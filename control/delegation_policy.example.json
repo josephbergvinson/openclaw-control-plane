@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "discord": {
+    "codingSlices": {
+      "shortInline": {
+        "maxExpectedSeconds": 60,
+        "allow": true,
+        "notes": "Short bounded coding-adjacent asks may stay inline when no durable lane is needed."
+      },
+      "ackThenInline": {
+        "maxExpectedSeconds": 300,
+        "allow": true,
+        "notes": "Small multi-step asks may stay inline after a quick acknowledgement if they do not require a durable execution lane."
+      },
+      "substantialImplementation": {
+        "allowInline": false,
+        "requiresDurableLane": true,
+        "durableLaneRequirements": [
+          "verified worktree path",
+          "branch attached to that worktree",
+          "resume-safe checkpoint or concrete on-disk task state",
+          "one visible acknowledgement after lane establishment"
+        ],
+        "failClosedWhen": [
+          "worktree cannot be established or verified",
+          "branch/worktree identity is ambiguous",
+          "resume target is missing or inconsistent",
+          "required approval is missing"
+        ],
+        "visibleThreadPolicy": {
+          "acknowledgementCount": 1,
+          "allowStatusLoops": false,
+          "allowedFollowups": [
+            "meaningful checkpoint",
+            "reviewable result",
+            "real blocker"
+          ]
+        }
+      },
+      "inboundDeadlineGuard": {
+        "budgetSeconds": 30,
+        "safeRemainingSeconds": 12,
+        "forceDurableLaneForPhases": [
+          "build",
+          "test",
+          "install",
+          "gateway-restart",
+          "long-exec",
+          "process-poll",
+          "coding-session",
+          "model-download"
+        ],
+        "forcedAckMessage": "Still working; continuing in a durable lane and will report the next meaningful checkpoint.",
+        "rules": [
+          "Do not start long commands from an inbound Discord worker unless remaining budget is safely above threshold and the command is bounded.",
+          "If a long phase is requested after acknowledgement, require a durable lane before execution.",
+          "If the remaining budget falls below threshold, release the inbound worker with a visible checkpoint instead of polling."
+        ]
+      }
+    }
+  }
+}
