@@ -1,0 +1,40 @@
+{
+  "entry_id": "scheduler-entry-0000",
+  "description": "Daily integrity guard for example-project: asserts that yesterday's expected result row exists in the datastore.",
+  "owner_layer": "host_service_manager",
+  "lifecycle_state": "active",
+  "schedule": {
+    "kind": "recurring",
+    "expression": "daily at a fixed local hour",
+    "timezone": "<timezone>"
+  },
+  "source_definition": "<workspace-root>/config/services/example-project-integrity-guard.service-definition",
+  "configured_entrypoint": "<workspace-root>/scripts/example_project_integrity_guard.sh",
+  "child_interpreter": "<interpreter-path>",
+  "failure_signal": "The guard exits non-zero, or emits no terminal marker. An absent terminal marker is treated as critical rather than demoted to a warning, because unknown must fail closed.",
+  "evidence_ref": "<artifact-root>/example-project-integrity-guard/run-0000/result.json",
+  "result_contract": {
+    "stdout_contract": "one JSON object carrying status, checked_period, and terminal marker",
+    "interprets": "domain",
+    "note": "Transport success is not domain success. A run that reached the network, got a refusal, and exited zero is a failure."
+  },
+  "runtime_contract": {
+    "target_date_semantics": "previous complete day",
+    "catch_up_permitted": false,
+    "backdating_permitted": false,
+    "required_environment": ["<credential-ref>"],
+    "installed": true,
+    "loaded": true,
+    "points_at_disposable_worktree": false
+  },
+  "delivery": {
+    "mode": "announce-on-failure",
+    "destination": "<channel-id>",
+    "severity": "critical",
+    "incident_fingerprint": "a1b2c3d4",
+    "cooldown_minutes": 60,
+    "routine_success_silent": true
+  },
+  "containment_history": null,
+  "note": "Lifecycle state is one of active, preserve-disabled, remove. Preserve-disabled is a deliberate state carrying why the job was switched off, what must be true to switch it back on, and which successor took over its purpose; deleting the row would destroy exactly that record."
+}

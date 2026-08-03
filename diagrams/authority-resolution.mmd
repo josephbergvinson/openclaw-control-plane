@@ -1,0 +1,32 @@
+flowchart TB
+  MAN[Policy manifest names which layers are authoritative]
+  R1[Rank 1 - normative behaviour contract]
+  R2[Rank 2 - normative execution mechanics contract]
+  R3[Rank 3 - style contract]
+  R3C[Conditional long-form prose child]
+  R4[Rank 4 - durable preferences]
+  R5[Rank 5 - memory pointers]
+  TIE[Tie break - rank 1 states a goal, rank 2 forbids the mechanism, rank 2 wins]
+  ANNEX[In scope but non normative - generated views, bootstrap policy, liveness, identity, changelog, legacy shim]
+  D1[Domain - current fact]
+  D2[Domain - durable preference]
+  D3[Domain - normative policy]
+  D4[Domain - proposal]
+  FACTS[Structured registry, status and control layers]
+  PROP[Labelled proposal awaiting an operator decision]
+  VIEWS[Generated views]
+  MAN --> R1
+  MAN --> FACTS
+  R1 --> R2
+  R2 --> R3
+  R3 --> R4
+  R4 --> R5
+  R3 -.-> R3C
+  TIE -.-> R2
+  ANNEX -. informs, never overrides .-> R1
+  D1 -- single owner --> FACTS
+  D2 -- single owner --> R4
+  D3 -- single owner --> R1
+  D4 -- single owner --> PROP
+  FACTS -- regenerates --> VIEWS
+  VIEWS -. renders from, never overrides .-> FACTS

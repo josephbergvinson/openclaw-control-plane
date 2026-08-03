@@ -1,0 +1,79 @@
+{
+  "schema": "project-layout/v1",
+  "namespaces": [
+    {
+      "role": "canonical_projects",
+      "root": "<projects-root>",
+      "editable_as_source": true,
+      "holds": "declared source repositories, one canonical root per surface"
+    },
+    {
+      "role": "mutable_generated_data",
+      "root": "<project-data-root>",
+      "editable_as_source": false,
+      "holds": "working data, exports, caches, and other regenerable output"
+    },
+    {
+      "role": "shared_git_infrastructure",
+      "root": "<project-infrastructure-root>",
+      "editable_as_source": false,
+      "holds": "bare repositories acting as authoritative history targets; push target only"
+    },
+    {
+      "role": "retained_archives",
+      "root": "<project-archives-root>",
+      "editable_as_source": false,
+      "holds": "preserved trees kept for history, rollback evidence, and cold storage"
+    }
+  ],
+  "roots_outside_the_taxonomy": [
+    { "role": "immutable_release_store", "root": "<releases-root>", "editable_as_source": false },
+    { "role": "runtime_state", "root": "<runtime-dir>", "editable_as_source": false },
+    { "role": "artifact_output", "root": "<artifact-root>", "editable_as_source": false }
+  ],
+  "retired_parents": [
+    {
+      "root": "<retired-root>",
+      "retired_at": "<timestamp-utc>",
+      "rule": "no alias may be declared beneath this root, and no guard may hard-fail against it"
+    }
+  ],
+  "surfaces": [
+    {
+      "surface_slug": "example-project",
+      "role": "product",
+      "namespace": "canonical_projects",
+      "canonical_source_root": "<projects-root>/example-project",
+      "operator_checkout_root": "<projects-root>/example-project",
+      "standing_branch": "main",
+      "authoritative_history_target": "<project-infrastructure-root>/example-project.git",
+      "mirror_targets": ["<mirror-remote>"],
+      "handoff_root": "<handoff-root>/example-project",
+      "validation_entrypoint": "scripts/validate.sh",
+      "live_binding_ref": "<workspace-root>/status/live_bindings.json#example-project",
+      "last_verified_utc": "<timestamp-utc>",
+      "evidence_ref": "<artifact-root>/run-0000/surface-verification.json"
+    },
+    {
+      "surface_slug": "example-control-plane",
+      "role": "control-plane",
+      "namespace": "canonical_projects",
+      "canonical_source_root": "<workspace-root>",
+      "operator_checkout_root": "<workspace-root>",
+      "standing_branch": "main",
+      "authoritative_history_target": "<project-infrastructure-root>/example-control-plane.git",
+      "mirror_targets": [],
+      "handoff_root": null,
+      "validation_entrypoint": "scripts/workspace_validate.sh",
+      "live_binding_ref": "<workspace-root>/status/live_bindings.json#example-control-plane",
+      "last_verified_utc": "<timestamp-utc>",
+      "evidence_ref": "<artifact-root>/run-0001/surface-verification.json"
+    }
+  ],
+  "rules": [
+    "Matching names across namespaces are different roles, not copies to keep in sync.",
+    "A registry row is evidence, not permission: it records that a surface legitimately exists and authorizes nothing.",
+    "Sealed releases, artifact trees, mirrors, handoff copies, and archives are never source.",
+    "The declaration is checked against the live filesystem by a topology validator, plus a storage guard that fails closed when expected storage is not mounted."
+  ]
+}

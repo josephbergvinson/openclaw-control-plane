@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/known-issue.schema.json",
+  "title": "Known-issues ledger entry",
+  "description": "A durable record of a deliberately degraded, disabled, or accepted-risk capability and the containment currently in force. Health classes describe now; this ledger is what makes a contained degradation auditable over months.",
+  "type": "object",
+  "required": [
+    "issue_id",
+    "capability_id",
+    "classification",
+    "containment",
+    "evidence",
+    "freshness_class"
+  ],
+  "properties": {
+    "issue_id": {
+      "type": "string",
+      "description": "Stable handle, so the same defect is discussed as one thing across months."
+    },
+    "capability_id": {
+      "type": "string",
+      "description": "The capability row this degrades, joining the ledger to the capability status layer."
+    },
+    "classification": {
+      "enum": [
+        "degraded",
+        "disabled",
+        "accepted-risk",
+        "retired-lane",
+        "blocked-on-external-permission",
+        "documented-fallback"
+      ]
+    },
+    "containment": {
+      "type": "string",
+      "description": "The compensating instruction in force, rendered into the generated operator view so a disabled lane cannot be silently rediscovered as available."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Where the proof of the classification lives."
+    },
+    "freshness_class": {
+      "enum": [
+        "stable",
+        "volatile",
+        "reprobe-before-use",
+        "reprobe-before-write",
+        "reprobe-before-access-expansion"
+      ],
+      "description": "How long the classification may be trusted before re-verification. An expired entry is a prompt to re-verify, not a fact."
+    },
+    "opened_at": { "type": "string" },
+    "re_verify_by": { "type": ["string", "null"] },
+    "reenable_criteria": {
+      "type": ["string", "null"],
+      "description": "What must be true to switch the capability back on. Re-enable is a gate against written criteria, not a judgement call by whoever finds the entry next."
+    },
+    "successor_capability_id": {
+      "type": ["string", "null"],
+      "description": "Which capability took over this one's purpose, when the lane was retired rather than repaired."
+    },
+    "closure": {
+      "type": ["object", "null"],
+      "description": "Set only when the issue is closed by restoration and verification.",
+      "required": ["closed_at", "verified_by"],
+      "properties": {
+        "closed_at": { "type": "string" },
+        "verified_by": { "type": "string" },
+        "evidence": { "type": "string" }
+      }
+    },
+    "note": { "type": "string" }
+  }
+}

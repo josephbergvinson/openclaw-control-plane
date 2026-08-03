@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/scheduler-entry.schema.json",
+  "title": "Scheduler reconciliation registry entry",
+  "description": "One row of the control-plane registry that reconciles the two scheduling substrates. It is the single declared inventory of every scheduled job on the host, including the ones deliberately switched off.",
+  "type": "object",
+  "required": [
+    "entry_id",
+    "owner_layer",
+    "lifecycle_state",
+    "schedule",
+    "source_definition",
+    "configured_entrypoint",
+    "child_interpreter",
+    "failure_signal",
+    "evidence_ref"
+  ],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "description": { "type": "string" },
+    "owner_layer": {
+      "enum": ["runtime_scheduler", "host_service_manager"],
+      "description": "Which substrate actually runs it. A runtime job cannot supervise the runtime; a host service can, because it survives a gateway restart."
+    },
+    "lifecycle_state": {
+      "enum": ["active", "preserve-disabled", "remove"],
+      "description": "Classification is explicit and exhaustive. preserve-disabled is a deliberate state carrying its containment history, not neglect."
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["kind", "expression", "timezone"],
+      "properties": {
+        "kind": { "enum": ["recurring", "interval", "one-shot"] },
+        "expression": { "type": "string" },
+        "timezone": {
+          "type": "string",
+          "description": "Explicit, so a cadence cannot be read differently by two layers."
+        }
+      }
+    },
+    "source_definition": {
+      "type": "string",
+      "description": "The file the definition is checked in as. The extension is whatever the host's user-level service supervisor expects; the requirement is that the definition is a checked-in file rather than state that exists only inside the supervisor."
+    },
+    "configured_entrypoint": {
+      "type": "string",
+      "description": "What the definition says it runs."
+    },
+    "child_interpreter": {
+      "type": "string",
+      "description": "The interpreter the wrapper hands work to, recorded because a wrapper and its child can drift apart."
+    },
+    "failure_signal": {
+      "type": "string",
+      "description": "What a failure of this job looks like from outside. An absent terminal marker is unknown, and unknown fails closed as critical."
+    },
+    "evidence_ref": {
+      "type": "string",
+      "description": "Where the proof of the last run lives."
+    },
+    "result_contract": {
+      "type": "object",
+      "required": ["interprets"],
+      "properties": {
+        "stdout_contract": { "type": "string" },
+        "interprets": {
+          "enum": ["domain", "transport"],
+          "description": "Policy requires interpreting the job's own declared result contract. Transport success is not domain success."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "runtime_contract": {
+      "type": "object",
+      "properties": {
+        "target_date_semantics": { "type": "string" },
+        "catch_up_permitted": { "type": "boolean" },
+        "backdating_permitted": { "type": "boolean" },
+        "required_environment": { "type": "array", "items": { "type": "string" } },
+        "installed": { "type": "boolean" },
+        "loaded": { "type": "boolean" },
+        "points_at_disposable_worktree": {
+          "const": false,
+          "description": "Asserted false. Scheduled jobs aimed at worktrees that later disappear are a recurring outage class."
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["announce", "announce-on-failure", "none"] },
+        "destination": { "type": "string" },
+        "severity": { "enum": ["info", "warning", "critical"] },
+        "incident_fingerprint": { "type": "string" },
+        "cooldown_minutes": { "type": "integer", "minimum": 0 },
+        "routine_success_silent": { "type": "boolean" }
+      }
+    },
+    "containment_history": {
+      "type": ["object", "null"],
+      "description": "Required when lifecycle_state is preserve-disabled or remove: why it was switched off, what would have to be true to switch it back on, and which successor took over its purpose.",
+      "required": ["disabled_at", "reason", "reenable_criteria"],
+      "properties": {
+        "disabled_at": { "type": "string" },
+        "reason": { "type": "string" },
+        "reenable_criteria": { "type": "string" },
+        "successor_entry_id": { "type": ["string", "null"] }
+      }
+    },
+    "note": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "lifecycle_state": { "const": "preserve-disabled" } }, "required": ["lifecycle_state"] },
+      "then": { "properties": { "containment_history": { "type": "object" } } }
+    }
+  ]
+}

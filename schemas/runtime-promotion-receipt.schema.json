@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/runtime-promotion-receipt.schema.json",
+  "title": "Runtime promotion receipt",
+  "description": "The terminal record of one immutable, resumable, journaled promotion operation. It reports the four gate booleans independently, binds every phase receipt into a hash chain, and proves convergence across every enumerated persisted and live identity surface before any promotion may be called live.",
+  "type": "object",
+  "required": [
+    "schema",
+    "contract_version",
+    "operation_id",
+    "target",
+    "release",
+    "journal",
+    "permits",
+    "phase_receipts",
+    "seals",
+    "zero_diff_gates",
+    "restart_contract",
+    "convergence",
+    "rollback",
+    "gate_results",
+    "terminal_state",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema": { "type": "string" },
+    "contract_version": {
+      "type": "string",
+      "description": "Identifier of the receipt contract revision this record was written against. An adopter picks the encoding; the requirement is that it is present and that a reader can tell two revisions apart."
+    },
+    "action_gate_manifest_schema_version": {
+      "type": "string",
+      "description": "Identifier of the action-gate manifest revision the gate results were evaluated under."
+    },
+    "operation_id": { "type": "string" },
+    "operation_lock": {
+      "type": "object",
+      "required": ["path", "hash", "readback_verified"],
+      "properties": {
+        "path": { "type": "string" },
+        "hash": { "type": "string" },
+        "readback_verified": { "type": "boolean" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["target_commit"],
+      "properties": {
+        "target_commit": { "type": "string" },
+        "surface_slug": { "type": "string" },
+        "admitted_from": {
+          "type": "string",
+          "description": "A promotion is admitted only from an explicit human approval bound to one exact source commit."
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["release_id"],
+      "properties": {
+        "release_id": { "type": "string" },
+        "previous_release_id": { "type": ["string", "null"] },
+        "published_by": { "type": "string" },
+        "hardened_read_only": { "type": "boolean" }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "description": "The append-only hash-chained event journal. A terminal receipt binds its length and head digest.",
+      "required": ["length", "head_digest", "chain_verified"],
+      "properties": {
+        "length": { "type": "integer", "minimum": 1 },
+        "head_digest": { "type": "string" },
+        "chain_verified": { "type": "boolean" },
+        "verified_on_read": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "permits": {
+      "type": "array",
+      "description": "One-shot claim-before-action permits. A claimed action is consumed regardless of return code, timeout, interruption or exception.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "budget", "claimed", "consumed"],
+        "properties": {
+          "name": { "type": "string" },
+          "budget": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "claimed": { "type": "boolean" },
+          "consumed": { "type": "boolean" },
+          "completion_receipt": { "type": "boolean" },
+          "retired_unused": {
+            "type": "boolean",
+            "description": "Set when the supervisor autonomously converged a service, so the unused permit is retired rather than left ambiguous."
+          }
+        }
+      }
+    },
+    "phase_receipts": {
+      "type": "array",
+      "description": "Hash-chained semantic receipts. Each live phase declares its receipt kind, required fields and expected values in advance, so a command that exits zero but did the wrong thing still fails.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "phase",
+          "kind",
+          "permit_bearing",
+          "previous_receipt_digest",
+          "receipt_digest",
+          "declared_fields_matched",
+          "result"
+        ],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "phase": { "type": "string" },
+          "group": { "type": "string" },
+          "kind": { "type": "string" },
+          "permit_bearing": {
+            "type": "boolean",
+            "description": "Permitless verification phases may fail and then succeed in the same journal; permit-bearing phases never repeat."
+          },
+          "sandbox_profile": {
+            "type": "string",
+            "description": "Deny-by-default write profile for this phase class. Offline flags alone are declared insufficient."
+          },
+          "sandbox_profile_hash": { "type": "string" },
+          "previous_receipt_digest": { "type": ["string", "null"] },
+          "receipt_digest": { "type": "string" },
+          "declared_fields_matched": { "type": "boolean" },
+          "result": { "enum": ["pass", "fail", "blocked", "skipped"] },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "seals": {
+      "type": "object",
+      "description": "The final seal is a full normalized inventory of the sealed release. Digests shown in examples are placeholders.",
+      "required": ["final_seal_digest", "symlink_closure_complete"],
+      "properties": {
+        "warmed_seal_digest": { "type": "string" },
+        "final_seal_digest": { "type": "string" },
+        "symlink_closure_complete": { "type": "boolean" },
+        "expected_entrypoints_present": { "type": "boolean" },
+        "runtime_mutation_paths_absent": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    },
+    "zero_diff_gates": {
+      "type": "array",
+      "description": "Three zero-difference gates bracket the single restart. A non-zero row sets live acceptance false and forbids reseal or in-place repair.",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["gate", "differing_rows", "result"],
+        "properties": {
+          "gate": { "type": "string" },
+          "differing_rows": { "type": "integer", "minimum": 0 },
+          "result": { "enum": ["pass", "fail"] },
+          "attempts": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "write_guard": {
+      "type": "object",
+      "description": "A continuous filesystem-event monitor, because inventory snapshots cannot see transient create-then-delete writes inside the release.",
+      "properties": {
+        "kind": { "type": "string" },
+        "binary_hash": { "type": "string" },
+        "source_hash": { "type": "string" },
+        "ran_through_activation": { "type": "boolean" },
+        "transient_writes_observed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "restart_contract": {
+      "type": "object",
+      "required": ["promotion_safe_mode", "restart_attempts", "fallback_starts"],
+      "properties": {
+        "promotion_safe_mode": { "const": true },
+        "restart_attempts": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "primary_definition_reloads": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "fallback_starts": { "const": 0 },
+        "shell_executable_rejected": { "type": "boolean" },
+        "raw_lifecycle_tokens_rejected": { "type": "boolean" }
+      }
+    },
+    "convergence": {
+      "type": "object",
+      "description": "Promotion reports persisted-not-applied until every enumerated persisted and live surface resolves to the promoted release. Version output or reachability alone is explicitly insufficient.",
+      "required": ["state", "persisted_surfaces", "live_surfaces"],
+      "properties": {
+        "state": {
+          "enum": ["persisted-not-applied", "live-promotion-accepted", "split-brain"]
+        },
+        "all_surfaces_resolve_to": { "type": ["string", "null"] },
+        "persisted_surfaces": {
+          "type": "object",
+          "required": [
+            "runtime_current_pointer",
+            "installed_package_link",
+            "installed_cli_bin_link",
+            "on_disk_service_definitions"
+          ],
+          "additionalProperties": { "type": "string" }
+        },
+        "live_surfaces": {
+          "type": "object",
+          "required": [
+            "loaded_gateway_arguments",
+            "gateway_process_argv_and_open_files",
+            "loaded_node_arguments",
+            "node_process_argv_and_open_files"
+          ],
+          "additionalProperties": { "type": "string" }
+        },
+        "readiness_wait": {
+          "type": "object",
+          "description": "A bounded wait for the readiness endpoint precedes any authenticated probe, so an open listener on a still-settling process cannot burn the limited retries.",
+          "properties": {
+            "endpoint": { "type": "string" },
+            "reported_ready": { "type": "boolean" },
+            "failing_components": { "type": "integer", "minimum": 0 },
+            "consumed_probe_retries": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "probes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "result"],
+            "properties": {
+              "name": { "type": "string" },
+              "result": { "enum": ["pass", "fail", "timeout"] },
+              "own_process_group": { "type": "boolean" },
+              "residual_group": { "type": "boolean" }
+            }
+          }
+        },
+        "supporting_evidence": { "type": "object" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "description": "Rollback retention is a first-class gate: the exact previous persisted surface must be restorable before any lifecycle permit is claimed.",
+      "required": ["previous_persisted_surface_restorable", "verified_before_lifecycle_permit"],
+      "properties": {
+        "previous_persisted_surface_restorable": { "const": true },
+        "retained_rollback_release_id": { "type": ["string", "null"] },
+        "verified_before_lifecycle_permit": { "const": true }
+      }
+    },
+    "gate_results": {
+      "type": "object",
+      "description": "Four independently reported booleans plus an optional fifth delivery scope. None of them implies another.",
+      "required": [
+        "build_complete",
+        "release_sealed",
+        "persisted_surface_promoted",
+        "live_promotion_accepted"
+      ],
+      "properties": {
+        "build_complete": { "type": "boolean" },
+        "release_sealed": { "type": "boolean" },
+        "persisted_surface_promoted": { "type": "boolean" },
+        "live_promotion_accepted": { "type": "boolean" },
+        "delivery_proof": { "type": ["object", "null"] }
+      }
+    },
+    "completion_scope": {
+      "type": "string",
+      "description": "A routine rebuild terminalizes at a runtime-health scope and leaves the delivery permit unclaimed."
+    },
+    "terminal_state": {
+      "enum": ["completed", "blocked", "failed", "cancelled"]
+    },
+    "closeout": {
+      "type": "object",
+      "description": "Closeout binds the exact control-plane commit and per-file hashes of the helpers, tests and documents that define the contract, with path-scoped clean readback. Unrelated drift is listed separately rather than claimed away.",
+      "properties": {
+        "control_plane_commit": { "type": "string" },
+        "bound_file_hashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "hash"],
+            "properties": {
+              "path": { "type": "string" },
+              "hash": { "type": "string" }
+            }
+          }
+        },
+        "path_scoped_clean_readback": { "type": "boolean" },
+        "unrelated_drift_listed_separately": { "type": "boolean" }
+      }
+    },
+    "recorded_at": { "type": "string" }
+  }
+}
