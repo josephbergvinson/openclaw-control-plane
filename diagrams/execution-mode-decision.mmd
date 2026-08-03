@@ -1,0 +1,18 @@
+flowchart TD
+  IN[Inbound message] --> CL[Classify the request class]
+  CL --> PV{Recorded selection provenance}
+  PV -->|unknown or missing| FC[Fail closed, report the mismatch, no side effect]
+  PV -->|operator inline-only instruction or bounded memory directive| PIN[Pinned inline, never promoted]
+  PV -->|active lane owns the continuation| BIND[Route into the live lane]
+  PV -->|classifier provisional| SZ{Bounded under the inline window with no declared long phase}
+  SZ -->|yes| INL[Inline]
+  SZ -->|no| DISC{Read-only discovery can bound target, blast radius, rollback, verification and evidence}
+  DISC -->|no| MAN[Terminal-side or manual containment]
+  DISC -->|yes| DUR[Durable isolated lane]
+  INL --> PROMO{Same-origin envelope unchanged and the promotion claim unspent}
+  PROMO -->|yes| DUR
+  PROMO -->|no| STOP[Stay inline and stop at the nearest safe boundary]
+  PIN --> STOP
+  INL --> DG{Inbound budget below the safe-remaining threshold}
+  DG -->|durable lane already established| REL[Release the worker with one visible checkpoint]
+  DG -->|no completed handoff| BLK[One visible blocker, never a fresh spawn inside an expiring worker]

@@ -1,0 +1,37 @@
+flowchart TD
+  subgraph L1[Layer 1 - runtime scheduler]
+    A1[Job list in the runtime state directory]
+    A2[Job state plus per-run append-only history]
+    A5[Gateway dispatch]
+    A6[Isolated agent run]
+    A7[Stored delivery route]
+  end
+  subgraph L2[Layer 2 - host service manager]
+    B1[Service definitions checked into the workspace]
+    B2[Wrapper script pinning interpreter and working directory]
+    B3[Guards, relays, monitors and daily jobs]
+    B4[Evidence artifacts and declared output contracts]
+    S1[Independent data-level safety net asserting the prior period result]
+  end
+  REG[Control-plane scheduler registry - the single declared inventory]
+  C1[active]
+  C2[preserve-disabled]
+  C3[remove]
+  F1[Fail-closed rule - transport success is not domain success]
+  F2[Absent terminal marker is unknown and escalates as critical]
+  A1 --> A5
+  A2 --> A5
+  A5 --> A6
+  A6 --> A2
+  A6 --> A7
+  B1 --> B2
+  B2 --> B3
+  B3 --> B4
+  B3 --> S1
+  A1 --> REG
+  B1 --> REG
+  REG --> C1
+  REG --> C2
+  REG --> C3
+  REG --> F1
+  F1 --> F2

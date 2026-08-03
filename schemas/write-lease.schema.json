@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/write-lease.schema.json",
+  "title": "Durable lane write lease",
+  "description": "The compare-and-swap record that decides which run may write which paths, and the reason concurrent mutation by two lanes is structurally impossible rather than merely discouraged. It is a record of its own in its own file, written beside the status artifact it protects and never inside it, for two reasons: it binds that artifact by filesystem identity, and no record can bind the file it lives in; and the two must be able to fail independently, since a lane can legitimately hold a status artifact with no live lease. The binding runs one way — the lease names the artifact, the artifact holds no reference to the lease.",
+  "type": "object",
+  "required": [
+    "schema",
+    "lease_id",
+    "lease_state",
+    "channel_scope_id",
+    "origin_message_id",
+    "root_run_id",
+    "child_session_key",
+    "generation",
+    "epoch",
+    "protects_status_artifact",
+    "runtime_owner",
+    "locked_write_sets"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Schema name and version of this record."
+    },
+    "lease_id": { "type": "string" },
+    "lease_state": {
+      "enum": ["pending-startup", "running", "released"],
+      "description": "Carried on the lease itself, so a released lease is a recorded fact rather than something inferred from a missing file. The active-lane claim mirrors this value and the lease stays the authority if the two disagree."
+    },
+    "channel_scope_id": {
+      "type": "string",
+      "description": "The conversation surface this lease belongs to."
+    },
+    "origin_message_id": {
+      "type": "string",
+      "description": "The inbound message the lease's lane was opened for."
+    },
+    "root_run_id": {
+      "type": "string",
+      "description": "The durable run that owns the lease."
+    },
+    "child_session_key": {
+      "type": "string",
+      "description": "The isolated child session the owning run executes in. Carried alongside the run id so a mismatch in either one is detectable. Identity is never repaired in place: a mismatch is reported, never corrected, because a wrong guess silently transfers ownership of live work."
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic counter of ownership handovers. A stale holder's write is rejected by its number alone. Taking the lease from a dead owner requires generation N plus one together with a successor record; a same-run resume leaves it unchanged and is idempotent."
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic counter of the lease's own versions. A writer reads the current value and its write succeeds only if the stored value is still the one it read; if another writer got there first the acquire fails instead of overwriting."
+    },
+    "protects_status_artifact": {
+      "type": "object",
+      "description": "The status artifact this lease guards, named by filesystem identity and not only by path, so a file deleted and recreated at the same path is correctly seen as a different file. This binding is the reason the lease is a separate record: nested inside the artifact it would be copied along with any replacement and would then certify the replacement as the file it was guarding.",
+      "required": ["path", "device", "inode"],
+      "properties": {
+        "path": { "type": "string" },
+        "device": { "type": "string" },
+        "inode": { "type": "string" }
+      }
+    },
+    "runtime_owner": {
+      "type": "object",
+      "description": "Which live runtime holds the lease, and when it last proved it was alive.",
+      "required": ["runtime_run_id", "embedded_session_id", "provider_authenticated", "heartbeat_at"],
+      "properties": {
+        "runtime_run_id": { "type": "string" },
+        "embedded_session_id": { "type": "string" },
+        "provider_authenticated": {
+          "type": "boolean",
+          "description": "Whether the holding runtime can still reach the delivery route. A holder that cannot deliver cannot discharge the obligation its lane owes."
+        },
+        "heartbeat_at": { "type": "string" }
+      }
+    },
+    "locked_write_sets": {
+      "type": "array",
+      "description": "The concrete sets of paths the owning worker may modify. Each is additionally guarded by an exclusive lock file, so a second writer fails to acquire rather than interleaving. A colliding acquire performs no writes at all and returns a typed collision, which becomes exactly one deduplicated blocker.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["real_path", "branch", "lock_id"],
+        "properties": {
+          "real_path": {
+            "type": "string",
+            "description": "The resolved path, so two names for one location cannot be leased twice."
+          },
+          "branch": { "type": "string" },
+          "lock_id": { "type": "string" },
+          "exclusive_lock_held": { "type": "boolean" }
+        }
+      }
+    },
+    "acquired_at": { "type": "string" },
+    "released_at": { "type": ["string", "null"] },
+    "reacquired": {
+      "type": ["string", "null"],
+      "description": "Marker recording that a resume reacquired this lease idempotently under the same run, which changes nothing and is therefore safe to repeat."
+    },
+    "successor_record": {
+      "type": ["object", "null"],
+      "description": "Present only when ownership was taken from a dead owner. Absent for a same-run resume, because nothing changed hands.",
+      "required": ["prior_owner_dead_proof", "inventory_diff", "fan_in_plan"],
+      "properties": {
+        "prior_owner_dead_proof": { "type": "string" },
+        "inventory_diff": {
+          "type": "string",
+          "description": "What the dead owner left behind."
+        },
+        "fan_in_plan": {
+          "type": "string",
+          "description": "How that residue will be reconciled. A takeover with no plan for the previous owner's partial work is a second writer with extra steps."
+        }
+      }
+    }
+  }
+}

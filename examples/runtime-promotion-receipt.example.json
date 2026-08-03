@@ -1,0 +1,203 @@
+{
+  "schema": "runtime-promotion-receipt/v1",
+  "contract_version": "<contract-version>",
+  "action_gate_manifest_schema_version": "<manifest-schema-version>",
+  "operation_id": "op-0000",
+  "operation_lock": {
+    "path": "<artifact-root>/promotions/op-0000/operation.lock",
+    "hash": "a1b2c3d4",
+    "readback_verified": true
+  },
+  "target": {
+    "target_commit": "a1b2c3d4",
+    "surface_slug": "example-runtime",
+    "admitted_from": "one explicit operator approval bound to this exact commit"
+  },
+  "release": {
+    "release_id": "<release-id>",
+    "previous_release_id": "<previous-release-id>",
+    "published_by": "one atomic rename from an unpublished staging root",
+    "hardened_read_only": true
+  },
+  "journal": {
+    "length": 12,
+    "head_digest": "b2c3d4e5",
+    "chain_verified": true,
+    "verified_on_read": [
+      "file naming",
+      "sequence contiguity",
+      "chain linkage",
+      "per-event digest",
+      "operation id",
+      "authority hash"
+    ]
+  },
+  "permits": [
+    { "name": "coverage", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "preparation_intent", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "install", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "build", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "persisted_promotion", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "gateway_activation", "budget": 1, "claimed": true, "consumed": true, "completion_receipt": true },
+    { "name": "node_disposition", "budget": 1, "claimed": false, "consumed": false, "retired_unused": true },
+    { "name": "delivery", "budget": 1, "claimed": false, "consumed": false, "completion_receipt": false },
+    { "name": "recovery_cycle", "budget": 0, "claimed": false, "consumed": false, "completion_receipt": false }
+  ],
+  "phase_receipts": [
+    {
+      "sequence": 1,
+      "phase": "offline_coverage_probe",
+      "group": "dependency_and_preparation",
+      "kind": "coverage_receipt",
+      "permit_bearing": true,
+      "sandbox_profile": "coverage",
+      "sandbox_profile_hash": "c3d4e5f6",
+      "previous_receipt_digest": null,
+      "receipt_digest": "d4e5f6a1",
+      "declared_fields_matched": true,
+      "result": "pass"
+    },
+    {
+      "sequence": 2,
+      "phase": "runtime_build",
+      "group": "build",
+      "kind": "build_receipt",
+      "permit_bearing": true,
+      "sandbox_profile": "build",
+      "sandbox_profile_hash": "e5f6a1b2",
+      "previous_receipt_digest": "d4e5f6a1",
+      "receipt_digest": "f6a1b2c3",
+      "declared_fields_matched": true,
+      "result": "pass"
+    },
+    {
+      "sequence": 3,
+      "phase": "final_seal_capture",
+      "group": "sealing_and_release",
+      "kind": "seal_receipt",
+      "permit_bearing": false,
+      "sandbox_profile": "publication",
+      "sandbox_profile_hash": "a1b2c3d5",
+      "previous_receipt_digest": "f6a1b2c3",
+      "receipt_digest": "b2c3d4e6",
+      "declared_fields_matched": true,
+      "result": "pass"
+    },
+    {
+      "sequence": 4,
+      "phase": "post_activation_inventory_diff_zero",
+      "group": "post_activation_verification",
+      "kind": "inventory_diff_receipt",
+      "permit_bearing": false,
+      "sandbox_profile": "live_acceptance",
+      "sandbox_profile_hash": "c3d4e5f7",
+      "previous_receipt_digest": "b2c3d4e6",
+      "receipt_digest": "d4e5f6a2",
+      "declared_fields_matched": true,
+      "result": "fail",
+      "note": "Permitless verification phases may fail and then succeed in the same journal. Permit-bearing phases never repeat."
+    },
+    {
+      "sequence": 5,
+      "phase": "post_activation_inventory_diff_zero",
+      "group": "post_activation_verification",
+      "kind": "inventory_diff_receipt",
+      "permit_bearing": false,
+      "sandbox_profile": "live_acceptance",
+      "sandbox_profile_hash": "c3d4e5f7",
+      "previous_receipt_digest": "d4e5f6a2",
+      "receipt_digest": "e5f6a1b3",
+      "declared_fields_matched": true,
+      "result": "pass"
+    }
+  ],
+  "seals": {
+    "warmed_seal_digest": "a1b2c3d4",
+    "final_seal_digest": "b2c3d4e5",
+    "symlink_closure_complete": true,
+    "expected_entrypoints_present": true,
+    "runtime_mutation_paths_absent": true,
+    "note": "Seal digests here are placeholders. A real seal is a full normalized inventory of the sealed release: per-entry byte digests, modes, the complete symlink closure, and device and inode identity."
+  },
+  "zero_diff_gates": [
+    { "gate": "pre_activation_inventory_diff", "differing_rows": 0, "result": "pass" },
+    { "gate": "post_activation_inventory_diff", "differing_rows": 0, "result": "pass", "attempts": 2 },
+    { "gate": "post_node_inventory_diff", "differing_rows": 0, "result": "pass" }
+  ],
+  "write_guard": {
+    "kind": "filesystem-event monitor",
+    "binary_hash": "c3d4e5f6",
+    "source_hash": "d4e5f6a1",
+    "ran_through_activation": true,
+    "transient_writes_observed": 0
+  },
+  "restart_contract": {
+    "promotion_safe_mode": true,
+    "restart_attempts": 1,
+    "primary_definition_reloads": 1,
+    "fallback_starts": 0,
+    "shell_executable_rejected": true,
+    "raw_lifecycle_tokens_rejected": true
+  },
+  "convergence": {
+    "state": "live-promotion-accepted",
+    "all_surfaces_resolve_to": "<release-id>",
+    "persisted_surfaces": {
+      "runtime_current_pointer": "<release-id>",
+      "installed_package_link": "<release-id>",
+      "installed_cli_bin_link": "<release-id>",
+      "on_disk_service_definitions": "<release-id>"
+    },
+    "live_surfaces": {
+      "loaded_gateway_arguments": "<release-id>",
+      "gateway_process_argv_and_open_files": "<release-id>",
+      "loaded_node_arguments": "<release-id>",
+      "node_process_argv_and_open_files": "<release-id>"
+    },
+    "readiness_wait": {
+      "endpoint": "loopback readiness endpoint",
+      "reported_ready": true,
+      "failing_components": 0,
+      "consumed_probe_retries": 0
+    },
+    "probes": [
+      { "name": "version", "result": "pass", "own_process_group": true, "residual_group": false },
+      { "name": "gateway_status", "result": "pass", "own_process_group": true, "residual_group": false },
+      { "name": "health", "result": "pass", "own_process_group": true, "residual_group": false },
+      { "name": "deep_status", "result": "pass", "own_process_group": true, "residual_group": false }
+    ],
+    "supporting_evidence": {
+      "loaded_plugin_cache_converged": true,
+      "target_only_open_files": true,
+      "listener_ownership_verified": true,
+      "recent_logs_fatal_free": true,
+      "task_pressure": 0,
+      "session_pointers_retired": false
+    }
+  },
+  "rollback": {
+    "previous_persisted_surface_restorable": true,
+    "retained_rollback_release_id": "<previous-release-id>",
+    "verified_before_lifecycle_permit": true
+  },
+  "gate_results": {
+    "build_complete": true,
+    "release_sealed": true,
+    "persisted_surface_promoted": true,
+    "live_promotion_accepted": true,
+    "delivery_proof": null
+  },
+  "completion_scope": "runtime-health",
+  "terminal_state": "completed",
+  "closeout": {
+    "control_plane_commit": "a1b2c3d4",
+    "bound_file_hashes": [
+      { "path": "<workspace-root>/scripts/promotion_coordinator.py", "hash": "b2c3d4e5" },
+      { "path": "<workspace-root>/tests/test_promotion_coordinator.py", "hash": "c3d4e5f6" },
+      { "path": "<workspace-root>/runbook/runtime-promotion.md", "hash": "d4e5f6a1" }
+    ],
+    "path_scoped_clean_readback": true,
+    "unrelated_drift_listed_separately": true
+  },
+  "recorded_at": "<timestamp-utc>"
+}

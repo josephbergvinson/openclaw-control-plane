@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/durable-status.schema.json",
+  "title": "Durable lane status artifact",
+  "description": "The single on-disk record a supervisor reads to learn the state of a durable isolated lane without reading the conversation. Written at or before the acknowledgement and updated in place; the identity fields are immutable once written. The record is flat: one level of keys, with structure only where a field is genuinely a set. The write lease is a separate record in its own file and is not referenced from here at all — the lease names this artifact by filesystem identity, so the binding runs one way and the two records can fail independently.",
+  "type": "object",
+  "required": [
+    "schema",
+    "lane_id",
+    "runtime_run_id",
+    "child_session_key",
+    "origin_message_id",
+    "delivery_target",
+    "state",
+    "health",
+    "acceptance_level",
+    "scope",
+    "write_boundaries",
+    "phases",
+    "checkpoint_due_within_minutes",
+    "checkpoint_delivery_strategy",
+    "owed_final_type",
+    "blockers",
+    "delivery_state",
+    "updated_at"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Schema name and version of this artifact, so a file written long ago is read under the rules it was written under."
+    },
+    "lane_id": {
+      "type": "string",
+      "description": "The lane's durable identifier, adopted from the spawn result. Immutable. A worker may append to or targeted-edit this artifact but may never overwrite an identity field; a mismatch produces an identifier-propagation blocker instead of a delivery."
+    },
+    "runtime_run_id": {
+      "type": "string",
+      "description": "Which run inside the runtime is executing the lane. Immutable, and adopted from the spawn result rather than from a planning slug, a proposed branch name, or any pre-spawn placeholder."
+    },
+    "child_session_key": {
+      "type": "string",
+      "description": "The isolated child session the lane runs in. Immutable, and adopted from the spawn result."
+    },
+    "origin_message_id": {
+      "type": "string",
+      "description": "The inbound message that caused this lane. Immutable. Every other record in the chain carries it too, so the chain can be reassembled from any one of its parts."
+    },
+    "delivery_target": {
+      "type": "string",
+      "description": "The route the result is owed to. Immutable."
+    },
+    "state": {
+      "enum": [
+        "establishing",
+        "executing",
+        "waiting-approval",
+        "waiting-input",
+        "complete",
+        "completed",
+        "blocked",
+        "failed",
+        "cancelled",
+        "canceled",
+        "superseded",
+        "preserve"
+      ],
+      "description": "Lifecycle state. The last eight are terminal and collapse to six outcomes, because two of them accept a spelling variant; of those six only complete is success-terminal, and cancelled or superseded lanes own no worker-visible final at all. The artifact must hold a terminal state before the visible final is sent."
+    },
+    "health": {
+      "enum": [
+        "healthy",
+        "healthy-noisy",
+        "degraded-contained",
+        "degraded-uncontained",
+        "unstable",
+        "split-brain",
+        "historical-residue-heavy"
+      ],
+      "description": "The health vocabulary, additive to state and never inferred from it. Prefer the narrowest truthful class; the list is descriptive, not a severity ladder. When there is no fresh evidence at all, the honest output is not a class but a request for verification from outside the runtime."
+    },
+    "acceptance_level": {
+      "enum": ["not-yet-verified", "verified-local", "verified-live", "unverifiable"],
+      "description": "How strong the evidence behind the result is. It rises only when evidence a reader could open exists under the lane's artifact root; a level above not-yet-verified with nothing recorded to support it is a defect."
+    },
+    "scope": {
+      "type": "string",
+      "description": "The declared objective this lane owns, written before execution so a later step can be tested against it rather than against memory."
+    },
+    "single_worker_reason": {
+      "type": ["string", "null"],
+      "description": "Required when fan-out stayed at one worker. Writing it down is what keeps a lane that ran alone on purpose distinguishable from a fan-out that silently failed to launch."
+    },
+    "write_boundaries": {
+      "type": "object",
+      "description": "The declared write boundary, stated in both directions. An empty allowed list is a defect: the boundary is what makes an out-of-scope edit detectable.",
+      "required": ["allowed", "forbidden"],
+      "properties": {
+        "allowed": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "forbidden": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "description": "The named progress ladder with per-phase state. A checkpoint is owed when one of these transitions, not when a timer expires.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "state"],
+        "properties": {
+          "name": {
+            "enum": [
+              "accepted",
+              "implementation-started",
+              "tests-started",
+              "tests-passed",
+              "commit-and-normalize",
+              "closeout",
+              "blocker"
+            ]
+          },
+          "state": { "enum": ["pending", "in-progress", "complete", "not-entered"] }
+        }
+      }
+    },
+    "checkpoint_due_within_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "When the next operator-visible update falls due. Staleness has to be measurable, not felt."
+    },
+    "checkpoint_delivery_strategy": {
+      "type": "string",
+      "description": "How that update will be sent — for example at phase boundaries rather than on a fixed interval."
+    },
+    "owed_final_type": {
+      "type": "string",
+      "description": "What kind of terminal result this lane owes. The obligation is created at acknowledgement time and clears only on a visibly delivered final or an explicit cancellation."
+    },
+    "blockers": {
+      "type": "array",
+      "description": "Open blockers, typed rather than written as prose. A state of complete while a blocker row is open is a defect.",
+      "items": {
+        "type": "object",
+        "required": ["code", "impact", "detail", "source_route_exercised", "next"],
+        "properties": {
+          "code": { "type": "string" },
+          "impact": { "type": "string" },
+          "detail": { "type": "string" },
+          "source_route_exercised": {
+            "type": ["string", "null"],
+            "description": "The route that was actually exercised, or null when none was. This keeps the route was tried and failed distinct from the route was never attempted."
+          },
+          "next": { "type": "string", "description": "The next atomic action, and who owns it." }
+        }
+      }
+    },
+    "diagram_artifact": {
+      "type": ["string", "null"],
+      "description": "Where the diagram this lane produced was written, when it produced one. Null otherwise."
+    },
+    "delivery_state": {
+      "enum": ["none", "ack-delivered", "final-pending", "final-delivered", "cancelled"],
+      "description": "How far the owed delivery has got."
+    },
+    "delivery_message_id": {
+      "type": ["string", "null"],
+      "description": "The provider message id for the final. Completion is proven by the provider, not by the sender, so this stays null until one confirms."
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "Last write to this artifact."
+    }
+  }
+}

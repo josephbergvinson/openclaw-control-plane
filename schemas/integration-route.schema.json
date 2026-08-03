@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/openclaw-reference/schemas/integration-route.schema.json",
+  "title": "Integration route record",
+  "description": "One declared path to a concrete external system, including which identity or workspace within it. The record is deliberately small: it names a path and delegates every readiness question to the separate probe registry. It never carries a credential value, and it authorizes nothing.",
+  "type": "object",
+  "required": [
+    "route_id",
+    "system",
+    "credential_ref_name",
+    "default_contexts",
+    "access_probe_id",
+    "notes"
+  ],
+  "properties": {
+    "route_id": {
+      "type": "string",
+      "description": "Stable slug for this exact path. Several routes for one system family coexist on purpose, so that which account is a routing decision rather than an accident of whichever session is warm."
+    },
+    "system": {
+      "type": "string",
+      "description": "Coarse system family. Colloquial names are normalized onto this slug by the resolver."
+    },
+    "credential_ref_name": {
+      "type": "string",
+      "description": "A name or path, never a value. Sanctioned styles are a provider-native credential store for a named identity, an environment-variable name, a path to a permission-restricted environment file, and an entry name in an OS credential store.",
+      "pattern": "^[^\\s].*$"
+    },
+    "default_contexts": {
+      "type": "array",
+      "description": "Context tags that make this route the default. A request context matching one of them is a large positive weight in route scoring; a miss on a context-declaring route is a small penalty.",
+      "items": { "type": "string" }
+    },
+    "access_probe_id": {
+      "type": "string",
+      "description": "Pointer into the probe registry. Every route must point at an existing, non-mutating probe."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-text constraints: read-only, reprobe before writes, or a statement that a ready default route is not evidence for this named route."
+    }
+  }
+}

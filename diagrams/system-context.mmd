@@ -1,0 +1,42 @@
+flowchart LR
+  OP[Operator - the only source of intent]
+  CS[Chat control surface]
+  CLI[CLI and local control UI clients]
+  subgraph GW[Gateway daemon - one per host]
+    CH[Channel adapters]
+    WSS[Authenticated local RPC surface]
+    AR[Agent runtime and session store]
+    TR[Tool registry and policy pipeline]
+    SCH[Scheduler stores and delivery queue]
+  end
+  CON[Injected contract files]
+  REG[Structured registries - surfaces, routes, control]
+  ST[Status and liveness layer]
+  VIEW[Generated views - non authoritative]
+  MEM[Memory corpus and semantic index]
+  CO[Coordinator and durable lanes]
+  WK[Worker sessions in isolated worktrees]
+  EV[Evidence - artifacts, receipts, journals]
+  ND[Node service in the node role]
+  MP[Model provider]
+  OP --> CS
+  OP --> CLI
+  CS --> CH
+  CLI --> WSS
+  CH --> AR
+  WSS --> AR
+  AR --> TR
+  AR --> MP
+  TR --> ND
+  CON --> AR
+  MEM --> AR
+  AR --> CO
+  REG --> CO
+  CO --> WK
+  CO --> SCH
+  SCH --> AR
+  WK --> EV
+  EV --> ST
+  REG --> VIEW
+  ST --> VIEW
+  SCH --> CH
