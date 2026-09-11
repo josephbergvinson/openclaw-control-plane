@@ -103,25 +103,29 @@ vi.mock("../../src/plugins/provider-thinking.js", () => ({
   resolveEffectiveThinkingProfile: () => undefined,
 }));
 
-vi.mock("../../src/agents/agent-tools.policy.js", () => ({
-  resolveEffectiveToolPolicy: (params: {
-    config: { tools?: { allow?: string[]; deny?: string[] } };
-  }) => ({
-    globalPolicy: params.config.tools
-      ? { allow: params.config.tools.allow, deny: params.config.tools.deny }
-      : undefined,
-    globalProviderPolicy: undefined,
-    agentPolicy: undefined,
-    agentProviderPolicy: undefined,
-    profile: undefined,
-    providerProfile: undefined,
-    profileAlsoAllow: undefined,
-    providerProfileAlsoAllow: undefined,
-  }),
-  resolveGroupToolPolicy: () => undefined,
-  resolveInheritedToolPolicyForSession: () => undefined,
-  resolveSubagentToolPolicyForSession: () => undefined,
-}));
+vi.mock(import("../../src/agents/agent-tools.policy.js"), async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/agents/agent-tools.policy.js")>();
+  return {
+    ...actual,
+    resolveEffectiveToolPolicy: (params: {
+      config: { tools?: { allow?: string[]; deny?: string[] } };
+    }) => ({
+      globalPolicy: params.config.tools
+        ? { allow: params.config.tools.allow, deny: params.config.tools.deny }
+        : undefined,
+      globalProviderPolicy: undefined,
+      agentPolicy: undefined,
+      agentProviderPolicy: undefined,
+      profile: undefined,
+      providerProfile: undefined,
+      profileAlsoAllow: undefined,
+      providerProfileAlsoAllow: undefined,
+    }),
+    resolveGroupToolPolicy: () => undefined,
+    resolveInheritedToolPolicyForSession: () => undefined,
+    resolveSubagentToolPolicyForSession: () => undefined,
+  };
+});
 
 vi.mock("../../src/agents/subagents/spawn/subagent-capabilities.js", () => ({
   isSubagentEnvelopeSession: vi.fn().mockReturnValue(false),
