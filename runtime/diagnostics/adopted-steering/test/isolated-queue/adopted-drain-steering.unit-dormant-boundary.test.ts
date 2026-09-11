@@ -1,6 +1,6 @@
-// Private isolated reproduction. Native 81a harness prefix copied without behavior changes; only import paths are absolute.
+// Portable queue/admission regression fixture with finite diagnostic labels.
 // The queue, adoption, admission policy, operation registry and tool-authority comparison remain real.
-// Tests media-only get-reply runs and sandboxed media attachment handling.
+// These four cases use a mock backend; they do not contact a live provider or channel.
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../src/agents/main-session-recovery/main-session-recovery-admission.js";
@@ -594,6 +594,59 @@ process.stderr.write("[steering:boundary] import:promise-helper:enter\n");
 const { createDeferred } = await import("../../test/helpers/promise.js");
 process.stderr.write("[steering:boundary] import:promise-helper:exit\n");
 
+process.stderr.write("[steering:boundary] preparation-probe-imports:enter\n");
+const preparationContextNative = await import("../../src/auto-reply/reply/get-reply-run-context.js");
+const preparationAdmissionNative = await import("../../src/auto-reply/reply/get-reply-run-admission.js");
+const preparationExecutionNative = await import("../../src/auto-reply/reply/get-reply-run-execute.js");
+const inboundContextNative = await import("../../src/auto-reply/reply/inbound-context.js");
+const conversationNative = await import("../../src/auto-reply/reply/prompt-session-context.js");
+const runtimePolicyNative = await import("../../src/auto-reply/reply/runtime-policy-session-key.js");
+const thinkingRuntimeNative = await import("../../src/agents/thinking-runtime.js");
+process.stderr.write("[steering:boundary] preparation-probe-imports:exit\n");
+
+const preparationProbeRestorers: Array<() => void> = [];
+function emitPreparationBoundary(label: string): void {
+  try {
+    process.stderr.write(`[steering:preparation] ${label}\n`);
+  } catch {
+    // A diagnostic write must not alter the observed call or reject a side observer.
+  }
+}
+
+function observePreparationCall(
+  namespace: object,
+  method: string,
+  label: string,
+  observeSettlement = false,
+): void {
+  const target = namespace as Record<string, (...args: unknown[]) => unknown>;
+  const actual = target[method];
+  if (typeof actual !== "function") {
+    throw new TypeError("Expected a native preparation function for the diagnostic probe");
+  }
+  const spy = vi.spyOn(target, method);
+  spy.mockImplementation(function (this: unknown, ...args: unknown[]) {
+    emitPreparationBoundary(`${label}:enter`);
+    try {
+      const result = Reflect.apply(actual, this, args);
+      emitPreparationBoundary(`${label}:return`);
+      if (observeSettlement) {
+        // Only the three native async preparation exports use this observer.
+        // Both branches return void; the original promise and rejection remain unchanged.
+        void (result as Promise<unknown>).then(
+          () => emitPreparationBoundary(`${label}:fulfilled`),
+          () => emitPreparationBoundary(`${label}:rejected`),
+        );
+      }
+      return result;
+    } catch (error) {
+      emitPreparationBoundary(`${label}:throw`);
+      throw error;
+    }
+  });
+  preparationProbeRestorers.push(() => spy.mockRestore());
+}
+
 process.stderr.write("[steering:boundary] describe:enter\n");
 describe("isolated adopted-drain steering", () => {
   beforeEach(async () => {
@@ -610,11 +663,19 @@ describe("isolated adopted-drain steering", () => {
     vi.mocked(hasControlCommand).mockReturnValue(false);
     resolveCurrentTurnImagesMock.mockReset().mockResolvedValue({});
     replyRunTesting.resetReplyRunRegistry();
+    observePreparationCall(preparationContextNative, "prepareReplyRunContext", "context", true);
+    observePreparationCall(preparationAdmissionNative, "prepareReplyRunAdmission", "admission", true);
+    observePreparationCall(preparationExecutionNative, "executePreparedReplyRun", "execute", true);
+    observePreparationCall(inboundContextNative, "finalizeInboundContextForSdk", "normalize-input");
+    observePreparationCall(conversationNative, "prepareReplyConversation", "conversation");
+    observePreparationCall(runtimePolicyNative, "resolveRuntimePolicySessionKey", "runtime-policy");
+    observePreparationCall(thinkingRuntimeNative, "resolveEffectiveAgentRuntime", "thinking-runtime");
     process.stderr.write("[steering:boundary] beforeEach:exit\n");
   });
 
   afterEach(async () => {
     process.stderr.write("[steering:boundary] afterEach:enter\n");
+    for (const restore of preparationProbeRestorers.splice(0).reverse()) restore();
     vi.useRealTimers();
     resetSystemEventsForTest();
     expect(preparedReplyMockState.unexpectedCalls).toEqual([]);
@@ -659,7 +720,9 @@ describe("isolated adopted-drain steering", () => {
       });
       try {
         process.stderr.write(`[steering:boundary] case:${scenario}:prepare-source:enter\n`);
-        await runPreparedReply(makeParams("prepare the checklist"));
+        const firstParams = makeParams("prepare the checklist");
+        process.stderr.write(`[steering:boundary] case:${scenario}:source-params:exit\n`);
+        await runPreparedReply(firstParams);
         process.stderr.write(`[steering:boundary] case:${scenario}:prepare-source:exit\n`);
         const source = requireLastRunReplyAgentCall().followupRun;
         expect(source.prompt).toContain("prepare the checklist");
@@ -727,7 +790,9 @@ describe("isolated adopted-drain steering", () => {
         if (scenario === "older-ready") {
           expect(queueNative.enqueueFollowupRun(key, { ...source, messageId: "fixture-older-waiter", prompt: "older pending request", turnAdoptionLifecycle: { onAdopted: vi.fn() } }, settings, "message-id", undefined, false)).toBe(true);
         }
+        process.stderr.write(`[steering:boundary] case:${scenario}:correction-params:enter\n`);
         const correctionParams = makeParams("it's in Drive, use that one");
+        process.stderr.write(`[steering:boundary] case:${scenario}:correction-params:exit\n`);
         correctionParams.opts = { [REPLY_OPERATION_RUN_STATE]: runState };
         process.stderr.write(`[steering:boundary] case:${scenario}:prepare-correction:enter\n`);
         await runPreparedReply(correctionParams);
