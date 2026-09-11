@@ -3,8 +3,12 @@
 Copy `test/isolated-queue` into the root of the reconstructed OpenClaw checkout after its frozen dependency install. The fixture resolves all source and native Vitest imports relative to that checkout. Run from the checkout root:
 
 ```sh
-OPENCLAW_VITEST_MAX_WORKERS=1 node scripts/run-vitest.mjs run --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts
+OPENCLAW_VITEST_MAX_WORKERS=1 node scripts/run-vitest.mjs run --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --pool=forks
 ```
+
+The current fixture adds finite stderr labels around module imports, hooks, case entry and exit, native awaited calls, and cleanup. It adds no timers or keepalive output. Removing those labels recovers the original baseline fixture byte-for-byte; `source-parity.json` retains both SHA-256 values. The four cases, assertions, lifecycle behavior and native 120-second no-output watchdog are unchanged.
+
+Two hosted attempts using the inherited `threads` pool ended with exit 143 from that watchdog and no completed case verdicts. In the second attempt, completed load/transform events stopped after about 15 seconds. The wait point and cause remain unresolved. The command above and the diagnostic workflow use `--pool=forks` as a worker-environment differential, preserving one worker, isolation and the native runner. A result under `forks` applies to that configuration; success alone would not resolve the original `threads` stall or establish its cause.
 
 The four existing scenarios are unchanged: an empty-queue steering control, the adopted current source, an older ready predecessor, and a different tool-authority request. The adopted current source asserts steering; the suspected baseline defect is expected to fail that assertion while the controls pass. That outcome has not yet been demonstrated. Preserve the actual native exit code, case results and logs, including unexpected setup failures. A cancelled run or empty test report does not establish the defect.
 
