@@ -42,7 +42,7 @@ jobs:
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-steering
         run: cp -R runtime/diagnostics/adopted-steering/test/isolated-queue "$RUNTIME_CHECKOUT/test/isolated-queue"
-      - name: Run the four native steering cases
+      - name: Reproduce the exact baseline assertion with three passing controls
         id: steering
         working-directory: ${{ runner.temp }}/openclaw-steering
         env:
@@ -50,8 +50,33 @@ jobs:
           OPENCLAW_VITEST_IMPORT_DURATIONS: "1"
           DEBUG: vite:load,vite:transform
         run: |
-          set -o pipefail
+          set +e
           node scripts/run-vitest.mjs run --pool=forks --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --reporter=verbose --reporter=junit --reporter="$PWD/scripts/lib/vitest-resource-reporter.mts" --outputFile.junit="$RUNNER_TEMP/steering-regression.xml" 2>&1 | tee "$RUNNER_TEMP/steering-regression.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pipeline_status[0]}" > "$RUNNER_TEMP/steering-regression.exit"
+          printf 'Baseline native exit: %s\n' "${pipeline_status[0]}"
+          test "${pipeline_status[1]}" -eq 0
+          python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/verify_result.py" baseline "${pipeline_status[0]}" "$RUNNER_TEMP/steering-regression.xml" "$RUNNER_TEMP/steering-regression.log" "$RUNNER_TEMP/steering-baseline-verdict.json"
+      - name: Apply the exact candidate to the disposable checkout
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/apply_candidate.py" "$PWD"
+      - name: Run the original four and six owner/FIFO cases against the candidate
+        id: candidate
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        env:
+          OPENCLAW_VITEST_MAX_WORKERS: "1"
+          OPENCLAW_VITEST_IMPORT_DURATIONS: "1"
+          DEBUG: vite:load,vite:transform
+        run: |
+          set +e
+          node scripts/run-vitest.mjs run --pool=forks --config test/isolated-queue/vitest.queue-candidate.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts test/isolated-queue/adopted-drain-steering.owner-fifo.test.ts --reporter=verbose --reporter=junit --reporter="$PWD/scripts/lib/vitest-resource-reporter.mts" --outputFile.junit="$RUNNER_TEMP/steering-candidate.xml" 2>&1 | tee "$RUNNER_TEMP/steering-candidate.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pipeline_status[0]}" > "$RUNNER_TEMP/steering-candidate.exit"
+          printf 'Candidate native exit: %s\n' "${pipeline_status[0]}"
+          test "${pipeline_status[1]}" -eq 0
+          python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/verify_result.py" candidate "${pipeline_status[0]}" "$RUNNER_TEMP/steering-candidate.xml" "$RUNNER_TEMP/steering-candidate.log" "$RUNNER_TEMP/steering-candidate-verdict.json"
       - name: Preserve the actual native result
         if: always() && steps.steering.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -60,5 +85,11 @@ jobs:
           path: |
             ${{ runner.temp }}/steering-regression.xml
             ${{ runner.temp }}/steering-regression.log
+            ${{ runner.temp }}/steering-regression.exit
+            ${{ runner.temp }}/steering-baseline-verdict.json
+            ${{ runner.temp }}/steering-candidate.xml
+            ${{ runner.temp }}/steering-candidate.log
+            ${{ runner.temp }}/steering-candidate.exit
+            ${{ runner.temp }}/steering-candidate-verdict.json
           if-no-files-found: warn
           retention-days: 7

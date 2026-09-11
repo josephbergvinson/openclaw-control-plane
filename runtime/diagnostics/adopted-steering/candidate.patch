@@ -1,0 +1,273 @@
+--- a/src/auto-reply/reply/agent-runner-core.ts
++++ b/src/auto-reply/reply/agent-runner-core.ts
+@@ -449,6 +449,8 @@
+   shouldSteer: boolean;
+   shouldFollowup: boolean;
+   queueAdmissionState?: "empty" | "steering" | "ready";
++  /** Exact owner whose adopted source was excluded from pending-work admission. */
++  adoptedFollowupSteerOwner?: ReplyOperation;
+   isActive: boolean;
+   isRunActive?: () => boolean;
+   opts?: InternalGetReplyOptions;
+--- a/src/auto-reply/reply/agent-runner-run.ts
++++ b/src/auto-reply/reply/agent-runner-run.ts
+@@ -305,6 +305,7 @@
+       followupRun,
+       opts,
+       providedReplyOperation,
++      adoptedFollowupSteerOwner: params.adoptedFollowupSteerOwner,
+       queueKey,
+       releaseAdmissionTicket,
+       replyOperationRunState,
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+@@ -16,6 +16,7 @@
+   scheduleFollowupDrain,
+   type FollowupRun,
+ } from "./queue.js";
++import { inspectFollowupQueueAdmission } from "./queue/state.js";
+ import type { ReplyOperationRunState } from "./reply-operation-run-state.js";
+ import {
+   beginReplyMessageInjectionTarget,
+@@ -23,6 +24,7 @@
+   type ReplyOperation,
+   replyRunRegistry,
+ } from "./reply-run-registry.js";
++import { resolveCurrentAdoptedFollowupSource } from "./reply-run-registry.state.js";
+ import { refreshReplyOperationTyping } from "./reply-run-typing.js";
+ import { buildChannelSourceTurnId } from "./source-turn-id.js";
+ import type { TypingSignaler } from "./typing-mode.js";
+@@ -31,6 +33,7 @@
+   followupRun: RunReplyAgentParams["followupRun"];
+   opts: RunReplyAgentParams["opts"];
+   providedReplyOperation: ReplyOperation | undefined;
++  adoptedFollowupSteerOwner?: ReplyOperation;
+   queueKey: string;
+   releaseAdmissionTicket: () => void;
+   replyOperationRunState: ReplyOperationRunState | undefined;
+@@ -96,9 +99,23 @@
+   const steerSessionId = activeReplyOperation?.sessionId ?? followupRun.run.sessionId;
+   // Capture exact injection authority before parking or awaiting admission.
+   // A same-key successor must never inherit this turn's steer or abort.
+-  const injectionTarget = replyRunRegistry.resolveCurrentMessageInjectionTarget(
+-    activeReplyOperation?.key ?? queueKey,
+-  );
++  const adoptedSourceStillOwnsAdmission = (before?: FollowupRun) => {
++    const owner = params.adoptedFollowupSteerOwner;
++    if (!owner) {
++      return true;
++    }
++    if (owner.key !== queueKey) {
++      return false;
++    }
++    const admission = inspectFollowupQueueAdmission(queueKey, {
++      activeSource: resolveCurrentAdoptedFollowupSource(owner),
++      before,
++    });
++    return admission.excludedActiveSource && admission.state !== "ready";
++  };
++  const injectionTarget = adoptedSourceStillOwnsAdmission()
++    ? replyRunRegistry.resolveCurrentMessageInjectionTarget(activeReplyOperation?.key ?? queueKey)
++    : undefined;
+   const parked = parkSteerCandidate(queueKey, followupRun, resolvedQueue, runFollowup);
+   if (!parked) {
+     releaseAdmissionTicket();
+@@ -143,6 +160,11 @@
+     }
+     if (!injectionTarget) {
+       return await fallback("no injectable reply operation");
++    }
++    // Admission can await earlier steers. Recheck the exact source and predecessors;
++    // later ordinary waiters must not displace this candidate's existing FIFO position.
++    if (!adoptedSourceStillOwnsAdmission(followupRun)) {
++      return await fallback("adopted followup owner or predecessor changed");
+     }
+     const injectionAttempt = beginReplyMessageInjectionTarget(injectionTarget, followupRun.prompt, {
+       steeringMode: "all",
+--- a/src/auto-reply/reply/followup-turn-admission.ts
++++ b/src/auto-reply/reply/followup-turn-admission.ts
+@@ -35,6 +35,7 @@
+   type FollowupRun,
+ } from "./queue.js";
+ import type { ReplyOperation } from "./reply-run-registry.js";
++import { adoptedFollowupSourceByOperation } from "./reply-run-registry.state.js";
+ import { admitReplyTurn } from "./reply-turn-admission.js";
+ import {
+   createReplySessionEntryHandle,
+@@ -171,6 +172,9 @@
+     if (isFollowupRunAborted(params.queued)) {
+       return { kind: "skipped", reason: "aborted", operation };
+     }
++
++    // Bind the retained queue source, before clones or awaited presentation work.
++    adoptedFollowupSourceByOperation.set(operation, params.queued);
+ 
+     // Queue drains retain the latest live runner closure per key. Keep local dispatcher
+     // callbacks in that closure so retried non-routable items use the newest transport owner.
+--- a/src/auto-reply/reply/get-reply-run-admission.ts
++++ b/src/auto-reply/reply/get-reply-run-admission.ts
+@@ -44,7 +44,7 @@
+ import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
+ import { resolveActiveRunQueueAction } from "./queue-policy.js";
+ import { resolveQueueSettings } from "./queue/settings-runtime.js";
+-import { getExistingFollowupQueue } from "./queue/state.js";
++import { inspectFollowupQueueAdmission } from "./queue/state.js";
+ import {
+   REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS,
+   interruptReplyRunTarget,
+@@ -54,6 +54,7 @@
+   resolveActiveReplyRunSessionId,
+   waitForReplyRunEndBySessionId,
+ } from "./reply-run-registry.js";
++import { resolveCurrentAdoptedFollowupSource } from "./reply-run-registry.state.js";
+ import { admitReplyTurn } from "./reply-turn-admission.js";
+ import {
+   isSlackDirectRoutedThreadTurn,
+@@ -549,14 +550,16 @@
+     activeRunQueueMode === "interrupt" && sessionKey
+       ? replyRunRegistry.resolveCurrentInterruptTarget(sessionKey)
+       : undefined;
+-  const pendingQueue = getExistingFollowupQueue(queueKey);
+-  const queueAdmissionState = !pendingQueue
+-    ? "empty"
+-    : pendingQueue.items.some((item) => !item.steerPending) ||
+-        pendingQueue.inFlight.size > 0 ||
+-        pendingQueue.droppedCount > 0
+-      ? "ready"
+-      : "steering";
++  const activeQueueOperation = replyRunRegistry.get(queueKey);
++  const queueAdmission = inspectFollowupQueueAdmission(queueKey, {
++    activeSource: activeQueueOperation
++      ? resolveCurrentAdoptedFollowupSource(activeQueueOperation)
++      : undefined,
++  });
++  const queueAdmissionState = queueAdmission.state;
++  const adoptedFollowupSteerOwner = queueAdmission.excludedActiveSource
++    ? activeQueueOperation
++    : undefined;
+   const activeRunAcceptsCurrentThread = resolveActiveRunAcceptsCurrentThread({ isActive });
+   const shouldSteer =
+     !isRoomEvent &&
+@@ -672,6 +675,7 @@
+     shouldSteer,
+     shouldFollowup,
+     queueAdmissionState,
++    adoptedFollowupSteerOwner,
+     isActive,
+     authProfileId,
+     authProfileIdSource,
+--- a/src/auto-reply/reply/get-reply-run-execute.ts
++++ b/src/auto-reply/reply/get-reply-run-execute.ts
+@@ -80,6 +80,7 @@
+     shouldSteer,
+     shouldFollowup,
+     queueAdmissionState,
++    adoptedFollowupSteerOwner,
+     isActive,
+     authProfileId,
+     authProfileIdSource,
+@@ -583,6 +584,7 @@
+       shouldSteer,
+       shouldFollowup,
+       queueAdmissionState,
++      adoptedFollowupSteerOwner,
+       isActive,
+       isRunActive: () => {
+         const latestSessionState = resolvePreparedSessionState();
+--- a/src/auto-reply/reply/queue/state.ts
++++ b/src/auto-reply/reply/queue/state.ts
+@@ -10,6 +10,7 @@
+ import { normalizeThinkLevel, resolveSupportedThinkingLevel } from "../../thinking.js";
+ import {
+   completeFollowupRunLifecycle,
++  isFollowupRunAborted,
+   type FollowupRun,
+   type QueueDropPolicy,
+   type QueueSettings,
+@@ -68,6 +69,39 @@
+   return FOLLOWUP_QUEUES.get(cleaned);
+ }
+ 
++/** Inspect waiting work without mistaking the exact adopted source for a predecessor. */
++export function inspectFollowupQueueAdmission(
++  key: string,
++  options: { activeSource?: FollowupRun; before?: FollowupRun } = {},
++): { state: "empty" | "steering" | "ready"; excludedActiveSource: boolean } {
++  const queue = getExistingFollowupQueue(key);
++  if (!queue) {
++    return { state: options.before ? "ready" : "empty", excludedActiveSource: false };
++  }
++  const beforeIndex = options.before ? queue.items.indexOf(options.before) : queue.items.length;
++  if (
++    beforeIndex < 0 ||
++    (options.before && queue.items.lastIndexOf(options.before) !== beforeIndex)
++  ) {
++    return { state: "ready", excludedActiveSource: false };
++  }
++  const source = options.activeSource;
++  const excludedActiveSource = Boolean(
++    source &&
++    queue.inFlight.has(source) &&
++    !isFollowupRunAborted(source) &&
++    !queue.activeSummarySources.has(source),
++  );
++  const isCurrentSource = (item: FollowupRun) => excludedActiveSource && item === source;
++  const ready =
++    queue.items.some(
++      (item, index) => index < beforeIndex && !item.steerPending && !isCurrentSource(item),
++    ) ||
++    [...queue.inFlight].some((item) => !isCurrentSource(item)) ||
++    queue.droppedCount > 0;
++  return { state: ready ? "ready" : "steering", excludedActiveSource };
++}
++
+ export function hasPendingFollowupQueueWork(keys: Iterable<string | undefined>): boolean {
+   const seen = new Set<string>();
+   for (const key of keys) {
+--- a/src/auto-reply/reply/reply-run-registry.state.ts
++++ b/src/auto-reply/reply/reply-run-registry.state.ts
+@@ -12,6 +12,7 @@
+ import { createDeferredCore } from "../../shared/deferred.js";
+ import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+ import type { OpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
++import type { FollowupRun } from "./queue/types.js";
+ import type { ReplyFollowupAdmissionBarrierTimeoutPolicy } from "./reply-dispatcher.types.js";
+ import type { ReplyOperationStaleReason } from "./reply-run-finalization-lease.js";
+ import {
+@@ -57,6 +58,7 @@
+   evictOperationByOperation?: WeakMap<ReplyOperation, () => void>;
+   executionStartedOperations?: WeakSet<ReplyOperation>;
+   lifecycleAdmissionByOperation?: WeakMap<ReplyOperation, ReplyOperationAdmission>;
++  adoptedFollowupSourceByOperation?: WeakMap<ReplyOperation, FollowupRun>;
+ };
+ 
+ const REPLY_RUN_STATE_KEY = Symbol.for("openclaw.replyRunRegistry");
+@@ -76,6 +78,20 @@
+ // Admission and the active operation must remain visible across transformed SDK graphs.
+ export const lifecycleAdmissionByOperation = (replyRunState.lifecycleAdmissionByOperation ??=
+   new WeakMap<ReplyOperation, ReplyOperationAdmission>());
++// Exact source identity stays private and shared across transformed runtime graphs.
++export const adoptedFollowupSourceByOperation = (replyRunState.adoptedFollowupSourceByOperation ??=
++  new WeakMap<ReplyOperation, FollowupRun>());
++
++export function resolveCurrentAdoptedFollowupSource(
++  operation: ReplyOperation,
++): FollowupRun | undefined {
++  return replyRunState.activeRunsByKey.get(operation.key) === operation &&
++    operation.result === null &&
++    !operation.abortSignal.aborted
++    ? adoptedFollowupSourceByOperation.get(operation)
++    : undefined;
++}
++
+ replyRunState.followupAdmissionBarriersByKey ??= new Map();
+ replyRunState.successorAdmissionBarriersByKey ??= new Map();
+ 
+@@ -580,6 +596,7 @@
+   sessionId: string;
+   operation: ReplyOperation;
+ }): void {
++  adoptedFollowupSourceByOperation.delete(params.operation);
+   if (replyRunState.activeRunsByKey.get(params.sessionKey) !== params.operation) {
+     if (
+       replyRunState.activeKeysBySessionId.get(params.sessionId) === params.sessionKey &&
