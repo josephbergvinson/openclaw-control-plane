@@ -1,0 +1,62 @@
+name: Steering regression
+
+on:
+  push:
+    branches: [main, "docs/current-build-reference-*"]
+    paths:
+      - runtime/**
+      - scripts/reconstruct_runtime.py
+      - .github/workflows/steering-regression.yml
+  pull_request:
+    paths:
+      - runtime/**
+      - scripts/reconstruct_runtime.py
+      - .github/workflows/steering-regression.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adopted-source-steering:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.16.0
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@12.3.4
+      - name: Reconstruct the pinned runtime source
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-steering
+        run: |
+          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
+      - name: Install frozen runtime dependencies
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: pnpm install --frozen-lockfile
+      - name: Install the isolated regression fixture
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-steering
+        run: cp -R runtime/diagnostics/adopted-steering/test/isolated-queue "$RUNTIME_CHECKOUT/test/isolated-queue"
+      - name: Run the four native steering cases
+        id: steering
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        env:
+          OPENCLAW_VITEST_MAX_WORKERS: "1"
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --reporter=verbose --reporter=junit --outputFile.junit="$RUNNER_TEMP/steering-regression.xml" 2>&1 | tee "$RUNNER_TEMP/steering-regression.log"
+      - name: Preserve the actual native result
+        if: always() && steps.steering.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: steering-regression-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/steering-regression.xml
+            ${{ runner.temp }}/steering-regression.log
+          if-no-files-found: warn
+          retention-days: 7
