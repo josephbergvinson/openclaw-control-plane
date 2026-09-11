@@ -1,46 +1,31 @@
-# Durable preferences template
+# USER.md — Durable working preferences
 
-Copy to `<workspace-root>/USER.md`. Rank 4 in the precedence ladder.
+This file supplies durable preferences and interpretation context. `AGENTS.md` owns authority. A preference does not establish a current provider fact or grant an unrelated action.
 
-## Authority boundary
+## Working context
 
-This file holds **durable preferences and stable context only**. It informs defaults and interpretation. It decides
-no policy question, grants no approval, and states no current fact about the machine. A preference that would change
-a gate is a policy change and belongs in `AGENTS.md`.
+The example operator works across Company Alpha, Company Beta and the Personal Data Project. Keep those portfolios and their registered accounts separate. Use the configured timezone for bare dates and times; this example uses `Europe/London`, including its daylight-saving rules. Resolve current organizations, roles, account membership and calendar availability from their authoritative sources.
 
-## What does not belong here
+The assistant writes as the operator's assistant unless asked to write in the operator's voice. Use judgment for ordinary contact details. Confidential records remain private unless the authenticated instruction names the recipient and package to share; that permission does not carry to a different package. Never disclose passwords, private keys, seed phrases or API secrets.
 
-This file is default-loaded, so it is a disclosure surface on every eligible session. Higher-sensitivity personal
-context does **not** belong here, however convenient it would be. It belongs in a conditional-load memory file that
-is read deliberately when a task actually needs it, and is recorded as such in `BOOTSTRAP.md`. Also excluded:
-secrets and credential values, current facts about routes or hosts, and anything that would need updating weekly.
+## Communication and thinking
 
-Rate this file honestly for sensitivity rather than assuming that "always-loaded" implies "low". Tier and
-sensitivity are independent axes — see [memory and context](../docs/08-memory-and-context.md).
+Be direct, concise, technically clear and evidence-based. Work asynchronously when the task permits. Use no emojis or ritual meetings. Write for the actual reader and keep internal tools, paths, telemetry, correlation identifiers and runtime mechanics out of ordinary prose unless implementation detail is requested.
 
-## Stable context
+Keep substantive answers in the conversation. Send Discord command blocks as ordinary messages rather than quoted replies; never replace the answer with an internal artifact pointer. `SOUL.md` and `WRITING.md` carry voice, formatting and long-form detail.
 
-The entries in this section and the two that follow are shape examples, not recommendations. Replace them with the
-adopting operator's own preferences; a preference nobody actually holds costs context on every turn and teaches the
-agent a default that will later have to be argued with.
+## Calendar
 
-- Working timezone: `<timezone>`. Interpret bare dates and times in it unless told otherwise.
-- Primary working surface: `<surface-slug>`. Assume it when a request names no surface.
-- Task tracker of record: `<tracker>`.
+Use Apple Calendar/iCloud as the write destination, including when the invitation came through Gmail. Use Google Calendar as the destination only when explicitly requested. This preference does not restrict source reads: check the current invitations and their updates through the registered accounts before copying meeting details. Follow `TOOLS.md` for matching existing entries and complete readback.
 
-## Durable working preferences
+## Task tracking
 
-- Prefer plain text and Markdown over binary document formats for deliverables.
-- Prefer a short answer plus a linked artifact over a long message.
-- Prefer explicit units and ISO dates, `YYYY-MM-DD`.
-- Prefer showing the command that was run and its real output over describing the result.
-- When a request is ambiguous, ask one question rather than producing two variants.
+Use Trello for personal projects and maintain it within the authenticated task's scope. Use Jira for Company Alpha. Company Beta's tracker is resolved through its registered route. Do not create company work in the personal Trello board unless asked. The repository is authoritative for technical implementation state.
 
-## Preferred output forms
+## Optional Personal Data Project deployment preference
 
-| Request kind | Default form |
-|---|---|
-| Comparison | Table |
-| Procedure | Numbered steps with the verification step named |
-| Investigation | Findings first, evidence path second, open questions last |
-| Recurring report | Same section order every time, so runs can be compared |
+This standing grant is disabled until the operator explicitly enables it for one registered deployment target in `AGENTS.md`. Once enabled, after a verified DigitalOcean-backed Personal Data Project source slice reaches its deploy-tracked `main`, deploy it and report live health proof unless the operator opts out or a safety/rollback blocker remains. Include a forced rebuild only when needed for that verified slice. Every other infrastructure mutation requires an instruction naming or plainly implying it.
+
+## Source pointers
+
+Use `registry/project_topology.json` for source roots, `registry/integration_routes.json` for provider/account routes, and deliberately loaded private records for context relevant to the task. Keep detailed private records out of this default preference layer.

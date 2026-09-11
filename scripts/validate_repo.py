@@ -28,6 +28,10 @@ REQUIRED = {
     "CONTRIBUTING.md",
     "SECURITY.md",
     "LICENSE",
+    "runtime/manifest.json",
+    "runtime/openclaw-2026.9.3-reference.patch",
+    "config/openclaw.preferences.json",
+    "templates/WRITING.example.md",
     "docs/00-start-here.md",
     "docs/01-glossary.md",
     "docs/03-capability-provenance.md",
@@ -40,8 +44,8 @@ REQUIRED = {
     "docs/17-adoption-guide.md",
     "templates/AGENTS.example.md",
     "templates/TOOLS.example.md",
-    "examples/durable-status.example.json",
-    "schemas/durable-status.schema.json",
+    "examples/native-task.example.json",
+    "schemas/native-task.schema.json",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")

@@ -1,24 +1,10 @@
-flowchart TD
-  ACK[Visible acknowledgement] --> OB[Delivery obligation record created before side effects]
-  OB --> WORK[Side effects begin]
-  WORK --> CKPT[Checkpoints at named phase boundaries]
-  CKPT --> TERM[Status artifact reaches a terminal state]
-  TERM --> OWN{Single writer - who owns the final}
-  OWN -->|worker auto-delivers| KEY[Canonical idempotency key over provider, account, visible target, origin, class and chunk]
-  OWN -->|parent only if a fresh read shows none visible| KEY
-  KEY --> CLAIM{Exclusive-create claim}
-  CLAIM -->|claim carries a receipt| SUP[Suppress as already delivered]
-  CLAIM -->|claim younger than the in-flight lease| SUP
-  CLAIM -->|older receipt-less claim| RECLAIM[Reclaim as crashed]
-  CLAIM -->|created| SEND[Provider send attempt]
-  RECLAIM --> SEND
-  SEND -->|provider message id| REC[Receipt recorded]
-  REC --> CLEAR[Obligation cleared]
-  SEND -->|transport failure| Q[Delivery queue entry preserving the original payload]
-  Q --> DRAIN[Drainer takes the active-delivery claim]
-  DRAIN -->|backoff ladder within the retry budget| SEND
-  DRAIN -->|permanent-error class| FAILED[Failed-delivery area - retained, never deleted]
-  DRAIN -->|retry budget exhausted| FAILED
-  FAILED --> GATE[Delivery incident gate]
-  GATE --> RELAY[Follow-up relay as a supervised host job]
-  RELAY --> CORR[Corrective update to the same visible target]
+flowchart LR
+    A[Completed agent result] --> R[Runtime delivery owner]
+    R --> P[Channel provider]
+    P --> V[Visible destination message]
+    R --> E[Retained delivery evidence]
+    V --> C[Readback and reconciliation]
+    E --> C
+    C --> D{Outcome established?}
+    D -->|Yes| F[Report verified result]
+    D -->|No| U[Retain unknown and inspect before retry]

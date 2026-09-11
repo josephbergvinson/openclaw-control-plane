@@ -1,32 +1,10 @@
 flowchart LR
-  R[Promoted sealed release]
-  P1[Persisted - runtime current pointer]
-  P2[Persisted - installed package link]
-  P3[Persisted - installed CLI bin link]
-  P4[Persisted - on-disk service definitions]
-  L1[Live - loaded gateway arguments]
-  L2[Live - gateway process argv and open files]
-  L3[Live - loaded node arguments]
-  L4[Live - node process argv and open files]
-  V{All persisted and live surfaces resolve to the same release}
-  OK[Live promotion accepted]
-  SB[Persisted-not-applied - pointer, definition and process disagree, evidence preserved]
-  R --> P1
-  R --> P2
-  R --> P3
-  R --> P4
-  P4 -. definition reload required .-> L1
-  L1 --> L2
-  P2 -. restart required .-> L3
-  L3 --> L4
-  P1 --> V
-  P2 --> V
-  P3 --> V
-  P4 --> V
-  L1 --> V
-  L2 --> V
-  L3 --> V
-  L4 --> V
-  V -- yes --> OK
-  V -- no --> SB
-  SB -. never reported as live or done .-> OK
+    Source[Recorded source commit] --> Release[Sealed release inventory]
+    Release --> Selector[Current selector]
+    Selector --> CLI[Installed CLI and package links]
+    Selector --> Definitions[Stable service arguments]
+    Definitions --> Loaded[Loaded launchd definitions]
+    Loaded --> Processes[Gateway and node process identity]
+    Processes --> Ready[Listener, plugin and health verification]
+    State[Bound state root, config and approval state] --> Processes
+    Ready --> Receipt[Immutable activation receipt]

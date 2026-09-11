@@ -1,24 +1,13 @@
-stateDiagram-v2
-  [*] --> Establishing
-  Establishing --> CollisionBlocked: active-lane index already owns this scope
-  CollisionBlocked --> Closed: one deduped blocker and no writes
-  Establishing --> PendingStartup: surface resolved, worktree verified, status artifact created
-  PendingStartup --> Acknowledged: exactly one visible acknowledgement delivered
-  Acknowledged --> Running: acknowledgement barrier records the provider receipt
-  Running --> Running: checkpoint emitted at a named phase
-  Running --> ApprovalWait: approval boundary reached
-  ApprovalWait --> Running: matching token resumes the same lane
-  Running --> LeaseOrphaned: owning process no longer alive
-  LeaseOrphaned --> Running: dead-owner proof and diff inventory admit generation N plus 1
-  Running --> Terminal: status artifact reaches a terminal state
-  Terminal --> FinalReserved: terminal dispatch claim created exclusively
-  FinalReserved --> Closed: one visible final carrying a provider message id
-  Closed --> [*]
-  note right of Running
-    The write lease binds root run id, lane generation, status artifact identity
-    and runtime owner. Ownership, not state alone, is what makes the lane durable.
-  end note
-  note right of ApprovalWait
-    Parked state stores owner, deadline and resume action, so a restart
-    resumes in the same lane rather than opening a second writer.
-  end note
+sequenceDiagram
+    participant O as Operator
+    participant P as Parent session
+    participant W as Worker session
+    participant R as Native task runtime
+    O->>P: Ordinary goal request
+    P->>R: Create represented worker
+    R->>W: Start authorized subtask
+    P->>R: Yield pending completion
+    W->>R: Return result and evidence
+    R->>P: Resume requester continuation
+    P->>P: Verify source and effects
+    P->>O: One clear final result

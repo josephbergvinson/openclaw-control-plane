@@ -1,0 +1,4881 @@
+{
+  "system_aliases": {
+    "x": [
+      "x-api"
+    ],
+    "twitter": [
+      "x-api"
+    ],
+    "google": [
+      "google-workspace"
+    ],
+    "gmail": [
+      "gmail",
+      "google-workspace"
+    ],
+    "drive": [
+      "google-workspace"
+    ],
+    "docs": [
+      "google-workspace"
+    ],
+    "sheets": [
+      "google-workspace"
+    ],
+    "gsc": [
+      "google-search-console"
+    ],
+    "searchconsole": [
+      "google-search-console"
+    ],
+    "search-console": [
+      "google-search-console"
+    ],
+    "calendar": [
+      "apple-calendar",
+      "google-calendar"
+    ],
+    "icloud-calendar": [
+      "apple-calendar"
+    ],
+    "google-calendar": [
+      "google-calendar"
+    ],
+    "gcal": [
+      "google-calendar"
+    ],
+    "forms": [
+      "google-forms"
+    ],
+    "google-forms": [
+      "google-forms"
+    ],
+    "cf": [
+      "cloudflare"
+    ],
+    "neon": [
+      "personal-data-neon-postgres"
+    ],
+    "postgres": [
+      "personal-data-neon-postgres"
+    ],
+    "postgresql": [
+      "personal-data-neon-postgres"
+    ],
+    "digitalocean": [
+      "digitalocean-api-app-platform"
+    ],
+    "company-alpha-local": [
+      "company-alpha-local-dev"
+    ],
+    "company-alpha-dev": [
+      "company-alpha-local-dev"
+    ],
+    "company-alpha-docker": [
+      "company-alpha-local-dev"
+    ],
+    "company-alpha-mcp": [
+      "company-alpha-docs"
+    ],
+    "company-alpha-docs-mcp": [
+      "company-alpha-docs"
+    ],
+    "company-alpha-docs-mcp-readonly": [
+      "company-alpha-docs"
+    ],
+    "gigabrain": [
+      "company-alpha-gigabrain"
+    ],
+    "metabase": [
+      "company-alpha-gigabrain"
+    ],
+    "metabase-gigabrain": [
+      "company-alpha-gigabrain"
+    ],
+    "company-alpha-metabase": [
+      "company-alpha-gigabrain"
+    ],
+    "hedera": [
+      "hedera-mainnet-test-signer",
+      "hedera-testnet-test-signer"
+    ],
+    "hedera-mainnet": [
+      "hedera-mainnet-test-signer"
+    ],
+    "openclaw-hedera-mainnet-test-signer": [
+      "hedera-mainnet-test-signer"
+    ],
+    "hedera-testnet": [
+      "hedera-testnet-test-signer"
+    ],
+    "openclaw-hedera-testnet-test-signer": [
+      "hedera-testnet-test-signer"
+    ],
+    "walletconnect": [
+      "company-alpha-walletconnect-testnet",
+      "company-alpha-walletconnect-mainnet"
+    ],
+    "company-alpha-walletconnect": [
+      "company-alpha-walletconnect-testnet",
+      "company-alpha-walletconnect-mainnet"
+    ],
+    "existing-chrome-session": [
+      "openclaw-browser-chrome-session"
+    ],
+    "chrome-user-session": [
+      "openclaw-browser-chrome-session"
+    ],
+    "hashpack": [
+      "hashpack"
+    ],
+    "trello": [
+      "trello"
+    ],
+    "gh": [
+      "github"
+    ]
+  },
+  "routing_defaults": {
+    "native_lane_class": "declared_native",
+    "native_lane_kinds": [
+      "provider_api",
+      "connector",
+      "mcp_integration",
+      "supported_cli"
+    ],
+    "fallback_order": [
+      "declared_native_route",
+      "declared_probe_or_readiness_check",
+      "persistent_managed_browser",
+      "stock_extension_existing_session_browser",
+      "host_os_ui_last_resort"
+    ],
+    "managed_browser_primary": {
+      "profile_id": "openclaw",
+      "transport": "managed_cdp",
+      "persistent": true
+    },
+    "browser_profile_fallbacks": [
+      {
+        "profile_id": "chrome",
+        "automatic": true,
+        "requires_explicit_existing_session_handoff": false
+      }
+    ],
+    "browser_fallback_predicates": [
+      "native_operation_unsupported",
+      "native_probe_failed",
+      "native_route_unavailable",
+      "authenticated_ui_required",
+      "user_requested_ui_state"
+    ],
+    "adaptive_navigation_required": true,
+    "browser_secret_entry": "opaque_secret_broker_only",
+    "agent_handled_auth_steps": [
+      "account_selection",
+      "username_or_email_entry",
+      "opaque_broker_password_entry",
+      "routine_continue",
+      "expected_scope_allow"
+    ],
+    "human_only_auth_gates": [
+      "captcha",
+      "passkey_biometric_or_security_key",
+      "one_time_2fa_or_mfa",
+      "password_create_reset_change_or_recovery",
+      "unexpected_account_or_tenant_switch",
+      "unexpected_scope_admin_consent_or_privilege",
+      "ungranted_legal_acceptance"
+    ]
+  },
+  "credential_handles": [
+    {
+      "handle_id": "google.gog.keyring-password",
+      "credential_kind": "provider-unlock-secret",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.gog_env_file}",
+        "keys": [
+          "GOG_KEYRING_PASSWORD"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-google",
+        "company-alpha-google-coordinator",
+        "company-alpha-google-operator",
+        "company-beta-google-admin",
+        "company-beta-google-operator",
+        "operations-google"
+      ],
+      "consumers": [
+        {
+          "kind": "provider-native",
+          "consumer_id": "gog"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/resolve_capability.py"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/google_search_console_probe.py"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.personal.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.personal_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-google"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-search-console-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-calendar-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-forms-personal-gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.personal.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.personal.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-google"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-search-console-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-calendar-personal-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-forms-personal-gog"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-personal"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-personal",
+        "login_hint": "${operator:identifiers.accounts.personal_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "google.company_alpha.coordinator.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.company_alpha_coordinator_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-google-coordinator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-alpha-coordinator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-company-alpha-coordinator"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-calendar-company-alpha-coordinator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-forms-company-alpha-coordinator-gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.company_alpha.coordinator.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.company_alpha.coordinator.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-google-coordinator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-alpha-coordinator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-company-alpha-coordinator"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-calendar-company-alpha-coordinator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-forms-company-alpha-coordinator-gog"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-company-alpha-coordinator"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-company-alpha-coordinator",
+        "login_hint": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "google.company_alpha.operator.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.company_alpha_operator_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-google-operator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-alpha-operator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-company-alpha-operator"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.company_alpha.operator.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.company_alpha.operator.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-google-operator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-alpha-operator-gog"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-gmail-company-alpha-operator"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-company-alpha-operator"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-company-alpha-operator",
+        "login_hint": "${operator:identifiers.accounts.company_alpha_operator_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "google.company_beta.admin.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.company_beta_admin_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-google-admin"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-beta-admin"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.company_beta.admin.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.company_beta.admin.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-google-admin"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-beta-admin"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-company-beta-admin"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-company-beta-admin",
+        "login_hint": "${operator:identifiers.accounts.company_beta_admin_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "google.company_beta.operator.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.company_beta_operator_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-google-operator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-beta-operator"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.company_beta.operator.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.company_beta.operator.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-google-operator"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-company-beta-operator"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-company-beta-operator"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-company-beta-operator",
+        "login_hint": "${operator:identifiers.accounts.company_beta_operator_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "google.operations.oauth.gog",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "gog",
+        "keys": [
+          "${operator:identifiers.accounts.operations_google}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "operations-google"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-operations-gog"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "gog"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "google.operations.password",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "com.openclaw.browser-credentials.v1",
+        "keys": [
+          "google.operations.password"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "operations-google"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "google-workspace-operations-gog"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "google-operations"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "google-operations",
+        "login_hint": "${operator:identifiers.accounts.operations_google}",
+        "allowed_origins": [
+          "https://accounts.google.com"
+        ]
+      }
+    },
+    {
+      "handle_id": "notion.personal.api",
+      "credential_kind": "api-token",
+      "owner": {
+        "kind": "workspace-secret-file",
+        "ref": "${operator:paths.routing_notion_env}",
+        "keys": [
+          "NOTION_API_KEY"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-notion"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "notion-personal"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/notion_capability_probe.py"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/notion_read.py"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "notion.company_alpha.api",
+      "credential_kind": "api-token",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.gog_env_file}",
+        "keys": [
+          "NOTION_API_KEY_COMPANY_ALPHA"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-notion"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "notion-company-alpha"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/notion_capability_probe.py"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/notion_read.py"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "cloudflare.personal.api",
+      "credential_kind": "api-token",
+      "owner": {
+        "kind": "workspace-secret-file",
+        "ref": "${operator:paths.routing_cloudflare_env}",
+        "keys": [
+          "CLOUDFLARE_API_TOKEN",
+          "CLOUDFLARE_ZONE_NAME",
+          "CLOUDFLARE_ACCOUNT_NAME"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-cloudflare"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "cloudflare-operator-readonly-api"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/cloudflare_capability_probe.py"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "wrangler"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "topology.neon.database",
+      "credential_kind": "database-credential-bundle",
+      "owner": {
+        "kind": "workspace-secret-file",
+        "ref": "${operator:paths.routing_health_env}",
+        "keys": [
+          "NEON_API_KEY",
+          "NEON_PROJECT_ID",
+          "HEALTH_DB_DSN",
+          "TOPOLOGY_DB_DSN"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-data-neon"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "personal-data-neon-postgres-readonly"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "jira.company_alpha.api",
+      "credential_kind": "api-credential-bundle",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.routing_company_alpha_jira_env}",
+        "keys": [
+          "ATLASSIAN_SITE_URL",
+          "ATLASSIAN_EMAIL",
+          "ATLASSIAN_API_TOKEN"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-jira"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "jira-company-alpha"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/jira_company_alpha_capability_probe.py"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/jira_company_alpha_read.py"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "digitalocean.personal.oauth",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "doctl",
+        "keys": [
+          "openclaw"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-digitalocean"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "digitalocean-openclaw-doctl"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "doctl"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "x.personal.oauth",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "${operator:paths.routing_xurl}",
+        "keys": [
+          "openclaw-research",
+          "${operator:identifiers.x_username}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-x"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "x-api-operator-x-xurl"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "birdclaw-x-research-readonly"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "xurl"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "metabase.company_alpha.api",
+      "credential_kind": "api-credential-bundle",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.routing_company_alpha_gigabrain_metabase_env}",
+        "keys": [
+          "COMPANY_ALPHA_GIGABRAIN_METABASE_URL",
+          "COMPANY_ALPHA_GIGABRAIN_METABASE_USER",
+          "COMPANY_ALPHA_GIGABRAIN_METABASE_PASSWORD"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-metabase"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "company-alpha-gigabrain-metabase-api"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "company-alpha-gigabrain"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "hedera.company_alpha.mainnet.private-key",
+      "credential_kind": "private-key",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.routing_openclaw_hedera_mainnet_test_account_env}",
+        "keys": [
+          "OPENCLAW_HEDERA_MAINNET_TEST_ACCOUNT_ID",
+          "OPENCLAW_HEDERA_MAINNET_TEST_PRIVATE_KEY",
+          "OPENCLAW_HEDERA_MAINNET_TEST_KEY_TYPE"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-hedera-mainnet",
+        "openclaw-hedera-mainnet"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "openclaw-hedera-mainnet-test-signer"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "company-alpha-walletconnect-mainnet"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "hedera.company_alpha.testnet.private-key",
+      "credential_kind": "private-key",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.routing_openclaw_hedera_testnet_test_account_env}",
+        "keys": [
+          "OPENCLAW_HEDERA_TESTNET_TEST_ACCOUNT_ID",
+          "OPENCLAW_HEDERA_TESTNET_TEST_PRIVATE_KEY"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-hedera-testnet",
+        "openclaw-hedera-testnet"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "openclaw-hedera-testnet-test-signer"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "company-alpha-walletconnect-testnet"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "company_alpha.qa.hashpack.testnet",
+      "credential_kind": "browser-password",
+      "owner": {
+        "kind": "macos-keychain",
+        "ref": "openclaw.company_alpha.qa.hashpack.testnet",
+        "keys": [
+          "${operator:services.wallets.hedera_testnet.account_id}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-hedera-testnet",
+        "openclaw-hedera-testnet"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "hashpack-company-alpha-testnet"
+        },
+        {
+          "kind": "browser-binding",
+          "consumer_id": "company-alpha-hashpack-qa"
+        }
+      ],
+      "browser_binding": {
+        "binding_id": "company-alpha-hashpack-qa",
+        "login_hint": null,
+        "allowed_origins": [
+          "chrome-extension://gjagmgiddbbciopjhllkdnddhcglnemk"
+        ]
+      }
+    },
+    {
+      "handle_id": "trello.personal.api",
+      "credential_kind": "api-credential-bundle",
+      "owner": {
+        "kind": "runtime-secret-file",
+        "ref": "${operator:paths.gog_env_file}",
+        "keys": [
+          "TRELLO_API_KEY",
+          "TRELLO_TOKEN",
+          "TRELLO_BOARD_URL"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-trello"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "trello-personal-api"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/trello_capability_probe.py"
+        },
+        {
+          "kind": "script",
+          "consumer_id": "scripts/trello_task_sync.py"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "trello"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "github.personal.session",
+      "credential_kind": "provider-session",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "${operator:paths.github_binary}",
+        "keys": [
+          "${operator:identifiers.github_username}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-github",
+        "company-alpha-github"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "github-personal-cli"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "gh"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "linear.company_beta.oauth.codex-mcp",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "${operator:services.linear.auth_reference}",
+        "keys": [
+          "${operator:identifiers.accounts.company_beta_operator_google}",
+          "company-beta",
+          "${operator:services.linear.workspace_id}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-linear"
+      ],
+      "consumers": [
+        {
+          "kind": "provider-native",
+          "consumer_id": "linear"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "linear.company_beta.oauth.openclaw-mcp",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "${operator:paths.routing_openclaw_sqlite}",
+        "keys": [
+          "table=mcp_oauth_stores",
+          "store_key=linear-4cca6302a658efcc",
+          "principal=operator"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-linear"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "linear-company-beta-mcp"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "openclaw-mcp:linear"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "mercury.company_beta.oauth.openclaw-mcp",
+      "credential_kind": "provider-oauth",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "${operator:services.mercury.auth_reference}",
+        "keys": [
+          "mercury-company-beta",
+          "${operator:identifiers.accounts.company_beta_admin_google}",
+          "${operator:services.mercury.organization_name}"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-beta-mercury"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "mercury-company-beta-mcp"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "mercury-company-beta"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "browser.openclaw.session",
+      "credential_kind": "provider-session",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "openclaw-browser",
+        "keys": [
+          "profile=openclaw"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "personal-google",
+        "company-alpha-google-coordinator",
+        "company-alpha-google-operator",
+        "company-beta-google-admin",
+        "company-beta-google-operator",
+        "operations-google",
+        "company-beta-vercel"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "vercel-company-beta-browser"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "openclaw-browser"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "browser.company-alpha-vercel.session",
+      "credential_kind": "provider-session",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "openclaw-browser",
+        "keys": [
+          "profile=personal"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-vercel"
+      ],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "vercel-company-alpha-browser"
+        },
+        {
+          "kind": "provider-native",
+          "consumer_id": "openclaw-browser"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "browser.chrome.session",
+      "credential_kind": "provider-session",
+      "owner": {
+        "kind": "provider-native",
+        "ref": "openclaw-browser",
+        "keys": [
+          "profile=chrome"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [],
+      "consumers": [
+        {
+          "kind": "integration-route",
+          "consumer_id": "openclaw-browser-chrome-session"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "openclaw.discord.bot-token",
+      "credential_kind": "runtime-token",
+      "owner": {
+        "kind": "runtime-secret-json",
+        "ref": "${operator:paths.routing_openclaw_secrets_json}",
+        "keys": [
+          "/discord.token"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [
+        "company-alpha-discord-team",
+        "company-beta-discord-team",
+        "operations-discord-team"
+      ],
+      "consumers": [
+        {
+          "kind": "runtime-config",
+          "consumer_id": "channels.discord.token"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "discord-source-company-alpha-team"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "discord-source-company-beta-team"
+        },
+        {
+          "kind": "integration-route",
+          "consumer_id": "discord-source-operations-team"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "openclaw.telegram.bot-token",
+      "credential_kind": "runtime-token",
+      "owner": {
+        "kind": "runtime-secret-json",
+        "ref": "${operator:paths.routing_openclaw_secrets_json}",
+        "keys": [
+          "/telegram.botToken"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [],
+      "consumers": [
+        {
+          "kind": "runtime-config",
+          "consumer_id": "channels.telegram.botToken"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "openclaw.gateway.auth-token",
+      "credential_kind": "runtime-token",
+      "owner": {
+        "kind": "runtime-secret-json",
+        "ref": "${operator:paths.routing_openclaw_secrets_json}",
+        "keys": [
+          "/gateway.auth.token"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [],
+      "consumers": [
+        {
+          "kind": "runtime-config",
+          "consumer_id": "gateway.auth.token"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "openclaw.gateway.remote-token",
+      "credential_kind": "runtime-token",
+      "owner": {
+        "kind": "runtime-secret-json",
+        "ref": "${operator:paths.routing_openclaw_secrets_json}",
+        "keys": [
+          "/gateway.remote.token"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [],
+      "consumers": [
+        {
+          "kind": "runtime-config",
+          "consumer_id": "gateway.remote.token"
+        }
+      ],
+      "browser_binding": null
+    },
+    {
+      "handle_id": "brave.web-search.api-key",
+      "credential_kind": "api-token",
+      "owner": {
+        "kind": "runtime-secret-json",
+        "ref": "${operator:paths.routing_openclaw_secrets_json}",
+        "keys": [
+          "/brave.webSearch.apiKey"
+        ]
+      },
+      "provisioning_state": "unprovisioned",
+      "account_ids": [],
+      "consumers": [
+        {
+          "kind": "runtime-config",
+          "consumer_id": "plugins.entries.brave.config.webSearch.apiKey"
+        }
+      ],
+      "browser_binding": null
+    }
+  ],
+  "portfolios": [
+    {
+      "portfolio_id": "personal",
+      "display_name": "Personal",
+      "accounts": [
+        {
+          "account_id": "personal-google",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "personal-notion",
+          "provider": "notion",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "google-sso-and-api-token"
+        },
+        {
+          "account_id": "personal-cloudflare",
+          "provider": "cloudflare",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "google-sso-and-api-token"
+        },
+        {
+          "account_id": "personal-trello",
+          "provider": "trello",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "google-sso-and-api-token"
+        },
+        {
+          "account_id": "personal-github",
+          "provider": "github",
+          "account": "${operator:identifiers.github_username}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-cli"
+        },
+        {
+          "account_id": "personal-digitalocean",
+          "provider": "digitalocean",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-cli"
+        },
+        {
+          "account_id": "personal-x",
+          "provider": "x",
+          "account": "${operator:identifiers.x_username}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-cli"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "personal-x-profile",
+          "canonical_url": "${operator:services.source_urls.personal_x_profile}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "x-api-operator-x-xurl",
+            "birdclaw-x-research-readonly"
+          ]
+        },
+        {
+          "source_id": "personal-website",
+          "canonical_url": "${operator:services.source_urls.personal_website}",
+          "canonical_local_root": "${operator:paths.routing_personal_site}",
+          "registered_route_ids": [
+            "cloudflare-operator-readonly-api",
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "personal-linkedin-profile",
+          "canonical_url": "${operator:services.source_urls.personal_linkedin_profile}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "openclaw-browser-chrome-session"
+          ]
+        },
+        {
+          "source_id": "personal-github-profile",
+          "canonical_url": "${operator:services.source_urls.personal_github_profile}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "personal-google-workspace",
+          "canonical_url": "https://workspace.google.com",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "google-workspace-personal-gog",
+            "google-search-console-personal-gog",
+            "google-gmail-personal-gog",
+            "google-calendar-personal-gog",
+            "google-forms-personal-gog"
+          ]
+        },
+        {
+          "source_id": "personal-notion-workspace",
+          "canonical_url": "https://www.notion.so",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "notion-personal"
+          ]
+        },
+        {
+          "source_id": "personal-subject-context",
+          "canonical_url": "https://console.neon.tech",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "personal-data-neon-postgres-readonly"
+          ]
+        },
+        {
+          "source_id": "personal-trello-board",
+          "canonical_url": "${operator:services.source_urls.personal_trello_board}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "trello-personal-api"
+          ]
+        }
+      ]
+    },
+    {
+      "portfolio_id": "company-alpha",
+      "display_name": "CompanyAlpha",
+      "accounts": [
+        {
+          "account_id": "company-alpha-google-coordinator",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "company-alpha-google-operator",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.company_alpha_operator_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "company-alpha-discord-team",
+          "provider": "discord",
+          "account": "${operator:services.discord.company_alpha.guild_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "bot-token"
+        },
+        {
+          "account_id": "company-alpha-notion",
+          "provider": "notion",
+          "account": "company-alpha-team-notion",
+          "provisioning_state": "route-registered",
+          "auth_method": "api-token"
+        },
+        {
+          "account_id": "company-alpha-jira",
+          "provider": "jira",
+          "account": "${operator:services.jira.hostname}",
+          "provisioning_state": "route-registered",
+          "auth_method": "api-token-and-browser-session"
+        },
+        {
+          "account_id": "company-alpha-github",
+          "provider": "github",
+          "account": "${operator:identifiers.github_username}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-cli"
+        },
+        {
+          "account_id": "company-alpha-vercel",
+          "provider": "vercel",
+          "account": "${operator:identifiers.accounts.personal_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "google-sso"
+        },
+        {
+          "account_id": "company-alpha-metabase",
+          "provider": "metabase",
+          "account": "company-alpha-gigabrain",
+          "provisioning_state": "route-registered",
+          "auth_method": "api-token"
+        },
+        {
+          "account_id": "company-alpha-hedera-mainnet",
+          "provider": "hedera",
+          "account": "${operator:services.wallets.hedera_mainnet.account_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "process-bound-key"
+        },
+        {
+          "account_id": "company-alpha-hedera-testnet",
+          "provider": "hedera",
+          "account": "${operator:services.wallets.hedera_testnet.account_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "process-bound-key"
+        },
+        {
+          "account_id": "company-alpha-evm",
+          "provider": "evm",
+          "account": null,
+          "provisioning_state": "discovery-required",
+          "auth_method": "process-bound-key"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "company-alpha-local-and-github",
+          "canonical_url": "${operator:services.source_urls.company_alpha_local_and_github}",
+          "canonical_local_root": "${operator:paths.routing_companyalpha}",
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "company-alpha-google-workspace",
+          "canonical_url": "https://workspace.google.com",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "google-workspace-company-alpha-coordinator-gog",
+            "google-workspace-company-alpha-operator-gog",
+            "google-gmail-company-alpha-coordinator",
+            "google-gmail-company-alpha-operator",
+            "google-calendar-company-alpha-coordinator-gog",
+            "google-forms-company-alpha-coordinator-gog"
+          ]
+        },
+        {
+          "source_id": "company-alpha-notion",
+          "canonical_url": "https://www.notion.so",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "notion-company-alpha"
+          ]
+        },
+        {
+          "source_id": "company-alpha-jira",
+          "canonical_url": "${operator:services.jira.site}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "jira-company-alpha"
+          ]
+        },
+        {
+          "source_id": "company-alpha-public-docs",
+          "canonical_url": "${operator:services.company_alpha_docs.origin}",
+          "canonical_local_root": "${operator:paths.routing_company_alpha_docs}",
+          "registered_route_ids": [
+            "company-alpha-docs-mcp-readonly",
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "company-alpha-gigabrain",
+          "canonical_url": "${operator:services.company_alpha_analytics.origin}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "company-alpha-gigabrain-metabase-api"
+          ]
+        },
+        {
+          "source_id": "company-alpha-team-discord",
+          "canonical_url": "${operator:services.source_urls.company_alpha_team_discord}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "discord-source-company-alpha-team"
+          ]
+        },
+        {
+          "source_id": "company-alpha-vercel-team",
+          "canonical_url": "${operator:services.source_urls.company_alpha_vercel_team}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "vercel-company-alpha-browser"
+          ]
+        }
+      ]
+    },
+    {
+      "portfolio_id": "company-beta",
+      "display_name": "company-beta",
+      "accounts": [
+        {
+          "account_id": "company-beta-google-admin",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.company_beta_admin_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "company-beta-google-operator",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.company_beta_operator_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "company-beta-discord-team",
+          "provider": "discord",
+          "account": "${operator:services.discord.company_beta.guild_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "bot-token"
+        },
+        {
+          "account_id": "company-beta-linear",
+          "provider": "linear",
+          "account": "${operator:identifiers.accounts.company_beta_operator_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-oauth"
+        },
+        {
+          "account_id": "company-beta-mercury",
+          "provider": "mercury",
+          "account": "${operator:services.mercury.organization_name}",
+          "provisioning_state": "route-registered",
+          "auth_method": "provider-oauth"
+        },
+        {
+          "account_id": "company-beta-vercel",
+          "provider": "vercel",
+          "account": "${operator:identifiers.accounts.company_beta_admin_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "google-sso"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "company-beta-company-intelligence-reference-architecture-local-and-github",
+          "canonical_url": "${operator:services.source_urls.company_beta_company_intelligence_reference_architecture_local_and_github}",
+          "canonical_local_root": "${operator:paths.routing_company_beta_company_intelligence_reference_architecture}",
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "company-beta-company-alpha-labs-company-intelligence-architecture-local-and-github",
+          "canonical_url": "${operator:services.source_urls.company_beta_company_alpha_labs_company_intelligence_architecture_local_and_github}",
+          "canonical_local_root": "${operator:paths.routing_company_beta_company_alpha_labs_company_intelligence_architecture}",
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "company-beta-partner-company-intelligence-architecture-local-and-github",
+          "canonical_url": "${operator:services.source_urls.company_beta_partner_company_intelligence_architecture_local_and_github}",
+          "canonical_local_root": "${operator:paths.routing_company_beta_partner_company_intelligence_architecture}",
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "company-beta-current-site",
+          "canonical_url": "${operator:services.source_urls.company_beta_current_site}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "openclaw-browser-chrome-session"
+          ]
+        },
+        {
+          "source_id": "company-beta-google-workspace",
+          "canonical_url": "https://workspace.google.com",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "google-workspace-company-beta-admin",
+            "google-workspace-company-beta-operator"
+          ]
+        },
+        {
+          "source_id": "company-beta-linear",
+          "canonical_url": "https://linear.app",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "linear-company-beta-mcp"
+          ]
+        },
+        {
+          "source_id": "company-beta-team-discord",
+          "canonical_url": "${operator:services.source_urls.company_beta_team_discord}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "discord-source-company-beta-team"
+          ]
+        },
+        {
+          "source_id": "company-beta-vercel-team",
+          "canonical_url": "${operator:services.source_urls.company_beta_vercel_team}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "vercel-company-beta-browser"
+          ]
+        },
+        {
+          "source_id": "company-beta-mercury",
+          "canonical_url": "https://mcp.mercury.com/mcp",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "mercury-company-beta-mcp"
+          ]
+        }
+      ]
+    },
+    {
+      "portfolio_id": "operations",
+      "display_name": "Operations",
+      "accounts": [
+        {
+          "account_id": "operations-google",
+          "provider": "google",
+          "account": "${operator:identifiers.accounts.operations_google}",
+          "provisioning_state": "route-registered",
+          "auth_method": "oauth-and-google-sso"
+        },
+        {
+          "account_id": "operations-discord-team",
+          "provider": "discord",
+          "account": "${operator:services.discord.operations.guild_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "bot-token"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "operations-google-workspace",
+          "canonical_url": "https://workspace.google.com",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "google-workspace-operations-gog"
+          ]
+        },
+        {
+          "source_id": "operations-team-discord",
+          "canonical_url": "${operator:services.source_urls.operations_team_discord}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "discord-source-operations-team"
+          ]
+        }
+      ]
+    },
+    {
+      "portfolio_id": "personal-data-project",
+      "display_name": "PersonalDataProject",
+      "accounts": [
+        {
+          "account_id": "personal-data-neon",
+          "provider": "neon",
+          "account": "personal-data-neon-project",
+          "provisioning_state": "route-registered",
+          "auth_method": "database-secret"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "personal-data-app-local-and-github",
+          "canonical_url": "${operator:services.source_urls.personal_data_app_local_and_github}",
+          "canonical_local_root": "${operator:paths.routing_personal_data_app}",
+          "registered_route_ids": [
+            "github-personal-cli"
+          ]
+        },
+        {
+          "source_id": "personal-data-runtime-local",
+          "canonical_url": null,
+          "canonical_local_root": "${operator:paths.routing_personal_data_runtime}",
+          "registered_route_ids": []
+        },
+        {
+          "source_id": "personal-data-hk-exporter-local",
+          "canonical_url": null,
+          "canonical_local_root": "${operator:paths.routing_personal_data_hk_exporter}",
+          "registered_route_ids": []
+        },
+        {
+          "source_id": "personal-data-public-docs-local",
+          "canonical_url": null,
+          "canonical_local_root": "${operator:paths.routing_personal_data_public_docs}",
+          "registered_route_ids": []
+        },
+        {
+          "source_id": "personal-data-neon-database",
+          "canonical_url": "https://console.neon.tech",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "personal-data-neon-postgres-readonly"
+          ]
+        }
+      ]
+    },
+    {
+      "portfolio_id": "openclaw-testing",
+      "display_name": "OpenClaw testing",
+      "accounts": [
+        {
+          "account_id": "openclaw-hedera-mainnet",
+          "provider": "hedera",
+          "account": "${operator:services.wallets.hedera_mainnet.account_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "process-bound-key"
+        },
+        {
+          "account_id": "openclaw-hedera-testnet",
+          "provider": "hedera",
+          "account": "${operator:services.wallets.hedera_testnet.account_id}",
+          "provisioning_state": "route-registered",
+          "auth_method": "process-bound-key"
+        },
+        {
+          "account_id": "openclaw-evm",
+          "provider": "evm",
+          "account": null,
+          "provisioning_state": "discovery-required",
+          "auth_method": "process-bound-key"
+        }
+      ],
+      "authoritative_read_sources": [
+        {
+          "source_id": "openclaw-mainnet-test-account",
+          "canonical_url": "${operator:services.source_urls.openclaw_mainnet_test_account}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "openclaw-hedera-mainnet-test-signer"
+          ]
+        },
+        {
+          "source_id": "openclaw-testnet-test-account",
+          "canonical_url": "${operator:services.source_urls.openclaw_testnet_test_account}",
+          "canonical_local_root": null,
+          "registered_route_ids": [
+            "openclaw-hedera-testnet-test-signer"
+          ]
+        }
+      ]
+    }
+  ],
+  "portfolio_routes": {
+    "selection_only": true,
+    "portfolio_source": "trusted_project_or_session",
+    "ambiguity_resolution": "read_account_set_or_ask_one_concise_question",
+    "by_route_id": {
+      "google-workspace-personal-gog": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "google-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "google-search-console-personal-gog": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "google-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "google-workspace-company-alpha-coordinator-gog": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-workspace-company-alpha-operator-gog": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-workspace-operations-gog": {
+        "portfolio_ids": [
+          "operations"
+        ],
+        "workspace_ids": [
+          "google-operations"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "operations"
+        ]
+      },
+      "google-gmail-personal-gog": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "google-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "google-gmail-company-alpha-coordinator": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "notion-personal": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "notion-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "notion-company-alpha": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "notion-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "cloudflare-operator-readonly-api": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "cloudflare-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "personal-data-neon-postgres-readonly": {
+        "portfolio_ids": [
+          "personal",
+          "personal-data-project"
+        ],
+        "workspace_ids": [
+          "personal-data-neon"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal",
+          "personal-data-project"
+        ]
+      },
+      "jira-company-alpha": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "jira-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "digitalocean-openclaw-doctl": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "digitalocean-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "x-api-operator-x-xurl": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "x-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "birdclaw-x-research-readonly": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "x-research"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "company-alpha-local-dev-docker": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-local"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "company-alpha-gigabrain-metabase-api": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-gigabrain"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "company-alpha-docs-mcp-readonly": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-public-docs"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "openclaw-hedera-mainnet-test-signer": {
+        "portfolio_ids": [
+          "openclaw-testing",
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-testing"
+        ],
+        "network_ids": [
+          "hedera-mainnet"
+        ],
+        "default_for_portfolios": []
+      },
+      "openclaw-hedera-testnet-test-signer": {
+        "portfolio_ids": [
+          "openclaw-testing",
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-testing"
+        ],
+        "network_ids": [
+          "hedera-testnet"
+        ],
+        "default_for_portfolios": []
+      },
+      "google-workspace-company-beta-admin": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "google-company-beta"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-workspace-company-beta-operator": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "google-company-beta"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-gmail-company-alpha-operator": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-calendar-personal-gog": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "google-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "google-calendar-company-alpha-coordinator-gog": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "google-forms-personal-gog": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "google-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "google-forms-company-alpha-coordinator-gog": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "google-company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "apple-calendar-local": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "apple-local"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "openclaw-browser-chrome-session": {
+        "portfolio_ids": [
+          "personal",
+          "company-alpha",
+          "company-beta",
+          "operations",
+          "personal-data-project",
+          "openclaw-testing"
+        ],
+        "workspace_ids": [],
+        "network_ids": [],
+        "default_for_portfolios": []
+      },
+      "company-alpha-walletconnect-testnet": {
+        "portfolio_ids": [
+          "openclaw-testing",
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-testing"
+        ],
+        "network_ids": [
+          "hedera-testnet"
+        ],
+        "default_for_portfolios": []
+      },
+      "company-alpha-walletconnect-mainnet": {
+        "portfolio_ids": [
+          "openclaw-testing",
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-testing"
+        ],
+        "network_ids": [
+          "hedera-mainnet"
+        ],
+        "default_for_portfolios": []
+      },
+      "hashpack-company-alpha-testnet": {
+        "portfolio_ids": [
+          "openclaw-testing",
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha-testing"
+        ],
+        "network_ids": [
+          "hedera-testnet"
+        ],
+        "default_for_portfolios": []
+      },
+      "trello-personal-api": {
+        "portfolio_ids": [
+          "personal"
+        ],
+        "workspace_ids": [
+          "trello-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal"
+        ]
+      },
+      "github-personal-cli": {
+        "portfolio_ids": [
+          "personal",
+          "company-alpha",
+          "company-beta",
+          "personal-data-project"
+        ],
+        "workspace_ids": [
+          "github-personal"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "personal",
+          "company-alpha",
+          "company-beta",
+          "personal-data-project"
+        ]
+      },
+      "linear-company-beta-mcp": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "${operator:services.linear.workspace_id}"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-beta"
+        ]
+      },
+      "mercury-company-beta-mcp": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "mercury-company-beta"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-beta"
+        ]
+      },
+      "vercel-company-alpha-browser": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "company-alpha"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "vercel-company-beta-browser": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "company-beta-team"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-beta"
+        ]
+      },
+      "discord-source-company-alpha-team": {
+        "portfolio_ids": [
+          "company-alpha"
+        ],
+        "workspace_ids": [
+          "discord-company-alpha-team"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-alpha"
+        ]
+      },
+      "discord-source-company-beta-team": {
+        "portfolio_ids": [
+          "company-beta"
+        ],
+        "workspace_ids": [
+          "discord-company-beta-team"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "company-beta"
+        ]
+      },
+      "discord-source-operations-team": {
+        "portfolio_ids": [
+          "operations"
+        ],
+        "workspace_ids": [
+          "discord-operations-team"
+        ],
+        "network_ids": [],
+        "default_for_portfolios": [
+          "operations"
+        ]
+      }
+    }
+  },
+  "routes": [
+    {
+      "route_id": "google-workspace-personal-gog",
+      "system": "google-workspace",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "Google Workspace route \u2014 personal `personal_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-personal-gog`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin"
+      ],
+      "access_probe_id": "google-workspace-personal-gog-probe",
+      "notes": "Exact-account GOG route for the enabled Google service command families. OAuth validation proves the personal account binding only, not current per-service readiness. Disabled project APIs and the unsupported Ads command are intentionally absent; existing Drive, Docs, and Sheets mutations retain their exact receipt gates."
+    },
+    {
+      "route_id": "google-search-console-personal-gog",
+      "system": "google-search-console",
+      "required_principal": "operator",
+      "readiness_status_id": "Google Search Console \u2014 personal `personal_google@example.invalid` via `gog` and authenticated UI",
+      "native_lane_kind": "supported_cli",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "browser_profile_primary": {
+        "profile_id": "openclaw",
+        "transport": "managed_cdp"
+      },
+      "browser_profile_fallbacks": [
+        {
+          "profile_id": "chrome",
+          "automatic": true,
+          "requires_explicit_existing_session_handoff": false
+        }
+      ],
+      "operations": {
+        "sites-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "search-analytics-query": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sitemaps-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sitemaps-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-indexing-example-urls": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_provider_evidence",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "operation_policy": {
+          "required": true,
+          "missing_blocker_code": "blocked_unknown_search_console_operation",
+          "missing_decision": "require_explicit_search_console_operation",
+          "unknown_blocker_code": "blocked_unknown_search_console_operation",
+          "unknown_decision": "block_unknown_operation",
+          "native_unsupported_blocker_code": "blocked_required_operation_unsupported_by_api",
+          "native_unsupported_decision": "use_runtime_authenticated_browser_evidence_lane"
+        },
+        "request_evidence": {
+          "property_domain": {
+            "normalizer": "dns_domain",
+            "output_key": "required_property_domain",
+            "validity_output_key": "required_property_domain_valid",
+            "invalid_blocker_code": "blocked_invalid_search_console_property_domain",
+            "invalid_decision": "block_invalid_property_domain"
+          },
+          "issue_label": {
+            "normalizer": "trimmed_text",
+            "output_key": "required_issue_label"
+          }
+        },
+        "native_evidence": {
+          "probe_receipt_authority": "none",
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "supported_operation_decision": "allow_api_evidence_collection"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_preferred_search_console_api_route_not_exhausted",
+          "native_not_exhausted_decision": "block_browser_until_api_probe_fails",
+          "account_mismatch_blocker_code": "blocked_requested_search_console_route_unverified",
+          "account_mismatch_decision": "block_unverified_browser_account",
+          "allowed_decision": "allow_browser_evidence_collection"
+        },
+        "completion_evidence": {
+          "required_for_operations": [
+            "page-indexing-example-urls"
+          ],
+          "required_when_authenticated_ui_required": true,
+          "resolver_can_verify": false,
+          "unresolved_disposition": "blocked_or_unverified",
+          "prohibited_claims": [
+            "benign",
+            "fixed",
+            "normal",
+            "complete",
+            "no defect"
+          ]
+        },
+        "constraints": [
+          "Search Console API-supported operations stay on the declared exact-account API route until that route fails or is unavailable.",
+          "The Page Indexing example-URL table is UI-only and requires an authenticated browser independently verified as personal_google@example.invalid.",
+          "Search Console browser evidence starts on managed profile=openclaw; the stock profile=chrome extension may reuse an ordinary signed-in tab automatically after a registered browser-fallback predicate.",
+          "API readiness and browser account identity do not prove Page Indexing example URLs were inspected.",
+          "Without provider example-URL evidence, report blocked or unverified and do not claim benign, fixed, normal, complete, or no defect."
+        ]
+      },
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin",
+        "search-console"
+      ],
+      "access_probe_id": "google-search-console-personal-gog-probe",
+      "notes": "Reusable personal Google Search Console route for personal_google@example.invalid. Site, property URI/type, report, and issue are current-request evidence, not permanent route configuration: sites.list discovers authorized Domain and URL-prefix properties, while a caller may provide an optional requested site domain for fail-closed matching and ambiguity detection. The managed profile=openclaw CDP lane is primary. The stock profile=chrome extension is the automatic existing-session fallback after a registered predicate and can reuse an ordinary signed-in tab without a Chrome-MCP consent prompt. The gog API lane supports sites, search analytics, and sitemaps. Its sites.list probe writes an audit-only route-readiness record that grants no authority and cannot prove task completion. Page Indexing example URLs are UI-only; completion requires the OpenClaw runtime itself to observe the authenticated exact account, current-request property/report, and example table. Workspace files, audit receipts, and caller declarations cannot certify browser completion."
+    },
+    {
+      "route_id": "google-workspace-company-alpha-coordinator-gog",
+      "system": "google-workspace",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+      "readiness_status_id": "Google Workspace route \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-coordinator-gog`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha-coordinator",
+        "${operator:identifiers.accounts.company_alpha_coordinator_google}"
+      ],
+      "access_probe_id": "google-workspace-company-alpha-coordinator-gog-probe",
+      "notes": "Exact-account GOG route for the enabled Google service command families under company_alpha_coordinator_google@example.invalid. OAuth validation proves the account binding only, not current per-service readiness. Disabled project APIs and the unsupported Ads command are intentionally absent; existing Drive, Docs, and Sheets mutations retain their exact receipt gates."
+    },
+    {
+      "route_id": "google-workspace-company-alpha-operator-gog",
+      "system": "google-workspace",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:identifiers.accounts.company_alpha_operator_google}",
+      "readiness_status_id": "Google Workspace route \u2014 CompanyAlpha `company_alpha_operator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-alpha-operator-gog`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "operator-company-alpha",
+        "company-alpha-operator",
+        "${operator:identifiers.accounts.company_alpha_operator_google}"
+      ],
+      "access_probe_id": "google-workspace-company-alpha-operator-gog-probe",
+      "notes": "Exact-account GOG route for the enabled Google service command families under company_alpha_operator_google@example.invalid. OAuth validation proves the account binding only, not current per-service readiness. Disabled project APIs and the unsupported Ads command are intentionally absent; no mutation readiness is claimed."
+    },
+    {
+      "route_id": "google-workspace-operations-gog",
+      "system": "google-workspace",
+      "required_principal": "operations",
+      "required_account": "${operator:identifiers.accounts.operations_google}",
+      "readiness_status_id": "Google Workspace route \u2014 Operations `operations_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-operations-gog`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "operations",
+        "${operator:identifiers.accounts.operations_google}"
+      ],
+      "access_probe_id": "google-workspace-operations-gog-probe",
+      "notes": "Exact-account GOG route for the enabled Google service command families under operations_google@example.invalid. OAuth validation proves the account binding only, not current per-service readiness. Disabled project APIs and the unsupported Ads command are intentionally absent; no mutation readiness is claimed."
+    },
+    {
+      "route_id": "google-gmail-personal-gog",
+      "system": "gmail",
+      "required_principal": "operator",
+      "readiness_status_id": "Gmail read \u2014 personal `personal_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-draft": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Gmail mutation readiness \u2014 personal `personal_google@example.invalid` via `gog`"
+        },
+        "gmail-send": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Gmail mutation readiness \u2014 personal `personal_google@example.invalid` via `gog`"
+        }
+      },
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin"
+      ],
+      "access_probe_id": "gmail-personal-gog-account-probe",
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "default_decision": "probe_declared_api_route",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_mismatched_api_probe_account"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_preferred_gmail_api_route_not_exhausted",
+          "native_not_exhausted_decision": "block_browser_until_fallback_predicate",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_unverified_browser_account",
+          "allowed_decision": "allow_browser_evidence_collection"
+        },
+        "target_url_evidence": {
+          "path_capture_pattern": "(?:^|/)mail/u/([0-9]+)(?:/|$)",
+          "capture_group": 1,
+          "captured_value_format": "non_negative_integer",
+          "captured_value_max_length": 10,
+          "matched_output_key": "has_session_account_index",
+          "captured_output_key": "session_account_index",
+          "constant_outputs": {
+            "session_account_index_is_identity": false
+          }
+        },
+        "constraints": [
+          "Gmail /u/<number> paths are browser-session indexes and never prove account identity.",
+          "A registry-ready Gmail route is selected, not live-verified, until the named account probe passes.",
+          "Browser Gmail evidence collection requires a generic fallback predicate and an exact expected-account hint; caller failure/unavailability remains audit-only, and only runtime-authenticated observation may verify identity."
+        ]
+      },
+      "notes": "Personal Gmail route for personal_google@example.invalid. Does not satisfy CompanyAlpha/work Gmail requests. Reprobe before reads and bind authenticated package intent before outbound mail."
+    },
+    {
+      "route_id": "google-gmail-company-alpha-coordinator",
+      "system": "gmail",
+      "required_principal": "company-alpha",
+      "readiness_status_id": "Gmail read \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-draft": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Gmail send/draft \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`"
+        },
+        "gmail-send": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Gmail send/draft \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`"
+        }
+      },
+      "required_account": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+      "default_contexts": [
+        "company-alpha-coordinator",
+        "${operator:identifiers.accounts.company_alpha_coordinator_google}"
+      ],
+      "access_probe_id": "gmail-company-alpha-coordinator-route-probe",
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "default_decision": "probe_declared_api_route",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_mismatched_api_probe_account"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_preferred_gmail_api_route_not_exhausted",
+          "native_not_exhausted_decision": "block_browser_until_fallback_predicate",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_unverified_browser_account",
+          "allowed_decision": "allow_browser_evidence_collection"
+        },
+        "target_url_evidence": {
+          "path_capture_pattern": "(?:^|/)mail/u/([0-9]+)(?:/|$)",
+          "capture_group": 1,
+          "captured_value_format": "non_negative_integer",
+          "captured_value_max_length": 10,
+          "matched_output_key": "has_session_account_index",
+          "captured_output_key": "session_account_index",
+          "constant_outputs": {
+            "session_account_index_is_identity": false
+          }
+        },
+        "constraints": [
+          "Gmail /u/<number> paths are browser-session indexes and never prove account identity.",
+          "A registry-ready Gmail route is selected, not live-verified, until the named account probe passes.",
+          "Browser Gmail evidence collection requires a generic fallback predicate and an exact expected-account hint; caller failure/unavailability remains audit-only, and only runtime-authenticated observation may verify identity."
+        ]
+      },
+      "notes": "CompanyAlpha Gmail route for company_alpha_coordinator_google@example.invalid. A ready personal gog account is not valid evidence for this route. company_alpha_operator_google@example.invalid is a separate candidate and must not be silently treated as Coordinator."
+    },
+    {
+      "route_id": "notion-personal",
+      "system": "notion",
+      "required_principal": "operator",
+      "required_account": "operator-personal-notion",
+      "readiness_status_id": "Notion API route \u2014 personal workspace (`NOTION_API_KEY`)",
+      "native_lane_kind": "provider_api",
+      "operations": {
+        "identity-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-personal`"
+        },
+        "page-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-personal`"
+        },
+        "page-archive": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-personal`"
+        },
+        "database-query": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin"
+      ],
+      "access_probe_id": "notion-personal-probe",
+      "notes": "Personal/private/admin Notion workspace route. The checked-in reader supports bounded current page search, full structured recursive page reads, and full-property data-source queries. The 2026-09-03 disposable canary accepts page create/read/archive under an exact accessible parent; page-update remains registered but unaccepted, and database writes remain undeclared."
+    },
+    {
+      "route_id": "notion-company-alpha",
+      "system": "notion",
+      "required_principal": "company-alpha",
+      "required_account": "company-alpha-team-notion",
+      "readiness_status_id": "Notion API route \u2014 CompanyAlpha workspace (`NOTION_API_KEY_COMPANY_ALPHA`)",
+      "native_lane_kind": "provider_api",
+      "operations": {
+        "identity-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "page-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-company-alpha`"
+        },
+        "page-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-company-alpha`"
+        },
+        "page-archive": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `notion-company-alpha`"
+        },
+        "database-query": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha",
+        "work",
+        "company-internal"
+      ],
+      "access_probe_id": "notion-company-alpha-probe",
+      "notes": "CompanyAlpha/work/company-internal Notion workspace route. The checked-in reader supports bounded current page search, full structured recursive page reads, and full-property data-source queries. The 2026-09-03 disposable canary accepts page create/read/archive under an exact accessible parent; page-update remains registered but unaccepted, and database writes remain undeclared."
+    },
+    {
+      "route_id": "cloudflare-operator-readonly-api",
+      "system": "cloudflare",
+      "required_principal": "operator",
+      "required_account": "${operator:services.cloudflare.zone_name}",
+      "readiness_status_id": "Cloudflare API token lane \u2014 `operator-owned-value` zone (`secrets/cloudflare.env`)",
+      "native_lane_kind": "provider_api",
+      "capability_scope": "read-preview-deploy",
+      "operations": {
+        "token-verify": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "account-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "zone-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "pages-project-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "pages-deployment-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "pages-preview-deploy": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `cloudflare-personal-pages-preview`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "admin",
+        "site-operations",
+        "${operator:services.cloudflare.zone_name}"
+      ],
+      "access_probe_id": "cloudflare-operator-readonly-probe",
+      "notes": "The legacy route identifier retains readonly for compatibility. Exact provider reads and a separately declared Pages preview deployment are supported. Bind the configured Cloudflare account, zone and GitHub-backed project. Use the source-grounded read helper for diagnostics and provider-native Wrangler for an authorized preview deployment with a task-selected nonproduction branch. Keep credentials out of argv. Production deploys, DNS and configuration changes remain undeclared."
+    },
+    {
+      "route_id": "personal-data-neon-postgres-readonly",
+      "system": "personal-data-neon-postgres",
+      "required_principal": "personal-data-project",
+      "required_account": "personal-data-neon-project",
+      "readiness_status_id": "PersonalDataProject Neon/Postgres read-only route (`personal-data-neon-postgres-readonly`)",
+      "native_lane_kind": "supported_cli",
+      "capability_scope": "read_only",
+      "operations": {
+        "query-readonly": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal-data-project",
+        "financial",
+        "health",
+        "personal",
+        "admin",
+        "neon",
+        "postgres"
+      ],
+      "access_probe_id": "personal-data-neon-postgres-readonly-probe",
+      "notes": "Exact-target read-only PersonalDataProject Neon/Postgres route. The checked-in helper verifies physical secret custody, attested project/branch/endpoint/database/role/TLS identity, GET-only Neon API access, and a Postgres session forced read-only before its identity SELECT. This route grants no write, migration, DDL, write-DML, role-management, credential-management, branch, endpoint, or provider mutation authority; those operations remain unsupported and require a separately target-bound route and applicable approval."
+    },
+    {
+      "route_id": "jira-company-alpha",
+      "system": "jira",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:services.jira.hostname}",
+      "readiness_status_id": "Jira API route \u2014 CompanyAlpha workspace (`/operator/installation`)",
+      "native_lane_kind": "provider_api",
+      "operations": {
+        "identity-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "project-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-create-metadata-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-create": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `jira-company-alpha`"
+        },
+        "issue-update": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `jira-company-alpha`"
+        },
+        "comment-create": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `jira-company-alpha`"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "provider_account_digest_required": true
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "provider_account_id_sha256": "${operator:services.jira.provider_identity_sha256}"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "account_mismatch_blocker_code": "blocked_requested_jira_route_unverified",
+          "native_not_exhausted_blocker_code": "blocked_preferred_jira_api_route_not_exhausted",
+          "allowed_decision": "allow_jira_browser_execution"
+        }
+      },
+      "default_contexts": [
+        "company-alpha"
+      ],
+      "access_probe_id": "jira-company-alpha-probe",
+      "notes": "Read-only CompanyAlpha Jira Cloud API route for the exact registered provider account and ALPHA project. The checked-in reader supports bounded current-issue search plus exact issue and comment reads; the readiness probe separately checks identity, project, and QA Feedback metadata. Secrets stay in the canonical owner-private env file. Issue creation remains authenticated-UI-required; no native issue-create executor or completion receipt is declared."
+    },
+    {
+      "route_id": "digitalocean-openclaw-doctl",
+      "system": "digitalocean-api-app-platform",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "DigitalOcean API / App Platform via `doctl` (`/operator/installation/.local/bin/doctl`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "account-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "app-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "app-deploy": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `digitalocean-openclaw-doctl`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "openclaw",
+        "personal-data-app",
+        "digitalocean-app-platform"
+      ],
+      "access_probe_id": "digitalocean-doctl-account-probe",
+      "notes": "Use the configured provider CLI with the exact selected account and registered operation. Deployment requires authority from the current operator instruction and live readback; installation or token availability alone does not authorize it."
+    },
+    {
+      "route_id": "x-api-operator-x-xurl",
+      "system": "x-api",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.x_username}",
+      "readiness_status_id": "X API read route \u2014 `operator-x` via `xurl` (`openclaw-research` app)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "identity-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "post-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "timeline-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "search-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "x-research",
+        "crypto-market-research",
+        "company-alpha-research",
+        "read-only-social-research"
+      ],
+      "access_probe_id": "x-api-operator-x-xurl-probe",
+      "notes": "Read-only X API route for research via contained xurl/Birdclaw tooling. Current evidence accepts identity-read, search-read, post-read, and timeline-read without emitting result text. App is configured read-only in X Developer Console and local Birdclaw wrapper disables live writes; do not use for posting, replies, DMs, follows, likes/bookmarks, or moderation without separate explicit approval and route reclassification."
+    },
+    {
+      "route_id": "birdclaw-x-research-readonly",
+      "system": "birdclaw",
+      "required_principal": "operator",
+      "required_account": "birdclaw-research",
+      "readiness_status_id": "Birdclaw read-only X research workspace (`~/.openclaw/birdclaw-research`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "local-index-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "bounded-sync-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "x-research",
+        "crypto-market-research",
+        "company-alpha-research",
+        "read-only-social-research"
+      ],
+      "access_probe_id": "birdclaw-x-research-readonly-probe",
+      "notes": "Local-first X/Twitter research store and CLI wrapper at `~/.openclaw/bin/birdclaw-research`; use for read-only search/sync/research. Current direct xurl reads are the most reliable live path; Birdclaw bounded sync works but may mark partial max-page runs incomplete."
+    },
+    {
+      "route_id": "company-alpha-local-dev-docker",
+      "system": "company-alpha-local-dev",
+      "required_principal": "company-alpha",
+      "required_account": "company-alpha-local",
+      "readiness_status_id": "CompanyAlpha local Docker developer stack (`company-alpha-local-dev`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "stack-status": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "stack-start": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `company-alpha-local-dev-docker`"
+        },
+        "stack-stop": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `company-alpha-local-dev-docker`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha",
+        "local-dev",
+        "developer-onboarding",
+        "testing"
+      ],
+      "access_probe_id": "company-alpha-local-dev-probe",
+      "notes": "Supported local CompanyAlpha Docker developer stack route. Read-only resolver/probe path is status/version/metadata only. `up` starts local services and requires task approval; `smoke` is post-start verification; bot/signing/transaction actions are excluded and require separate exact approval."
+    },
+    {
+      "route_id": "company-alpha-gigabrain-metabase-api",
+      "system": "company-alpha-gigabrain",
+      "required_principal": "company-alpha",
+      "required_account": "company-alpha-gigabrain",
+      "readiness_status_id": "CompanyAlpha Gigabrain / Metabase API route (`company-alpha-gigabrain-metabase-api`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "status-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "metadata-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "query-readonly": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_provider_evidence",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "exact",
+          "provider_account_digest_required": true
+        },
+        "native_evidence": {
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "provider_account_id_sha256": "${operator:services.company_alpha_analytics.provider_identity_sha256}"
+        }
+      },
+      "default_contexts": [
+        "company-alpha",
+        "work",
+        "company-internal",
+        "analytics",
+        "gigabrain",
+        "metabase"
+      ],
+      "access_probe_id": "company-alpha-gigabrain-metabase-api-probe",
+      "notes": "Read-only CompanyAlpha Gigabrain/Metabase API lane. The checked-in helper compares the full configured and provider-native current-user identities internally and emits only the registered stable identity digest. Its default probe preserves the resolver's exact status-read contract; explicit modes provide bounded saved-question metadata and bounded execution of an already-visible saved question with empty parameters. Direct MySQL credentials are never used. Dashboard/card/collection creation or edits, direct SQL/MySQL access, parameterized or native queries, and unrestricted data dumps are excluded from the helper."
+    },
+    {
+      "route_id": "company-alpha-docs-mcp-readonly",
+      "system": "company-alpha-docs",
+      "required_principal": "company-alpha",
+      "required_account": "company-alpha-public-docs",
+      "readiness_status_id": "CompanyAlpha docs MCP read-only adapter (`company-alpha-docs-mcp-readonly`)",
+      "native_lane_kind": "mcp_integration",
+      "operations": {
+        "docs-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha",
+        "developer",
+        "documentation",
+        "api",
+        "protocol-research"
+      ],
+      "access_probe_id": "company-alpha-docs-mcp-readonly-probe",
+      "notes": "The checked-in source policy remains live-inactive and never auto-installs; current client/runtime activation is tracked separately in structured capability status and live bindings. The local stdio adapter exposes exactly docs_search and docs_read, pins remote identity/protocol/schema, and blocks submit_feedback/resources/prompts/private context. New client surfaces, ACPX, or reactivation after removal still require the applicable approval."
+    },
+    {
+      "route_id": "openclaw-hedera-mainnet-test-signer",
+      "system": "hedera-mainnet-test-signer",
+      "required_principal": "openclaw-testing",
+      "required_account": "${operator:services.wallets.hedera_mainnet.account_id}",
+      "readiness_status_id": "General OpenClaw Hedera mainnet test signer (`openclaw-hedera-mainnet-test-signer`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "account-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "transaction-sign": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `openclaw-hedera-mainnet-test-signer`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "openclaw-testing",
+        "hedera-mainnet",
+        "testing",
+        "disposable-test-account"
+      ],
+      "access_probe_id": "openclaw-hedera-mainnet-test-signer-probe",
+      "notes": "General OpenClaw Hedera mainnet test/disposable funding and signing account operator-owned-value. It is not Refuel402-specific, not production treasury, not CompanyAlpha corporate authority, and never default-loaded into ordinary processes or company-alpha-local. The probe is public/read-only. An authenticated task that names or plainly implies the QA, trading, or on-chain objective authorizes routine signing, transactions, and funds movement through this registered account route without a second generic approval. Before mutation, bind the current provider network and selected account, and keep transaction submission submit-once until readback resolves any ambiguous outcome. Account or wallet creation, custody changes, and credential changes remain human boundaries."
+    },
+    {
+      "route_id": "openclaw-hedera-testnet-test-signer",
+      "system": "hedera-testnet-test-signer",
+      "required_principal": "openclaw-testing",
+      "required_account": "${operator:services.wallets.hedera_testnet.account_id}",
+      "readiness_status_id": "General OpenClaw Hedera testnet test signer (`openclaw-hedera-testnet-test-signer`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "account-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "transaction-sign": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `openclaw-hedera-testnet-test-signer`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "openclaw-testing",
+        "hedera-testnet",
+        "testing",
+        "disposable-test-account"
+      ],
+      "access_probe_id": "openclaw-hedera-testnet-test-signer-probe",
+      "notes": "General OpenClaw Hedera testnet test/disposable funding and signing account operator-owned-value. It is not Refuel402-specific, not production treasury, not CompanyAlpha corporate authority, and never default-loaded into ordinary processes or company-alpha-local. The probe is public/read-only. An authenticated task that names or plainly implies the QA, trading, or on-chain objective authorizes routine signing and transactions through this registered account route without a second generic approval. Before mutation, bind the current provider network and selected account, and keep transaction submission submit-once until readback resolves any ambiguous outcome. Account or wallet creation, custody changes, and credential changes remain human boundaries."
+    },
+    {
+      "route_id": "google-workspace-company-beta-admin",
+      "system": "google-workspace",
+      "required_principal": "company-beta",
+      "readiness_status_id": "Google Workspace route \u2014 company_beta `company_beta_admin_google@example.invalid` via `gog`",
+      "default_contexts": [
+        "company-beta-admin",
+        "${operator:identifiers.accounts.company_beta_admin_google}"
+      ],
+      "access_probe_id": "google-workspace-company-beta-admin-gog-probe",
+      "notes": "Exact company_beta_admin_google@example.invalid route. Enabled Google service reads prefer the account-bound GOG lane; Admin Console, directory-user, domain-settings, and DNS/routing surfaces remain authenticated-browser-only. OAuth validation proves the account binding only, not current service or browser readiness. Disabled project APIs and the unsupported Ads command are intentionally absent.",
+      "required_account": "${operator:identifiers.accounts.company_beta_admin_google}",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "admin-console-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "admin-console-write": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "workspace-user-list": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "workspace-domain-settings": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-admin`"
+        },
+        "dns-and-routing-inspection": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable",
+            "not_run"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "supported_operation_decision": "allow_api_evidence_collection",
+          "account_mismatch_blocker_code": "blocked_requested_company_beta_route_unverified",
+          "account_mismatch_decision": "block_mismatched_api_probe_account"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_preferred_company_beta_api_route_not_exhausted",
+          "native_not_exhausted_decision": "block_browser_until_fallback_predicate",
+          "account_mismatch_blocker_code": "blocked_requested_company_beta_route_unverified",
+          "account_mismatch_decision": "block_unverified_browser_account",
+          "allowed_decision": "allow_browser_evidence_collection"
+        },
+        "constraints": [
+          "Google /u/<number> paths are browser-session indexes and never prove account identity.",
+          "A session authenticated as personal_google@example.invalid is not valid evidence for this route.",
+          "The provider-native OAuth credential is enrolled for supported GOG service reads, but it does not prove Google Admin Console access or an authenticated browser session.",
+          "The company_beta_admin_google@example.invalid browser-password handle remains unprovisioned; browser execution therefore requires an existing exact-account session or a provider-forced human login gate."
+        ],
+        "target_url_evidence": {
+          "path_capture_pattern": "(?:^|/)u/([0-9]+)(?:/|$)",
+          "capture_group": 1,
+          "captured_value_format": "non_negative_integer",
+          "captured_value_max_length": 10,
+          "matched_output_key": "has_session_account_index",
+          "captured_output_key": "session_account_index",
+          "constant_outputs": {
+            "session_account_index_is_identity": false
+          }
+        }
+      }
+    },
+    {
+      "route_id": "google-workspace-company-beta-operator",
+      "system": "google-workspace",
+      "required_principal": "company-beta",
+      "required_account": "${operator:identifiers.accounts.company_beta_operator_google}",
+      "readiness_status_id": "Google Workspace route \u2014 company_beta `company_beta_operator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "workspace-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "calendar-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "drive-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "docs-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "slides-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sheets-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "forms-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "sites-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "meet-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "appscript-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "searchconsole-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "youtube-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "calendar-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "drive-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "docs-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "slides-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "sheets-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "forms-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "meet-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "appscript-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        },
+        "searchconsole-write": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-workspace-company-beta-operator`"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable",
+            "not_run"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "supported_operation_decision": "allow_api_evidence_collection"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "account_mismatch_blocker_code": "blocked_requested_company_beta_route_unverified",
+          "native_not_exhausted_blocker_code": "blocked_company_beta_native_route_unavailable",
+          "allowed_decision": "allow_browser_evidence_collection"
+        }
+      },
+      "default_contexts": [
+        "company-beta-operator",
+        "${operator:identifiers.accounts.company_beta_operator_google}"
+      ],
+      "access_probe_id": "google-workspace-company-beta-operator-gog-probe",
+      "notes": "Exact-account GOG route for the enabled Google service command families under company_beta_operator_google@example.invalid; the generic workspace browser surface remains authenticated-UI-only. OAuth validation proves the account binding only, not current per-service or browser readiness."
+    },
+    {
+      "route_id": "google-gmail-company-alpha-operator",
+      "system": "gmail",
+      "required_principal": "company-alpha",
+      "readiness_status_id": "Gmail read \u2014 CompanyAlpha `company_alpha_operator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "required_account": "${operator:identifiers.accounts.company_alpha_operator_google}",
+      "default_contexts": [
+        "operator-company-alpha",
+        "company-alpha-operator",
+        "${operator:identifiers.accounts.company_alpha_operator_google}"
+      ],
+      "access_probe_id": "gmail-company-alpha-operator-route-probe",
+      "operations": {
+        "gmail-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "gmail-draft": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-gmail-company-alpha-operator`"
+        },
+        "gmail-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable",
+            "not_run"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "supported_operation_decision": "allow_api_evidence_collection",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_mismatched_api_probe_account"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_preferred_gmail_api_route_not_exhausted",
+          "native_not_exhausted_decision": "block_browser_until_fallback_predicate",
+          "account_mismatch_blocker_code": "blocked_requested_gmail_route_unverified",
+          "account_mismatch_decision": "block_unverified_browser_account",
+          "allowed_decision": "allow_browser_evidence_collection"
+        },
+        "target_url_evidence": {
+          "path_capture_pattern": "(?:^|/)mail/u/([0-9]+)(?:/|$)",
+          "capture_group": 1,
+          "captured_value_format": "non_negative_integer",
+          "captured_value_max_length": 10,
+          "matched_output_key": "has_session_account_index",
+          "captured_output_key": "session_account_index",
+          "constant_outputs": {
+            "session_account_index_is_identity": false
+          }
+        },
+        "constraints": [
+          "Gmail /u/<number> paths are browser-session indexes and never prove account identity.",
+          "company_alpha_coordinator_google@example.invalid is a separate CompanyAlpha address, not an alias. A ready Coordinator lane is not evidence for this route and must never be substituted.",
+          "A provider-native OAuth credential is enrolled for company_alpha_operator_google@example.invalid, but exact Gmail service readiness and any browser authentication remain independent; never substitute Coordinator or personal Gmail."
+        ]
+      },
+      "notes": "Second CompanyAlpha Gmail address. Provider-native GOG is preferred for reads and search; browser draft remains UI-only behind its existing mutation gate. OAuth validation proves the account binding only, not current Gmail or browser readiness. Neither CompanyAlpha Gmail identity owns a generic portfolio default; never substitute the Coordinator route."
+    },
+    {
+      "route_id": "google-calendar-personal-gog",
+      "system": "google-calendar",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "Google Calendar read via `gog` CLI",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "calendar-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-calendar-personal-gog`"
+        },
+        "event-delete": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-calendar-personal-gog`"
+        },
+        "freebusy": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin"
+      ],
+      "access_probe_id": "google-calendar-personal-gog-probe",
+      "notes": "Exact personal Google Calendar route. gog v0.18.0 exposes event create with attendees and --with-meet plus event readback operations; current account readiness remains governed by the exact probe and status row."
+    },
+    {
+      "route_id": "google-calendar-company-alpha-coordinator-gog",
+      "system": "google-calendar",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+      "readiness_status_id": "Google Calendar read \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "calendar-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-calendar-company-alpha-coordinator-gog`"
+        },
+        "event-delete": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-calendar-company-alpha-coordinator-gog`"
+        },
+        "freebusy": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha",
+        "work",
+        "company-internal",
+        "company-alpha-ops",
+        "dovu",
+        "lari",
+        "project"
+      ],
+      "access_probe_id": "google-calendar-company-alpha-coordinator-gog-probe",
+      "notes": "Exact CompanyAlpha Google Calendar route. It never substitutes the personal account and must be reprobed before writes."
+    },
+    {
+      "route_id": "google-forms-personal-gog",
+      "system": "google-forms",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "Google Forms read \u2014 personal `personal_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "form-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-personal-gog`"
+        },
+        "form-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-personal-gog`"
+        },
+        "form-publish": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-personal-gog`"
+        },
+        "form-responses-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-response-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-response-submit": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-personal-gog`"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "account_mismatch_blocker_code": "blocked_requested_google_forms_route_unverified",
+          "native_not_exhausted_blocker_code": "blocked_preferred_google_forms_native_route_not_exhausted",
+          "allowed_decision": "allow_google_forms_browser_execution"
+        }
+      },
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin"
+      ],
+      "access_probe_id": "google-forms-personal-gog-probe",
+      "notes": "gog v0.18.0 supports Forms object and response reads but exposes no response-submit command. Submitting a response therefore requires the exact-account authenticated UI route and same-lane readback."
+    },
+    {
+      "route_id": "google-forms-company-alpha-coordinator-gog",
+      "system": "google-forms",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+      "readiness_status_id": "Google Forms read \u2014 CompanyAlpha `company_alpha_coordinator_google@example.invalid` via `gog`",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "form-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-company-alpha-coordinator-gog`"
+        },
+        "form-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-company-alpha-coordinator-gog`"
+        },
+        "form-publish": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-company-alpha-coordinator-gog`"
+        },
+        "form-responses-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-response-get": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "form-response-submit": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `google-forms-company-alpha-coordinator-gog`"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "account_mismatch_blocker_code": "blocked_requested_google_forms_route_unverified",
+          "native_not_exhausted_blocker_code": "blocked_preferred_google_forms_native_route_not_exhausted",
+          "allowed_decision": "allow_google_forms_browser_execution"
+        }
+      },
+      "default_contexts": [
+        "company-alpha",
+        "work",
+        "company-internal",
+        "company-alpha-ops",
+        "qa"
+      ],
+      "access_probe_id": "google-forms-company-alpha-coordinator-gog-probe",
+      "notes": "Exact CompanyAlpha Google Forms route. Form-response submission is authenticated-UI-only because the installed gog response surface is list/get only."
+    },
+    {
+      "route_id": "apple-calendar-local",
+      "system": "apple-calendar",
+      "required_principal": "operator",
+      "required_account": "local-apple-calendar",
+      "readiness_status_id": "Apple Calendar local read (Calendar app via AppleScript)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "calendar-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-find": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "event-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Apple Calendar write path"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "private",
+        "admin",
+        "default"
+      ],
+      "access_probe_id": "apple-calendar-local-probe",
+      "notes": "Default calendar route on this host. The checked-in create helper performs an exact Calendar.app write and UID readback; the target calendar must be selected from the live calendar list before mutation."
+    },
+    {
+      "route_id": "openclaw-browser-chrome-session",
+      "system": "openclaw-browser-chrome-session",
+      "required_principal": "operator",
+      "required_account": "profile=chrome",
+      "readiness_status_id": "OpenClaw browser `profile=chrome` \u2014 stock extension existing-session lane",
+      "native_lane_kind": null,
+      "operations": {
+        "existing-session-attach-probe": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "existing-browser-state",
+        "existing-user-session",
+        "opened-tab",
+        "profile=chrome"
+      ],
+      "access_probe_id": "openclaw-browser-chrome-session-probe",
+      "notes": "The stock OpenClaw extension reuses an ordinary signed-in Chrome tab automatically after a registered browser-fallback predicate. Managed profile=openclaw remains the autonomous default. The retired Chrome-MCP profiles user and operator are not fallbacks for this route."
+    },
+    {
+      "route_id": "company-alpha-walletconnect-testnet",
+      "system": "company-alpha-walletconnect-testnet",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:services.wallets.hedera_testnet.account_id}",
+      "readiness_status_id": "CompanyAlpha WalletConnect testnet executor (`company-alpha-walletconnect-testnet`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "capability-probe": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "request-execute": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `company-alpha-walletconnect-testnet`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "testnet",
+        "hedera-testnet",
+        "dev"
+      ],
+      "access_probe_id": "company-alpha-walletconnect-testnet-probe",
+      "notes": "Browser-driven CompanyAlpha WalletConnect route for Hedera testnet account operator-owned-value. The agent controls the visible CompanyAlpha UI, connects one normal WalletConnect session, and signs the site's message or transaction requests as supplied. There is no duplicated router, asset, amount, calldata, quote, build, or approval policy. The signer keeps only origin, network, selected-account, and transaction-payer checks; loads the key inside the process; handles multiple sequential requests; never retries an ambiguous transaction outcome blindly; and writes settlement plus before/after evidence for transactions. No wallet extension or password entry is required."
+    },
+    {
+      "route_id": "company-alpha-walletconnect-mainnet",
+      "system": "company-alpha-walletconnect-mainnet",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:services.wallets.hedera_mainnet.account_id}",
+      "readiness_status_id": "CompanyAlpha WalletConnect mainnet executor (`company-alpha-walletconnect-mainnet`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "capability-probe": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "request-execute": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `company-alpha-walletconnect-mainnet`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "mainnet",
+        "hedera-mainnet",
+        "staging-2",
+        "production"
+      ],
+      "access_probe_id": "company-alpha-walletconnect-mainnet-probe",
+      "notes": "Browser-driven CompanyAlpha WalletConnect route for Hedera mainnet account operator-owned-value, including staging and production CompanyAlpha origins. The agent controls the visible CompanyAlpha UI, connects one normal WalletConnect session, and signs the site's message or transaction requests as supplied. There is no duplicated router, asset, amount, calldata, quote, build, or approval policy. The signer keeps only origin, network, selected-account, and transaction-payer checks; loads the key inside the process; handles multiple sequential requests; never retries an ambiguous transaction outcome blindly; and writes settlement plus before/after evidence for transactions. No wallet extension or password entry is required."
+    },
+    {
+      "route_id": "hashpack-company-alpha-testnet",
+      "system": "hashpack",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:services.wallets.hedera_testnet.account_id}",
+      "readiness_status_id": "HashPack testnet credential source \u2014 CompanyAlpha QA on Mini (macOS Keychain + managed profile)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "credential-presence-probe": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "wallet-ui-inspect": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "exact"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "account_mismatch_blocker_code": "blocked_requested_hashpack_account_unverified",
+          "native_not_exhausted_blocker_code": "blocked_hashpack_ui_route_not_requested",
+          "allowed_decision": "allow_hashpack_ui_evidence_collection"
+        }
+      },
+      "default_contexts": [
+        "company-alpha",
+        "qa",
+        "testnet",
+        "wallet"
+      ],
+      "access_probe_id": "hashpack-company-alpha-testnet-probe",
+      "notes": "Credential presence and exact-account wallet UI inspection for public account operator-owned-value are registered. Wallet signing, approval, transaction, and funds-movement operations are intentionally absent because no production runtime caller currently binds the approval envelope to a signing click. Unknown mutation operations fail closed."
+    },
+    {
+      "route_id": "trello-personal-api",
+      "system": "trello",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "member-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "board-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "card-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "card-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        },
+        "card-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        },
+        "card-label-add": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        },
+        "card-label-remove": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        },
+        "label-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        },
+        "card-delete": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Trello API board access \u2014 `PRJ:TOP` (`OpenClaw Project Management`)"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "project-management"
+      ],
+      "access_probe_id": "trello-personal-api-probe",
+      "notes": "Personal Trello API route through the runtime global dotenv shared by the stock upstream Trello skill and existing Python helpers. Member/board/card reads and card create/update/delete plus existing-label add/remove and label creation use the existing native API lane. The 2026-09-03 canary accepted card create/read/update/delete and adding/removing an existing label with exact readback and no residue. Label creation remains registered but unaccepted. Other portfolios, private-board visibility, and channel delivery are not covered by this route."
+    },
+    {
+      "route_id": "github-personal-cli",
+      "system": "github",
+      "required_principal": "operator",
+      "required_account": "${operator:identifiers.github_username}",
+      "readiness_status_id": "GitHub CLI auth (`gh`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "repo-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "pull-request-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "issue-delete": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "issue-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "issue-comment": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "pull-request-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "pull-request-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        },
+        "pull-request-comment": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `github-personal-cli`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "personal",
+        "coding",
+        "company-alpha",
+        "company-beta",
+        "personal-data-project"
+      ],
+      "access_probe_id": "github-personal-cli-probe",
+      "notes": "Existing authenticated GitHub CLI route at /operator/installation. The 2026-09-03 fixture accepts issue read/create/delete only for an exact target repository with provider readback and cleanup. Issue update/comment and pull-request operations remain registered but unaccepted. Repository push, settings, secrets, releases, and administration remain undeclared."
+    },
+    {
+      "route_id": "linear-company-beta-mcp",
+      "system": "linear",
+      "required_principal": "company-beta",
+      "required_account": "${operator:identifiers.accounts.company_beta_operator_google}",
+      "readiness_status_id": "Linear MCP OAuth \u2014 company_beta team (`company_beta_operator_google@example.invalid`)",
+      "native_lane_kind": "mcp_integration",
+      "operations": {
+        "identity-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "workspace-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "team-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "comment-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "issue-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `linear-company-beta-mcp`"
+        },
+        "issue-update": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `linear-company-beta-mcp`"
+        },
+        "issue-cancel": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `linear-company-beta-mcp`"
+        },
+        "comment-create": {
+          "lane": "declared_native",
+          "effect": "mutation",
+          "readiness_status_id": "Mutation readiness \u2014 `linear-company-beta-mcp`"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-beta",
+        "work-company-beta",
+        "linear-company-beta"
+      ],
+      "access_probe_id": "linear-company-beta-mcp-oauth-probe",
+      "notes": "Native OpenClaw MCP server linear at https://mcp.linear.app/mcp uses operator OAuth owned by the shared OpenClaw state database; the desktop Codex OAuth handle remains separate. The explicit get_workspace read closed the initial workspace-field gap. The 2026-09-03 desktop Codex canary's comment-read and write evidence remains historical, not fresh native OpenClaw acceptance. All declared operations are unchanged; native mutation effects require their own readback. Project/team administration and all other mutations remain undeclared."
+    },
+    {
+      "route_id": "mercury-company-beta-mcp",
+      "system": "mercury",
+      "required_principal": "company-beta",
+      "required_account": "${operator:services.mercury.organization_name}",
+      "readiness_status_id": "Mercury MCP OAuth \u2014 company_beta (`company_beta_admin_google@example.invalid`)",
+      "native_lane_kind": "mcp_integration",
+      "operations": {
+        "capability-probe": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "organization-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "account-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "transaction-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "statement-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "card-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "recipient-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "treasury-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "customer-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "invoice-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "user-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "webhook-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "approval-request-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "safe-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "attachment-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "category-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "merchant-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-beta",
+        "work-company-beta",
+        "mercury-company-beta"
+      ],
+      "access_probe_id": "mercury-company-beta-mcp-oauth-probe",
+      "notes": "Official Mercury hosted MCP at https://mcp.mercury.com/mcp, authenticated by company_beta_admin_google@example.invalid to operator-owned-value Mercury issues a read-only OAuth token; the route exposes no payment, transfer, approval, recipient, card, invoice, webhook, or account mutation. Current provider evidence proves organization-read only. Every other declared read requires current provider readback before reliance, and financial values must remain private to the requesting personal session."
+    },
+    {
+      "route_id": "vercel-company-alpha-browser",
+      "system": "vercel",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:identifiers.accounts.personal_google}",
+      "readiness_status_id": "Vercel browser session \u2014 CompanyAlpha (`personal_google@example.invalid`, team `company_alpha`)",
+      "native_lane_kind": null,
+      "operations": {
+        "team-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "project-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha",
+        "work-company-alpha",
+        "vercel-company-alpha"
+      ],
+      "access_probe_id": "vercel-company-alpha-browser-session-probe",
+      "browser_profile_primary": {
+        "profile_id": "personal",
+        "transport": "managed_cdp"
+      },
+      "notes": "The managed profile name personal is a legacy browser-transport label only; every use must select and verify the company_alpha team rather than the account's personal Vercel scope. No API, CLI, deployment, configuration, domain, environment, secret, or other mutation operation is declared."
+    },
+    {
+      "route_id": "vercel-company-beta-browser",
+      "system": "vercel",
+      "required_principal": "company-beta",
+      "required_account": "${operator:identifiers.accounts.company_beta_admin_google}",
+      "readiness_status_id": "Vercel browser session \u2014 company_beta (`company_beta_admin_google@example.invalid`, team `company-beta-team`)",
+      "native_lane_kind": null,
+      "operations": {
+        "team-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "project-read": {
+          "lane": "authenticated_ui",
+          "effect": "read"
+        },
+        "preview-deploy": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Vercel preview deployment \u2014 company_beta (`company_beta_admin_google@example.invalid`, team `company-beta-team`, project `company-beta-site`)"
+        },
+        "preview-delete": {
+          "lane": "authenticated_ui",
+          "effect": "mutation",
+          "readiness_status_id": "Vercel preview deployment \u2014 company_beta (`company_beta_admin_google@example.invalid`, team `company-beta-team`, project `company-beta-site`)"
+        }
+      },
+      "provider_adapter": {
+        "type": "authenticated_account_route",
+        "required_account_route_field": "required_account",
+        "identity_policy": {
+          "required": true,
+          "normalizer": "casefold",
+          "missing_route_account_blocker_code": "blocked_provider_adapter_required_account_missing",
+          "missing_route_account_decision": "block_missing_route_account_metadata"
+        },
+        "native_evidence": {
+          "passed_states": [
+            "passed"
+          ],
+          "exhausted_states": [
+            "failed",
+            "unavailable",
+            "not_run"
+          ],
+          "probe_receipts_are_audit_only": true,
+          "completion_receipt_supported": false,
+          "default_decision": "use_authenticated_vercel_browser_route",
+          "account_mismatch_blocker_code": "blocked_requested_vercel_route_unverified",
+          "account_mismatch_decision": "block_mismatched_vercel_account"
+        },
+        "browser_evidence": {
+          "completion_authority": "runtime_authenticated_evidence_only",
+          "native_not_exhausted_blocker_code": "blocked_authenticated_vercel_route_unverified",
+          "native_not_exhausted_decision": "require_authenticated_vercel_browser_route",
+          "account_mismatch_blocker_code": "blocked_requested_vercel_route_unverified",
+          "account_mismatch_decision": "block_unverified_vercel_browser_account",
+          "allowed_decision": "allow_vercel_browser_execution"
+        },
+        "constraints": [
+          "Browser execution must verify the exact account, team, project, environment, source, and provider result in the live Vercel UI.",
+          "A Vercel session for CompanyAlpha or a personal account is not authority for this company_beta route."
+        ]
+      },
+      "default_contexts": [
+        "company-beta",
+        "work-company-beta",
+        "vercel-company-beta"
+      ],
+      "access_probe_id": "vercel-company-beta-browser-session-probe",
+      "browser_profile_primary": {
+        "profile_id": "openclaw",
+        "transport": "managed_cdp"
+      },
+      "notes": "One exact company-beta-site Preview redeploy reached Ready and its exact disposable deployment was then deleted, accepting preview-deploy and preview-delete through profile=openclaw only after verifying the Preview environment and provider result. No API or CLI route, production deployment or promotion, configuration, custom-domain, environment-variable, secret, or other mutation operation is declared; the CompanyAlpha Vercel identity is not a substitute."
+    },
+    {
+      "route_id": "discord-source-company-alpha-team",
+      "system": "discord-source",
+      "required_principal": "company-alpha",
+      "required_account": "${operator:services.discord.company_alpha.guild_id}",
+      "readiness_status_id": "Discord source route \u2014 CompanyAlpha team (`discord-source-company-alpha-team`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "channel-info": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "guild-channel-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-alpha-team-discord"
+      ],
+      "access_probe_id": "discord-source-company-alpha-team-probe",
+      "notes": "Exact CompanyAlpha team-guild source-only route. Current evidence accepts channel-info and bounded message read/search for CompanyAlpha context only. guild-channel-list remains declared but unaccepted because the current CLI emits truncated invalid JSON. The route creates no inbound agent binding and exposes no reply, post, send, react, thread, moderation, or other mutation operation; team messages are evidence, not authenticated operator authority."
+    },
+    {
+      "route_id": "discord-source-company-beta-team",
+      "system": "discord-source",
+      "required_principal": "company-beta",
+      "required_account": "${operator:services.discord.company_beta.guild_id}",
+      "readiness_status_id": "Discord source route \u2014 company_beta team (`discord-source-company-beta-team`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "channel-info": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "guild-channel-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "company-beta-team-discord"
+      ],
+      "access_probe_id": "discord-source-company-beta-team-probe",
+      "notes": "Exact company_beta team-guild source-only route. Current evidence accepts channel-info and bounded message read/search for company_beta context only. guild-channel-list remains declared but unaccepted because the current CLI emits truncated invalid JSON. The route creates no inbound agent binding and exposes no reply, post, send, react, thread, moderation, or other mutation operation; team messages are evidence, not authenticated operator authority."
+    },
+    {
+      "route_id": "discord-source-operations-team",
+      "system": "discord-source",
+      "required_principal": "operations",
+      "required_account": "${operator:services.discord.operations.guild_id}",
+      "readiness_status_id": "Discord source route \u2014 Operations team (`discord-source-operations-team`)",
+      "native_lane_kind": "supported_cli",
+      "operations": {
+        "channel-info": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "guild-channel-list": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-read": {
+          "lane": "declared_native",
+          "effect": "read"
+        },
+        "message-search": {
+          "lane": "declared_native",
+          "effect": "read"
+        }
+      },
+      "provider_adapter": null,
+      "default_contexts": [
+        "operations-team-discord"
+      ],
+      "access_probe_id": "discord-source-operations-team-probe",
+      "notes": "Exact Operations team-guild source-only route. Current evidence accepts channel-info and bounded message read/search for Operations context only. The route creates no inbound agent binding and exposes no reply, post, send, react, thread, moderation, or other mutation operation; team messages are evidence, not authenticated operator authority. Provider-level read-only is not yet accepted because the guild's @everyone role currently grants Administrator, which overrides the bot role's requested read-only permissions."
+    }
+  ]
+}

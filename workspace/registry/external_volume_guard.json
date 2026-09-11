@@ -1,0 +1,50 @@
+{
+  "kind": "openclaw.owc-volume-guard.contract.v1",
+  "schemaVersion": 2,
+  "hostId": "${operator:identifiers.host_name}",
+  "mountPoint": "${operator:paths.data_root}",
+  "volumeUuid": "${operator:volumes.expected_uuid}",
+  "installedSnapshotPath": "${operator:paths.volume_guard_contract}",
+  "installedHelperPath": "${operator:paths.volume_guard_helper}",
+  "installedLauncherPath": "${operator:paths.volume_guard_launcher}",
+  "launcherRuntimePath": "${operator:paths.node_binary}",
+  "observerPythonPath": "${operator:paths.python_binary}",
+  "statePath": "${operator:paths.volume_guard_state}",
+  "incidentDirectory": "${operator:paths.volume_guard_incidents}",
+  "lockPath": "${operator:paths.volume_guard_lock}",
+  "livenessProbe": {
+    "path": "${operator:paths.volume_liveness_probe}",
+    "sha256": "${operator:volumes.liveness_sha256}",
+    "sizeBytes": 4096,
+    "timeoutSeconds": 10
+  },
+  "policy": {
+    "unhealthyWriteAdmission": "deny",
+    "automaticRemount": false,
+    "automaticServiceRestart": false,
+    "automaticFallbackPath": false,
+    "incidentEvidenceStorage": "internal-only"
+  },
+  "protectedPaths": [
+    {
+      "rootId": "workspace",
+      "logicalPath": "${operator:paths.workspace}"
+    },
+    {
+      "rootId": "agent-state",
+      "logicalPath": "${operator:paths.state_root}"
+    },
+    {
+      "rootId": "runtime-releases",
+      "logicalPath": "${operator:paths.runtime_releases_root}"
+    },
+    {
+      "rootId": "git-history",
+      "logicalPath": "${operator:paths.git_history_root}"
+    }
+  ],
+  "canonicalInputs": [
+    "registry/storage_roots.json",
+    "registry/project_topology.json"
+  ]
+}
