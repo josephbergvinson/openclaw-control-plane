@@ -212,10 +212,14 @@ vi.mock("../../src/config/sessions/group.js", () => ({
   resolveGroupSessionKey: vi.fn().mockReturnValue(undefined),
 }));
 
-vi.mock("../../src/config/sessions/paths.js", () => ({
-  resolveSessionFilePathCore: vi.fn().mockReturnValue("/tmp/session.jsonl"),
-  resolveSessionFilePathOptions: vi.fn().mockReturnValue({}),
-}));
+vi.mock(import("../../src/config/sessions/paths.js"), async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config/sessions/paths.js")>();
+  return {
+    ...actual,
+    resolveSessionFilePathCore: vi.fn().mockReturnValue("/tmp/session.jsonl"),
+    resolveSessionFilePathOptions: vi.fn().mockReturnValue({}),
+  };
+});
 
 const loadSessionEntryMock = vi.hoisted(() => vi.fn());
 const updateAmbientTranscriptWatermarkMock = vi.hoisted(() => vi.fn().mockResolvedValue(null));
