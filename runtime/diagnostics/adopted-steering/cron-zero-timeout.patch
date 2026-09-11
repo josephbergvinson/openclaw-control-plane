@@ -1,0 +1,116 @@
+--- a/src/cron/command-runner.ts
++++ b/src/cron/command-runner.ts
+@@ -99,7 +99,10 @@
+   const noOutputTimeoutMs = secondsToMs(payload.noOutputTimeoutSeconds);
+   try {
+     const result = await runCommandWithTimeout(payload.argv, {
+-      timeoutMs: secondsToMs(payload.timeoutSeconds) ?? DEFAULT_COMMAND_TIMEOUT_MS,
++      timeoutMs:
++        payload.timeoutSeconds === 0
++          ? undefined
++          : (secondsToMs(payload.timeoutSeconds) ?? DEFAULT_COMMAND_TIMEOUT_MS),
+       ...(payload.cwd ? { cwd: payload.cwd } : {}),
+       ...(payload.input !== undefined ? { input: payload.input } : {}),
+       ...(payload.env ? { env: payload.env } : {}),
+--- a/src/cron/command-runner.test.ts
++++ b/src/cron/command-runner.test.ts
+@@ -27,6 +27,51 @@
+ }
+ 
+ describe("runCronCommandJob", () => {
++  it.each([
++    { name: "explicit zero", timeoutSeconds: 0, timeoutMs: undefined },
++    { name: "omitted timeout", timeoutSeconds: undefined, timeoutMs: 600_000 },
++    { name: "positive timeout", timeoutSeconds: 1.25, timeoutMs: 1_250 },
++  ])(
++    "passes $name to the command runner with cancellation intact",
++    async ({ timeoutSeconds, timeoutMs }) => {
++      const argv = [process.execPath, "-e", "process.stdout.write('done')"];
++      const controller = new AbortController();
++      const runCommand = vi.spyOn(processExecution, "runCommandWithTimeout").mockResolvedValueOnce({
++        stdout: "done",
++        stderr: "",
++        code: 0,
++        signal: null,
++        killed: false,
++        termination: "exit",
++      });
++
++      try {
++        const result = await runCronCommandJob({
++          job: makeCommandJob({
++            kind: "command",
++            argv,
++            ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
++          }),
++          abortSignal: controller.signal,
++        });
++
++        expect(runCommand).toHaveBeenCalledExactlyOnceWith(
++          argv,
++          expect.objectContaining({
++            timeoutMs,
++            signal: controller.signal,
++            killProcessTree: true,
++          }),
++        );
++        expect(runCommand.mock.calls[0]?.[1]).not.toHaveProperty("noOutputTimeoutMs");
++        expect(result.status).toBe("ok");
++        expect(result.summary).toBe("done");
++      } finally {
++        runCommand.mockRestore();
++      }
++    },
++  );
++
+   it("runs command argv and returns stdout as the deliverable summary", async () => {
+     const result = await runCronCommandJob({
+       job: makeCommandJob({
+@@ -232,25 +277,28 @@
+     });
+   });
+ 
+-  it("marks aborted command runs as cron errors", async () => {
+-    const controller = new AbortController();
+-    controller.abort();
+-
+-    const result = await runCronCommandJob({
+-      job: makeCommandJob({
+-        kind: "command",
+-        argv: [process.execPath, "-e", "process.stdout.write('should not run')"],
+-        timeoutSeconds: 5,
+-      }),
+-      abortSignal: controller.signal,
+-    });
+-
+-    expect(result.status).toBe("error");
+-    expect(result.error).toBe("command stopped");
+-    expect(result.errorClassification).toBeUndefined();
+-    expect(result.summary).toBeUndefined();
+-    expect(result.failureNotificationDetail).toBeUndefined();
+-  });
++  it.each([0, 5])(
++    "marks aborted command runs as cron errors with timeout %ss",
++    async (timeoutSeconds) => {
++      const controller = new AbortController();
++      controller.abort();
++
++      const result = await runCronCommandJob({
++        job: makeCommandJob({
++          kind: "command",
++          argv: [process.execPath, "-e", "process.stdout.write('should not run')"],
++          timeoutSeconds,
++        }),
++        abortSignal: controller.signal,
++      });
++
++      expect(result.status).toBe("error");
++      expect(result.error).toBe("command stopped");
++      expect(result.errorClassification).toBeUndefined();
++      expect(result.summary).toBeUndefined();
++      expect(result.failureNotificationDetail).toBeUndefined();
++    },
++  );
+ 
+   it("keeps command start failures generic", async () => {
+     const result = await runCronCommandJob({
