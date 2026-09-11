@@ -1,33 +1,17 @@
 flowchart TD
-  A[Operator approval bound to one source commit]
-  B[Admission - quiescence proof, phase plan, build authority, operation lock]
-  C[Group 1 - dependency snapshot, offline coverage probe, preparation intent]
-  D[Group 2 - offline frozen install and sandboxed runtime and UI builds]
-  E[Group 3 - candidate verification by bundled-dependency smoke]
-  F[Group 4 - stage copy, equality proof, one atomic rename, final seal]
-  G[Group 5 - pre-activation inventory diff zero and durable lifecycle claim]
-  H[Group 6 - activation with exactly one supervised restart]
-  I[Group 7 - post-activation inventory diff zero after gateway and node]
-  J[Group 8 - pre-delivery live acceptance and delivery]
-  K[Terminal receipt - runtime-health closeout]
-  L[Terminal receipt - full contract accepted]
-  STOP[Fail-closed stop - no reseal, no repair in place, evidence retained]
-  ADJ[Permit claimed with no completion receipt - external adjudication required]
-  A --> B
-  B --> C
-  C --> D
-  D --> E
-  E --> F
-  F --> G
-  G --> H
-  H --> I
-  I --> J
-  J --> K
-  J --> L
-  B -- host not quiet --> STOP
-  D -- build or coverage failure --> STOP
-  F -- equality or seal mismatch --> STOP
-  G -- any differing row --> STOP
-  I -- any differing row --> STOP
-  J -- live acceptance false --> STOP
-  H -- crash or timeout consumes the one-shot permit --> ADJ
+    Source[Pinned source and recorded local commit] --> Build[Dependency install, native checks and build]
+    Build --> Candidate[Complete candidate release]
+    Candidate --> Seal[Validate and seal candidate]
+    Seal --> Stop[Drain work and stop gateway and node]
+    Stop --> Snapshot[Capture and verify predecessor snapshot]
+    Snapshot --> Preflight[Check state, approvals, links and service definitions]
+    Preflight --> Fence[Persist one-start fence]
+    Fence --> Upgrade{Version upgrade?}
+    Upgrade -->|Yes| Migration[Install reviewed config and migrate state once]
+    Upgrade -->|No| Select[Select candidate]
+    Migration --> Select
+    Select --> Gateway[Bootstrap and verify gateway]
+    Gateway --> Node[Bootstrap and verify node]
+    Node --> Verify[Verify protected invariants and write terminal receipt]
+    Verify --> Acceptance[Exercise affected user paths]
+    Fence -.-> Recovery[If start is consumed and outcome is uncertain, restore matched snapshot]

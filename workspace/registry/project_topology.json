@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "registry_id": "operator-project-topology",
+  "host_id": "operator-host",
+  "evidence_ref": null,
+  "namespace_roots": {
+    "projects": "${operator:paths.namespace_projects}",
+    "runtime_data": "${operator:paths.namespace_runtime_data}",
+    "archives": "${operator:paths.namespace_archives}",
+    "git_remotes": "${operator:paths.namespace_git_remotes}"
+  },
+  "namespace_contract": {
+    "projects": {
+      "root": "${operator:paths.namespace_projects}",
+      "role": "canonical source project containers, repositories, and project-owned worktrees",
+      "source_authority": true
+    },
+    "project_data": {
+      "root": "${operator:paths.namespace_runtime_data}",
+      "role": "mutable generated or application-managed project data that is not source",
+      "source_authority": false
+    },
+    "project_infrastructure": {
+      "root": "${operator:paths.namespace_infrastructure}",
+      "role": "shared project infrastructure, including local bare Git remotes",
+      "source_authority": false
+    },
+    "project_archives": {
+      "root": "${operator:paths.namespace_archives}",
+      "role": "retained recovery, quarantine, and failed-migration evidence",
+      "source_authority": false,
+      "deletion_policy": "never delete the root by category; retire only an exact classified subtree after unique-history, live-reference, retention, and independent-recovery gates pass"
+    },
+    "openclaw_operations": {
+      "root": "${operator:paths.namespace_openclaw_operations}",
+      "role": "OpenClaw control-plane workspace and operational runtime, state, cache, build, backup, and archive namespaces",
+      "source_authority": false,
+      "general_project_parent": false,
+      "control_plane_exception": "${operator:paths.workspace}",
+      "upstream_source_project": "${operator:paths.projects.openclaw.canonical_root}"
+    }
+  },
+  "retired_compatibility_paths": [],
+  "global_compatibility_aliases": [],
+  "projects": [
+    {
+      "project_id": "openclaw",
+      "canonical_root": "${operator:paths.projects.openclaw.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": null,
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "openclaw",
+          "canonical_root": "${operator:paths.projects.openclaw.repository_1}",
+          "role": "source"
+        },
+        {
+          "repository_id": "gogcli",
+          "canonical_root": "${operator:paths.projects.openclaw.repository_2}",
+          "role": "source"
+        },
+        {
+          "repository_id": "xurl",
+          "canonical_root": "${operator:paths.projects.openclaw.repository_3}",
+          "role": "source"
+        },
+        {
+          "repository_id": "keyring",
+          "canonical_root": "${operator:paths.projects.openclaw.repository_4}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.openclaw.worktrees_1}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.openclaw.worktrees_2}",
+          "root_class": "legacy-shared-compatibility"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "personal-data-project",
+      "canonical_root": "${operator:paths.projects.personal_data_project.canonical_root}",
+      "runtime_data_root": "${operator:paths.projects.personal_data_project.runtime_data_root}",
+      "archive_root": "${operator:paths.projects.personal_data_project.archive_root}",
+      "runtime_data_root_state": "active",
+      "archive_root_state": "active",
+      "repositories": [
+        {
+          "repository_id": "personal-data-app",
+          "canonical_root": "${operator:paths.projects.personal_data_project.repository_1}",
+          "role": "source"
+        },
+        {
+          "repository_id": "personal-data-runtime",
+          "canonical_root": "${operator:paths.projects.personal_data_project.repository_2}",
+          "role": "source"
+        },
+        {
+          "repository_id": "personal-data-hk-exporter",
+          "canonical_root": "${operator:paths.projects.personal_data_project.repository_3}",
+          "role": "source"
+        },
+        {
+          "repository_id": "personal-data-public-docs",
+          "canonical_root": "${operator:paths.projects.personal_data_project.repository_4}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.personal_data_project.worktrees_1}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.personal_data_project.worktrees_2}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.personal_data_project.worktrees_3}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.personal_data_project.worktrees_4}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.personal_data_project.worktrees_5}",
+          "root_class": "legacy-shared-compatibility"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "company-alpha",
+      "canonical_root": "${operator:paths.projects.company_alpha.canonical_root}",
+      "runtime_data_root": "${operator:paths.projects.company_alpha.runtime_data_root}",
+      "archive_root": null,
+      "runtime_data_root_state": "active",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "company-alpha-docs",
+          "canonical_root": "${operator:paths.projects.company_alpha.repository_1}",
+          "role": "source"
+        },
+        {
+          "repository_id": "company-alpha-server",
+          "canonical_root": "${operator:paths.projects.company_alpha.repository_2}",
+          "role": "source"
+        },
+        {
+          "repository_id": "company-alpha-site",
+          "canonical_root": "${operator:paths.projects.company_alpha.repository_3}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.company_alpha.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "company-alpha-replay-study",
+      "canonical_root": "${operator:paths.projects.company_alpha_replay_study.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": "${operator:paths.projects.company_alpha_replay_study.archive_root}",
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "reserved",
+      "repositories": [
+        {
+          "repository_id": "company-alpha-v3-replay-harness",
+          "canonical_root": "${operator:paths.projects.company_alpha_replay_study.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.company_alpha_replay_study.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "payment-research",
+      "canonical_root": "${operator:paths.projects.payment_research.canonical_root}",
+      "runtime_data_root": "${operator:paths.projects.payment_research.runtime_data_root}",
+      "archive_root": null,
+      "runtime_data_root_state": "reserved",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "payment-research",
+          "canonical_root": "${operator:paths.projects.payment_research.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.payment_research.worktrees_1}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.payment_research.worktrees_2}",
+          "root_class": "legacy-shared-active",
+          "new_worktrees_allowed": false,
+          "reason": "Existing active Refuel402 task worktrees were created here before the project-owned root contract; preserve them until their owning tasks close out, but create no successors here."
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "personal-site",
+      "canonical_root": "${operator:paths.projects.personal_site.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": null,
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "personal-site",
+          "canonical_root": "${operator:paths.projects.personal_site.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.personal_site.worktrees_1}",
+          "root_class": "project-owned"
+        },
+        {
+          "path": "${operator:paths.projects.personal_site.worktrees_2}",
+          "root_class": "legacy-shared-compatibility"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "prompt-builder",
+      "canonical_root": "${operator:paths.projects.prompt_builder.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": null,
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "prompt-builder",
+          "canonical_root": "${operator:paths.projects.prompt_builder.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.prompt_builder.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "portfolio-research",
+      "canonical_root": "${operator:paths.projects.portfolio_research.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": null,
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "portfolio-research",
+          "canonical_root": "${operator:paths.projects.portfolio_research.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.portfolio_research.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "desktop-demo",
+      "canonical_root": "${operator:paths.projects.desktop_demo.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": "${operator:paths.projects.desktop_demo.archive_root}",
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "active",
+      "repositories": [
+        {
+          "repository_id": "desktop-demo-app",
+          "canonical_root": "${operator:paths.projects.desktop_demo.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.desktop_demo.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "reference-architecture",
+      "canonical_root": "${operator:paths.projects.reference_architecture.canonical_root}",
+      "runtime_data_root": null,
+      "archive_root": null,
+      "runtime_data_root_state": "not-applicable",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "reference-architecture",
+          "canonical_root": "${operator:paths.projects.reference_architecture.repository_1}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.reference_architecture.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    },
+    {
+      "project_id": "company-beta",
+      "canonical_root": "${operator:paths.projects.company_beta.canonical_root}",
+      "runtime_data_root": "${operator:paths.projects.company_beta.runtime_data_root}",
+      "archive_root": null,
+      "runtime_data_root_state": "active",
+      "archive_root_state": "not-applicable",
+      "repositories": [
+        {
+          "repository_id": "company-beta-company-intelligence-reference-architecture",
+          "canonical_root": "${operator:paths.projects.company_beta.repository_1}",
+          "role": "source"
+        },
+        {
+          "repository_id": "company-beta-company-alpha-labs-company-intelligence-architecture",
+          "canonical_root": "${operator:paths.projects.company_beta.repository_2}",
+          "role": "source"
+        },
+        {
+          "repository_id": "company-beta-partner-company-intelligence-architecture",
+          "canonical_root": "${operator:paths.projects.company_beta.repository_3}",
+          "role": "source"
+        }
+      ],
+      "common_git_dirs": [],
+      "allowed_worktree_roots": [
+        {
+          "path": "${operator:paths.projects.company_beta.worktrees_1}",
+          "root_class": "project-owned"
+        }
+      ],
+      "compatibility_aliases": []
+    }
+  ],
+  "operational_exceptions": []
+}

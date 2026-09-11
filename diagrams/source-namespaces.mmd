@@ -1,37 +1,17 @@
-flowchart TB
-  subgraph NS[Volume-level namespaces]
-    NSP[Projects - canonical source]
-    NSD[Project data - mutable and generated]
-    NSI[Project infrastructure - shared bare Git repositories]
-    NSA[Project archives - retained trees]
-  end
-  subgraph SURF[One project surface]
-    CR[Canonical root] --> WT[Task worktree]
-    WT --> VC[Verified commit]
-    VC --> SB[Standing branch]
-    SB --> AHT[Authoritative history target]
-  end
-  subgraph CP[Control-plane workspace]
-    ROOT[Clean integration checkout]
-    POOL[Local worktree pool - one lane per task branch]
-    RDP[Root drift policy - four path classes, unmatched paths fail closed]
-  end
-  RREL[Immutable release store]
-  RSD[Runtime state directory]
-  ART[Artifact and evidence root]
-  MIR[Mirror or handoff copy]
-  NEVER[Never an edit surface - read, restore or publish only]
-  NSP --> CR
-  NSP --> ROOT
-  NSI --> AHT
-  ROOT --> POOL
-  RDP --> ROOT
-  RDP --> POOL
-  SB -.-> MIR
-  SB -.-> ART
-  NSD --> NEVER
-  NSA --> NEVER
-  ART --> NEVER
-  MIR --> NEVER
-  RREL --> NEVER
-  RSD --> NEVER
+flowchart TD
+  REG[Project and storage registries] --> SRC[Canonical source repositories]
+  REG --> DATA[Mutable project data]
+  REG --> HIST[Authoritative Git history]
+  REG --> ARCH[Retained archives]
+  SRC --> WT[Registered task worktree]
+  WT --> VERIFY[Verified source change]
+  VERIFY --> SRC
+  SRC --> BUILD[Complete source build]
+  BUILD --> REL[Sealed runtime release]
+  SELECT[Release selector] --> REL
+  REL --> RUN[Running gateway and node]
+  STATE[Application-owned runtime state] --> RUN
+  RUN --> EVIDENCE[Private operational receipts]
+  DATA --> EVIDENCE
+  SRC -. deliberate publication .-> HIST
+  EVIDENCE -. retention policy .-> ARCH

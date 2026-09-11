@@ -1,32 +1,15 @@
-flowchart TB
-  subgraph T1[Tier 1 - always injected]
-    A1[Normative behaviour and mechanics contracts - low sensitivity]
-    A2[Style, preferences and identity - low to medium sensitivity]
-    A3[Cue and pointer file - declared low sensitivity, observed medium to high]
-  end
-  subgraph T2[Tier 2 - runtime selected per new session]
-    B1[Recent dated notes within a bounded window and character budget]
-    B2[Injected block wrapped in an untrusted-content header]
-  end
-  subgraph T3[Tier 3 - retrieved on demand only]
-    C1[Dated notes and machine-written session summaries]
-    C2[Evergreen topic files - variable sensitivity]
-    C3[Conditional high-sensitivity files - never default loaded]
-  end
-  RATE[Per-file sensitivity rating - low, medium or high]
-  LOAD[Per-file load default - always, conditional or never]
-  AXES[Two independent axes - the tier says when a file loads, the rating says what is in it]
-  IDX[Semantic and lexical index over the whole corpus]
-  S[Agent turn]
-  WRITE[Explicit operator write request]
-  AUDIT[Audit hook records the write]
-  T1 --> S
-  T2 --> S
-  T3 -. search then narrow read .-> S
-  RATE --> AXES
-  LOAD --> AXES
-  AXES -. rate every file individually .-> A3
-  IDX -. indexes every tier without a sensitivity filter .-> T1
-  IDX -. indexes every tier without a sensitivity filter .-> T3
-  WRITE --> AUDIT
-  AUDIT --> C1
+flowchart TD
+  Q[Request identity and audience] --> L[Runtime filename and privacy filters]
+  L --> B[AGENTS and eligible profile context]
+  Q --> R[Bounded relevant retrieval]
+  R --> M[Memory files and exact pointers]
+  R --> S[Registered current provider or subject source]
+  M --> P[Preserve source and audience boundaries]
+  S --> P
+  P --> W[Working model turn]
+  B --> W
+  W --> C[Supported compaction and compact checkpoint]
+  C --> W
+  W --> E[Inspect current task and external effect]
+  E --> O[Verified answer or action]
+  D[Detailed private records] -. deliberate authorized reads .-> P

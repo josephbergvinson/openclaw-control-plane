@@ -61,21 +61,18 @@ class RepositoryTests(unittest.TestCase):
             stem = path.name.split(".example.json")[0]
             self.assertTrue((ROOT / "schemas" / f"{stem}.schema.json").is_file(), stem)
 
-    def test_status_example_matches_its_schema(self) -> None:
-        status = json.loads((ROOT / "examples" / "durable-status.example.json").read_text(encoding="utf-8"))
-        schema = json.loads((ROOT / "schemas" / "durable-status.schema.json").read_text(encoding="utf-8"))
-        self.assertTrue(set(schema["required"]).issubset(status))
-        self.assertEqual([], [key for key in status if key not in schema["properties"]])
-        self.assertIn(status["state"], schema["properties"]["state"]["enum"])
-        self.assertIn(status["health"], schema["properties"]["health"]["enum"])
+    def test_native_task_example_separates_execution_from_delivery(self) -> None:
+        task = json.loads((ROOT / "examples" / "native-task.example.json").read_text(encoding="utf-8"))
+        schema = json.loads((ROOT / "schemas" / "native-task.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual([], VALIDATOR.check_instance(task, schema))
+        self.assertEqual("succeeded", task["status"])
+        self.assertEqual("pending", task["deliveryStatus"])
 
-    def test_write_lease_is_a_separate_record_binding_the_status_artifact(self) -> None:
-        lease = json.loads((ROOT / "examples" / "write-lease.example.json").read_text(encoding="utf-8"))
-        required = json.loads((ROOT / "schemas" / "write-lease.schema.json").read_text(encoding="utf-8"))["required"]
-        status = json.loads((ROOT / "examples" / "durable-status.example.json").read_text(encoding="utf-8"))
-        self.assertTrue(set(required).issubset(lease))
-        self.assertEqual({"path", "device", "inode"}, set(lease["protects_status_artifact"]))
-        self.assertEqual([], [key for key in status if "lease" in key])
+    def test_native_task_schema_rejects_invented_runtime_states(self) -> None:
+        task = json.loads((ROOT / "examples" / "native-task.example.json").read_text(encoding="utf-8"))
+        schema = json.loads((ROOT / "schemas" / "native-task.schema.json").read_text(encoding="utf-8"))
+        task["status"] = "complete"
+        self.assertTrue(VALIDATOR.check_instance(task, schema))
 
 
 if __name__ == "__main__":

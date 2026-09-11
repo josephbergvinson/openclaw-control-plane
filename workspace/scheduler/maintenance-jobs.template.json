@@ -1,0 +1,352 @@
+[
+  {
+    "name": "External-volume Backblaze Weekly Backup",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "40 23 * * 0",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 360,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.backblaze-health-weekly}",
+        "--script",
+        "${operator:scheduler.helper_paths.backblaze-health-weekly}",
+        "--what",
+        "External-volume Backblaze Weekly Backup",
+        "--",
+        "--start"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "OpenClaw Gateway Auto-Heal",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "52 5 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 720,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.gateway-autoheal-cron-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.gateway-autoheal-cron-daily}",
+        "--what",
+        "OpenClaw Gateway Auto-Heal"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "Workspace Integrity Guard",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "35 5 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 600,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.workspace-integrity-guard-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.workspace-integrity-guard-daily}",
+        "--what",
+        "Workspace Integrity Guard"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "OpenClaw Daily Health Audit",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "5 6 * * 1-6",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 660,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.openclaw-health-audit-cron-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.openclaw-health-audit-cron-daily}",
+        "--what",
+        "OpenClaw Daily Health Audit",
+        "--",
+        "--maintenance"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "OpenClaw Weekly Deep Health Audit",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "5 6 * * 0",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 840,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.openclaw-health-audit-cron-weekly}",
+        "--script",
+        "${operator:scheduler.helper_paths.openclaw-health-audit-cron-weekly}",
+        "--what",
+        "OpenClaw Weekly Deep Health Audit",
+        "--",
+        "--weekly",
+        "--maintenance"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "OpenClaw Storage Headroom Guard",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "45 5 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 420,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.storage-headroom-guard-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.storage-headroom-guard-daily}",
+        "--what",
+        "OpenClaw Storage Headroom Guard",
+        "--",
+        "--apply"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "External-volume Backblaze Backup Follow-Up",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "25 6 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 360,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.backblaze-health-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.backblaze-health-daily}",
+        "--what",
+        "External-volume Backblaze Backup Follow-Up",
+        "--",
+        "--check"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "OpenClaw Daily Storage and Runtime Cleanup",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "35 4 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 3300,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.openclaw-retention-cleanup-cron-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.openclaw-retention-cleanup-cron-daily}",
+        "--what",
+        "OpenClaw Daily Storage and Runtime Cleanup",
+        "--",
+        "--apply",
+        "--human"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  },
+  {
+    "name": "LaunchAgent Integrity Guard",
+    "enabled": false,
+    "agentId": "main",
+    "schedule": {
+      "kind": "cron",
+      "expr": "50 5 * * *",
+      "tz": "${operator:scheduler.timezone}",
+      "staggerMs": 0
+    },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "command",
+      "cwd": "${operator:paths.workspace}",
+      "env": {
+        "OPENCLAW_OPERATOR_CONFIG": "${operator:paths.operator_config}",
+        "OPENCLAW_STATE_DIR": "${operator:paths.state_root}"
+      },
+      "timeoutSeconds": 120,
+      "argv": [
+        "${operator:paths.python_binary}",
+        "${operator:paths.cron_entrypoint}",
+        "--receipt-dir",
+        "${operator:scheduler.receipt_directories.openclaw-launchagent-integrity-guard-daily}",
+        "--script",
+        "${operator:scheduler.helper_paths.openclaw-launchagent-integrity-guard-daily}",
+        "--what",
+        "LaunchAgent Integrity Guard",
+        "--",
+        "--report",
+        "--repair"
+      ]
+    },
+    "delivery": {
+      "mode": "announce",
+      "channel": "${operator:scheduler.delivery_channel}",
+      "to": "${operator:scheduler.delivery_target}"
+    },
+    "wakeMode": "now"
+  }
+]

@@ -1,171 +1,119 @@
 # OpenClaw Control Plane
 
-A reference architecture for turning a local OpenClaw installation into a supervised,
-durable, and auditable agent system.
+A reproducible reference for a customized **OpenClaw 2026.9.3** installation: runtime
+changes, substantial agent instructions, integration routing, release management and
+host operations for a persistent single-operator assistant.
 
-OpenClaw gives you an agent runtime: a gateway, chat channels, tools, sessions, workers,
-skills, plugins, scheduling, and injectable workspace files. It deliberately takes no
-position on approvals, source authority, durability, privacy, or release discipline.
-Those are operator decisions. This repository documents one complete set of answers —
-the contracts, artifacts, and mechanics that turn a capable agent into a system whose
-claims you can check.
+The aim is practical. An operator should be able to ask for useful work in ordinary
+language, leave a task running, return through the same conversation and inspect what
+actually happened. The assistant should know which sources and accounts to use, carry
+unfinished work across context changes and verify the resulting files or provider
+records before saying it is done.
 
-If you have never heard of OpenClaw, start with
-[start here](docs/00-start-here.md). It explains the whole system from first principles
-before any policy concept appears.
+Company Alpha, Company Beta and the Personal Data Project are consistent example
+identities. Their procedures remain substantial; accounts, host paths and data are
+supplied by the adopter.
 
-## System at a glance
+## Three terms, one system
+
+| Term | What it does here |
+|---|---|
+| **Runtime** | Executes model calls, tool calls, tasks, goals, sessions, compaction and channel delivery. |
+| **Harness** | The runtime machinery around a model: preparing context, exposing tools, dispatching work, enforcing limits and handling results. It is a responsibility within this system, not a separate mandatory product. |
+| **Control plane** | Configures and supervises the installation: policy, source and account routing, runtime selection, maintenance, operational state and evidence. Some responsibilities live inside OpenClaw; others are workspace helpers or host services. |
 
 ```mermaid
 flowchart TD
-    O[Operator] --> C[Chat control surface]
-    C --> G[Local gateway]
-    G --> A[Coordinator agent]
-    A --> P[Contract stack]
-    A --> R[Structured registries]
-    A --> M[Layered memory]
-    A --> T[Tools and integrations]
-    A --> W[Isolated durable workers]
-    W --> S[Status artifact and evidence]
-    S --> D[Delivery path]
-    D --> C
-    G --> N[Node service]
-    N --> B[Browser and device capabilities]
-    A --> H[Git source and worktrees]
-    H --> RL[Sealed runtime releases]
+    Operator[Operator in chat or app] --> Gateway[OpenClaw gateway]
+    Gateway --> Runtime[Model and tool harness]
+    Runtime --> Native[Native goals, tasks and session state]
+    Runtime --> Workspace[Policy, memory and capability routing]
+    Workspace --> Sources[Company Alpha, Company Beta and personal sources]
+    Runtime --> Tools[APIs, browser and device tools]
+    Tools --> Effects[Files and provider records]
+    Effects --> Evidence[Readback and acceptance evidence]
+    Evidence --> Gateway
+    Host[Host services and maintenance] --> Gateway
+    Host --> Releases[Sealed releases and runtime selection]
+    Host --> Recovery[Local archives, Backblaze and container recovery]
 ```
 
-The central idea is separation of concerns. Policy does not masquerade as current fact.
-A convenient folder does not become source of truth. A message saying "working" does not
-become durable state. A passing unit test does not become live acceptance. A memory cue
-does not become approval authority.
+Start with [the introduction](docs/00-start-here.md) for the complete request flow.
 
-## What is policy and what needs runtime support
+## What is included
 
-Some behaviours described here are policy: instructions an operator writes, which any
-capable agent can be asked to follow. Others need the runtime itself to enforce them, and
-no amount of Markdown will conjure a feature the installed build does not implement. Several
-of the strongest guarantees in this repository — the acknowledgement barrier, write leases,
-the active-lane index, approval boundaries — fall into the second group.
+- **The complete runtime delta:** 470 changed paths from the official release,
+  including regression tests. The reconstruction helper verifies the patch checksum
+  and resulting Git tree. Production source is unchanged from the reference deployment;
+  two labels in one test fixture are normalized.
+- **The working policy:** detailed AGENTS, SOUL, TOOLS, WRITING, bootstrap and memory
+  templates covering initiative, approval, source authority, tool selection, writing,
+  long work and verification.
+- **Workspace implementation:** capability routing and adapters, release activation,
+  guarded maintenance, backup supervision and supporting contracts and tests.
+- **Configuration and adoption guidance:** model preferences, context behavior,
+  source layout, account setup, operational definitions and acceptance steps.
 
-Read every capability claim with that distinction in mind. A version string does not tell
-you which of these a given build has; only checking does.
+The runtime [manifest](runtime/manifest.json) pins official commit
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, custom lineage
+`81a38d9766169ddade96b44e43fafab78ec5589d`, the public reconstruction tree and Node.js
+24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
 
-Chapters label capability provenance where they make a capability claim:
+## Start using the reference
 
-| Level | Meaning |
-|---|---|
-| **policy-only** | model instructions and operator discipline |
-| **helper-backed** | enforced by local scripts and schemas |
-| **runtime-backed** | implemented by the runtime itself |
-| **live-proven** | a status an operator reaches by verifying a capability against their own installation and keeping dated evidence inside a freshness window; no document can confer it |
+Read the [adoption guide](docs/17-adoption-guide.md) before installing. It separates
+source reconstruction, workspace setup, account connection, host installation and
+actual user-path acceptance. The [runtime package](runtime/README.md) gives the exact
+clone, check, apply and build commands. Installation begins in a separate workspace;
+changing an existing service is a later explicit step.
 
-The first three say where a capability has to be implemented, which is a property of the
-design and therefore transferable. The fourth is about one installation, so it is recorded
-on a status row rather than asserted in a table.
-[Capability provenance](docs/03-capability-provenance.md) carries the full matrix,
-including what an adopter must supply manually where the runtime does not help. Read it
-before assuming any behaviour here is free.
-
-## Reading paths
-
-| You are | Read |
-|---|---|
-| **New to OpenClaw** | [00 start here](docs/00-start-here.md) → [01 glossary](docs/01-glossary.md) → [02 why a control plane](docs/02-why-a-control-plane.md) → [04 system architecture](docs/04-system-architecture.md) |
-| **Adopting the model** | [03 capability provenance](docs/03-capability-provenance.md) → [17 adoption guide](docs/17-adoption-guide.md) → [05 policy](docs/05-policy-and-authority.md) → [06 execution](docs/06-execution-and-durable-lanes.md) → [07 worked example](docs/07-worked-example.md) |
-| **Auditing claims** | [03 capability provenance](docs/03-capability-provenance.md) → [15 evidence and audit](docs/15-evidence-audit-and-verification.md) → [10 releases and promotion](docs/10-runtime-releases-and-promotion.md) → [16 security and trust model](docs/16-security-and-trust-model.md) |
-
-## Documentation map
-
-| # | Chapter | Covers |
-|---|---|---|
-| 00 | [Start here](docs/00-start-here.md) | what OpenClaw is, end to end, for a first-time reader |
-| 01 | [Glossary and conventions](docs/01-glossary.md) | every term the rest of the repository uses |
-| 02 | [Why a control plane](docs/02-why-a-control-plane.md) | the failure catalogue each rule exists to prevent |
-| 03 | [Capability provenance](docs/03-capability-provenance.md) | policy-only vs helper vs runtime vs live-proven |
-| 04 | [System architecture](docs/04-system-architecture.md) | layers, control loops, trust boundaries |
-| 05 | [Policy and authority](docs/05-policy-and-authority.md) | precedence, approval classes, standing directives |
-| 06 | [Execution and durable lanes](docs/06-execution-and-durable-lanes.md) | modes, promotion, leases, checkpoints, resume |
-| 07 | [A worked example](docs/07-worked-example.md) | one request traced through every stage |
-| 08 | [Memory and context](docs/08-memory-and-context.md) | tiers, sensitivity, retrieval, writes, rollover |
-| 09 | [Source layout and artifacts](docs/09-source-layout-and-artifacts.md) | namespaces, worktrees, retention |
-| 10 | [Runtime, releases, and promotion](docs/10-runtime-releases-and-promotion.md) | build, seal, promote, converge, roll back |
-| 11 | [Integrations and capability routing](docs/11-integrations-and-capability-routing.md) | routes, probes, readback, fallbacks |
-| 12 | [Scheduling and background work](docs/12-scheduling-and-background-work.md) | two scheduler layers and their reconciliation |
-| 13 | [Delivery and the control surface](docs/13-delivery-and-control-surface.md) | acknowledgement, receipts, queue, relay |
-| 14 | [Guards, health, and restoration](docs/14-guards-health-and-restoration.md) | guard pattern, health classes, containment |
-| 15 | [Evidence, audit, and verification](docs/15-evidence-audit-and-verification.md) | event log, audit hook, contract tests |
-| 16 | [Security and trust model](docs/16-security-and-trust-model.md) | injection boundary, secrets, sandboxing, blast radius |
-| 17 | [Adoption guide](docs/17-adoption-guide.md) | levels 0-4, minimum file set, sizing |
-| 18 | [Architecture evolution](docs/18-architecture-evolution.md) | how the model got here, and what is still moving |
-
-Reusable starting points live in [`templates/`](templates/), machine-readable examples in
-[`examples/`](examples/), their contracts in [`schemas/`](schemas/), and standalone Mermaid
-sources in [`diagrams/`](diagrams/).
-
-## Repository layout
-
-```text
-.
-├── diagrams/       # Mermaid sources for the system schematics
-├── docs/           # the architecture and operating guide
-├── examples/       # example registries, status records, and receipts
-├── schemas/        # machine-readable contracts for the examples
-├── scripts/        # repository checks
-├── templates/      # compact policy stack for adaptation
-└── tests/          # structural tests
-```
-
-The patterns here are written to transfer: they assume no particular chat platform, operating
-system, or hosting provider.
-
-## Quick start
-
-1. Read [start here](docs/00-start-here.md) and [why a control plane](docs/02-why-a-control-plane.md).
-2. Read [capability provenance](docs/03-capability-provenance.md) so you know what your
-   runtime gives you and what you must supply.
-3. Begin at Level 0 in the [adoption guide](docs/17-adoption-guide.md). Do not start by
-   copying the whole stack.
-4. Copy `templates/*.example.md` into your own workspace and replace every angle-bracket
-   placeholder locally.
-5. Define your trust model and approval classes *before* enabling any write tool.
-6. Add only the integration routes you can probe and verify.
-7. Run the repository checks:
+Repository checks use Python's standard library:
 
 ```bash
 python3 scripts/validate_repo.py
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-## Design principles
+These checks establish repository consistency. Runtime tests, fixture tests for host
+helpers and adoption acceptance are separate evidence.
 
-1. **Authority is explicit.** Each reusable concept has exactly one owner.
-2. **Facts are probed.** Generated summaries never override structured state or live evidence.
-3. **Side effects are classified.** Approval depends on the operation, not on a keyword.
-4. **Long work is durable.** Identity, ownership, checkpoints, and a delivery path exist
-   before deep work begins.
-5. **Source stays singular.** Worktrees, mirrors, artifacts, backups, and runtime releases
-   have distinct roles.
-6. **Live acceptance is earned.** Persisted state, loaded definitions, running processes,
-   and observable behaviour must all agree.
-7. **Memory is layered.** Sensitivity is a per-file attribute, not a per-tier assumption.
-8. **Claims match evidence.** Completion is tied to an acceptance predicate, and the
-   provenance of every capability is stated rather than implied.
+## Reading guide
 
-## Limitations
+| Chapter | Purpose |
+|---|---|
+| [00 Start here](docs/00-start-here.md) | Follow an ordinary request through the system. |
+| [01 Glossary](docs/01-glossary.md) | Understand the terminology. |
+| [02 Why a control plane](docs/02-why-a-control-plane.md) | See the failures each design choice addresses. |
+| [03 Capability provenance](docs/03-capability-provenance.md) | Separate instructions, code and live proof. |
+| [04 System architecture](docs/04-system-architecture.md) | Understand ownership between layers. |
+| [05 Policy and authority](docs/05-policy-and-authority.md) | Read the instruction hierarchy. |
+| [06 Execution and durable lanes](docs/06-execution-and-durable-lanes.md) | Follow native tasks, goals, yields and continuation. |
+| [07 Worked example](docs/07-worked-example.md) | Trace a calendar request through source retrieval and readback. |
+| [08 Memory and context](docs/08-memory-and-context.md) | Understand retrieval, bootstrap budgets and compaction. |
+| [09 Source layout and artifacts](docs/09-source-layout-and-artifacts.md) | Keep source, working data, runtime state and recovery distinct. |
+| [10 Runtime releases and promotion](docs/10-runtime-releases-and-promotion.md) | Build, seal, activate and recover a release. |
+| [11 Integrations and capability routing](docs/11-integrations-and-capability-routing.md) | Verify routes for the intended account and operation. |
+| [12 Scheduling and background work](docs/12-scheduling-and-background-work.md) | Understand native cron and host scheduler ownership. |
+| [13 Delivery and the control surface](docs/13-delivery-and-control-surface.md) | Separate task completion from visible delivery. |
+| [14 Guards, health and restoration](docs/14-guards-health-and-restoration.md) | Interpret health, containment and recovery evidence. |
+| [15 Evidence, audit and verification](docs/15-evidence-audit-and-verification.md) | Match each claim to its actual proof. |
+| [16 Security and trust model](docs/16-security-and-trust-model.md) | Define credentials, audience and tool boundaries. |
+| [17 Adoption guide](docs/17-adoption-guide.md) | Reconstruct and qualify an installation. |
+| [18 Architecture evolution](docs/18-architecture-evolution.md) | Understand the direction and tradeoffs. |
+| [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, Backblaze, Docker/OrbStack and adjacent software. |
+| [20 Runtime source changes](docs/20-runtime-source-changes.md) | Inspect the complete patch and source map. |
 
-- This is **not** a multi-tenant security boundary. It assumes one trusted operator on one
-  host. Granting access to additional operators requires a redesign, not a configuration
-  change. See [security and trust model](docs/16-security-and-trust-model.md).
-- Templates cannot create runtime features your installed build does not implement. Where
-  the runtime does not enforce a guarantee, manual discipline has to stand in for it, and
-  the result is weaker. [Capability provenance](docs/03-capability-provenance.md) says which
-  guarantees those are.
-- The examples are intentionally incomplete. Treat them as schemas and patterns, not as
-  production defaults.
-- Operational cost is real: immutable releases accumulate, scheduler histories accumulate,
-  and always-loaded contracts consume context budget on every turn.
+## Scope and evidence
 
-## License
+The reference favors one trusted operator and a macOS host. Core runtime and routing
+mechanisms are reusable elsewhere; launchd, Apple applications, native permissions and
+Backblaze procedures require platform-specific adaptation.
 
-MIT. See [LICENSE](LICENSE).
+Policy guides the model. Helpers enforce their own checked operations. Runtime code
+implements task and session mechanics. **Live-proven** means an adopter has verified
+that behavior on their own installation; importing this repository does not confer
+that status. A successful build does not prove account refresh, background device
+delivery or a recoverable backup.
+
+MIT licensed. See [LICENSE](LICENSE) and the runtime's
+[third-party notices](runtime/THIRD_PARTY_NOTICES.md).

@@ -1,0 +1,89 @@
+{
+  "schema_version": "openclaw.company_alpha_docs_mcp.policy.v1",
+  "route_id": "company-alpha-docs-mcp-readonly",
+  "route_state": "source_ready_live_inactive",
+  "endpoint": "${operator:services.company_alpha_docs.endpoint}",
+  "transport": "streamable-http",
+  "protocol_version": "2025-06-18",
+  "server_identity": {
+    "name": "${operator:services.company_alpha_docs.server_name}",
+    "version": "${operator:services.company_alpha_docs.server_version}"
+  },
+  "remote_tool_schema": {
+    "digest_algorithm": "sha256",
+    "canonical_projection": [
+      "name",
+      "inputSchema",
+      "annotations",
+      "execution"
+    ],
+    "digest": "${operator:services.company_alpha_docs.tool_schema_sha256}",
+    "refresh_requires_explicit_source_change": true
+  },
+  "remote_tools": {
+    "search": "${operator:services.company_alpha_docs.search}",
+    "read": "${operator:services.company_alpha_docs.read}",
+    "expected_inventory": "${operator:services.company_alpha_docs.expected_inventory}",
+    "blocked_inventory": "${operator:services.company_alpha_docs.blocked_inventory}"
+  },
+  "local_tools": [
+    {
+      "name": "docs_search",
+      "remote_mapping": "search"
+    },
+    {
+      "name": "docs_read",
+      "remote_mapping": "read"
+    }
+  ],
+  "egress": {
+    "class": "public_only",
+    "raw_query_logging": false,
+    "allow_surrounding_context": false,
+    "allow_environment": false,
+    "allow_credentials": false,
+    "allow_local_paths": false
+  },
+  "limits": {
+    "connect_timeout_seconds": 5.0,
+    "tool_timeout_seconds": 20.0,
+    "retry_count": 1,
+    "max_query_chars": 240,
+    "max_paths": 5,
+    "max_path_chars": 512,
+    "max_output_bytes": 30720,
+    "default_read_lines": 200,
+    "max_read_lines": 500,
+    "max_fallback_age_seconds": 604800
+  },
+  "fallback": {
+    "canonical_origin": "${operator:services.company_alpha_docs.origin}",
+    "search_index_path": "/llms.txt",
+    "page_suffix": ".md",
+    "project_data_project_id": "company-alpha",
+    "project_data_relative_root": "docs-mcp",
+    "receipt_directory": "receipts",
+    "snapshot_directory": "lkg"
+  },
+  "client_generation": {
+    "default_scope": "project",
+    "server_name": "company-alpha-docs-readonly",
+    "python_command": "python3",
+    "adapter_relative_path": "scripts/company_alpha_docs_mcp_adapter.py",
+    "manifest_relative_path": "config/company_alpha_docs_mcp.json",
+    "supported_clients": [
+      "openclaw",
+      "acpx",
+      "codex",
+      "claude-code",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "activation": {
+    "live_config_authorized": false,
+    "phase_5_project_client_pilot_authorized": false,
+    "phase_6_openclaw_acpx_authorized": false,
+    "disable_by_removing_single_generated_server_entry": true
+  }
+}

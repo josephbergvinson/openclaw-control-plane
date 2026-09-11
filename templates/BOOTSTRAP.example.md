@@ -1,82 +1,35 @@
-# Load policy and sensitivity manifest template
+# BOOTSTRAP.md — Load-policy reference
 
-Copy to `<workspace-root>/BOOTSTRAP.md`. This file declares, for every contract and deep memory file, what role it
-plays, whether it should load by default, how sensitive it is, and which file owns its subject.
+This file describes intended use and sensitivity. It is not a loader configuration and creates no behavioral authority. `AGENTS.md` owns behavior. The actual runtime filename list, session classification, privacy filter and context budgets determine what reaches a model turn.
 
-## What this file is, and is not
+## Files and roles
 
-**It is documentation and a lint target.** It is not the loader. Unless the runtime is modified to read it, changing
-a row here changes an intention, not what reaches the model. Two consequences follow, and both should be stated
-plainly rather than papered over.
+| File | Role | How it reaches the agent in the pinned reference |
+|---|---|---|
+| `AGENTS.md` | Sole behavioral authority | Recognized bootstrap file; retained by the native subagent and cron filters |
+| `SOUL.md` | Voice and presentation | Recognized; not in the native `subagent:` allowlist |
+| `USER.md` | Durable working preferences | Recognized when present; not in the native `subagent:` allowlist |
+| `IDENTITY.md` | Concise assistant identity | Recognized; not in the native `subagent:` allowlist |
+| `MEMORY.md` | Compact cues and pointers | Recognized when present; root memory is removed for native subagents, cron, groups and channels |
+| `BOOTSTRAP.md` | Setup/load reference | Recognized, subject to setup and continuation handling; absent from cron/subagent allowlists |
+| `TOOLS.md` | Deliberate-read mechanics | Not in the recognized bootstrap filename list; read the relevant sections when AGENTS routes there |
+| `WRITING.md` | Long-form style child of SOUL | Not in the recognized list; deliberately read for applicable prose |
+| `WORKER.md` | Legacy generated reference, if retained | Not recognized; does not replace AGENTS in a worker |
+| `policy_manifest.json`, `policy_bootstrap_manifest.json` | Advisory metadata | Not runtime loader inputs |
+| `capabilities.md`, `INDEX.md`, `HEARTBEAT.md` | Optional derived/reference files | Not recognized by the standard workspace bootstrap list; use only an explicitly configured reader |
 
-1. **Declared tiers and injected reality can diverge.** The runtime injects a fixed, hard-coded set of filenames
-   resolved against the workspace root. Adding a file to the workspace does not add it to the prompt, and marking a
-   file `conditional` here does not remove it from the prompt if it is in that fixed set. Where the table and the
-   runtime disagree, the runtime is what happens; record the divergence in the notes column.
-2. **Live enforcement comes from character budgets, not from this table.** The binding constraint is the runtime's
-   per-file and total bootstrap character budget. A file over the per-file budget is not dropped: it is truncated
-   head and tail with a visible marker naming the file and the kept-versus-original size. Check contract sizes
-   against the live runtime configuration, never against numbers written here, because a static copy goes stale the
-   first time the configuration changes.
+The pinned source implements these rules in `src/agents/workspace.ts`, particularly `WORKSPACE_BOOTSTRAP_FILENAMES` and `filterBootstrapFilesForSession`. A visible dashboard worker is not automatically a native `subagent:` session: its session and chat classification determine filtering. Do not infer injected contents from a UI label or a manifest role name.
 
-This file is itself **non-normative**. It never promotes a lower-precedence or non-normative file into live
-authority: being loaded early is not the same as being authoritative.
+## Privacy and context size
 
-## Tiers
+Loading and retrieval are different disclosure surfaces. A file omitted from default context may still be reachable through a tool. Source/account/audience boundaries continue to apply to deliberate reads. Keep detailed confidential records outside the default profile; a pointer can itself reveal information.
 
-| Tier | Meaning |
-|---|---|
-| `always` | Broadly useful and low-risk enough to sit in every eligible session |
-| `conditional` | Load only when the task needs that surface |
-| `never` | Not default-loaded; read deliberately, for history or compatibility |
+Rate each file's actual content, not its filename. The template MEMORY file contains synthetic operating cues; a real installation's MEMORY may be sensitive and must follow the runtime's private-session boundary. Do not copy a live private profile into shared or scheduled prompts.
 
-## Sensitivity
+Context budgets apply after selection. Long policies may be truncated; a file being eligible does not prove every rule was injected. Keep reusable rules single-owned and load detailed mechanics on demand. Check the actual compiled context for isolated behavioral acceptance rather than raising limits to retain duplication.
 
-Rate `low`, `medium`, or `high` per file, judged on content, not on tier. Tier says *when* a file loads; sensitivity
-says *what is in it*. They are independent axes, and the reverse inference — "it is always-loaded, so it must be low"
-— is exactly the mistake this rating exists to prevent.
+## Refresh and startup conduct
 
-Two disciplines follow. Keep higher-sensitivity context out of the default profile whenever a conditional source
-would do, so the `always` plus `high` cell stays empty by intent rather than by luck. And review the whole
-always-loaded set periodically as a single disclosure surface, since a pointer can disclose as much as its target.
+Bootstrap contents refresh before the next turn. An edit does not rewrite an in-flight turn. Use a fresh session when accepting a changed behavior in isolation. A successful load stays private: answer the request rather than announcing policy files or readiness.
 
-Sensitivity gates injection only. A conditional file is still indexed and still one query away, so the default-load
-surface and the retrieval surface are reasoned about separately.
-
-## Contract registry
-
-| File | Role | Tier | Sensitivity | Owner of subject |
-|---|---|---|---|---|
-| `AGENTS.md` | normative behaviour | always | low | itself |
-| `TOOLS.md` | normative mechanics | always | low | itself |
-| `SOUL.md` | style | always | low | itself |
-| `WRITING.md` | style child, long-form prose only | conditional | low | `SOUL.md` |
-| `USER.md` | preference | always | medium | itself |
-| `MEMORY.md` | memory pointers | always | medium | itself |
-| `IDENTITY.md` | identity and defaults | always | low | itself |
-| `HEARTBEAT.md` | liveness view, generated | conditional | low | the status layer |
-| `BOOTSTRAP.md` | load policy | conditional | low | itself |
-| `policy-manifest.json` | manifest of authoritative layers | never | low | itself |
-| `capabilities.md` | generated capability view | conditional | low | the registry and status layers |
-| `POLICY_CHANGELOG.md` | history | never | low | itself |
-| `runbook/<legacy-doc>.md` | legacy compatibility shim | never | low | the structured layers |
-| `memory/<topic>.md` | deeper context, per topic | conditional | rate per file | itself |
-
-Keep this table and `policy-manifest.json` in agreement. A structural check may assert that every row here has a
-counterpart there and that the roles match; that check verifies agreement between two declarations and proves
-nothing about what the runtime loads.
-
-## Bootstrap conduct
-
-- Successful loading is internal. Do not report the contract stack, the loaded context, or a no-blocker status in a
-  visible reply unless asked or unless a real blocker exists.
-- A missing contract file is recorded as missing and the run continues. A missing *normative* contract is a blocker
-  and is reported before any mutation.
-- Delegated and scheduled sessions receive a reduced set — in the reference runtime the two normative contracts plus
-  style, identity, and preferences, dropping the liveness view, this file, and the memory pointer layer. A
-  lightweight heartbeat run may receive the liveness view alone, and a lightweight scheduled run may receive nothing
-  at all. Write jobs so they do not depend on a file they will not get, and put any rule a delegated session must
-  obey inside a contract that session actually receives.
-
-Background: [memory and context](../docs/08-memory-and-context.md) and
-[policy and authority](../docs/05-policy-and-authority.md).
+If a required instruction or route cannot be verified, state the concrete limitation and preserve completed work. Neither this document nor its companion manifest may invent an approval or claim that a missing runtime feature is enabled.

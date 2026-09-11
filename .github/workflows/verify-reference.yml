@@ -1,0 +1,53 @@
+name: Verify reference
+
+on:
+  push:
+    branches: [main, "docs/current-build-reference-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check documentation and examples
+        run: python3 -B scripts/validate_repo.py
+      - name: Test reconstruction and workspace installers
+        run: python3 -B -m unittest discover -s tests -p 'test_*.py'
+      - name: Check patch whitespace
+        run: git diff --check HEAD^ HEAD
+
+  reconstruct-and-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.16.0
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@12.3.4
+      - name: Reconstruct the pinned source in a separate checkout
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
+        run: |
+          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
+          git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
+      - name: Install frozen runtime dependencies
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: pnpm install --frozen-lockfile
+      - name: Run native changed-source checks
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: node scripts/check-changed.mjs --base 1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7 --head HEAD
+      - name: Build the reconstructed runtime
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: pnpm build

@@ -1,0 +1,744 @@
+{
+  "probes": [
+    {
+      "probe_id": "google-workspace-personal-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact personal_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-workspace-personal-gog",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service; verify the requested service and target directly before reliance, and retain existing exact mutation/readback gates."
+    },
+    {
+      "probe_id": "google-search-console-personal-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/google_search_console_probe.py",
+          "--account",
+          "${operator:identifiers.accounts.personal_google}",
+          "--receipt-path",
+          "artifacts/CapabilityReceipts/google-search-console-personal.json",
+          "--json"
+        ]
+      },
+      "expected_signal": "owner-private mode-0600 gog environment is bound to personal_google@example.invalid, Search Console sites.list succeeds, and at least one discovered Domain or URL-prefix property has siteOwner or siteFullUser permission without exposing secret values; callers may add --property-domain for current-request exact-site matching",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-search-console-personal-gog",
+      "notes": "Secret-safe read-only exact-account route probe using only the fixed /operator/installation binary and canonical owner-private /operator/installation. A 403 insufficientPermissions is classified as oauth_scope_missing. Its sanitized owner-private receipt is audit-only: it grants no authority, proves no task completion, and cannot expose or verify the Page Indexing example table."
+    },
+    {
+      "probe_id": "google-workspace-company-alpha-coordinator-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact company_alpha_coordinator_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-workspace-company-alpha-coordinator-gog",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service; verify the requested service and target directly before reliance, and never substitute the personal or Operator CompanyAlpha identity."
+    },
+    {
+      "probe_id": "google-workspace-company-alpha-operator-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact company_alpha_operator_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-workspace-company-alpha-operator-gog",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service; verify the requested service and target directly before reliance, and never substitute Coordinator or personal identity."
+    },
+    {
+      "probe_id": "google-workspace-operations-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact operations_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-workspace-operations-gog",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service; verify the requested service and target directly before reliance, and never substitute a personal, CompanyAlpha, or company_beta identity."
+    },
+    {
+      "probe_id": "gmail-personal-gog-account-probe",
+      "command": {
+        "$operator_argv": [
+          "gog",
+          "auth",
+          "list",
+          "--json",
+          "or",
+          "gog",
+          "auth",
+          "status",
+          "--json,",
+          "then",
+          "harmless",
+          "Gmail",
+          "read",
+          "with",
+          "--account",
+          "${operator:identifiers.accounts.personal_google}",
+          "when",
+          "supported"
+        ]
+      },
+      "expected_signal": "authenticated account is personal_google@example.invalid and Gmail read works without printing token values",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "google-gmail-personal-gog",
+      "notes": "Read-only Gmail route probe; account identity is required evidence, not just generic Gmail readiness."
+    },
+    {
+      "probe_id": "gmail-company-alpha-coordinator-route-probe",
+      "command": "Manual account inspection; no executable exact probe is registered for this procedure.",
+      "expected_signal": "selected route is authenticated or browser-accessible as company_alpha_coordinator_google@example.invalid; otherwise blocked_requested_gmail_route_unverified",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "google-gmail-company-alpha-coordinator",
+      "notes": "Inspect the exact configured coordinator account in the provider CLI. Follow the registered fallback and account-isolation rules if the account is absent. This manual procedure is not an executable probe receipt."
+    },
+    {
+      "probe_id": "notion-personal-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/notion_capability_probe.py",
+          "--route",
+          "personal"
+        ]
+      },
+      "expected_signal": "route ready",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "notion-personal",
+      "notes": "personal notion route probe"
+    },
+    {
+      "probe_id": "notion-company-alpha-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/notion_capability_probe.py",
+          "--route",
+          "company-alpha"
+        ]
+      },
+      "expected_signal": "route ready",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "notion-company-alpha",
+      "notes": "company_alpha notion route probe"
+    },
+    {
+      "probe_id": "cloudflare-operator-readonly-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/cloudflare_capability_probe.py"
+        ]
+      },
+      "expected_signal": "Exact account operator-owned-value, active full zone operator-owned-value, and GitHub-backed Pages project operator-owned-value are readable without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "cloudflare-operator-readonly-api",
+      "notes": "Read-only provider API probe through the existing helper. It proves the exact personal Cloudflare account, zone, and Pages project/source/production branch. Provider-native Wrangler owns the separately declared preview deployment operation; this probe grants no mutation or production authority."
+    },
+    {
+      "probe_id": "personal-data-neon-postgres-readonly-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/personal_data_neon_readonly_capability_probe.py",
+          "--json"
+        ]
+      },
+      "expected_signal": "status ready with mode-0700/0600 physical custody, attestation identity binding, GET-only Neon auth/project/endpoint identity, and an exact project/branch/endpoint/database/role/TLS Postgres identity read performed with transaction_read_only true; no DSN or secret values emitted",
+      "safe_lane": "local-read-network-read-database-read",
+      "default_ttl": 3600000,
+      "scope": "personal-data-neon-postgres-readonly",
+      "notes": "Read-only exact-target PersonalDataProject Neon/Postgres route probe. The helper accepts no credential or DSN arguments and exposes no mutation method or SQL surface. Writes, migrations, DDL, write-DML, provider changes, and credential changes remain unsupported."
+    },
+    {
+      "probe_id": "policy-drift-probe",
+      "command": {
+        "$operator_argv": [
+          "bash",
+          "scripts/policy_drift_check.sh"
+        ]
+      },
+      "expected_signal": "PASS: policy_drift_check",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "control-plane",
+      "notes": "Control-plane authority drift probe"
+    },
+    {
+      "probe_id": "workspace-validate-probe",
+      "command": {
+        "$operator_argv": [
+          "bash",
+          "scripts/openclaw_workspace_validate.sh"
+        ]
+      },
+      "expected_signal": "safe/passive workspace validation pass",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "control-plane",
+      "notes": "safe/passive control-plane workspace validation entrypoint; excludes finance/Plaid/RBC/browser/manual-workflow checks"
+    },
+    {
+      "probe_id": "jira-company-alpha-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.python_binary}",
+          "-E",
+          "-s",
+          "scripts/jira_company_alpha_capability_probe.py"
+        ]
+      },
+      "expected_signal": "ok true only when the canonical owner-private credential file authenticates the exact registered Jira provider account and ALPHA / QA Feedback metadata exposes Summary, Description, Reporter, Platform, Tester Name, and Labels",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "jira-company-alpha",
+      "notes": "Read-only exact-account CompanyAlpha Jira API route probe. It accepts no credential override, hashes the /myself accountId only for comparison with the registered digest, emits no accountId, credential, email, or token, and performs no provider mutation."
+    },
+    {
+      "probe_id": "digitalocean-doctl-account-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.doctl_binary}",
+          "account",
+          "get"
+        ]
+      },
+      "expected_signal": "account status active and email verified true for personal_google@example.invalid",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "digitalocean-openclaw-doctl",
+      "notes": "Read-only DigitalOcean account probe; do not expose token or account UUID; doctl on this host does not support apps create-deployment --update-sources, use --force-rebuild --wait for forced deploys when the authenticated instruction names or plainly implies them"
+    },
+    {
+      "probe_id": "local-whisper-audio-transcription-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/local_whisper_capability_probe.py"
+        ]
+      },
+      "expected_signal": "ok true with wrapper, whisper-cli, model, and tools.media.audio.models config present",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "openclaw-audio-transcription",
+      "notes": "Read-only local Whisper.cpp audio transcription probe; optional --audio path performs end-to-end transcription proof. Uses user-local wrapper and model, not provider billing."
+    },
+    {
+      "probe_id": "x-api-operator-x-xurl-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.routing_xurl}",
+          "whoami"
+        ]
+      },
+      "expected_signal": "authenticated X API user context returns username operator-x without printing token values",
+      "safe_lane": "local-read-costed-api-read",
+      "default_ttl": 86400000,
+      "scope": "x-api-operator-x-xurl",
+      "notes": "Read-only X API route probe; consumes a small X API user-read credit. Use `xurl auth status` for no-cost local auth inventory when live read proof is not required."
+    },
+    {
+      "probe_id": "birdclaw-x-research-readonly-probe",
+      "command": "~/.openclaw/bin/birdclaw-research auth status --json && ~/.openclaw/bin/birdclaw-research db stats --json",
+      "expected_signal": "Birdclaw reports availableTransport xurl and isolated DB under ~/.openclaw/birdclaw-research; no live writes enabled",
+      "safe_lane": "local-read",
+      "default_ttl": 86400000,
+      "scope": "birdclaw-x-research-readonly",
+      "notes": "Local Birdclaw readiness probe. For live data proof, run a bounded read-only xurl search or Birdclaw sync with explicit max limits and cost accounting."
+    },
+    {
+      "probe_id": "company-alpha-local-dev-probe",
+      "command": "~/Projects/CompanyAlpha/bin/company-alpha-local status && docker --version && docker compose version && stat -f \"%OLp %N\" ~/Projects/CompanyAlpha/company-alpha-server/.env",
+      "expected_signal": "Read-only status returns coordinator/service state; Docker and Compose versions are available; secret-bearing local metadata path exists with mode 600 without printing secret values. `up` is not a probe; `smoke` is post-start verification only.",
+      "safe_lane": "local-read",
+      "default_ttl": 3600000,
+      "scope": "company-alpha-local-dev-docker",
+      "notes": "Read-only local Docker developer-stack probe. Does not start containers, reset/prune Docker state, load signing credentials, run bots, place orders, sign transactions, or move funds."
+    },
+    {
+      "probe_id": "company-alpha-gigabrain-metabase-api-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.python_binary}",
+          "-E",
+          "-s",
+          "scripts/company_alpha_gigabrain_capability_probe.py",
+          "--json"
+        ]
+      },
+      "expected_signal": "schema openclaw.company-alpha-gigabrain-metabase-probe.v1; exact expected origin; configured identity matches provider-native current user and registered identity digest; auth ok; secrets redacted; external mutation false",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "company-alpha-gigabrain-metabase-api",
+      "notes": "Checked-in read-only exact-identity probe for the CompanyAlpha Gigabrain/Metabase API route. It creates an in-memory Metabase session, compares full identities internally, and emits only the stable registered digest; it never prints an email, endpoint credential, session token, or backend MySQL credential."
+    },
+    {
+      "probe_id": "company-alpha-docs-mcp-readonly-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/company_alpha_docs_mcp_adapter.py",
+          "--manifest",
+          "config/company_alpha_docs_mcp.json",
+          "--probe"
+        ]
+      },
+      "expected_signal": "ok true; route id company-alpha-docs-mcp-readonly; exactly docs_search/docs_read; pinned remote schema digest; mutation_attempt_count 0",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "company-alpha-docs-mcp-readonly",
+      "notes": "Read-only identity/schema probe. It performs initialize, notifications/initialized, and tools/list only; it performs no local writes and never calls a remote tool, installs dependencies, writes client config, reads prompts/resources, or invokes submit_feedback."
+    },
+    {
+      "probe_id": "openclaw-hedera-mainnet-test-signer-probe",
+      "command": {
+        "$operator_argv": [
+          "node",
+          "scripts/hedera_mainnet_test_signer_probe.mjs",
+          "--json"
+        ]
+      },
+      "expected_signal": "ok true for Hedera mainnet account operator-owned-value, ED25519 public-key match true, owner openclaw, mode 0600, and public-only balance/timestamp evidence without private-key output",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "openclaw-hedera-mainnet-test-signer",
+      "notes": "Secret-safe read-only readiness probe. It reads the private key only inside the process, emits public identity/fingerprints only, performs no signature or transaction, and does not authorize use."
+    },
+    {
+      "probe_id": "openclaw-hedera-testnet-test-signer-probe",
+      "command": {
+        "$operator_argv": [
+          "node",
+          "scripts/hedera_testnet_test_signer_probe.mjs",
+          "--json"
+        ]
+      },
+      "expected_signal": "ok true for Hedera testnet account operator-owned-value, ECDSA_SECP256K1 public-key and EVM-alias matches true, owner openclaw, mode 0600, and public-only balance/timestamp evidence without private-key output",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "openclaw-hedera-testnet-test-signer",
+      "notes": "Secret-safe read-only readiness probe. It reads the private key only inside the process, emits public identity/fingerprints only, performs no signature or transaction, and does not authorize use."
+    },
+    {
+      "probe_id": "google-workspace-company-beta-admin-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact company_beta_admin_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "google-workspace-company-beta-admin",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service, Google Admin Console access, or an authenticated browser; Admin Console and directory surfaces remain UI-only, the browser-password handle remains unprovisioned, and no other identity is substitute evidence."
+    },
+    {
+      "probe_id": "google-workspace-company-beta-operator-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact company_beta_operator_google@example.invalid OAuth entry is present and valid without printing token values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-workspace-company-beta-operator",
+      "notes": "Exact-account OAuth identity probe only. It does not prove current readiness for every registered GOG service or an authenticated browser; verify the requested service and target directly, and keep the generic workspace browser surface independently authenticated."
+    },
+    {
+      "probe_id": "gmail-company-alpha-operator-route-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--check",
+          "--json"
+        ]
+      },
+      "expected_signal": "the provider-native OAuth credential for company_alpha_operator_google@example.invalid is present and valid; this identity proof does not establish Gmail service readiness, browser authentication, or mutation acceptance, and neither Coordinator nor personal identity is substitute evidence",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 86400000,
+      "scope": "google-gmail-company-alpha-operator",
+      "notes": "Exact-account OAuth identity probe only. Current Gmail service access, browser authentication, and any draft or send mutation require their own operation evidence; a ready company_alpha_coordinator_google@example.invalid or personal lane is never valid evidence for this route."
+    },
+    {
+      "probe_id": "google-forms-personal-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact personal_google@example.invalid account is present and its declared services include forms without printing token values; this does not verify a browser session or form-response submission",
+      "safe_lane": "local-read",
+      "default_ttl": 3600000,
+      "scope": "google-forms-personal-gog",
+      "notes": "Exact-account local credential-inventory probe for the Google Forms route. The installed gog CLI has no response-submit command, so this probe cannot authorize or certify a submission."
+    },
+    {
+      "probe_id": "google-forms-company-alpha-coordinator-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "auth",
+          "list",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact company_alpha_coordinator_google@example.invalid account is present and its declared services include forms without printing token values; the personal account is not substitute evidence",
+      "safe_lane": "local-read",
+      "default_ttl": 3600000,
+      "scope": "google-forms-company-alpha-coordinator-gog",
+      "notes": "Exact-account local credential-inventory probe for the CompanyAlpha Google Forms route. Browser identity still requires current runtime observation before response submission."
+    },
+    {
+      "probe_id": "google-calendar-personal-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "calendar",
+          "calendars",
+          "--account",
+          "${operator:identifiers.accounts.personal_google}",
+          "--json",
+          "--max",
+          "250",
+          "--all",
+          "--no-input"
+        ]
+      },
+      "expected_signal": "exactly one primary calendar has id personal_google@example.invalid and accessRole owner or writer; this read probe does not itself prove a later event write completed",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "google-calendar-personal-gog",
+      "notes": "Exact-account, service-specific Google Calendar readiness probe. Run before event writes while the status row remains degraded; event completion requires returned event identity and same-account readback."
+    },
+    {
+      "probe_id": "google-calendar-company-alpha-coordinator-gog-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.gog_binary}",
+          "calendar",
+          "calendars",
+          "--account",
+          "${operator:identifiers.accounts.company_alpha_coordinator_google}",
+          "--json",
+          "--max",
+          "250",
+          "--all",
+          "--no-input"
+        ]
+      },
+      "expected_signal": "exactly one primary calendar has id company_alpha_coordinator_google@example.invalid and accessRole owner or writer; the personal account is not substitute evidence",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "google-calendar-company-alpha-coordinator-gog",
+      "notes": "Exact-account, service-specific Google Calendar readiness probe. Run before event writes; event completion requires returned event identity and same-account readback."
+    },
+    {
+      "probe_id": "apple-calendar-local-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.python_binary}",
+          "-E",
+          "-s",
+          "scripts/apple_calendar_probe.py"
+        ]
+      },
+      "expected_signal": "overall ready with at least one live Calendar.app calendar and readable event counts; event writes still require target-calendar selection and same-operation UID readback",
+      "safe_lane": "host-os-ui-read",
+      "default_ttl": 3600000,
+      "scope": "apple-calendar-local",
+      "notes": "Read-only Apple Calendar access probe. The registered event-create helper is scripts/apple_calendar_create_event.py; do not run the reversible write probe merely to resolve a route."
+    },
+    {
+      "probe_id": "openclaw-browser-chrome-session-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "browser",
+          "--browser-profile",
+          "chrome",
+          "status",
+          "--json"
+        ]
+      },
+      "expected_signal": "the stock extension transport reports an attached ordinary Chrome session through profile=chrome without a Chrome-MCP consent prompt; status alone does not prove a provider operation completed",
+      "safe_lane": "local-read",
+      "default_ttl": 300000,
+      "scope": "openclaw-browser-chrome-session",
+      "notes": "Read-only readiness probe for the automatic existing signed-in Chrome/tab fallback. Managed profile=openclaw remains the autonomous default, and provider completion still requires runtime-observed evidence."
+    },
+    {
+      "probe_id": "company-alpha-walletconnect-testnet-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.node_binary}",
+          "scripts/company_alpha_walletconnect_agent.mjs",
+          "--probe",
+          "--json"
+        ]
+      },
+      "expected_signal": "schema openclaw.company_alpha_walletconnect_agent_probe.v1 reports testnet and mainnet support, CompanyAlpha-domain origin policy, site-generated WalletConnect request passthrough, both transaction and message signing, one multi-request session, process-bound key loading, no router/asset/amount/calldata policy, no unknown-submission retry, production-adapter dependencies, and all zero-effect fields false with execution_attempts 0",
+      "safe_lane": "local-read",
+      "default_ttl": 3600000,
+      "scope": "company-alpha-walletconnect-testnet",
+      "notes": "Zero-effect source and dependency readiness probe for the browser-driven WalletConnect agent selected to the registered testnet account. It does not read the private key, connect the relay, pair a session, capture a request, sign, submit, query settlement, or move funds. Mutation readiness requires a separate live transaction and settlement receipt."
+    },
+    {
+      "probe_id": "company-alpha-walletconnect-mainnet-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.node_binary}",
+          "scripts/company_alpha_walletconnect_agent.mjs",
+          "--probe",
+          "--json"
+        ]
+      },
+      "expected_signal": "schema openclaw.company_alpha_walletconnect_agent_probe.v1 reports testnet and mainnet support, CompanyAlpha-domain origin policy, site-generated WalletConnect request passthrough, both transaction and message signing, one multi-request session, process-bound key loading, no router/asset/amount/calldata policy, no unknown-submission retry, production-adapter dependencies, and all zero-effect fields false with execution_attempts 0",
+      "safe_lane": "local-read",
+      "default_ttl": 3600000,
+      "scope": "company-alpha-walletconnect-mainnet",
+      "notes": "Zero-effect source and dependency readiness probe for the browser-driven WalletConnect agent selected to the registered mainnet account. It does not read the private key, connect the relay, pair a session, capture a request, sign, submit, query settlement, or move funds. Mutation readiness requires a separate live transaction and settlement receipt."
+    },
+    {
+      "probe_id": "hashpack-company-alpha-testnet-probe",
+      "command": {
+        "$operator_argv": [
+          "security",
+          "find-generic-password",
+          "-s",
+          "openclaw.company_alpha.qa.hashpack.testnet"
+        ]
+      },
+      "expected_signal": "the named Keychain item exists without using -w or printing its secret value; separately verify the managed HashPack UI before wallet interaction",
+      "safe_lane": "local-secret-metadata-read",
+      "default_ttl": 3600000,
+      "scope": "hashpack-company-alpha-testnet",
+      "notes": "Secret-safe custody probe only. It does not unlock HashPack, mint an approval envelope, authorize a signature, or prove a production signing path."
+    },
+    {
+      "probe_id": "trello-personal-api-probe",
+      "command": {
+        "$operator_argv": [
+          "python3",
+          "scripts/trello_capability_probe.py",
+          "--board-id",
+          "${operator:services.trello.board_id}"
+        ]
+      },
+      "expected_signal": "the existing helper verifies the authenticated member and the registered OpenClaw Project Management board without mutating Trello",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "trello-personal-api",
+      "notes": "Read-only identity and board-access probe through the runtime global dotenv shared with the stock upstream Trello skill."
+    },
+    {
+      "probe_id": "github-personal-cli-probe",
+      "command": {
+        "$operator_argv": [
+          "${operator:paths.github_binary}",
+          "auth",
+          "status",
+          "--hostname",
+          "github.com"
+        ]
+      },
+      "expected_signal": "GitHub CLI reports the authenticated account operator on github.com without printing a token",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "github-personal-cli",
+      "notes": "Provider-native GitHub CLI authentication probe. It performs no repository mutation."
+    },
+    {
+      "probe_id": "linear-company-beta-mcp-oauth-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "mcp",
+          "probe",
+          "linear",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact native OpenClaw Linear MCP server is authorized at https://mcp.linear.app/mcp and exposes its tool catalog without printing OAuth tokens",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "linear-company-beta-mcp",
+      "notes": "Native OpenClaw transport, OAuth, and tool-catalog probe only. It does not establish the authenticated account, team, workspace, issue content, or any mutation effect; those require separate source-native readback. Desktop Codex registration is not proof of OpenClaw access."
+    },
+    {
+      "probe_id": "mercury-company-beta-mcp-oauth-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "mcp",
+          "probe",
+          "mercury-company-beta",
+          "--json"
+        ]
+      },
+      "expected_signal": "the exact official https://mcp.mercury.com/mcp server is authorized and exposes its read-only Mercury tools without printing OAuth tokens or financial values",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "mercury-company-beta-mcp",
+      "notes": "Provider-native transport, OAuth, and tool-catalog probe only. It does not prove the organization or any financial result; those require a bounded source-native read such as getOrganization and task-specific provider readback."
+    },
+    {
+      "probe_id": "vercel-company-alpha-browser-session-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "browser",
+          "--browser-profile",
+          "personal",
+          "status",
+          "--json"
+        ]
+      },
+      "expected_signal": "persistent managed profile=personal is reachable; this transport-only check does not prove the CompanyAlpha Vercel email, user, team, project, or any provider operation",
+      "safe_lane": "local-read",
+      "default_ttl": 300000,
+      "scope": "vercel-company-alpha-browser",
+      "notes": "Read-only managed-browser transport probe. Every CompanyAlpha Vercel use must separately verify personal_google@example.invalid, user operator-account, team slug company_alpha, the exact target project, and the provider result from the live UI."
+    },
+    {
+      "probe_id": "vercel-company-beta-browser-session-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "browser",
+          "--browser-profile",
+          "openclaw",
+          "status",
+          "--json"
+        ]
+      },
+      "expected_signal": "persistent managed profile=openclaw is reachable; this transport-only check does not prove the Vercel email, user, team, project, or any provider operation",
+      "safe_lane": "local-read",
+      "default_ttl": 300000,
+      "scope": "vercel-company-beta-browser",
+      "notes": "Read-only managed-browser transport probe. Every Vercel use must separately verify company_beta_admin_google@example.invalid, user company-beta-user, team slug company-beta-team, the exact target project, and the provider result from the live UI."
+    },
+    {
+      "probe_id": "discord-source-company-alpha-team-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "message",
+          "channel",
+          "info",
+          "--channel",
+          "discord",
+          "--target",
+          {
+            "$operator_prefix": "channel:",
+            "value": "${operator:services.discord.company_alpha.channel_id}"
+          },
+          "--json"
+        ]
+      },
+      "expected_signal": "the configured Discord bot returns metadata for exact source channel operator-owned-value in exact guild operator-owned-value without exposing its token; each task-specific channel list, message read, or search remains a separate bounded read in this guild",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "discord-source-company-alpha-team",
+      "notes": "Source-only membership probe anchored to the existing welcome channel. Replace its channel ID only after fresh guild-bound channel-info readback. The probe performs no reply, post, send, reaction, thread, moderation, inbound binding, or other Discord mutation and grants no operator authority to team members."
+    },
+    {
+      "probe_id": "discord-source-company-beta-team-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "message",
+          "channel",
+          "info",
+          "--channel",
+          "discord",
+          "--target",
+          {
+            "$operator_prefix": "channel:",
+            "value": "${operator:services.discord.company_beta.channel_id}"
+          },
+          "--json"
+        ]
+      },
+      "expected_signal": "the configured Discord bot returns metadata for exact source channel operator-owned-value in exact guild operator-owned-value without exposing its token; each task-specific channel list, message read, or search remains a separate bounded read in this guild",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "discord-source-company-beta-team",
+      "notes": "Source-only membership probe anchored to the existing general channel. Replace its channel ID only after fresh guild-bound channel-info readback. The probe performs no reply, post, send, reaction, thread, moderation, inbound binding, or other Discord mutation and grants no operator authority to team members."
+    },
+    {
+      "probe_id": "discord-source-operations-team-probe",
+      "command": {
+        "$operator_argv": [
+          "openclaw",
+          "message",
+          "channel",
+          "info",
+          "--channel",
+          "discord",
+          "--target",
+          {
+            "$operator_prefix": "channel:",
+            "value": "${operator:services.discord.operations.channel_id}"
+          },
+          "--json"
+        ]
+      },
+      "expected_signal": "the configured Discord bot returns metadata for exact source channel operator-owned-value in exact guild operator-owned-value without exposing its token; each task-specific channel list, message read, or search remains a separate bounded read in this guild",
+      "safe_lane": "local-read-network-read",
+      "default_ttl": 3600000,
+      "scope": "discord-source-operations-team",
+      "notes": "Source-only membership probe anchored to the existing property-management channel. Replace its channel ID only after fresh guild-bound channel-info readback. The probe performs no reply, post, send, reaction, thread, moderation, inbound binding, or other Discord mutation and grants no operator authority to team members."
+    }
+  ]
+}
