@@ -21,9 +21,12 @@ def apply(checkout, bundle):
         raise ValueError("candidate checkout is not based on the pinned upstream commit")
     git(checkout, "diff", "--cached", "--quiet", manifest["normalizedTree"], "--")
     git(checkout, "diff", "--quiet", "--")
-    patch = bundle / "candidate.patch"
-    if digest(patch) != manifest["patchSha256"]:
-        raise ValueError("candidate patch hash differs")
+    patches = [{"file": "candidate.patch", "sha256": manifest["patchSha256"]}, *manifest.get("additionalPatches", [])]
+    for entry in patches:
+        if Path(entry["file"]).name != entry["file"]:
+            raise ValueError("candidate patch must be a bundle file")
+        if digest(bundle / entry["file"]) != entry["sha256"]:
+            raise ValueError("candidate patch hash differs: " + entry["file"])
     baseline = checkout / "test/isolated-queue"
     for name, key in (
         ("adopted-drain-steering.unit-dormant-boundary.test.ts", "baselineFixtureSha256"),
@@ -34,12 +37,16 @@ def apply(checkout, bundle):
     for entry in manifest["files"]:
         if digest(checkout / entry["path"]) != entry["originalSha256"]:
             raise ValueError("candidate base differs: " + entry["path"])
-    git(checkout, "apply", "--check", "--whitespace=error-all", str(patch))
-    git(checkout, "apply", "--whitespace=error-all", str(patch))
+    # These separately reviewed patches affect disjoint paths. Check both against
+    # the original generation before applying either one.
+    for entry in patches:
+        git(checkout, "apply", "--check", "--whitespace=error-all", str(bundle / entry["file"]))
+    for entry in patches:
+        git(checkout, "apply", "--whitespace=error-all", str(bundle / entry["file"]))
     for entry in manifest["files"]:
         if digest(checkout / entry["path"]) != entry["candidateSha256"]:
             raise ValueError("candidate result differs: " + entry["path"])
-    print(json.dumps({"candidatePatchSha256": manifest["patchSha256"], "filesVerified": len(manifest["files"]), "status": "overlay applied to disposable checkout"}))
+    print(json.dumps({"candidatePatches": patches, "filesVerified": len(manifest["files"]), "status": "overlay applied to disposable checkout"}))
 
 
 if __name__ == "__main__":

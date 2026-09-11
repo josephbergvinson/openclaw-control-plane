@@ -77,6 +77,39 @@ jobs:
           printf 'Candidate native exit: %s\n' "${pipeline_status[0]}"
           test "${pipeline_status[1]}" -eq 0
           python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/verify_result.py" candidate "${pipeline_status[0]}" "$RUNNER_TEMP/steering-candidate.xml" "$RUNNER_TEMP/steering-candidate.log" "$RUNNER_TEMP/steering-candidate-verdict.json"
+      - name: Remove only the verified untracked diagnostic copy
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/freeze_candidate.py" remove-fixture "$PWD"
+      - name: Run the focused native ownership and cron suites
+        id: owners
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: |
+          set +e
+          pnpm test:serial src/auto-reply/reply/followup-turn-admission.test.ts src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts src/auto-reply/reply/get-reply-run.media-only.test.ts src/auto-reply/reply/get-reply-run.prepared-metadata.test.ts src/auto-reply/reply/queue/state.test.ts src/auto-reply/reply/queue.in-flight.test.ts src/auto-reply/reply/queue.collect.test.ts src/auto-reply/reply/queue.drain-restart.test.ts src/auto-reply/reply/queue/drain.identity-guard.test.ts src/auto-reply/reply/reply-run-registry.test.ts src/auto-reply/reply/reply-run-registry.control-owner.test.ts src/cron/command-runner.test.ts 2>&1 | tee "$RUNNER_TEMP/candidate-owner-tests.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pipeline_status[0]}" > "$RUNNER_TEMP/candidate-owner-tests.exit"
+          test "${pipeline_status[1]}" -eq 0
+          exit "${pipeline_status[0]}"
+      - name: Freeze the reviewed disposable candidate source
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: |
+          set -o pipefail
+          python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/freeze_candidate.py" prepare "$PWD" "$RUNNER_TEMP/combined-candidate-manifest.json" "$RUNNER_TEMP/candidate-source.json" 2>&1 | tee "$RUNNER_TEMP/candidate-freeze.log"
+      - name: Build the same qualified candidate source
+        id: build
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: |
+          set -o pipefail
+          python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/freeze_candidate.py" verify "$PWD" "$RUNNER_TEMP/combined-candidate-manifest.json"
+          pnpm build 2>&1 | tee "$RUNNER_TEMP/candidate-build.log"
+          python3 "$GITHUB_WORKSPACE/runtime/diagnostics/adopted-steering/freeze_candidate.py" verify "$PWD" "$RUNNER_TEMP/combined-candidate-manifest.json"
+      - name: Run the complete native plan against the combined candidate
+        id: native
+        working-directory: ${{ runner.temp }}/openclaw-steering
+        run: |
+          set -o pipefail
+          node --import ./scripts/tsx.mjs "$GITHUB_WORKSPACE/scripts/run-native-reference-checks.mjs" "$RUNNER_TEMP/combined-candidate-manifest.json" "$RUNNER_TEMP/candidate-native-evidence" 2>&1 | tee "$RUNNER_TEMP/candidate-native.log"
       - name: Preserve the actual native result
         if: always() && steps.steering.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -91,5 +124,13 @@ jobs:
             ${{ runner.temp }}/steering-candidate.log
             ${{ runner.temp }}/steering-candidate.exit
             ${{ runner.temp }}/steering-candidate-verdict.json
+            ${{ runner.temp }}/candidate-owner-tests.log
+            ${{ runner.temp }}/candidate-owner-tests.exit
+            ${{ runner.temp }}/combined-candidate-manifest.json
+            ${{ runner.temp }}/candidate-source.json
+            ${{ runner.temp }}/candidate-freeze.log
+            ${{ runner.temp }}/candidate-native-evidence
+            ${{ runner.temp }}/candidate-native.log
+            ${{ runner.temp }}/candidate-build.log
           if-no-files-found: warn
           retention-days: 7
