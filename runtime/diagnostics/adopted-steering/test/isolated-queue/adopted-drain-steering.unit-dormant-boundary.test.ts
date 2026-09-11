@@ -48,6 +48,11 @@ import { buildChannelSourceTurnId } from "../../src/auto-reply/reply/source-turn
 import { withReplySystemEventContext } from "../../src/auto-reply/reply/system-event-session-key.js";
 import { resolveTypingMode } from "../../src/auto-reply/reply/typing-mode.js";
 
+vi.hoisted(() => {
+  process.stderr.write("[steering:boundary] module:hoisted-start\n");
+});
+process.stderr.write("[steering:boundary] static-imports:done\n");
+
 vi.mock("../../src/agents/auth-profiles/session-override.js", () => ({
   resolveSessionAuthSelection: vi.fn().mockResolvedValue(undefined),
 }));
@@ -564,17 +569,35 @@ vi.mock("../../src/auto-reply/reply/agent-runner-session-reset.js", () => ({
   },
 }));
 
+process.stderr.write("[steering:boundary] import:queue:enter\n");
 const queueNative = await import("../../src/auto-reply/reply/queue.js");
+process.stderr.write("[steering:boundary] import:queue:exit\n");
+process.stderr.write("[steering:boundary] import:queue-state:enter\n");
 const queueStateNative = await import("../../src/auto-reply/reply/queue/state.js");
+process.stderr.write("[steering:boundary] import:queue-state:exit\n");
+process.stderr.write("[steering:boundary] import:followup-turn-admission:enter\n");
 const { admitFollowupTurn } = await import("../../src/auto-reply/reply/followup-turn-admission.js");
+process.stderr.write("[steering:boundary] import:followup-turn-admission:exit\n");
+process.stderr.write("[steering:boundary] import:agent-runner-run:enter\n");
 const { runReplyAgent: runRealReplyAgent } = await import("../../src/auto-reply/reply/agent-runner-run.js");
+process.stderr.write("[steering:boundary] import:agent-runner-run:exit\n");
+process.stderr.write("[steering:boundary] import:reply-tool-authority:enter\n");
 const { prepareReplyToolAuthority, resolveFollowupRunToolAuthorityFingerprint } = await import("../../src/auto-reply/reply/reply-tool-authority.js");
+process.stderr.write("[steering:boundary] import:reply-tool-authority:exit\n");
+process.stderr.write("[steering:boundary] import:test-helpers:enter\n");
 const { createMockTypingController } = await import("../../src/auto-reply/reply/test-helpers.js");
+process.stderr.write("[steering:boundary] import:test-helpers:exit\n");
+process.stderr.write("[steering:boundary] import:reply-operation-run-state:enter\n");
 const { REPLY_OPERATION_RUN_STATE } = await import("../../src/auto-reply/reply/reply-operation-run-state.js");
+process.stderr.write("[steering:boundary] import:reply-operation-run-state:exit\n");
+process.stderr.write("[steering:boundary] import:promise-helper:enter\n");
 const { createDeferred } = await import("../../test/helpers/promise.js");
+process.stderr.write("[steering:boundary] import:promise-helper:exit\n");
 
+process.stderr.write("[steering:boundary] describe:enter\n");
 describe("isolated adopted-drain steering", () => {
   beforeEach(async () => {
+    process.stderr.write("[steering:boundary] beforeEach:enter\n");
     preparedReplyMockState.unexpectedCalls.length = 0;
     loadSessionEntryMock.mockReset();
     updateAmbientTranscriptWatermarkMock.mockClear();
@@ -587,12 +610,15 @@ describe("isolated adopted-drain steering", () => {
     vi.mocked(hasControlCommand).mockReturnValue(false);
     resolveCurrentTurnImagesMock.mockReset().mockResolvedValue({});
     replyRunTesting.resetReplyRunRegistry();
+    process.stderr.write("[steering:boundary] beforeEach:exit\n");
   });
 
   afterEach(async () => {
+    process.stderr.write("[steering:boundary] afterEach:enter\n");
     vi.useRealTimers();
     resetSystemEventsForTest();
     expect(preparedReplyMockState.unexpectedCalls).toEqual([]);
+    process.stderr.write("[steering:boundary] afterEach:exit\n");
   });
 
 
@@ -601,9 +627,12 @@ describe("isolated adopted-drain steering", () => {
   it.each(["empty-control", "adopted-current", "older-ready", "different-authority"] as const)(
     "preserves source ownership and steering for %s",
     async (scenario) => {
+      process.stderr.write(`[steering:boundary] case:${scenario}:enter\n`);
       const key = `agent:main:discord:channel:fixture-${scenario}`;
       const settings = { mode: "steer" as const, debounceMs: 0, cap: 10 };
+      process.stderr.write(`[steering:boundary] case:${scenario}:queue-settings-import:enter\n`);
       const { resolveQueueSettings } = await import("../../src/auto-reply/reply/queue/settings-runtime.js");
+      process.stderr.write(`[steering:boundary] case:${scenario}:queue-settings-import:exit\n`);
       vi.mocked(resolveQueueSettings).mockReturnValue(settings);
       const sourceAdopted = vi.fn(async () => {});
       const sourceSettled = vi.fn();
@@ -629,7 +658,9 @@ describe("isolated adopted-drain steering", () => {
         sessionCtx: { Body: body, Provider: "discord", Surface: "discord", AccountId: "default", From: "channel:fixture", To: "channel:fixture", SenderId: "fixture-owner" },
       });
       try {
+        process.stderr.write(`[steering:boundary] case:${scenario}:prepare-source:enter\n`);
         await runPreparedReply(makeParams("prepare the checklist"));
+        process.stderr.write(`[steering:boundary] case:${scenario}:prepare-source:exit\n`);
         const source = requireLastRunReplyAgentCall().followupRun;
         expect(source.prompt).toContain("prepare the checklist");
         source.messageId = "fixture-first";
@@ -661,16 +692,22 @@ describe("isolated adopted-drain steering", () => {
         };
         if (scenario === "empty-control") {
           activate(createReplyOperation({ sessionKey: key, sessionId: source.run.sessionId, resetTriggered: false }));
+          process.stderr.write(`[steering:boundary] case:${scenario}:source-lifecycle:enter\n`);
           await queueNative.admitFollowupRunLifecycle(source);
+          process.stderr.write(`[steering:boundary] case:${scenario}:source-lifecycle:exit\n`);
         } else {
           expect(queueNative.enqueueFollowupRun(key, source, settings, "message-id", async (queued) => {
             try {
+              process.stderr.write(`[steering:boundary] case:${scenario}:drain-admission:enter\n`);
               const admitted = await admitFollowupTurn({ queued, defaults: { typing, typingMode: "never", defaultModel: source.run.model, sessionKey: key } });
+              process.stderr.write(`[steering:boundary] case:${scenario}:drain-admission:exit\n`);
               expect(admitted.kind).toBe("admitted");
               if (admitted.kind !== "admitted") throw new Error("source did not acquire its queued operation");
               activate(admitted.turn.operation);
               entered.resolve();
+              process.stderr.write(`[steering:boundary] case:${scenario}:source-release:enter\n`);
               await release.promise;
+              process.stderr.write(`[steering:boundary] case:${scenario}:source-release:exit\n`);
               queueNative.completeFollowupRunLifecycle(queued);
             } catch (error) {
               entered.reject(error);
@@ -679,7 +716,9 @@ describe("isolated adopted-drain steering", () => {
               drained.resolve();
             }
           })).toBe(true);
+          process.stderr.write(`[steering:boundary] case:${scenario}:drain-entered:enter\n`);
           await entered.promise;
+          process.stderr.write(`[steering:boundary] case:${scenario}:drain-entered:exit\n`);
           expect(sourceAdopted).toHaveBeenCalledOnce();
           expect(queueNative.getFollowupQueueDepth(key)).toBe(0);
           expect(queueStateNative.getExistingFollowupQueue(key)?.inFlight.has(source)).toBe(true);
@@ -690,7 +729,9 @@ describe("isolated adopted-drain steering", () => {
         }
         const correctionParams = makeParams("it's in Drive, use that one");
         correctionParams.opts = { [REPLY_OPERATION_RUN_STATE]: runState };
+        process.stderr.write(`[steering:boundary] case:${scenario}:prepare-correction:enter\n`);
         await runPreparedReply(correctionParams);
+        process.stderr.write(`[steering:boundary] case:${scenario}:prepare-correction:exit\n`);
         const prepared = requireLastRunReplyAgentCall();
         expect(prepared.followupRun.prompt).toContain("it's in Drive, use that one");
         prepared.followupRun.messageId = "fixture-correction";
@@ -700,7 +741,9 @@ describe("isolated adopted-drain steering", () => {
         if (scenario === "different-authority") prepared.followupRun.toolsAllow = [];
         const fingerprint = resolveFollowupRunToolAuthorityFingerprint(prepared.followupRun);
         expect(fingerprint === operation.toolAuthorityFingerprint).toBe(scenario !== "different-authority");
+        process.stderr.write(`[steering:boundary] case:${scenario}:run-reply-agent:enter\n`);
         await runRealReplyAgent(prepared);
+        process.stderr.write(`[steering:boundary] case:${scenario}:run-reply-agent:exit\n`);
         const expectSteer = scenario === "empty-control" || scenario === "adopted-current";
         expect(injected).toHaveBeenCalledTimes(expectSteer ? 1 : 0);
         expect(correctionAdopted).toHaveBeenCalledTimes(expectSteer ? 1 : 0);
@@ -712,12 +755,18 @@ describe("isolated adopted-drain steering", () => {
         expect(waiting.some((item) => item.messageId === "fixture-correction")).toBe(!expectSteer);
         if (scenario === "older-ready") expect(waiting.map((item) => item.messageId)).toEqual(["fixture-first", "fixture-older-waiter", "fixture-correction"]);
       } finally {
+        process.stderr.write(`[steering:boundary] case:${scenario}:finally:enter\n`);
         // Invalidate queued continuations before releasing the mocked tool boundary.
         queueNative.clearSessionQueues([key]);
         release.resolve();
+        process.stderr.write(`[steering:boundary] case:${scenario}:finally-drained:enter\n`);
         if (scenario !== "empty-control" && operation) await drained.promise;
+        process.stderr.write(`[steering:boundary] case:${scenario}:finally-drained:exit\n`);
         operation?.complete();
+        process.stderr.write(`[steering:boundary] case:${scenario}:finally:exit\n`);
       }
+      process.stderr.write(`[steering:boundary] case:${scenario}:exit\n`);
     },
   );
 });
+process.stderr.write("[steering:boundary] describe:exit\n");

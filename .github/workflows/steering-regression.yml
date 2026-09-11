@@ -51,7 +51,7 @@ jobs:
           DEBUG: vite:load,vite:transform
         run: |
           set -o pipefail
-          node scripts/run-vitest.mjs run --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --reporter=verbose --reporter=junit --reporter="$PWD/scripts/lib/vitest-resource-reporter.mts" --outputFile.junit="$RUNNER_TEMP/steering-regression.xml" 2>&1 | tee "$RUNNER_TEMP/steering-regression.log"
+          node scripts/run-vitest.mjs run --pool=forks --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --reporter=verbose --reporter=junit --reporter="$PWD/scripts/lib/vitest-resource-reporter.mts" --outputFile.junit="$RUNNER_TEMP/steering-regression.xml" 2>&1 | tee "$RUNNER_TEMP/steering-regression.log"
       - name: Preserve the actual native result
         if: always() && steps.steering.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
