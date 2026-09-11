@@ -730,8 +730,8 @@ describe("isolated adopted-drain steering", () => {
         sessionId: "fixture-session",
         isNewSession: false,
         typing,
-        ctx: { Body: body, Provider: "discord", Surface: "discord", AccountId: "default", From: "channel:fixture", To: "channel:fixture", SenderId: "fixture-owner" },
-        sessionCtx: { Body: body, Provider: "discord", Surface: "discord", AccountId: "default", From: "channel:fixture", To: "channel:fixture", SenderId: "fixture-owner" },
+        ctx: { Body: body, Provider: "discord", Surface: "discord", AccountId: "default", ReplyToMode: "off", From: "channel:fixture", To: "channel:fixture", SenderId: "fixture-owner" },
+        sessionCtx: { Body: body, Provider: "discord", Surface: "discord", AccountId: "default", ReplyToMode: "off", From: "channel:fixture", To: "channel:fixture", SenderId: "fixture-owner" },
       });
       try {
         process.stderr.write(`[steering:boundary] case:${scenario}:prepare-source:enter\n`);
