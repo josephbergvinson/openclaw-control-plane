@@ -20,14 +20,19 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.16.0
       - name: Check documentation and examples
         run: python3 -B scripts/validate_repo.py
       - name: Test reconstruction and workspace installers
         run: python3 -B -m unittest discover -s tests -p 'test_*.py'
+      - name: Test native plan preservation with fake command execution
+        run: node --test tests/native-reference-checks.test.mjs
       - name: Check patch whitespace
         run: git diff --check HEAD^ HEAD
 
-  reconstruct-and-build:
+  runtime-checks:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,9 +53,73 @@ jobs:
       - name: Install frozen runtime dependencies
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: pnpm install --frozen-lockfile
-      - name: Run native changed-source checks
+      - name: Run the complete native plan with split core lint
+        id: native
         working-directory: ${{ runner.temp }}/openclaw-reference
-        run: node scripts/check-changed.mjs --base 1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7 --head HEAD
+        run: |
+          set -o pipefail
+          node --import ./scripts/tsx.mjs "$GITHUB_WORKSPACE/scripts/run-native-reference-checks.mjs" "$GITHUB_WORKSPACE/runtime/manifest.json" "$RUNNER_TEMP/reference-native-evidence" 2>&1 | tee "$RUNNER_TEMP/reference-native.log"
+      - name: Preserve native command plan and actual outcomes
+        if: always() && steps.native.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-native-evidence
+            ${{ runner.temp }}/reference-native.log
+          if-no-files-found: error
+          retention-days: 7
+
+  runtime-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.16.0
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@12.3.4
+      - name: Reconstruct the pinned source in a separate checkout
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
+        run: |
+          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
+          git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
+      - name: Install frozen runtime dependencies
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: pnpm install --frozen-lockfile
       - name: Build the reconstructed runtime
+        id: build
         working-directory: ${{ runner.temp }}/openclaw-reference
-        run: pnpm build
+        run: |
+          set -o pipefail
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/reference-build-source.txt"
+          pnpm build 2>&1 | tee "$RUNNER_TEMP/reference-build.log"
+      - name: Preserve actual build output
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-build-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-build.log
+          if-no-files-found: error
+          retention-days: 7
+
+  reconstruct-and-build:
+    needs: [reference-checks, runtime-checks, runtime-build]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every qualification job to succeed
+        env:
+          REFERENCE_RESULT: ${{ needs.reference-checks.result }}
+          NATIVE_RESULT: ${{ needs.runtime-checks.result }}
+          BUILD_RESULT: ${{ needs.runtime-build.result }}
+        run: |
+          test "$REFERENCE_RESULT" = success
+          test "$NATIVE_RESULT" = success
+          test "$BUILD_RESULT" = success

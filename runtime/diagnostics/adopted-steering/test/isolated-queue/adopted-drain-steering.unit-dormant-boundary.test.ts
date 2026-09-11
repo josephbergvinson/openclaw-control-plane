@@ -602,6 +602,10 @@ const inboundContextNative = await import("../../src/auto-reply/reply/inbound-co
 const conversationNative = await import("../../src/auto-reply/reply/prompt-session-context.js");
 const runtimePolicyNative = await import("../../src/auto-reply/reply/runtime-policy-session-key.js");
 const thinkingRuntimeNative = await import("../../src/agents/thinking-runtime.js");
+const currentImagesNative = await import("../../src/auto-reply/reply/current-turn-images.js");
+const transcriptRecorderNative = await import("../../src/sessions/user-turn-transcript.js");
+const replyThreadingNative = await import("../../src/auto-reply/reply/reply-threading.js");
+const bundledChannelNative = await import("../../src/channels/plugins/bundled.js");
 process.stderr.write("[steering:boundary] preparation-probe-imports:exit\n");
 
 const preparationProbeRestorers: Array<() => void> = [];
@@ -620,9 +624,13 @@ function observePreparationCall(
   observeSettlement = false,
 ): void {
   const target = namespace as Record<string, (...args: unknown[]) => unknown>;
-  const actual = target[method];
+  const originalExport = target[method];
+  const existingMock = vi.isMockFunction(originalExport) ? originalExport : undefined;
+  // An existing vi.fn is already a spy: invoking it after replacing its implementation
+  // would recurse. Capture its implementation and restore that same implementation.
+  const actual = existingMock ? existingMock.getMockImplementation() : originalExport;
   if (typeof actual !== "function") {
-    throw new TypeError("Expected a native preparation function for the diagnostic probe");
+    throw new TypeError("Expected a preparation function implementation for the diagnostic probe");
   }
   const spy = vi.spyOn(target, method);
   spy.mockImplementation(function (this: unknown, ...args: unknown[]) {
@@ -631,7 +639,7 @@ function observePreparationCall(
       const result = Reflect.apply(actual, this, args);
       emitPreparationBoundary(`${label}:return`);
       if (observeSettlement) {
-        // Only the three native async preparation exports use this observer.
+        // Native async preparation exports and the existing async image mock use this observer.
         // Both branches return void; the original promise and rejection remain unchanged.
         void (result as Promise<unknown>).then(
           () => emitPreparationBoundary(`${label}:fulfilled`),
@@ -644,7 +652,10 @@ function observePreparationCall(
       throw error;
     }
   });
-  preparationProbeRestorers.push(() => spy.mockRestore());
+  preparationProbeRestorers.push(() => {
+    if (existingMock) existingMock.mockImplementation(actual);
+    else spy.mockRestore();
+  });
 }
 
 process.stderr.write("[steering:boundary] describe:enter\n");
@@ -670,6 +681,10 @@ describe("isolated adopted-drain steering", () => {
     observePreparationCall(conversationNative, "prepareReplyConversation", "conversation");
     observePreparationCall(runtimePolicyNative, "resolveRuntimePolicySessionKey", "runtime-policy");
     observePreparationCall(thinkingRuntimeNative, "resolveEffectiveAgentRuntime", "thinking-runtime");
+    observePreparationCall(currentImagesNative, "resolveCurrentTurnImages", "current-images", true);
+    observePreparationCall(transcriptRecorderNative, "createUserTurnTranscriptRecorder", "transcript-recorder");
+    observePreparationCall(replyThreadingNative, "resolveReplyToMode", "reply-to-mode");
+    observePreparationCall(bundledChannelNative, "getBundledChannelPlugin", "bundled-channel");
     process.stderr.write("[steering:boundary] beforeEach:exit\n");
   });
 

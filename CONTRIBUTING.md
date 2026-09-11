@@ -26,6 +26,7 @@ Relative links must resolve, and Mermaid diagrams must render.
 ```bash
 python3 scripts/validate_repo.py
 python3 -m unittest discover -s tests -p 'test_*.py'
+node --test tests/native-reference-checks.test.mjs
 git diff --check
 ```
 
@@ -39,4 +40,9 @@ and reconstructs and builds the pinned runtime in a separate Ubuntu checkout.
 It accepts manual dispatch and runs on pull requests, main, and reference rebuild
 branches. Standard hosted runners are free for public repositories; a private fork
 uses the owner's Actions allowance. See [GitHub's runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The native plan adapter changes only full-lint shard selection and preserves every
+other command, including checks after lint. Its tests use fake command execution.
+Independent native-check and build jobs feed the existing `reconstruct-and-build`
+check; each qualification job must succeed. Workflow artifacts retain command plans
+and actual results without environment values.
 No operator credentials or private preservation data belong in that workflow.

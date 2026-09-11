@@ -102,3 +102,17 @@ installation and permission checks in the adoption guide.
 The incorporated OpenClaw source is MIT licensed. Retain its [LICENSE](LICENSE) and
 [third-party notices](THIRD_PARTY_NOTICES.md). This package contains no runtime
 credentials, host configuration, conversation history or compiled dependencies.
+
+## Hosted qualification
+
+The reference workflow executes the pinned runtime's native changed-source plan.
+Its small adapter preserves every planned command and environment, adding only
+`--split-core --threads=1` to the full `lint` command. Native shard deadlines,
+Control UI i18n verification, extension and script lint, Stylelint, and checks after
+lint remain in the plan. An unexpected plan shape fails before execution.
+
+A separate job reconstructs the same pinned source and runs `pnpm build`. The final
+`reconstruct-and-build` check requires repository tests, all native checks, and the
+build to succeed. Command plans, actual command outcomes and build logs are retained
+as workflow artifacts; environment values are not recorded in the plan. A cancelled
+run or partial command log does not qualify the reference.
