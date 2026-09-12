@@ -1,51 +1,91 @@
-# Adopted queue source steering qualification
+# Adopted queue source steering regression
 
-Copy `test/isolated-queue` into the root of the reconstructed OpenClaw checkout after its frozen dependency install. The fixture resolves all source and native Vitest imports relative to that checkout. Both fixture input contexts explicitly supply Discord's resolved default reply policy, `off`, to avoid unrelated bundled-channel discovery while constructing the test requests. This matches the pinned Discord policy for the fixture's empty configuration; it does not assert that real Discord ingress always supplies that field. Run from the checkout root:
+The reference runtime includes the adopted-source steering fix and the separate
+explicit-zero command timeout correction. The workflow tests the reconstructed
+source directly. The patch files and original baseline records in this directory
+remain historical qualification evidence; do not apply those overlays on top of
+the current runtime package.
 
-```sh
-OPENCLAW_VITEST_MAX_WORKERS=1 node scripts/run-vitest.mjs run --config test/isolated-queue/vitest.queue-unit-dormant-boundary.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts --pool=forks
-```
+## Current regression command
 
-The current fixture combines finite stderr labels with eleven pass-through probes around input normalization, conversation preparation, runtime policy, thinking runtime, native context/admission/execution preparation, current images, transcript-recorder construction, reply threading and bundled-channel lookup. Ten probes wrap native unmocked exports. The image probe wraps the existing async mock by capturing its implementation before replacement, avoiding recursive invocation of the mutable spy. Each probe forwards the original arguments and `this`, returns the original result, and rethrows synchronous errors. The four async probes attach settlement observers to the original returned promise; diagnostic write failures cannot reject those observers. Before the existing `afterEach` cleanup, native spies are restored and the image mock regains its captured implementation. No timers or keepalive output are added. The four cases, assertions, lifecycle behavior and native 120-second no-output watchdog are unchanged.
-
-`source-parity.json` retains the original baseline hash, the prior labels-only, preparation, execution, resolved-policy and native-session-path fixture hashes, and the current fixture hash. The current fixture also splits initial argument construction from the native call and corrects stale comments. The resolved `ReplyToMode: "off"` input fields remain. The session-path mock preserves native exports through `importOriginal`, followed by the same two transcript-path overrides. The latest change applies that partial-mock pattern to the existing agent-tool-policy mock while retaining its four deliberate overrides. This restores native trusted-group validation and session conversation classification, both required by the authority profile. Store-path resolution, sandbox session lookup, authority fingerprinting, all probes, assertions and cleanup remain real or unchanged as previously described. Recovering a prior fixture requires reversing the complete diagnostic delta; simply removing labels is no longer sufficient.
-
-Two hosted attempts using the inherited `threads` pool ended with exit 143 from that watchdog and no completed case verdicts. In the second attempt, completed load/transform events stopped after about 15 seconds. A third attempt using `forks` completed collection and `beforeEach`, then entered the empty-queue control and stopped at initial request preparation. A fourth attempt, also using `forks`, completed argument construction and native context and admission preparation. The fifth attempt additionally confirmed that image resolution and transcript-recorder construction completed, then entered synchronous bundled-channel lookup while resolving the missing reply policy; that lookup did not return before the watchdog. All three forks attempts ended with exit 143 and no completed case verdict. Supplying the equivalent resolved policy bypasses that unrelated fixture setup path. The deeper bundled-loader cause and the original threads stall remain unresolved. No production source has been changed. The sixth hosted attempt, with the explicit resolved policy, completed all four cases in about 57 milliseconds after collection (13.81 seconds overall). All four failed during native authority setup because the old session-path mock omitted `resolveSessionStorePathCore`; all source preparation and cleanup callbacks completed. These are fixture setup failures, not the expected steering defect. The seventh attempt restored that path contract and again completed all four cases (13.93 seconds overall), but each failed on another stale mock export, `resolveTrustedGroupId`, in capability-profile authority setup. A bounded inspection also found that the same mock omitted `sessionKeyNamesGroupConversation`, which the profile uses next. The current partial policy mock restores both native exports. The eighth attempt, run `34657404147` at reference commit `e576d0fd1ceedf7624ec67257951c0c43e5c2962`, completed all four cases in 15.26 seconds overall: all three controls passed, while `adopted-current` failed its original injection-count assertion (zero calls instead of one). Native exit was 1, with no unhandled errors; all four cleanup paths completed. That failure occurs before the later adopted-current assertions, which therefore have no baseline verdict.
-
-The command above and the diagnostic workflow retain `--pool=forks`, one worker, isolation and the native runner. Switching pools did not eliminate the observed stall. A result under `forks` applies to that configuration and does not by itself resolve the original `threads` stall or establish its cause.
-
-The four existing scenarios are unchanged: an empty-queue steering control, the adopted current source, an older ready predecessor, and a different tool-authority request. The adopted current source asserts steering. The observed baseline failure and three passing controls reproduce that routing defect within this isolated fixture. Preserve the actual native exit code, case results and logs, including unexpected setup failures. A cancelled run or empty test report does not establish the defect.
-
-The real queue, followup admission, operation registry, active steering and authority comparison run in process. A mock backend accepts message injection. This tests runtime routing and lifecycle callbacks; it does not prove provider transcript persistence or Discord behavior.
-
-The config removes only the eager compiled-subprocess plugin. No scenario executes a child backend or reads compiled child artifacts. Future queued execution, fresh model execution and session reset callbacks record and throw if invoked. The remaining native schema plugin, aliases, worker setup and single-worker runner remain in use. Queue cleanup runs before the active operation is released.
-
-`source-parity.json` records a bounded comparison between the canonical source and reconstructed source used to prepare this fixture. It does not cover the complete transitive source graph or establish a passing test result.
-
-## Candidate comparison
-
-`candidate.patch` is an explicit eight-file overlay for the source generation recorded in `candidate-overlay.json`. It binds an adopted queue source to its exact active operation, excludes only that source when checking pending predecessors, and rechecks ownership and FIFO position before injection. It is a candidate, not a production change. The original four-case fixture and baseline config are byte-identical to the successful reproduction setup.
-
-The six additional cases cover replacement of the owner after preparation, an ordinary predecessor arriving after preparation, source cancellation, a parked correction retaining priority over a later waiter, replacement of the owner while parked, and distinct collected sources remaining admission blockers. Their existing assertions and cleanup are unchanged. Setup carries over only the proven resolved `ReplyToMode: "off"` input and the two partial native mocks; no authority result is fabricated. Run `34658769048` at reference commit `9c04bbf` reproduced the expected failing baseline, then passed all ten candidate cases with no unhandled errors. That result qualifies the eight-file steering overlay within this fixture; it does not include the separate cron change or the full native checks/build.
-
-The workflow first runs the unchanged baseline command. It saves the actual native exit code, log and JUnit report. `verify_result.py` accepts only exit 1 with the exact four case identities, three passing controls, the observed adopted-current assertion, and no skipped cases or native unhandled errors. Any other failure stops qualification. This classification records an expected baseline failure; it does not claim that the baseline passed.
-
-After the baseline process has ended, the workflow applies the overlay to the disposable reconstructed checkout. `apply_candidate.py` reuses the reconstruction script's Git helper to verify the pinned upstream HEAD, the exact normalized staged tree and absence of unstaged tracked changes; isolated untracked fixtures and cache are allowed. It then verifies the original fixture/config, patch and eight source hashes before applying, followed by all eight resulting hashes. Reconstruction deliberately stages its patch without committing, so the normalized tree is checked against the index rather than HEAD. The candidate runs in a new native process with a separate cache and the same inherited setup, aliases, one-worker isolation, `forks` override and unchanged watchdog:
+After reconstructing the source and completing its frozen dependency install,
+copy `test/isolated-queue` into the reconstructed checkout's `test` directory. Run
+from that checkout root:
 
 ```sh
 OPENCLAW_VITEST_MAX_WORKERS=1 node scripts/run-vitest.mjs run --pool=forks --config test/isolated-queue/vitest.queue-candidate.config.ts test/isolated-queue/adopted-drain-steering.unit-dormant-boundary.test.ts test/isolated-queue/adopted-drain-steering.owner-fifo.test.ts --reporter=verbose --reporter=junit --reporter="$PWD/scripts/lib/vitest-resource-reporter.mts" --outputFile.junit=steering-candidate.xml
 ```
 
-Qualification requires native exit 0 and exactly all ten named cases passing, with no skipped cases or unhandled errors. Baseline and candidate reports remain separate artifacts even when qualification fails. No arbitrary failure is allowed through `continue-on-error`. The 91-file parity record describes the pre-overlay reconstruction; only the eight explicitly bound source files differ during the candidate phase. Passing this comparison would establish the isolated routing and ownership invariants, not the cause of a production Discord incident, provider transcript persistence, native source qualification, or live acceptance. Those remain separate gates.
+The ten cases cover an empty-queue control, the adopted current source, an older
+ready predecessor, different authority, owner replacement after preparation, a
+new predecessor, source cancellation, a parked correction retaining priority over
+a later waiter, owner replacement while parked, and distinct collected sources.
+The real queue, follow-up admission, operation registry and authority comparison
+run in process. A mock backend accepts message injection. This verifies routing
+and ownership, not provider transcript persistence or Discord delivery.
 
-## Combined source qualification
+The original fixtures, assertions and cleanup are retained. They use the native
+Vitest setup, schema plugin and aliases, one worker, isolation, the `forks` pool
+and the native 120-second no-output watchdog. The configuration removes only an
+eager compiled-subprocess plugin; no scenario executes a child backend. Future
+queued execution, fresh model execution and reset callbacks record and throw if
+invoked. Probe wrappers forward native arguments/results and restore spies during
+cleanup. No timing deadline or assertion is weakened to obtain a pass.
 
-The next candidate adds the separately reviewed `cron-zero-timeout.patch`. It changes only explicit numeric `timeoutSeconds: 0` to mean no wall-clock timer and adds focused coverage for zero, omission, positive values and cancellation. The original eight-file steering patch stays byte-identical; `candidate-overlay.json` binds the two patches separately and records all ten before/after file hashes. Both patches are checked against the same normalized base before either applies, and all ten resulting files must match. The deployed `runtime/manifest.json` is unchanged.
+Both fixture requests supply the resolved default `ReplyToMode: "off"` for their
+empty Discord configuration, avoiding unrelated bundled-channel lookup. The two
+partial mocks preserve native session-path and authority-policy exports through
+`importOriginal` while retaining their explicit fixture overrides. This setup
+does not assert that real Discord ingress always supplies the same field.
 
-The workflow preserves the expected-red baseline and the existing ten-case candidate gate. After the ten-case result, it removes only the verified untracked copy of the diagnostic fixture directory and its transform caches, retaining the original bundle and result artifacts. This prevents full native typechecking from treating copied diagnostic files as source inputs. It then runs twelve explicit native ownership/queue/cron test files through `pnpm test:serial`, retaining their normal native configuration, compiler support and watchdogs. A nonzero test result stops the workflow. The original four-case fixture, six owner/FIFO assertions, candidate config and exact native-result verifier are unchanged.
+The workflow requires native exit zero, exactly the ten named cases passing, no
+skipped cases and no unhandled errors. It retains native output, JUnit and the
+existing verifier result. The verifier's `candidate` phase name is retained for
+compatibility; the input is now the reconstructed reference source.
 
-After these behavioral checks, `freeze_candidate.py` verifies the unchanged staged baseline, exactly the ten intended tracked modifications, unchanged file modes and all final file hashes. It stages only those paths and makes an ephemeral commit inside the disposable checkout. The candidate-only manifest and source receipt are written outside that checkout under `RUNNER_TEMP`; they record the exact resulting tree and separate patch provenance. The candidate manifest carries no deployed-commit labels or stale baseline patch statistics.
+After these cases, the existing cleanup helper removes only the verified,
+untracked diagnostic copy and its caches. The workflow then runs its twelve
+explicit native ownership/queue/cron test files through `pnpm test:serial`.
+Native failures remain failures. The separate [reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/verify-reference.yml)
+owns the complete native-check plan and full build against the runtime manifest;
+this regression workflow no longer repeats the historical overlay/build sequence.
 
-The same checkout and dependency install first run `pnpm build`, then the existing `run-native-reference-checks.mjs` adapter against that candidate manifest. The build produces its evidence before the longer full native plan; both remain mandatory and run sequentially. The adapter is unchanged: it requires a clean exact committed tree, obtains the complete native all-lane plan and preserves its commands except the already reviewed split-core/thread lint flags. The build verifies the same clean candidate tree before and after execution. Native failures, cancellations and skipped work do not pass qualification; the artifact step retains available baseline, candidate, focused-test, source, native-plan and build evidence even on failure. No second CI framework or duplicate full baseline build is introduced.
+## Qualification history
 
-This combined qualification has not yet run. Production adoption still requires the actual full native/build results, native autoreview of the scoped source changes and the applicable maintenance release. The historic baseline package remains unchanged during this qualification. Once the fixed source is adopted, the reference package can advance and the steering workflow can run its ten regressions directly against that generation.
+The original four-case baseline reproduced the source defect in
+[run 34657404147](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34657404147):
+three controls passed and `adopted-current` failed because injection was called
+zero times instead of once. Native exit was one with no unhandled errors and all
+four cleanup paths completed. This is the expected assertion failure, not a
+passing baseline. Earlier setup failures and pool observations remain recorded in
+`source-parity.json`; they do not establish a production-incident cause.
+
+The eight-file steering overlay passed all ten cases in
+[run 34658769048](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34658769048).
+The combined steering and two-file cron overlay then passed
+[run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151)
+at reference commit `6795d19633907166fcac2c24dfbff99bd8186321`:
+
+- The unchanged baseline produced its exact expected assertion failure.
+- All ten steering cases passed with no unhandled errors.
+- All 525 tests across twelve native files passed, including fourteen cron tests.
+- The complete native plan ran all 34 commands successfully.
+- The full build passed against the same normalized source tree.
+
+That qualified tree is `cc032d12126f13922aad858d6104ec1c62e71abc`, the sanitized
+derivative of canonical source `f31686e33ce3fa8564cecf97e3f36f39a69f57dd`. The
+canonical source subsequently completed a full macOS build. Source qualification,
+local packaging and live acceptance remain distinct facts.
+
+`candidate-overlay.json` preserves the exact original base and ten before/after
+hashes. `candidate.patch` and `cron-zero-timeout.patch` remain separate historical
+overlays. `apply_candidate.py` and the prepare/verify modes of `freeze_candidate.py`
+are tied to that older base and fail closed on a different generation. To replay
+the complete historical qualification, use reference commit `6795d196` and its
+manifest/workflow together. Do not replace the historical base hashes with the
+current reference tree.
+
+The 91-file source-parity record describes the original bounded comparison, not
+the complete import graph. A successful regression or build does not prove that
+the original Discord incident took this path, that a provider saved the steering
+message, or that an adopter's channels and devices work.

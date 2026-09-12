@@ -17,12 +17,12 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed custom commit | `81a38d9766169ddade96b44e43fafab78ec5589d` |
-| Sanitized source tree | `aa9a540d48dc21fbbd9047001d136a4eaddfda31` |
-| Patch SHA-256 | `202e3d6a2ac08706cab41a68220804e4d68f53d8dfe242d150d36b65dbf8d8d9` |
+| Deployed custom commit | `f31686e33ce3fa8564cecf97e3f36f39a69f57dd` |
+| Sanitized source tree | `cc032d12126f13922aad858d6104ec1c62e71abc` |
+| Patch SHA-256 | `c358067965fe7079a0ea6bfcd2c31635517a8bc85c509a3b3835578fde85ae6d` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,493,941 bytes and changes 470 paths. The custom commit is a lineage
+The patch is 1,511,568 bytes and changes 477 paths. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
@@ -59,7 +59,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `aa9a540d48dc21fbbd9047001d136a4eaddfda31`.
+`git write-tree` must print `cc032d12126f13922aad858d6104ec1c62e71abc`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -116,3 +116,14 @@ A separate job reconstructs the same pinned source and runs `pnpm build`. The fi
 build to succeed. Command plans, actual command outcomes and build logs are retained
 as workflow artifacts; environment values are not recorded in the plan. A cancelled
 run or partial command log does not qualify the reference.
+
+
+The steering and cron changes in this source were qualified together in
+[run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151):
+ten steering regression cases, 525 tests across twelve native test files, all 34
+native check commands, and the full build passed against this normalized tree.
+The corresponding canonical source also completed a full macOS build. These are
+source and build results; they do not establish another host's channel or device
+acceptance. The [steering regression workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/steering-regression.yml)
+now exercises the included fix directly, while the reference workflow retains the
+complete native-check and build requirements.

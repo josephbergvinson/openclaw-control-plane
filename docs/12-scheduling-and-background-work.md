@@ -43,6 +43,12 @@ Source: [`diagrams/scheduling-layers.mmd`](../diagrams/scheduling-layers.mmd).
 
 A native definition records identity and enablement, schedule and timezone, payload, session target, time budget and delivery settings. Command payloads also bind argument vectors, working directory and required environment. Agent payloads bind their model/tool configuration where appropriate. Mutable last-run state remains separate from the intended definition.
 
+For command payloads, explicit numeric `timeoutSeconds: 0` disables the wall-clock
+timer in this pinned runtime. Omitting it retains the native ten-minute default;
+a positive value sets a deadline in seconds. A separately configured no-output
+limit and cancellation still apply. Zero does not make a process crash-resumable
+or remove its owner's obligation to observe completion.
+
 Keep exact time semantics with the job: the civil timezone, period being processed, catch-up policy and whether a late execution may write an earlier period. A timer firing after an outage does not by itself authorize backdating data.
 
 A stored delivery route is part of the already-authorized scheduled task. Use its intended account, destination and message class. Do not choose a different recipient because the preferred route failed, or route a domain alert by guessing from its prose. Routine no-change checks can be silent; explicitly configured daily maintenance reports may report both success and failure.

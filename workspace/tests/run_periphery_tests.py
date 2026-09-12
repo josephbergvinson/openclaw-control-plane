@@ -31,7 +31,7 @@ TESTS = [
     'test_openclaw_cli_common.py', 'test_openclaw_daily_backup_cron.py',
     'test_openclaw_health_audit_cron.py', 'test_openclaw_independent_backup_receipt.py',
     'test_openclaw_launchagent_integrity_guard.py', 'test_openclaw_retention_cleanup_cron.py',
-    'test_openclaw_storage_prune.py', 'test_openclaw_weekly_archive_backup.py',
+    'test_openclaw_storage_prune.py', 'test_npm_log_retention.py', 'test_openclaw_weekly_archive_backup.py',
     'test_openclaw_weekly_backup_integration_proof.py',
     'test_openclaw_weekly_backup_reconcile.py', 'test_external_volume_guard.py',
     'test_external_volume_guard_launcher.py', 'test_root_drift_control_plane.py',

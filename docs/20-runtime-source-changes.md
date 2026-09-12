@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-50 local commits and 470 changed paths from the official release. It includes
+52 local commits and 477 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -23,8 +23,9 @@ The source paths are relative to the reconstructed OpenClaw checkout.
 | Detached work presentation | `extensions/lane-contract/` presents detached Discord work through the native task owner. Checkpoint requests use the exact active backend and stable queue identity; uncertain acceptance is not replayed. `src/tasks/agent-harness-task-runtime-scope.ts` and SDK continuation methods enforce the underlying ownership. |
 | Goal accounting | `src/agents/session-goal-usage.ts` and `src/config/sessions/goals-usage.ts` count accepted provider input, output and cache usage once across attempts. Compaction changes context size without resetting accumulated usage. A bound final response remains charged after goal completion; later unrelated work does not. Unknown mid-run usage is reported rather than fabricated. |
 | Yield and continuation | Reply classification carries pending continuation through dispatch and Discord native command settlement. An intentional yield without acknowledgment does not become an empty-answer failure. Transcript projection completes before the writer yields. |
+| Follow-up steering | The reply queue binds an adopted source to its exact active operation. That source no longer blocks its own correction; older queued work and different authority remain blockers. Ownership and queue order are rechecked before injection and after parked admission. |
 | Visible child deadlines | The initial visible-session timeout reaches the existing execution owner in milliseconds. Explicit zero, default/omitted values and seconds compatibility retain their distinct contracts. Generated protocol types and regression cases travel with the patch. |
-| Cron and child custody | Native cron, subagent registry and task runtime changes retain parent custody through child completion, retries, cancellation and restart recovery. A parent does not lose responsibility merely because execution moved into a child. |
+| Cron and child custody | Native cron, subagent registry and task runtime changes retain parent custody through child completion, retries, cancellation and restart recovery. A parent does not lose responsibility merely because execution moved into a child. In `src/cron/command-runner.ts`, explicit numeric `timeoutSeconds: 0` disables the command wall timer; omission, positive deadlines, no-output limits and cancellation keep their separate contracts. |
 | OAuth refresh persistence | `src/agents/auth-profiles/oauth-manager.ts` retains refresh ownership and durable adoption after a caller's wait times out. Queue and cross-process locks prevent overlapping refresh owners; writes reject identity mismatch or credential regression. Failures remain associated with the credentials actually attempted. |
 | Compaction and maintenance | Embedded compaction resolves the selected runtime/model policy and retains ingress/writer custody. Maintenance waits can be cancelled without releasing another operation's writer. Native notices describe supported lifecycle events. |
 | Plain channel responses | Shared progress rendering and Discord/Telegram adapters omit synthetic emoji markers. Disabled tool progress also hides failed-tool progress rows while preserving approvals and final errors. Group prompt guidance respects reaction preferences. |
@@ -82,23 +83,28 @@ Never copy another operator's account database into a fresh installation.
 
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records deployed source
-`81a38d9766169ddade96b44e43fafab78ec5589d`. Its public derivative changes only two
+`f31686e33ce3fa8564cecf97e3f36f39a69f57dd`. Its public derivative changes only two
 company-specific strings in one regression fixture. All production source bytes
 and file modes match that deployed source. The resulting tree is
-`aa9a540d48dc21fbbd9047001d136a4eaddfda31`.
+`cc032d12126f13922aad858d6104ec1c62e71abc`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
 clone, refuses an unexpected ref or dirty state, and performs no network access,
 build or activation. It does not operate on a running installation.
 
-Native checks and a complete build were performed for the deployed source. The
-public export separately verifies source reconstruction and production parity.
-These do not grant another host live acceptance. In the reference's fresh Discord
-Calendar flow, a native goal completed after an intentional no-acknowledgment yield
-and requester continuation; accepted usage matched its counter and one final was
-observed. No child deadline expired in that flow, so timeout enforcement is supported
-by regression/native-check evidence rather than that particular live scenario.
+The normalized source passed [combined qualification run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151):
+all ten steering regression cases, 525 tests across twelve native test files, all
+34 native check commands and a complete build. The same canonical source also
+completed a full macOS build. The public export separately verifies reconstruction
+and production parity; these results do not grant another host live acceptance.
+
+On an earlier deployed predecessor, a fresh Discord Calendar goal completed after
+an intentional no-acknowledgment yield and requester continuation; accepted usage
+matched its counter and one final was observed. That historical flow did not test
+the newer steering correction or expire a child deadline. Their routing and timeout
+claims rest on the identified regression evidence until the corresponding live
+user path is independently verified.
 
 The repository's operating policies, service layout, scheduled maintenance,
 integrations and backup procedures remain necessary alongside this source package.

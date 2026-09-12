@@ -49,6 +49,8 @@ USER_HOME = Path((str(OPERATOR.require_path('paths.host_home'))))
 XCODE_OUTPUTS = ('Build/Intermediates.noindex', 'ModuleCache.noindex', 'Index.noindex',
                  'SDKStatCaches.noindex', 'CompilationCache.noindex')
 QUARANTINE_PREFIX = '.openclaw-prune-'
+NPM_LOG_KIND = 'npm-debug-log'
+NPM_LOG_NAME = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{3}Z-debug-\d+\.log')
 
 
 def is_recovery_path(path: Path) -> bool:
@@ -65,6 +67,24 @@ class Candidate:
     inode: int
     newest_mtime: float
     allocated_bytes: int
+    leaf_fingerprint: tuple | None = None
+
+
+def npm_log_stat(path: Path, cutoff: float) -> os.stat_result:
+    """Only old npm debug logs in the exact physical user log directory."""
+    parent = USER_HOME / '.npm/_logs'
+    if path.parent != parent or NPM_LOG_NAME.fullmatch(path.name) is None or path.resolve() != path:
+        raise ValueError('unclassified npm log path')
+    stamp = datetime.strptime(path.name.split('-debug-')[0], '%Y-%m-%dT%H_%M_%S_%fZ').replace(tzinfo=timezone.utc)
+    value, directory = path.lstat(), parent.lstat()
+    if (not stat.S_ISREG(value.st_mode) or value.st_nlink != 1
+            or value.st_uid != os.getuid() or directory.st_uid != os.getuid()
+            or not stat.S_ISDIR(directory.st_mode) or value.st_dev != directory.st_dev
+            or getattr(value, 'st_flags', 0)):
+        raise ValueError('npm log owner, type, links, flags or filesystem is invalid')
+    if value.st_mtime > cutoff or stamp.timestamp() > cutoff:
+        raise ValueError('recent npm log')
+    return value
 
 
 def tree_facts(path: Path, cutoff: float, deadline: float | None = None) -> tuple[int, float]:
@@ -145,11 +165,15 @@ def bounded_candidates() -> list[tuple[Path, str, Path, int]]:
                 continue
             result.append((p, node_compile_cache.KIND, p, node_compile_cache.DAYS))
     # Download caches only; package stores, databases and browser/app caches stay.
-    for root in (USER_HOME / 'Library/Caches/pnpm/dlx', USER_HOME / '.npm/_logs'):
+    for root in (USER_HOME / 'Library/Caches/pnpm/dlx',):
         if root.is_dir() and not root.is_symlink():
             for p in root.iterdir():
                 if p.is_dir() and not p.is_symlink():
                     result.append((p, 'package-download-cache', p, 14))
+    logs = USER_HOME / '.npm/_logs'
+    if logs.is_dir() and logs.resolve() == logs:
+        result.extend((p, NPM_LOG_KIND, p, 14) for p in logs.iterdir()
+                      if NPM_LOG_NAME.fullmatch(p.name))
     return [entry for entry in result if not is_recovery_path(entry[0])]
 
 
@@ -167,7 +191,10 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
             # Every ancestor must still resolve to the path we classified.
             if p.resolve() != p or activity.resolve() != activity:
                 raise ValueError('symlink ancestor')
-            if kind == node_compile_cache.KIND:
+            if kind == NPM_LOG_KIND:
+                s = npm_log_stat(p, now - days * 86400)
+                allocated, newest = s.st_blocks * 512, s.st_mtime
+            elif kind == node_compile_cache.KIND:
                 version = node_compile_cache.version_for(p)
                 s = p.lstat()
                 if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.getuid():
@@ -200,7 +227,8 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
                 allocated, newest = tree_facts(p, now - days * 86400, deadline)
                 s = p.lstat()
             candidates.append(Candidate(str(p), kind, str(activity), days,
-                                        s.st_dev, s.st_ino, newest, allocated))
+                                        s.st_dev, s.st_ino, newest, allocated,
+                                        entry_fingerprint(s) if kind == NPM_LOG_KIND else None))
         except (OSError, ValueError) as error:
             skipped.append({'path': str(p), 'reason': str(error), 'error': isinstance(error, OSError)})
     return candidates, skipped
@@ -234,7 +262,8 @@ def process_references(path: Path, commands: str) -> bool:
     return any(alias in commands for alias in aliases)
 
 
-def activity_reason(path: Path, commands: str, *, ignore_current_process: bool = False) -> str | None:
+def activity_reason(path: Path, commands: str, *, ignore_current_process: bool = False,
+                    directory: bool = True) -> str | None:
     if process_references(path, commands):
         return 'active process references directory'
     try:
@@ -243,7 +272,7 @@ def activity_reason(path: Path, commands: str, *, ignore_current_process: bool =
         args = ['/usr/bin/sudo', '-n', '/usr/sbin/lsof', '-nP']
         if ignore_current_process:
             args += ['-a', '-p', '^' + str(os.getpid())]
-        result = subprocess.run(args + ['+D', str(path)],
+        result = subprocess.run(args + (['+D', str(path)] if directory else [str(path)]),
                                 capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
         return 'open-handle inspection unavailable'
@@ -641,21 +670,33 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
             if is_recovery_path(p):
                 raise ValueError('preserved recovery quarantine')
             is_node = candidate.kind == node_compile_cache.KIND
+            is_npm_log = candidate.kind == NPM_LOG_KIND
+            if is_npm_log:
+                if candidate.min_age_days != 14 or activity != p or candidate.leaf_fingerprint is None:
+                    raise ValueError('unclassified npm log retention policy')
+                before_log = npm_log_stat(p, time.time() - 14 * 86400)
+                if entry_fingerprint(before_log) != candidate.leaf_fingerprint:
+                    raise ValueError('npm log changed after discovery')
             if is_node:
                 version = node_compile_cache.version_for(p)
                 if candidate.min_age_days != node_compile_cache.DAYS or activity != p:
                     raise ValueError('unclassified Node cache retention policy')
                 if version in node_compile_cache.active_versions(deadline):
                     raise ValueError('active Node version ' + version)
-            reason = activity_reason(activity, process_arguments())
+            reason = activity_reason(activity, process_arguments(), directory=not is_npm_log)
             if reason:
                 raise ValueError(reason)
             if p.resolve() != p or activity.resolve() != activity:
                 raise ValueError('path redirected after discovery')
             check_deadline(deadline)
-            with capture_entry(p, (candidate.device, candidate.inode), directory=True) as captured:
+            with capture_entry(p, (candidate.device, candidate.inode), directory=not is_npm_log) as captured:
                 cutoff = time.time() - candidate.min_age_days * 86400
-                if is_node:
+                if is_npm_log:
+                    captured_log = os.fstat(captured.fd)
+                    if entry_fingerprint(captured_log, after_rename=True) != entry_fingerprint(before_log, after_rename=True):
+                        raise ValueError('npm log changed during capture')
+                    allocated, newest = captured_log.st_blocks * 512, captured_log.st_mtime
+                elif is_node:
                     if (os.fstat(captured.fd).st_dev != os.fstat(captured.anchor.fd).st_dev
                             or os.fstat(captured.anchor.fd).st_uid != os.getuid()):
                         raise ValueError('Node cache root owner or filesystem changed')
@@ -673,11 +714,14 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                     reason = 'active process references directory' if process_references(activity, commands) else None
                 else:
                     reason = activity_reason(activity, commands, ignore_current_process=True)
-                reason = reason or activity_reason(captured.path, commands, ignore_current_process=True)
+                reason = reason or activity_reason(captured.path, commands, ignore_current_process=True,
+                                                    directory=not is_npm_log)
                 if reason:
                     raise ValueError(reason)
                 captured.anchor.verify()
-                if is_node:
+                if is_npm_log:
+                    remove_captured_leaf(captured, captured_log, cutoff, candidate.device, deadline)
+                elif is_node:
                     remove_node_cache(captured, leaves, cutoff, deadline)
                 else:
                     remove_captured_tree(captured, cutoff, deadline)
