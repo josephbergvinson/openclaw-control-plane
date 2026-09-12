@@ -102,9 +102,18 @@ and production parity; these results do not grant another host live acceptance.
 On an earlier deployed predecessor, a fresh Discord Calendar goal completed after
 an intentional no-acknowledgment yield and requester continuation; accepted usage
 matched its counter and one final was observed. That historical flow did not test
-the newer steering correction or expire a child deadline. Their routing and timeout
-claims rest on the identified regression evidence until the corresponding live
-user path is independently verified.
+the newer steering correction or expire a child deadline. Child-deadline behavior
+remains supported by the identified regression evidence, without a live expiry test.
+
+On 12 September, the adopted `f31686e` release also passed one naturalistic Discord
+steering case: a source-location follow-up arrived during the original document
+request, both messages stayed in the same active run, and one final response with
+the requested PDF was visible. The run ended with no pending inputs and no premature
+compaction observed, using `ultra` reasoning with fast mode off. The file supplied for delivery
+matched an independent raw fetch from the source provider, and the attachment's
+name and size were observed in Discord. CDN bytes were not downloaded again.
+This verifies that specific user path on the originating host; it does not cover
+every future steering, compaction or device case or replace adoption checks.
 
 The repository's operating policies, service layout, scheduled maintenance,
 integrations and backup procedures remain necessary alongside this source package.

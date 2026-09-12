@@ -127,3 +127,12 @@ source and build results; they do not establish another host's channel or device
 acceptance. The [steering regression workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/steering-regression.yml)
 now exercises the included fix directly, while the reference workflow retains the
 complete native-check and build requirements.
+
+Published base `707dc70` also passed [qualification run 34669121956](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34669121956):
+reference checks, the full native plan, the runtime build and the aggregate gate.
+The documentation-only acceptance update preserves that qualified runtime source.
+
+The originating host separately passed a naturalistic two-message Discord steering
+case on the adopted release on 12 September, with one visible final response and
+no premature compaction. See the [source chapter](../docs/20-runtime-source-changes.md)
+for the observed scope and limits; this does not replace an adopter's live checks.
