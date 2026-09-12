@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -232,6 +233,9 @@ class FakeBackend:
         self.command_evidence.extend(
             activate_module.expected_stopped_command_evidence(self.fixture.paths)
         )
+
+    def verify_screen_capture_continuity(self):
+        return None
 
     def inspect_exec_approvals(self, release):
         self.events.append("inspect")
@@ -2460,12 +2464,14 @@ def test_reduced_source_has_no_initial_cutover_migration_or_plugin_install_contr
         "EXPECTED_CONFIG_EVIDENCE_SHA256",
         "EXPECTED_OPENAI_PROFILE_ORDER",
         "@openclaw/discord@2026.8.1-beta.3",
-        "sqlite3",
         "coordinator",
         "adjudication",
         "operation UUID",
     ):
         assert retired not in source
+    # SQLite is confined to the exact read-only TCC query, never state migration.
+    permission_source = inspect.getsource(activate_module.screen_capture_permission)
+    assert "sqlite3" not in source.replace(permission_source, "").replace("import sqlite3\n", "")
     assert 'modes.add_parser("activate")' in source
     assert 'modes.add_parser("prepare")' not in source
     assert 'modes.add_parser("start")' not in source

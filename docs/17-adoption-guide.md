@@ -390,6 +390,13 @@ same-version case shown. Follow the [activation runbook](../workspace/runbooks/r
 for exact preservation, consumed-start recovery and receipt retirement. Do not
 bootstrap manually after a consumed activation failure.
 
+If adopting the Journal workflow, complete its [native capture acceptance and
+permission binding](../workspace/runbooks/runtime-activation.md#journal-capture-acceptance-and-permission-continuity)
+after the initial activation. Configure the resulting private binding for later
+activations. Subsequent process or activation changes require fresh capture
+evidence before capability readiness can be claimed; this does not require
+replaying the scheduled Journal synchronization job.
+
 ### Stage maintenance separately
 
 For the configured host operations, run `materialize_host.py` without

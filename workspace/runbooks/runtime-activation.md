@@ -1,7 +1,8 @@
 # Runtime activation and the first installation
 
 `../scripts/openclaw_runtime_activate.py` is the exported lifecycle owner. Its
-operations are `seal`, `snapshot`, `activate`, `restore` and `retire-receipts`.
+operations are `seal`, `snapshot`, `activate`, `restore`, `retire-receipts`,
+`screen-capture-enroll` and `screen-capture-check`.
 It runs as the configured macOS operator account. It does not install Node,
 onboard accounts, invent a predecessor, stop a working service, or turn an
 incomplete installation into a successful activation receipt.
@@ -33,6 +34,8 @@ placeholders. All these paths must describe the same installation:
 | `paths.activation_lock`, `paths.activation_result` | Shared activation lock and immutable terminal receipt path. |
 | `paths.legacy_exec_approvals` | Legacy approvals-file location checked for absence; for a new installation use `state_root/exec-approvals.json`. Its parent must match the persisted approvals socket directory. |
 | `paths.session_store`, `paths.session_reservations` | Historical session-store and reservation paths within `state_root`; these identify a preservation constraint, not a newly created store. |
+| `paths.screen_capture_binding` | Private immutable Journal continuity binding. Initially `null` for an installation that has not enrolled this route; set the exact path after acceptance to require the guard on subsequent activations. |
+| `paths.python_binary`, `paths.peekaboo_binary` | Executables used by the explicit Journal capture route. Use the same Python and Peekaboo executables as the installed Journal workflow. |
 
 Set `runtime.gateway_label`, `runtime.node_label`, `runtime.gateway_port` and
 `runtime.required_extensions` to the actual installation. The reference expects
@@ -44,6 +47,82 @@ configured port, with `WorkingDirectory=host_home`, `RunAtLoad=true` and
 set `OPENCLAW_SUPERVISOR_MODE=external` and
 `OPENCLAW_SERVICE_REPAIR_POLICY=external`. See
 [release architecture](../../docs/10-runtime-releases-and-promotion.md).
+
+## Journal capture acceptance and permission continuity
+
+The source installation protects its Journal route across runtime activations.
+When `paths.screen_capture_binding` is configured, the activator checks that
+binding before touching either launchd job and again after the transition. It
+pins the responsible Node and Peekaboo executable bytes, filesystem identities
+and signatures, and the exact read-only ScreenCapture TCC row. The compiled TCC
+`csreq` must pass `codesign --test-requirement` against the exact Node binary;
+a valid self-signature alone is insufficient. A changed, revoked or unknown
+prerequisite stops activation. The helper never repairs permissions.
+
+A fresh installation first establishes its normal activation receipt with this
+optional binding unset. Then run the explicit native acceptance below and set
+`paths.screen_capture_binding` to the verified output. Keep it configured for
+every later activation when using the Journal workflow. Do not unset it to bypass
+a failed prerequisite, or fabricate a first-install receipt or TCC grant.
+
+Open the existing Journal app before invoking the capture. Read-only TCC log
+observation requires already configured noninteractive sudo access and fails
+before dispatch when unavailable. It does not prompt for credentials or change
+system logging privacy settings. Use private durable evidence storage under the
+configured state root, not a disposable source checkout or scratch directory.
+The following variables are absolute paths from the adopter's private contract:
+`$PYTHON`, `$WORKSPACE`, `$STATE`, and `$OPENCLAW_OPERATOR_CONFIG`.
+
+```sh
+CAPTURE_ROOT="$STATE/capability-evidence/journal"
+mkdir -p "$CAPTURE_ROOT"
+chmod 700 "$CAPTURE_ROOT"
+CAPTURE_DIR="$CAPTURE_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
+"$PYTHON" -B "$WORKSPACE/scripts/journal_screen_capture_acceptance.py" \
+  capture --directory "$CAPTURE_DIR"
+```
+
+This creates one disabled temporary scheduler command job, manually invokes it
+once, records a private Peekaboo image and TCC attribution, then removes the job.
+The Python parent and two new-session children preserve the installed scheduler
+route. It does not export or ingest Journal content, replay a production job,
+change TCC, or restart the gateway. An uncertain result retains command receipts
+for reconciliation and never retries the capture automatically.
+
+Inspect `journal.png` and confirm it depicts the actual Journal window. Pass the
+reported image hash only after that review; acceptance rejects a replaced image,
+responsible process or activation receipt. Then enroll and check the evidence:
+
+```sh
+"$PYTHON" -B "$WORKSPACE/scripts/journal_screen_capture_acceptance.py" \
+  accept --directory "$CAPTURE_DIR" \
+  --reviewed-journal-image-sha256 "$REVIEWED_IMAGE_SHA256"
+BINDING_OUTPUT="$CAPTURE_DIR/continuity-binding.json"
+"$PYTHON" "$WORKSPACE/scripts/openclaw_runtime_activate.py" \
+  screen-capture-enroll --acceptance "$CAPTURE_DIR/acceptance.json" \
+  --acceptance-sha256 "$ACCEPTANCE_SHA256" \
+  --permission-database '/Library/Application Support/com.apple.TCC/TCC.db' \
+  --output "$BINDING_OUTPUT"
+"$PYTHON" "$WORKSPACE/scripts/openclaw_runtime_activate.py" \
+  screen-capture-check --binding "$BINDING_OUTPUT" --require-current-process
+```
+
+`$ACCEPTANCE_SHA256` is the hash returned by the acceptance command. After the
+check passes, bind `paths.screen_capture_binding` to `$BINDING_OUTPUT` in private
+`operator.json`. Preserve each previous immutable receipt when renewing the
+binding. Include the evidence directory and configured binding in private state
+backups. No original host receipt or permission state is supplied by this repo.
+
+For a corresponding capability status record, set `screen_capture_binding` to
+an object containing that absolute `path` and its `sha256`. The resolver and
+configuration-invalidation helper recheck the native binding. A new responsible
+process or activation makes current capability unknown and requires a fresh
+explicit capture, even when code and TCC prerequisites still match. The focused
+`capability_validation_runner.py --screen-capture-binding "$BINDING_OUTPUT"`
+command performs the same current-process check without provider probes.
+Other native capture routes keep their own evidence. This manual acceptance
+proves current Journal capture capability; natural scheduled synchronization
+requires a separate successful scheduler and data-delivery observation.
 
 ## Native state prerequisites
 

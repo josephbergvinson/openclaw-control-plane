@@ -39,7 +39,8 @@ TESTS = [
     'test_workspace_integrity_guard.py',
     'test_openclaw_runtime_activate.py', 'test_openclaw_runtime_release_retention.py',
     'test_openclaw_runtime_promotion_retention.py', 'test_openclaw_approval_a_retention.py',
-    'test_runtime_activation_portability.py',
+    'test_runtime_activation_portability.py', 'test_screen_capture_continuity.py',
+    'test_journal_screen_capture_acceptance.py',
 ]
 
 
@@ -67,6 +68,7 @@ def fixture_contract(root: Path) -> dict:
         'internal_control_root': str(home / 'InternalControl'),
         'node_compile_cache': str(data / 'ProjectData' / '.node-compile-cache'),
         'openclaw_cli': str(cli), 'node_binary': node, 'python_binary': sys.executable,
+        'peekaboo_binary': str(root / 'bin' / 'peekaboo'),
         'runtime_package_link': str(home / '.openclaw-cli' / 'lib' / 'node_modules' / 'openclaw'),
         'temp_root': str(root / 'scratch'), 'runtime_source': str(root / 'runtime-source'),
         'xcode_derived_data': str(data / 'Developer/Xcode/BuildData/DerivedData'),

@@ -24,9 +24,11 @@ import plistlib
 import pwd
 import re
 import stat
+import sqlite3
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from typing import Any, Protocol
 
@@ -44,6 +46,13 @@ DEFAULT_HEALTH_TIMEOUT_SECONDS = 900.0
 SNAPSHOT_TIMEOUT_SECONDS = 3600.0
 START_CONSUMED_NAME = "activation-start-consumed.json"
 RETIREMENT_RECEIPT_NAME = "retirement-receipt.json"
+SCREEN_CAPTURE_ROUTE = "gateway cron command -> Python -> Python new session -> Python new session -> Peekaboo Journal window capture"
+
+
+def configured_screen_capture_binding() -> Path | None:
+    if OPERATOR.get("paths.screen_capture_binding") is None:
+        return None
+    return OPERATOR.require_path("paths.screen_capture_binding")
 
 
 def runtime_gateway_port() -> int:
@@ -170,6 +179,7 @@ class ActivationPaths:
     command_timeout_seconds: float = 120.0
     health_timeout_seconds: float = DEFAULT_HEALTH_TIMEOUT_SECONDS
     health_poll_seconds: float = 0.25
+    screen_capture_binding: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +210,7 @@ class ActivationBackend(Protocol):
     command_evidence: list[dict[str, Any]]
     def assert_gateway_and_node_stopped(self) -> None: ...
     def inspect_exec_approvals(self, release: Path) -> dict[str, Any]: ...
+    def verify_screen_capture_continuity(self) -> dict[str, Any] | None: ...
     def verify_candidate_discord(self, release: Path, config_path: Path) -> dict[str, Any]: ...
     def migrate_state_once(self, release: Path) -> dict[str, Any]: ...
     def bootstrap_gateway_once(self) -> None: ...
@@ -347,6 +358,205 @@ def sha256_physical_file(path: Path, label: str) -> tuple[str, os.stat_result]:
     ):
         raise ActivationError(f"{label} identity drift")
     return digest.hexdigest(), after
+
+
+
+def screen_capture_permission(database: Path, client: Path) -> dict[str, Any]:
+    """Read one exact permission prerequisite, never infer effective capture from it."""
+    if not database.is_absolute() or database.resolve(strict=True) != database:
+        raise ActivationError("ScreenCapture permission database is not physical")
+    try:
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=3)
+        try:
+            connection.execute("PRAGMA query_only=ON")
+            rows = connection.execute(
+                "SELECT client_type,auth_value,auth_reason,auth_version,csreq,last_modified "
+                "FROM access WHERE service=? AND client=?",
+                ("kTCCServiceScreenCapture", str(client)),
+            ).fetchmany(2)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ActivationError("ScreenCapture permission is unknown") from exc
+    if len(rows) != 1 or rows[0][0] != 1 or rows[0][1] != 2 or not isinstance(rows[0][4], bytes):
+        raise ActivationError("ScreenCapture exact client permission is not definitely allowed")
+    row = rows[0]
+    verify_screen_capture_requirement(client, row[4])
+    return {"database": str(database), "clientType": row[0], "authValue": row[1],
+            "authReason": row[2], "authVersion": row[3],
+            "csreqSha256": sha256_bytes(row[4]), "lastModified": row[5]}
+
+
+def verify_screen_capture_requirement(client: Path, requirement: bytes) -> None:
+    """Check the database requirement against the exact client, not its self-signature."""
+    if not requirement or len(requirement) > MAX_COMMAND_BYTES:
+        raise ActivationError("ScreenCapture permission requirement is invalid")
+    with tempfile.TemporaryDirectory(prefix="openclaw-tcc-requirement-") as directory:
+        compiled = Path(directory) / "requirement.bin"
+        compiled.write_bytes(requirement)
+        compiled.chmod(0o400)
+        result = run_bounded(("/usr/bin/codesign", "--verify", "--strict",
+                              "--test-requirement", str(compiled), str(client)), 30)
+    if result.returncode != 0 or result.timed_out:
+        raise ActivationError("ScreenCapture permission requirement does not match the exact executable")
+
+
+def screen_capture_code_identity(path: Path) -> dict[str, Any]:
+    digest, before = sha256_physical_file(path, "ScreenCapture executable")
+    verified = run_bounded(("/usr/bin/codesign", "--verify", "--strict", str(path)), 30)
+    details = run_bounded(("/usr/bin/codesign", "-d", "--verbose=4", "-r-", str(path)), 30)
+    if any(item.returncode != 0 or item.timed_out for item in (verified, details)):
+        raise ActivationError("ScreenCapture executable signature is unknown")
+    try:
+        text = (details.stdout + details.stderr).decode("utf-8", "strict")
+        selected = {}
+        for prefix in ("designated => ", "Identifier=", "TeamIdentifier=", "CDHash="):
+            values = [line for line in text.splitlines() if line.startswith(prefix)]
+            if len(values) != 1:
+                raise ActivationError("ScreenCapture signing identity is ambiguous")
+            selected[prefix] = values[0][len(prefix):]
+    except UnicodeError as exc:
+        raise ActivationError("ScreenCapture signing identity is unreadable") from exc
+    after = path.stat()
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(getattr(before, field) != getattr(after, field) for field in fields):
+        raise ActivationError("ScreenCapture executable changed during inspection")
+    return {"path": str(path), "device": before.st_dev, "inode": before.st_ino,
+            "bytes": before.st_size, "mtimeNs": before.st_mtime_ns,
+            "sha256": digest, "signingIdentity": selected}
+
+
+def load_screen_capture_acceptance(path: Path, expected_sha256: str) -> dict[str, Any]:
+    proof, payload, _ = read_json(path, "ScreenCapture native acceptance")
+    if (re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+            or sha256_bytes(payload) != expected_sha256
+            or proof.get("status") != "current_scheduler_route_capture_and_responsibility_verified"
+            or proof.get("route") != SCREEN_CAPTURE_ROUTE
+            or proof.get("imageVisuallyVerifiedAsJournal") is not True
+            or proof.get("manualProbe") is not True
+            or proof.get("scheduledSyncProven") is not False
+            or proof.get("producerInvoked") is not False
+            or proof.get("tccMutated") is not False):
+        raise ActivationError("ScreenCapture native acceptance is missing or not bound")
+    pid, identity = proof.get("responsiblePid"), proof.get("responsibleProcessIdentity")
+    if (not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
+            or not isinstance(identity, list) or len(identity) != 3
+            or not all(isinstance(item, str) for item in identity)
+            or not Path(identity[1]).is_absolute()):
+        raise ActivationError("ScreenCapture responsible process is unknown")
+    process_start_time_us(identity[0])
+    files = proof.get("files")
+    if (not isinstance(files, list) or len(files) != 2
+            or not all(isinstance(row, dict) for row in files)
+            or files[0].get("path") != identity[1]):
+        raise ActivationError("ScreenCapture responsible executable binding is invalid")
+    messages = proof.get("tccdAttributionAndEffectivePermission", [])
+    if not isinstance(messages, list):
+        raise ActivationError("ScreenCapture native attribution is malformed")
+    subject = "from Sub:{" + identity[1] + "}Resp:"
+    if not any(isinstance(row, dict) and isinstance(row.get("message"), str)
+               and subject in row["message"]
+               and f"pid={pid}," in row["message"]
+               and "kTCCServiceScreenCapture" in row["message"]
+               and "Auth Right: Allowed (System Set)" in row["message"]
+               and "DB Action:None" in row["message"] for row in messages):
+        raise ActivationError("ScreenCapture effective permission attribution is unknown")
+    return proof
+
+
+def enroll_screen_capture_binding(paths: ActivationPaths, acceptance: Path,
+                                  acceptance_sha256: str, database: Path,
+                                  output: Path) -> dict[str, Any]:
+    """Bind an already performed native capture; never capture or change permission."""
+    proof = load_screen_capture_acceptance(acceptance, acceptance_sha256)
+    current = process_identity(proof["responsiblePid"])
+    if [str(item) for item in current] != proof["responsibleProcessIdentity"]:
+        raise ActivationError("ScreenCapture native proof is from a different process")
+    files = [screen_capture_code_identity(Path(row["path"])) for row in proof["files"]]
+    if Path(files[0]["path"]) != paths.node:
+        raise ActivationError("ScreenCapture responsible client differs from activation Node")
+    for actual, expected in zip(files, proof["files"]):
+        if expected.get("codesignVerified") is not True or any(
+                actual[key] != expected.get(key)
+                for key in ("path", "device", "inode", "bytes", "mtimeNs", "sha256")):
+            raise ActivationError("ScreenCapture executable differs from native proof")
+    activation, payload, _ = read_json(paths.result, "current activation result")
+    if activation.get("outcome") != "activated" or sha256_bytes(payload) != proof.get("activationReceiptSha256"):
+        raise ActivationError("ScreenCapture native proof activation differs")
+    binding = {"schemaVersion": 1, "route": SCREEN_CAPTURE_ROUTE,
+               "nativeAcceptancePath": str(acceptance), "nativeAcceptanceSha256": acceptance_sha256,
+               "activationReceiptPath": str(paths.result),
+               "activationReceiptSha256": sha256_bytes(payload),
+               "responsiblePid": proof["responsiblePid"],
+               "responsibleProcessIdentity": proof["responsibleProcessIdentity"],
+               "files": files, "permission": screen_capture_permission(database, paths.node),
+               "verifiedAt": proof["verifiedAt"], "enrolledAt": utc_now(),
+               "scheduledSyncProven": False}
+    if ([str(item) for item in process_identity(proof["responsiblePid"])]
+            != proof["responsibleProcessIdentity"]
+            or screen_capture_permission(database, paths.node) != binding["permission"]):
+        raise ActivationError("ScreenCapture native boundary changed during enrollment")
+    create_immutable_file(output, json.dumps(binding, indent=2, sort_keys=True).encode() + b"\n")
+    return binding
+
+
+def verify_screen_capture_binding(path: Path, node: Path, *,
+                                  require_current_process: bool = False) -> dict[str, Any]:
+    binding, payload, info = read_json(path, "ScreenCapture continuity binding")
+    if stat.S_IMODE(info.st_mode) != 0o400:
+        raise ActivationError("ScreenCapture continuity binding must be immutable")
+    if binding.get("schemaVersion") != 1 or binding.get("route") != SCREEN_CAPTURE_ROUTE:
+        raise ActivationError("ScreenCapture continuity binding is invalid")
+    proof = load_screen_capture_acceptance(Path(binding["nativeAcceptancePath"]),
+                                          binding["nativeAcceptanceSha256"])
+    files = binding.get("files")
+    if (not isinstance(files, list) or len(files) != 2
+            or not all(isinstance(row, dict) for row in files)
+            or files[0].get("path") != str(node)):
+        raise ActivationError("ScreenCapture continuity executable is unknown")
+    if (binding.get("responsiblePid") != proof["responsiblePid"]
+            or binding.get("responsibleProcessIdentity") != proof["responsibleProcessIdentity"]
+            or binding.get("activationReceiptSha256") != proof.get("activationReceiptSha256")):
+        raise ActivationError("ScreenCapture continuity proof drift")
+    for expected, native in zip(files, proof["files"]):
+        if native.get("codesignVerified") is not True or any(
+                expected.get(key) != native.get(key)
+                for key in ("path", "device", "inode", "bytes", "mtimeNs", "sha256")):
+            raise ActivationError("ScreenCapture continuity file differs from native proof")
+        if screen_capture_code_identity(Path(expected["path"])) != expected:
+            raise ActivationError("ScreenCapture executable or signature drift")
+    permission = screen_capture_permission(Path(binding["permission"]["database"]), node)
+    if permission != binding["permission"]:
+        raise ActivationError("ScreenCapture recorded permission drift")
+    current_process = False
+    try:
+        current_process = ([str(item) for item in process_identity(binding["responsiblePid"])]
+                           == binding["responsibleProcessIdentity"])
+    except (ActivationError, OSError):
+        pass
+    if require_current_process:
+        active, active_payload, _ = read_json(Path(binding["activationReceiptPath"]), "current ScreenCapture activation")
+        if (not current_process or active.get("outcome") != "activated"
+                or sha256_bytes(active_payload) != binding["activationReceiptSha256"]):
+            raise ActivationError("ScreenCapture effective evidence needs a fresh native route probe")
+    return {"bindingSha256": sha256_bytes(payload), "nativeAcceptanceSha256": binding["nativeAcceptanceSha256"],
+            "protectedCodeIdentityUnchanged": True, "recordedPermissionUnchanged": True,
+            "effectiveCaptureVerifiedForCurrentProcess": current_process,
+            "effectiveCaptureVerifiedAt": binding["verifiedAt"], "scheduledSyncProven": False}
+
+
+def verify_screen_capture_capability(reference: Any) -> dict[str, Any]:
+    """Current behavioral evidence is distinct from activation preconditions."""
+    if (not isinstance(reference, dict) or set(reference) != {"path", "sha256"}
+            or not isinstance(reference["path"], str) or not Path(reference["path"]).is_absolute()
+            or not isinstance(reference["sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", reference["sha256"]) is None):
+        raise ActivationError("ScreenCapture capability reference is invalid")
+    path = Path(reference["path"])
+    payload, _ = read_physical(path, "ScreenCapture capability binding")
+    if sha256_bytes(payload) != reference["sha256"]:
+        raise ActivationError("ScreenCapture capability binding changed")
+    return verify_screen_capture_binding(path, OPERATOR.require_path("paths.node_binary"), require_current_process=True)
 
 
 def fsync_directory(path: Path) -> None:
@@ -1311,6 +1521,11 @@ class SystemBackend:
         if result.returncode != 0 or result.timed_out:
             raise ActivationError(f"{purpose} failed")
         return result
+
+    def verify_screen_capture_continuity(self) -> dict[str, Any] | None:
+        if self.paths.screen_capture_binding is None:
+            return None
+        return verify_screen_capture_binding(self.paths.screen_capture_binding, self.paths.node)
 
     def migrate_state_once(self, release: Path) -> dict[str, Any]:
         versions = native_migration_schema_versions(release)
@@ -2858,6 +3073,7 @@ def activate(paths: ActivationPaths, candidate: Path, expected_commit: str,
                 )
                 backend.verify(candidate, candidate_record["device"], candidate_record["inode"])
                 backend.verify_node(candidate, candidate_record["device"], candidate_record["inode"])
+                backend.verify_screen_capture_continuity()
             return existing
         fence_path = _start_fence_path(paths)
         if fence_path.exists() or fence_path.is_symlink():
@@ -2936,6 +3152,9 @@ def activate(paths: ActivationPaths, candidate: Path, expected_commit: str,
                 raise ActivationError("protected plist drift")
             if validate_recovered_invariants(paths) != snapshot["recoveredInvariants"]:
                 raise ActivationError("protected invariant drift")
+            screen_capture = backend.verify_screen_capture_continuity()
+            if screen_capture is not None:
+                result["screenCapturePreflight"] = screen_capture
             plugin_selection = (
                 backend.verify_candidate_discord(candidate, paths.candidate_state_dir / "openclaw.json")
                 if upgrade is None else None
@@ -2999,12 +3218,19 @@ def activate(paths: ActivationPaths, candidate: Path, expected_commit: str,
                 )
             ):
                 raise ActivationError("post-boot protected invariant drift")
+            screen_capture_after = backend.verify_screen_capture_continuity()
+            if ((screen_capture is None) != (screen_capture_after is None)
+                    or (screen_capture is not None and screen_capture_after["bindingSha256"]
+                        != screen_capture["bindingSha256"])):
+                raise ActivationError("ScreenCapture continuity binding changed during activation")
             result["verification"] = {**gateway, "node": node,
                                       "recoveredInvariants": invariants,
                                       "execApprovals": approvals,
                                       "bundledExtensions": extensions,
                                       "pluginSelection": plugin_selection,
                                       "persistedSurface": True}
+            if screen_capture_after is not None:
+                result["verification"]["screenCaptureContinuity"] = screen_capture_after
             return _finish(paths, result, backend, "activated", None)
         except BaseException:
             result["restoreRequired"] = True
@@ -3021,7 +3247,8 @@ def live_paths() -> ActivationPaths:
     return ActivationPaths(OPERATOR.require_path("paths.runtime_releases_root"), OPERATOR.require_path("paths.runtime_current_link"), OPERATOR.require_path("paths.runtime_package_link"),
                            OPERATOR.require_path("paths.openclaw_cli"), OPERATOR.require_path("paths.gateway_plist"), OPERATOR.require_path("paths.node_plist"),
                            OPERATOR.require_path("paths.node_binary"), OPERATOR.require_path("paths.runtime_node_alias"), OPERATOR.require_path("paths.state_root"),
-                           OPERATOR.require_path("paths.state_root"), OPERATOR.require_path("paths.activation_lock"), OPERATOR.require_path("paths.activation_result"), uid)
+                           OPERATOR.require_path("paths.state_root"), OPERATOR.require_path("paths.activation_lock"), OPERATOR.require_path("paths.activation_result"), uid,
+                           screen_capture_binding=configured_screen_capture_binding())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3047,6 +3274,15 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--output", type=Path, required=True)
     restore.add_argument("--after-success", action="store_true",
                          help="Explicit stopped recovery of a successful version upgrade; never boots the restored queue")
+    screen_enroll = modes.add_parser("screen-capture-enroll",
+                                    help="Bind an already verified native route receipt; never capture")
+    screen_enroll.add_argument("--acceptance", type=Path, required=True)
+    screen_enroll.add_argument("--acceptance-sha256", required=True)
+    screen_enroll.add_argument("--permission-database", type=Path, required=True)
+    screen_enroll.add_argument("--output", type=Path, required=True)
+    screen_check = modes.add_parser("screen-capture-check", help="Read current identity and permission prerequisites")
+    screen_check.add_argument("--binding", type=Path, required=True)
+    screen_check.add_argument("--require-current-process", action="store_true")
     activation = modes.add_parser("activate")
     activation.add_argument("--candidate-release", type=Path, required=True)
     activation.add_argument("--expected-commit", required=True)
@@ -3066,7 +3302,13 @@ def main(argv: list[str] | None = None) -> int:
             raise ActivationError("activation tooling must run as the operator user")
         if args.mode in ("seal", "snapshot", "activate", "restore") and not args.candidate_release.is_absolute():
             raise ActivationError("candidate release must be absolute")
-        if args.mode == "seal":
+        if args.mode == "screen-capture-enroll":
+            receipt = enroll_screen_capture_binding(paths, args.acceptance, args.acceptance_sha256,
+                                                   args.permission_database, args.output)
+        elif args.mode == "screen-capture-check":
+            receipt = verify_screen_capture_binding(args.binding, paths.node,
+                                                    require_current_process=args.require_current_process)
+        elif args.mode == "seal":
             receipt = create_candidate_seal(paths, args.candidate_release, args.source_commit, args.output)
         elif args.mode == "snapshot":
             receipt = create_stopped_snapshot(
@@ -3092,11 +3334,11 @@ def main(argv: list[str] | None = None) -> int:
             receipt = activate(paths, args.candidate_release, args.expected_commit,
                                args.candidate_seal, args.stopped_snapshot_manifest,
                                SystemBackend(paths), upgrade_config=args.upgrade_config)
-    except (ActivationError, OSError, ValueError) as exc:
+    except (ActivationError, OSError, ValueError, KeyError, TypeError) as exc:
         parser.error(str(exc))
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0 if (
-        args.mode in ("seal", "snapshot", "retire-receipts")
+        args.mode in ("seal", "snapshot", "retire-receipts", "screen-capture-enroll", "screen-capture-check")
         or receipt["outcome"] in ("activated", "restored", "restored_stopped")
     ) else 3
 
