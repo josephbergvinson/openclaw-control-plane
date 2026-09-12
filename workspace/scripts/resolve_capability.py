@@ -3149,6 +3149,17 @@ def readiness_for_status_id(
             "evidence_effects": [],
             "evidence_operations": [],
         }
+    if "screen_capture_binding" in best:
+        try:
+            try:
+                from scripts.openclaw_runtime_activate import verify_screen_capture_capability
+            except ModuleNotFoundError:
+                from openclaw_runtime_activate import verify_screen_capture_capability
+            verify_screen_capture_capability(best["screen_capture_binding"])
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError):
+            best = {**best, "state": "unknown", "freshness_class": "reprobe-before-use",
+                    "evidence": "ScreenCapture identity, permission or responsible-process evidence is no longer current; use the actual native route acceptance.",
+                    "evidence_effects": [], "evidence_operations": []}
     freshness = capability_freshness(
         str(best.get("last_verified_utc", "")),
         best.get("slo_max_age_days"),

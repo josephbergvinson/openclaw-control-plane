@@ -130,6 +130,15 @@ applying a deletion. Unknown ownership means preserve until resolved.
 
 ## What activation proves
 
+For the Journal capture route, the configured activation guard preserves the
+responsible executable identity and checks its exact TCC ScreenCapture grant,
+including the stored code requirement. A stable grant is only a prerequisite.
+Current capture readiness additionally requires fresh evidence from the actual
+scheduler, Python and Peekaboo route; a process or activation change invalidates
+the earlier behavioral evidence. The [manual acceptance procedure](../workspace/runbooks/runtime-activation.md#journal-capture-acceptance-and-permission-continuity)
+provides that refresh without exporting, ingesting or replaying Journal data.
+Scheduled synchronization remains a separate acceptance claim.
+
 A successful activation receipt proves the checks represented in that receipt. It
 does not establish every user workflow. After changes to delivery, run a real channel
 request and inspect the visible message. After account changes, check the intended

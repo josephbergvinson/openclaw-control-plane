@@ -214,7 +214,7 @@ CAPABILITY_STATUS_REQUIRED_FIELDS = frozenset(
     }
 )
 CAPABILITY_STATUS_OPTIONAL_FIELDS = frozenset(
-    {"evidence_effects", "evidence_operations"}
+    {"evidence_effects", "evidence_operations", "screen_capture_binding"}
 )
 CAPABILITY_STATUS_STRING_FIELDS = frozenset(
     {
@@ -386,6 +386,13 @@ def validate_capability_status_record(
             "subset of read/mutation",
         )
 
+    if "screen_capture_binding" in record:
+        binding = record["screen_capture_binding"]
+        if (not isinstance(binding, dict) or set(binding) != {"path", "sha256"}
+                or not isinstance(binding["path"], str) or not Path(binding["path"]).is_absolute()
+                or not isinstance(binding["sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", binding["sha256"]) is None):
+            raise CapabilityStatusContractError("screen_capture_binding", f"invalid {source}: screen capture binding must pin a physical receipt path and SHA-256")
     validated = dict(record)
     validated["config_dependencies"] = list(config_dependencies)
     if evidence_effects is not None:
