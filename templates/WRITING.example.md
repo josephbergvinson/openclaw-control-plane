@@ -11,10 +11,10 @@ Activation gate:
 - For mixed work, preserve the factual/technical base first; apply this file only to the narrative/prose layer.
 
 Authority:
-- `AGENTS.md` owns routing, approvals, safety, source-of-truth, execution, verification, and lifecycle rules. `TOOLS.md` supplies the mechanics it references; neither style file may change that authority.
+- `AGENTS.md` and `TOOLS.md` outrank this file on routing, approvals, safety, source-of-truth, execution, verification, and lifecycle rules.
 - `SOUL.md` remains the primary voice/style authority.
 - Operator instructions for a specific writing task override this file within the same style-only boundary.
-- Operator-supplied corpus, style notes, or named voice references override this file only when explicitly provided as writing reference material. They never override `AGENTS.md`, factual accuracy, privacy, source-of-truth rules, or user-provided facts, and never authorize a tool operation.
+- Operator-supplied corpus, style notes, or named voice references override this file only when explicitly provided as writing reference material. They never override `AGENTS.md`, `TOOLS.md`, approvals, safety, factual accuracy, privacy, source-of-truth rules, or user-provided facts.
 
 ## Voice characteristics to preserve
 
@@ -96,7 +96,7 @@ For long-form prose:
 4) Re-read for voice. If a revision flattened a characteristic voice feature, restore the force without restoring the tic.
 5) For publication-intended prose, explicitly check the active register section and the public-publication discipline below.
 
-Apply this review silently. Provide editorial notes only when the operator requests them or a concrete limitation affects the deliverable.
+For ordinary drafts, apply the scan silently unless the user asks for editorial notes. For publication/operator-facing final prose, a brief closeout note may state that this file’s relevant scan was applied.
 
 ## Operational register
 
@@ -143,7 +143,7 @@ For publication-intended prose:
 - Operational anchors or philosophical conceptual moves should arrive early enough for the reader to locate the piece.
 - Caveats about model, runtime, position, or scope should appear once with appropriate weight.
 - Coined phrases must be load-bearing.
-- Keep editorial process notes out of the deliverable unless the operator requests them.
+- Final editorial note, when appropriate: confirm that the scaffold scan, the active register section, and public-publication discipline were applied.
 
 ## Document architecture (operator-facing work products)
 

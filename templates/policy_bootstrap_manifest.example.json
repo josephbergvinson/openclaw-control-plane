@@ -1,66 +1,165 @@
 {
   "version": 2,
-  "note": "Advisory description of the pinned reference, not a loader configuration or guaranteed per-turn injection. Verify src/agents/workspace.ts and actual compiled context.",
+  "note": "Advisory documentation, lint, and size-accounting metadata; the production loader does not read this manifest. bootstrap_default records intent and injected_for_roles records eligibility/accounting profiles, not WorkspaceSessionRole values or guaranteed per-session injection. Runtime truth lives in src/agents/workspace.ts.",
   "contracts": [
     {
       "path": "AGENTS.md",
-      "role": "normative",
-      "recognized_by_workspace_loader": true,
-      "notes": "Sole behavioral authority; retained by native subagent and cron allowlists."
-    },
-    {
-      "path": "SOUL.md",
-      "role": "style",
-      "recognized_by_workspace_loader": true,
-      "notes": "Native subagent filter excludes; main and cron eligibility remains subject to runtime classification."
-    },
-    {
-      "path": "USER.md",
-      "role": "preference",
-      "recognized_by_workspace_loader": true,
-      "notes": "Read when present; native subagent filter excludes."
-    },
-    {
-      "path": "IDENTITY.md",
-      "role": "identity",
-      "recognized_by_workspace_loader": true,
-      "notes": "Native subagent filter excludes."
-    },
-    {
-      "path": "MEMORY.md",
-      "role": "memory",
-      "recognized_by_workspace_loader": true,
-      "notes": "Root memory excluded from native subagent, cron, group and channel contexts."
-    },
-    {
-      "path": "BOOTSTRAP.md",
-      "role": "advisory",
-      "recognized_by_workspace_loader": true,
-      "notes": "Subject to setup/continuation handling; excluded from native cron and subagent allowlists."
+      "contract_role": "normative",
+      "bootstrap_default": "always",
+      "injected_for_roles": [
+        "orchestrator",
+        "subagent",
+        "cron"
+      ],
+      "sensitivity": "low",
+      "owner_file": "AGENTS.md",
+      "notes": "Recognized basename; orchestrators, subagents, and cron sessions may receive it subject to runtime filters",
+      "recognized_by_workspace_loader": true
     },
     {
       "path": "TOOLS.md",
-      "role": "mechanics-reference",
-      "recognized_by_workspace_loader": false,
-      "notes": "Deliberate section reads only."
-    },
-    {
-      "path": "WRITING.md",
-      "role": "style",
-      "recognized_by_workspace_loader": false,
-      "notes": "Deliberate reads for applicable long-form work."
+      "contract_role": "mechanics-reference",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "AGENTS.md",
+      "notes": "Loader-unrecognized; AGENTS.md routes deliberate section reads before applicable actions",
+      "recognized_by_workspace_loader": false
     },
     {
       "path": "WORKER.md",
-      "role": "generated-reference",
-      "recognized_by_workspace_loader": false,
-      "notes": "Legacy only, if retained."
+      "contract_role": "generated-reference",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "AGENTS.md",
+      "notes": "Loader-unrecognized; retained for deliberate reads and legacy control-plane tooling only",
+      "recognized_by_workspace_loader": false
+    },
+    {
+      "path": "SOUL.md",
+      "contract_role": "style",
+      "bootstrap_default": "always",
+      "injected_for_roles": [
+        "orchestrator",
+        "cron"
+      ],
+      "sensitivity": "low",
+      "owner_file": "SOUL.md",
+      "notes": "Recognized basename; main and cron accounting profiles are eligible, while the native subagent: key filter allows only AGENTS.md; visible dashboard: children follow their own session/privacy classification",
+      "recognized_by_workspace_loader": true
+    },
+    {
+      "path": "WRITING.md",
+      "contract_role": "style",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "SOUL.md",
+      "notes": "Long-form prose discipline; style-only child of SOUL.md. Unreachable by the OpenClaw bootstrap loader \u2014 not in WorkspaceBootstrapFileName / VALID_BOOTSTRAP_NAMES, so even the bootstrap-extra-files hook rejects it. Open deliberately by the main agent or a capable same-agent child when long-form mode is relevant.",
+      "recognized_by_workspace_loader": false
+    },
+    {
+      "path": "USER.md",
+      "contract_role": "preference",
+      "bootstrap_default": "always",
+      "injected_for_roles": [
+        "orchestrator",
+        "cron"
+      ],
+      "sensitivity": "medium",
+      "owner_file": "USER.md",
+      "notes": "Recognized basename; main and cron accounting profiles are eligible, while the native subagent: key filter allows only AGENTS.md; visible dashboard: children follow their own session/privacy classification",
+      "recognized_by_workspace_loader": true
+    },
+    {
+      "path": "MEMORY.md",
+      "contract_role": "memory",
+      "bootstrap_default": "always",
+      "injected_for_roles": [
+        "orchestrator"
+      ],
+      "sensitivity": "high",
+      "owner_file": "MEMORY.md",
+      "notes": "Recognized basename; eligible private main sessions are the named high-sensitivity exception, not an every-session guarantee",
+      "recognized_by_workspace_loader": true
+    },
+    {
+      "path": "IDENTITY.md",
+      "contract_role": "identity",
+      "bootstrap_default": "always",
+      "injected_for_roles": [
+        "orchestrator",
+        "cron"
+      ],
+      "sensitivity": "low",
+      "owner_file": "IDENTITY.md",
+      "notes": "Recognized basename; main and cron accounting profiles are eligible, while the native subagent: key filter allows only AGENTS.md; visible dashboard: children follow their own session/privacy classification",
+      "recognized_by_workspace_loader": true
+    },
+    {
+      "path": "capabilities.md",
+      "contract_role": "factual",
+      "bootstrap_default": "conditional",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "capabilities.md",
+      "notes": "Loader-unrecognized generated factual view; deliberate reads only",
+      "recognized_by_workspace_loader": false
+    },
+    {
+      "path": "BOOTSTRAP.md",
+      "contract_role": "bootstrap",
+      "bootstrap_default": "conditional",
+      "injected_for_roles": [
+        "orchestrator"
+      ],
+      "sensitivity": "low",
+      "owner_file": "BOOTSTRAP.md",
+      "notes": "Recognized basename; continuations and later bootstrap handling may omit it",
+      "recognized_by_workspace_loader": true
+    },
+    {
+      "path": "policy_bootstrap_manifest.json",
+      "contract_role": "bootstrap",
+      "bootstrap_default": "conditional",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "BOOTSTRAP.md",
+      "notes": "Loader-unrecognized advisory/lint metadata",
+      "recognized_by_workspace_loader": false
+    },
+    {
+      "path": "POLICY_CHANGELOG.md",
+      "contract_role": "history",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "POLICY_CHANGELOG.md",
+      "notes": "Loader-unrecognized audit history; deliberate reads only",
+      "recognized_by_workspace_loader": false
+    },
+    {
+      "path": "runbook/capabilities.md",
+      "contract_role": "legacy-compat",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "capabilities.md",
+      "notes": "Loader-unrecognized compatibility shim; deliberate reads only",
+      "recognized_by_workspace_loader": false
     },
     {
       "path": "HEARTBEAT.md",
-      "role": "advisory",
+      "contract_role": "advisory",
+      "bootstrap_default": "never",
+      "injected_for_roles": [],
+      "sensitivity": "low",
+      "owner_file": "AGENTS.md",
       "recognized_by_workspace_loader": false,
-      "notes": "Requires an explicitly configured reader; copying does not schedule work."
+      "reference_only": true,
+      "notes": "Optional reference template; absent from the source Workspace. Requires an explicitly configured reader; copying does not schedule work."
     }
-  ]
+  ],
+  "public_adaptation": "Private-context file inventories are omitted. Non-private contract roles, bootstrap intent, accounting profiles, sensitivity and ownership preserve the source schema. Optional reference-only entries are labeled explicitly."
 }

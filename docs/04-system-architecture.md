@@ -27,7 +27,7 @@ The standalone [system context diagram](../diagrams/system-context.mmd) contains
 
 ## A single behavioral authority
 
-`AGENTS.md` owns behavior, authorization, routing, lifecycle and source-of-truth policy. `SOUL.md` shapes voice, `USER.md` records preferences and `MEMORY.md` points to useful retained context. `TOOLS.md` supplies detailed mechanics when needed. Those supporting files cannot independently expand authority or impose a competing operating policy.
+`AGENTS.md` owns behavior, authorization, routing, lifecycle and source-of-truth policy. `IDENTITY.md` defines the assistant's name, assistant and automation-host role, and concise defaults. `SOUL.md` shapes voice, `USER.md` records preferences and `MEMORY.md` points to useful retained context. `TOOLS.md` supplies detailed mechanics when needed. Those supporting files cannot independently expand authority or impose a competing operating policy.
 
 The files present on disk are not necessarily the files injected into a particular turn. Runtime code, session type and configuration determine the actual context. A bootstrap manifest is advisory unless the runtime explicitly consumes it as configuration. See [policy](05-policy-and-authority.md) and [memory](08-memory-and-context.md).
 

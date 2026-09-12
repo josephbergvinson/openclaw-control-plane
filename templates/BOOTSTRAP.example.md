@@ -20,6 +20,11 @@ This file describes intended use and sensitivity. It is not a loader configurati
 
 The pinned source implements these rules in `src/agents/workspace.ts`, particularly `WORKSPACE_BOOTSTRAP_FILENAMES` and `filterBootstrapFilesForSession`. A visible dashboard worker is not automatically a native `subagent:` session: its session and chat classification determine filtering. Do not infer injected contents from a UI label or a manifest role name.
 
+## Advisory sensitivity exceptions
+
+- `MEMORY.md` is labelled `sensitivity: high` while remaining ordinarily eligible for private main-session bootstrap. This is an advisory exception, not an every-session guarantee.
+- No other `high`-sensitivity contract carries this exception. Any future exception must be named here, in this form, before it is relied on.
+
 ## Privacy and context size
 
 Loading and retrieval are different disclosure surfaces. A file omitted from default context may still be reachable through a tool. Source/account/audience boundaries continue to apply to deliberate reads. Keep detailed confidential records outside the default profile; a pointer can itself reveal information.
