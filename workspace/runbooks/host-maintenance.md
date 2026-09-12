@@ -91,8 +91,12 @@ retained local-backup path; it is not the cloud backup job ID.
 
 Each command uses the pinned Python interpreter, `cron_python_entrypoint.py`, a
 private receipt directory and the exact checked helper. The payload uses `argv`,
-`cwd`, `env` and `timeoutSeconds`; it is not shell syntax. Delivery uses the chosen
-channel and destination. Verify the registered definition after creation and keep
+`cwd`, `env` and `timeoutSeconds`; it is not shell syntax. Explicit numeric
+`timeoutSeconds: 0` disables this runtime's command wall timer; omission keeps the
+ten-minute default and positive values retain their seconds-based deadlines.
+No-output limits and cancellation remain independent. The supplied maintenance
+objects preserve their positive deadlines; choose zero only when the intended job
+contract requires it. Delivery uses the chosen channel and destination. Verify the registered definition after creation and keep
 it disabled until a separately authorized manual run proves its real effect and
 report. Enabling a schedule does not retroactively qualify older receipts from a
 different payload.

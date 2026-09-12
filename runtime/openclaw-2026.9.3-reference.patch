@@ -19217,7 +19217,7 @@ index cf4721ed5e13482d77e8c953d8e2f03b40863192..9f4bb0f13f700bc28bd92fdf929a5ed8
      !params.runtimeProvider ||
      !params.runtimeModel ||
 diff --git a/src/auto-reply/reply/agent-runner-core.ts b/src/auto-reply/reply/agent-runner-core.ts
-index 3767473455d3167c31fda5f2340569d767ed7f53..1e091e8c6ca245b5b6abff3d08c6d88f66080577 100644
+index 3767473455d3167c31fda5f2340569d767ed7f53..4ade10e37035ef1b7b22818eb718a7eeebcd6bd4 100644
 --- a/src/auto-reply/reply/agent-runner-core.ts
 +++ b/src/auto-reply/reply/agent-runner-core.ts
 @@ -47,7 +47,7 @@ import type { TypingController } from "./typing.js";
@@ -19238,6 +19238,15 @@ index 3767473455d3167c31fda5f2340569d767ed7f53..1e091e8c6ca245b5b6abff3d08c6d88f
        `Fallback used ${params.fallbackTransition.activeModelRef}, but it produced no visible reply.`,
      isError: true,
    });
+@@ -449,6 +449,8 @@ export type RunReplyAgentParams = {
+   shouldSteer: boolean;
+   shouldFollowup: boolean;
+   queueAdmissionState?: "empty" | "steering" | "ready";
++  /** Exact owner whose adopted source was excluded from pending-work admission. */
++  adoptedFollowupSteerOwner?: ReplyOperation;
+   isActive: boolean;
+   isRunActive?: () => boolean;
+   opts?: InternalGetReplyOptions;
 diff --git a/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts b/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts
 index 40499bb672f9a36ce2cea5e4d4d6b550929abbdb..ffcf93e4bc7cacc7086b676aef8d02327802fcec 100644
 --- a/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts
@@ -19919,6 +19928,85 @@ index d5a334e9d643b910393d8474bae3fb5b8fad12f3..f522d0f87099d6be282ba29f04cc58e4
      }
    }
    const prefixPayloads = [...prefixNotices];
+diff --git a/src/auto-reply/reply/agent-runner-run.ts b/src/auto-reply/reply/agent-runner-run.ts
+index 39ca64f0fae5719018c354cd5a11439e59ba8484..6bd35ccaa13061cbb3087ed905215bb1c64424dd 100644
+--- a/src/auto-reply/reply/agent-runner-run.ts
++++ b/src/auto-reply/reply/agent-runner-run.ts
+@@ -305,6 +305,7 @@ export async function runReplyAgent(
+       followupRun,
+       opts,
+       providedReplyOperation,
++      adoptedFollowupSteerOwner: params.adoptedFollowupSteerOwner,
+       queueKey,
+       releaseAdmissionTicket,
+       replyOperationRunState,
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+index 2647ddf1156740f5e1be52031e3cfc6af2d1e486..7d665a71f3259d2f0c36618a4a26a9e283e440f0 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+@@ -16,6 +16,7 @@ import {
+   scheduleFollowupDrain,
+   type FollowupRun,
+ } from "./queue.js";
++import { inspectFollowupQueueAdmission } from "./queue/state.js";
+ import type { ReplyOperationRunState } from "./reply-operation-run-state.js";
+ import {
+   beginReplyMessageInjectionTarget,
+@@ -23,6 +24,7 @@ import {
+   type ReplyOperation,
+   replyRunRegistry,
+ } from "./reply-run-registry.js";
++import { resolveCurrentAdoptedFollowupSource } from "./reply-run-registry.state.js";
+ import { refreshReplyOperationTyping } from "./reply-run-typing.js";
+ import { buildChannelSourceTurnId } from "./source-turn-id.js";
+ import type { TypingSignaler } from "./typing-mode.js";
+@@ -31,6 +33,7 @@ type ActiveReplySteerParams = {
+   followupRun: RunReplyAgentParams["followupRun"];
+   opts: RunReplyAgentParams["opts"];
+   providedReplyOperation: ReplyOperation | undefined;
++  adoptedFollowupSteerOwner?: ReplyOperation;
+   queueKey: string;
+   releaseAdmissionTicket: () => void;
+   replyOperationRunState: ReplyOperationRunState | undefined;
+@@ -96,9 +99,23 @@ export async function runActiveReplySteer(
+   const steerSessionId = activeReplyOperation?.sessionId ?? followupRun.run.sessionId;
+   // Capture exact injection authority before parking or awaiting admission.
+   // A same-key successor must never inherit this turn's steer or abort.
+-  const injectionTarget = replyRunRegistry.resolveCurrentMessageInjectionTarget(
+-    activeReplyOperation?.key ?? queueKey,
+-  );
++  const adoptedSourceStillOwnsAdmission = (before?: FollowupRun) => {
++    const owner = params.adoptedFollowupSteerOwner;
++    if (!owner) {
++      return true;
++    }
++    if (owner.key !== queueKey) {
++      return false;
++    }
++    const admission = inspectFollowupQueueAdmission(queueKey, {
++      activeSource: resolveCurrentAdoptedFollowupSource(owner),
++      before,
++    });
++    return admission.excludedActiveSource && admission.state !== "ready";
++  };
++  const injectionTarget = adoptedSourceStillOwnsAdmission()
++    ? replyRunRegistry.resolveCurrentMessageInjectionTarget(activeReplyOperation?.key ?? queueKey)
++    : undefined;
+   const parked = parkSteerCandidate(queueKey, followupRun, resolvedQueue, runFollowup);
+   if (!parked) {
+     releaseAdmissionTicket();
+@@ -144,6 +161,11 @@ export async function runActiveReplySteer(
+     if (!injectionTarget) {
+       return await fallback("no injectable reply operation");
+     }
++    // Admission can await earlier steers. Recheck the exact source and predecessors;
++    // later ordinary waiters must not displace this candidate's existing FIFO position.
++    if (!adoptedSourceStillOwnsAdmission(followupRun)) {
++      return await fallback("adopted followup owner or predecessor changed");
++    }
+     const injectionAttempt = beginReplyMessageInjectionTarget(injectionTarget, followupRun.prompt, {
+       steeringMode: "all",
+       isInboundUserMessage: true,
 diff --git a/src/auto-reply/reply/agent-runner-trace.ts b/src/auto-reply/reply/agent-runner-trace.ts
 index 488b3f363e14883247f9a19397da03d31c0c733b..e2e66397a97d9fbda114cc5ed5298d4b255d69c1 100644
 --- a/src/auto-reply/reply/agent-runner-trace.ts
@@ -23012,10 +23100,28 @@ index d31fe77c2c3388b081583c3683dadec1d36c1acb..f8fc06809f111ee6be924e822b4a22b2
          },
        ],
 diff --git a/src/auto-reply/reply/followup-turn-admission.ts b/src/auto-reply/reply/followup-turn-admission.ts
-index fc40918ddf4a6eba07366242af846a897bb9c5f7..5a3420cb4336882b0b4374da4eae122bed51481f 100644
+index fc40918ddf4a6eba07366242af846a897bb9c5f7..f6db33709c25bcbc82a8bf99aa8a31cff7986a88 100644
 --- a/src/auto-reply/reply/followup-turn-admission.ts
 +++ b/src/auto-reply/reply/followup-turn-admission.ts
-@@ -396,6 +396,7 @@ export async function admitFollowupTurn(params: {
+@@ -35,6 +35,7 @@ import {
+   type FollowupRun,
+ } from "./queue.js";
+ import type { ReplyOperation } from "./reply-run-registry.js";
++import { adoptedFollowupSourceByOperation } from "./reply-run-registry.state.js";
+ import { admitReplyTurn } from "./reply-turn-admission.js";
+ import {
+   createReplySessionEntryHandle,
+@@ -172,6 +173,9 @@ export async function admitFollowupTurn(params: {
+       return { kind: "skipped", reason: "aborted", operation };
+     }
+ 
++    // Bind the retained queue source, before clones or awaited presentation work.
++    adoptedFollowupSourceByOperation.set(operation, params.queued);
++
+     // Queue drains retain the latest live runner closure per key. Keep local dispatcher
+     // callbacks in that closure so retried non-routable items use the newest transport owner.
+     queuedFollowupAdmitted = true;
+@@ -396,6 +400,7 @@ export async function admitFollowupTurn(params: {
          isHeartbeat: params.defaults.opts?.isHeartbeat === true,
          abortSignal: operation.abortSignal,
          onCompactionStart: () => operation.setPhase("preflight_compacting"),
@@ -23136,11 +23242,73 @@ index 11a27c4db42018be929689fade20f623fa9d1743..ce326abd0a7abc602d069eced9cc279a
          };
        }
      }
+diff --git a/src/auto-reply/reply/get-reply-run-admission.ts b/src/auto-reply/reply/get-reply-run-admission.ts
+index bc65974ed8c85901dc726dcb1f67e27714f18ad6..6e04363f74bd41ef1c96cc017dedbbfeea6f13a1 100644
+--- a/src/auto-reply/reply/get-reply-run-admission.ts
++++ b/src/auto-reply/reply/get-reply-run-admission.ts
+@@ -44,7 +44,7 @@ import {
+ import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
+ import { resolveActiveRunQueueAction } from "./queue-policy.js";
+ import { resolveQueueSettings } from "./queue/settings-runtime.js";
+-import { getExistingFollowupQueue } from "./queue/state.js";
++import { inspectFollowupQueueAdmission } from "./queue/state.js";
+ import {
+   REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS,
+   interruptReplyRunTarget,
+@@ -54,6 +54,7 @@ import {
+   resolveActiveReplyRunSessionId,
+   waitForReplyRunEndBySessionId,
+ } from "./reply-run-registry.js";
++import { resolveCurrentAdoptedFollowupSource } from "./reply-run-registry.state.js";
+ import { admitReplyTurn } from "./reply-turn-admission.js";
+ import {
+   isSlackDirectRoutedThreadTurn,
+@@ -549,14 +550,16 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
+     activeRunQueueMode === "interrupt" && sessionKey
+       ? replyRunRegistry.resolveCurrentInterruptTarget(sessionKey)
+       : undefined;
+-  const pendingQueue = getExistingFollowupQueue(queueKey);
+-  const queueAdmissionState = !pendingQueue
+-    ? "empty"
+-    : pendingQueue.items.some((item) => !item.steerPending) ||
+-        pendingQueue.inFlight.size > 0 ||
+-        pendingQueue.droppedCount > 0
+-      ? "ready"
+-      : "steering";
++  const activeQueueOperation = replyRunRegistry.get(queueKey);
++  const queueAdmission = inspectFollowupQueueAdmission(queueKey, {
++    activeSource: activeQueueOperation
++      ? resolveCurrentAdoptedFollowupSource(activeQueueOperation)
++      : undefined,
++  });
++  const queueAdmissionState = queueAdmission.state;
++  const adoptedFollowupSteerOwner = queueAdmission.excludedActiveSource
++    ? activeQueueOperation
++    : undefined;
+   const activeRunAcceptsCurrentThread = resolveActiveRunAcceptsCurrentThread({ isActive });
+   const shouldSteer =
+     !isRoomEvent &&
+@@ -672,6 +675,7 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
+     shouldSteer,
+     shouldFollowup,
+     queueAdmissionState,
++    adoptedFollowupSteerOwner,
+     isActive,
+     authProfileId,
+     authProfileIdSource,
 diff --git a/src/auto-reply/reply/get-reply-run-execute.ts b/src/auto-reply/reply/get-reply-run-execute.ts
-index c8df6dacb419ca3118f5d183f6e7ac0752f2a82c..692f46dff16fd42c007d005c95e94629cd93779f 100644
+index c8df6dacb419ca3118f5d183f6e7ac0752f2a82c..5af6aca00f7f762aa5b021ff500030bcf13de74b 100644
 --- a/src/auto-reply/reply/get-reply-run-execute.ts
 +++ b/src/auto-reply/reply/get-reply-run-execute.ts
-@@ -497,7 +497,10 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+@@ -80,6 +80,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+     shouldSteer,
+     shouldFollowup,
+     queueAdmissionState,
++    adoptedFollowupSteerOwner,
+     isActive,
+     authProfileId,
+     authProfileIdSource,
+@@ -497,7 +498,10 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
            : {}),
        },
        timeoutMs,
@@ -23152,6 +23320,14 @@ index c8df6dacb419ca3118f5d183f6e7ac0752f2a82c..692f46dff16fd42c007d005c95e94629
        blockReplyBreak: resolvedBlockStreamingBreak,
        ownerNumbers: resolveOwnerPromptNumbers({
          ownerNumbers: command.ownerList,
+@@ -580,6 +584,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+       shouldSteer,
+       shouldFollowup,
+       queueAdmissionState,
++      adoptedFollowupSteerOwner,
+       isActive,
+       isRunActive: () => {
+         const latestSessionState = resolvePreparedSessionState();
 diff --git a/src/auto-reply/reply/get-reply-run-queue.test.ts b/src/auto-reply/reply/get-reply-run-queue.test.ts
 index 915c777a931b7ac81b2a5406c0070ad3401e8e02..9c2acb8d831c19b248219314b78d300e72dbbc02 100644
 --- a/src/auto-reply/reply/get-reply-run-queue.test.ts
@@ -23353,6 +23529,58 @@ index a0433778342dcdac4a366aa47d693e9e0ae18f82..7e262cf0570779b59ca6473941d204e3
        } else {
          defaultRuntime.error?.(`followup queue drain failed for ${key}: ${String(err)}`);
        }
+diff --git a/src/auto-reply/reply/queue/state.ts b/src/auto-reply/reply/queue/state.ts
+index e89e82859512ebb564f3e30492e3b4e656086700..bfe9bc3b442c2f2a17764eb1eeb1c841a7c4e69d 100644
+--- a/src/auto-reply/reply/queue/state.ts
++++ b/src/auto-reply/reply/queue/state.ts
+@@ -10,6 +10,7 @@ import { applyQueueRuntimeSettings } from "../../../utils/queue-helpers.js";
+ import { normalizeThinkLevel, resolveSupportedThinkingLevel } from "../../thinking.js";
+ import {
+   completeFollowupRunLifecycle,
++  isFollowupRunAborted,
+   type FollowupRun,
+   type QueueDropPolicy,
+   type QueueSettings,
+@@ -68,6 +69,39 @@ export function getExistingFollowupQueue(key: string): FollowupQueueState | unde
+   return FOLLOWUP_QUEUES.get(cleaned);
+ }
+ 
++/** Inspect waiting work without mistaking the exact adopted source for a predecessor. */
++export function inspectFollowupQueueAdmission(
++  key: string,
++  options: { activeSource?: FollowupRun; before?: FollowupRun } = {},
++): { state: "empty" | "steering" | "ready"; excludedActiveSource: boolean } {
++  const queue = getExistingFollowupQueue(key);
++  if (!queue) {
++    return { state: options.before ? "ready" : "empty", excludedActiveSource: false };
++  }
++  const beforeIndex = options.before ? queue.items.indexOf(options.before) : queue.items.length;
++  if (
++    beforeIndex < 0 ||
++    (options.before && queue.items.lastIndexOf(options.before) !== beforeIndex)
++  ) {
++    return { state: "ready", excludedActiveSource: false };
++  }
++  const source = options.activeSource;
++  const excludedActiveSource = Boolean(
++    source &&
++    queue.inFlight.has(source) &&
++    !isFollowupRunAborted(source) &&
++    !queue.activeSummarySources.has(source),
++  );
++  const isCurrentSource = (item: FollowupRun) => excludedActiveSource && item === source;
++  const ready =
++    queue.items.some(
++      (item, index) => index < beforeIndex && !item.steerPending && !isCurrentSource(item),
++    ) ||
++    [...queue.inFlight].some((item) => !isCurrentSource(item)) ||
++    queue.droppedCount > 0;
++  return { state: ready ? "ready" : "steering", excludedActiveSource };
++}
++
+ export function hasPendingFollowupQueueWork(keys: Iterable<string | undefined>): boolean {
+   const seen = new Set<string>();
+   for (const key of keys) {
 diff --git a/src/auto-reply/reply/reply-operation-abort.ts b/src/auto-reply/reply/reply-operation-abort.ts
 index c5c59ec70c58f131b6ea15f5c70cfe37de454082..1459c8ae46c4c0e157e8567d26586d06fd7ffb9f 100644
 --- a/src/auto-reply/reply/reply-operation-abort.ts
@@ -23366,6 +23594,55 @@ index c5c59ec70c58f131b6ea15f5c70cfe37de454082..1459c8ae46c4c0e157e8567d26586d06
  }
  
  function isReplyOperationUserAbort(replyOperation?: ReplyOperation): boolean {
+diff --git a/src/auto-reply/reply/reply-run-registry.state.ts b/src/auto-reply/reply/reply-run-registry.state.ts
+index 38473d6275600639449b7e13149d5b4d8f8f7453..4b28b7f83bb2e63edb926d094e72bacd6c29e5fc 100644
+--- a/src/auto-reply/reply/reply-run-registry.state.ts
++++ b/src/auto-reply/reply/reply-run-registry.state.ts
+@@ -12,6 +12,7 @@ import type { SessionWorkAdmissionLease } from "../../sessions/session-lifecycle
+ import { createDeferredCore } from "../../shared/deferred.js";
+ import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+ import type { OpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
++import type { FollowupRun } from "./queue/types.js";
+ import type { ReplyFollowupAdmissionBarrierTimeoutPolicy } from "./reply-dispatcher.types.js";
+ import type { ReplyOperationStaleReason } from "./reply-run-finalization-lease.js";
+ import {
+@@ -57,6 +58,7 @@ type ReplyRunState = {
+   evictOperationByOperation?: WeakMap<ReplyOperation, () => void>;
+   executionStartedOperations?: WeakSet<ReplyOperation>;
+   lifecycleAdmissionByOperation?: WeakMap<ReplyOperation, ReplyOperationAdmission>;
++  adoptedFollowupSourceByOperation?: WeakMap<ReplyOperation, FollowupRun>;
+ };
+ 
+ const REPLY_RUN_STATE_KEY = Symbol.for("openclaw.replyRunRegistry");
+@@ -76,6 +78,20 @@ export const replyRunState = resolveGlobalSingleton<ReplyRunState>(REPLY_RUN_STA
+ // Admission and the active operation must remain visible across transformed SDK graphs.
+ export const lifecycleAdmissionByOperation = (replyRunState.lifecycleAdmissionByOperation ??=
+   new WeakMap<ReplyOperation, ReplyOperationAdmission>());
++// Exact source identity stays private and shared across transformed runtime graphs.
++export const adoptedFollowupSourceByOperation = (replyRunState.adoptedFollowupSourceByOperation ??=
++  new WeakMap<ReplyOperation, FollowupRun>());
++
++export function resolveCurrentAdoptedFollowupSource(
++  operation: ReplyOperation,
++): FollowupRun | undefined {
++  return replyRunState.activeRunsByKey.get(operation.key) === operation &&
++    operation.result === null &&
++    !operation.abortSignal.aborted
++    ? adoptedFollowupSourceByOperation.get(operation)
++    : undefined;
++}
++
+ replyRunState.followupAdmissionBarriersByKey ??= new Map();
+ replyRunState.successorAdmissionBarriersByKey ??= new Map();
+ 
+@@ -580,6 +596,7 @@ export function clearReplyRunState(params: {
+   sessionId: string;
+   operation: ReplyOperation;
+ }): void {
++  adoptedFollowupSourceByOperation.delete(params.operation);
+   if (replyRunState.activeRunsByKey.get(params.sessionKey) !== params.operation) {
+     if (
+       replyRunState.activeKeysBySessionId.get(params.sessionId) === params.sessionKey &&
 diff --git a/src/auto-reply/reply/reply-turn-admission.test.ts b/src/auto-reply/reply/reply-turn-admission.test.ts
 index ab72b8b3324a708065ee5a514c8bbd1a5fe38260..ba086438ea3458b207151843cd6442295b68e0e6 100644
 --- a/src/auto-reply/reply/reply-turn-admission.test.ts
@@ -25375,6 +25652,124 @@ index c11a51e2b94cc4d3b5582e73b03a9d222d3b46ef..fb612c50327c186927d745057b86e1c3
    toolProgress?: boolean;
    /** Command/exec progress detail in the draft. "raw" opts into command text; "status" shows only the tool label. Default: "status". */
    commandText?: ChannelStreamingCommandTextMode;
+diff --git a/src/cron/command-runner.test.ts b/src/cron/command-runner.test.ts
+index 0e7d653010c87465930b633a2e7a6d3698c6dd11..22178c3f51535b5df45e286099fb030d0db7c325 100644
+--- a/src/cron/command-runner.test.ts
++++ b/src/cron/command-runner.test.ts
+@@ -27,6 +27,51 @@ function makeCommandJob(payload: Extract<CronJob["payload"], { kind: "command" }
+ }
+ 
+ describe("runCronCommandJob", () => {
++  it.each([
++    { name: "explicit zero", timeoutSeconds: 0, timeoutMs: undefined },
++    { name: "omitted timeout", timeoutSeconds: undefined, timeoutMs: 600_000 },
++    { name: "positive timeout", timeoutSeconds: 1.25, timeoutMs: 1_250 },
++  ])(
++    "passes $name to the command runner with cancellation intact",
++    async ({ timeoutSeconds, timeoutMs }) => {
++      const argv = [process.execPath, "-e", "process.stdout.write('done')"];
++      const controller = new AbortController();
++      const runCommand = vi.spyOn(processExecution, "runCommandWithTimeout").mockResolvedValueOnce({
++        stdout: "done",
++        stderr: "",
++        code: 0,
++        signal: null,
++        killed: false,
++        termination: "exit",
++      });
++
++      try {
++        const result = await runCronCommandJob({
++          job: makeCommandJob({
++            kind: "command",
++            argv,
++            ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
++          }),
++          abortSignal: controller.signal,
++        });
++
++        expect(runCommand).toHaveBeenCalledExactlyOnceWith(
++          argv,
++          expect.objectContaining({
++            timeoutMs,
++            signal: controller.signal,
++            killProcessTree: true,
++          }),
++        );
++        expect(runCommand.mock.calls[0]?.[1]).not.toHaveProperty("noOutputTimeoutMs");
++        expect(result.status).toBe("ok");
++        expect(result.summary).toBe("done");
++      } finally {
++        runCommand.mockRestore();
++      }
++    },
++  );
++
+   it("runs command argv and returns stdout as the deliverable summary", async () => {
+     const result = await runCronCommandJob({
+       job: makeCommandJob({
+@@ -232,25 +277,28 @@ describe("runCronCommandJob", () => {
+     });
+   });
+ 
+-  it("marks aborted command runs as cron errors", async () => {
+-    const controller = new AbortController();
+-    controller.abort();
++  it.each([0, 5])(
++    "marks aborted command runs as cron errors with timeout %ss",
++    async (timeoutSeconds) => {
++      const controller = new AbortController();
++      controller.abort();
+ 
+-    const result = await runCronCommandJob({
+-      job: makeCommandJob({
+-        kind: "command",
+-        argv: [process.execPath, "-e", "process.stdout.write('should not run')"],
+-        timeoutSeconds: 5,
+-      }),
+-      abortSignal: controller.signal,
+-    });
++      const result = await runCronCommandJob({
++        job: makeCommandJob({
++          kind: "command",
++          argv: [process.execPath, "-e", "process.stdout.write('should not run')"],
++          timeoutSeconds,
++        }),
++        abortSignal: controller.signal,
++      });
+ 
+-    expect(result.status).toBe("error");
+-    expect(result.error).toBe("command stopped");
+-    expect(result.errorClassification).toBeUndefined();
+-    expect(result.summary).toBeUndefined();
+-    expect(result.failureNotificationDetail).toBeUndefined();
+-  });
++      expect(result.status).toBe("error");
++      expect(result.error).toBe("command stopped");
++      expect(result.errorClassification).toBeUndefined();
++      expect(result.summary).toBeUndefined();
++      expect(result.failureNotificationDetail).toBeUndefined();
++    },
++  );
+ 
+   it("keeps command start failures generic", async () => {
+     const result = await runCronCommandJob({
+diff --git a/src/cron/command-runner.ts b/src/cron/command-runner.ts
+index 62b3e25d78b734bddc147857a5c21cbe473b442f..0c96aaeed48efbfa8a4e570045951ca00cdf03ec 100644
+--- a/src/cron/command-runner.ts
++++ b/src/cron/command-runner.ts
+@@ -99,7 +99,10 @@ export async function runCronCommandJob(params: {
+   const noOutputTimeoutMs = secondsToMs(payload.noOutputTimeoutSeconds);
+   try {
+     const result = await runCommandWithTimeout(payload.argv, {
+-      timeoutMs: secondsToMs(payload.timeoutSeconds) ?? DEFAULT_COMMAND_TIMEOUT_MS,
++      timeoutMs:
++        payload.timeoutSeconds === 0
++          ? undefined
++          : (secondsToMs(payload.timeoutSeconds) ?? DEFAULT_COMMAND_TIMEOUT_MS),
+       ...(payload.cwd ? { cwd: payload.cwd } : {}),
+       ...(payload.input !== undefined ? { input: payload.input } : {}),
+       ...(payload.env ? { env: payload.env } : {}),
 diff --git a/src/cron/isolated-agent/delivery-dispatch-types.ts b/src/cron/isolated-agent/delivery-dispatch-types.ts
 index 771ebf1187df44d552a646e409fd83d020f628d7..449e8d85893ce279a135d8358b49e8529bc993da 100644
 --- a/src/cron/isolated-agent/delivery-dispatch-types.ts
