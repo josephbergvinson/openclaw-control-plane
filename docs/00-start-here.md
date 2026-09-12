@@ -4,16 +4,6 @@ This repository describes a working pattern for one person's OpenClaw installati
 
 The reference starts from **OpenClaw 2026.9.3**. A maintained set of runtime changes extends that release. The version, source base, patch and validation instructions must travel together; installing the same version number alone does not reproduce a modified build. Follow the [adoption guide](17-adoption-guide.md) for the pinned reconstruction path.
 
-## Runtime, harness and control plane
-
-A **runtime** is the software that keeps the agent working. Here that includes the OpenClaw gateway, sessions, model-provider connections, tool execution, workers, scheduling and channel delivery. It is a service on the operator's computer, not a language model by itself.
-
-A **harness** is the part that surrounds each model interaction: it assembles instructions and context, presents tools, interprets model output, executes requested tool calls and decides how execution continues. Compaction, cancellation, reasoning configuration and a worker's return path all involve the harness. In this system the harness is implemented within the runtime; it is not another server to install.
-
-A **control plane** is how the operator configures, directs and checks that execution. It includes runtime APIs and task state, the instruction contract, account and project routing, scheduled-job definitions, release controls and operational evidence. Some controls are built into OpenClaw; others are maintained workspace files and host helpers. A control plane is therefore a responsibility shared across these components, rather than a synonym for one directory.
-
-Finally, the **periphery** contains systems that make the installation useful or keep it recoverable: the filesystem, container engine, backup client, native applications, network access and connected project services. They are part of the operating design even when their implementation belongs to another project.
-
 ## Follow a request
 
 Suppose the operator asks:
@@ -21,8 +11,6 @@ Suppose the operator asks:
 > Add today's calls with the two company leads to my work calendar.
 
 The channel adapter receives the message and binds it to the authenticated requester and session. The agent reads the applicable operating instructions, resolves the relevant company accounts and retrieves the current invitations. It checks for existing destination events, carries across the verified times and joining details, and verifies the destination after any change. Its answer describes the result in ordinary language.
-
-The model decides how to investigate. Tools perform the reads and writes. The harness manages the interaction. The runtime owns the sessions and execution. The control plane supplies the authority, account routing and evidence needed to judge the outcome. Apple Calendar and the invitation providers are external systems whose state must be checked directly.
 
 A successful tool call alone does not prove that the request was satisfied. An event can exist while its time or meeting link is wrong. That is why [verification](15-evidence-audit-and-verification.md) is part of task completion.
 

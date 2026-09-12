@@ -14,13 +14,7 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-## Three terms, one system
-
-| Term | What it does here |
-|---|---|
-| **Runtime** | Executes model calls, tool calls, tasks, goals, sessions, compaction and channel delivery. |
-| **Harness** | The runtime machinery around a model: preparing context, exposing tools, dispatching work, enforcing limits and handling results. It is a responsibility within this system, not a separate mandatory product. |
-| **Control plane** | Configures and supervises the installation: policy, source and account routing, runtime selection, maintenance, operational state and evidence. Some responsibilities live inside OpenClaw; others are workspace helpers or host services. |
+## How it works
 
 ```mermaid
 flowchart TD
