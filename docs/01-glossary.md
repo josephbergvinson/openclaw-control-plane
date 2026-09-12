@@ -1,6 +1,6 @@
 # Glossary and conventions
 
-These terms describe responsibilities, not a requirement to add a separate service for every noun. In particular, the harness and much of the control plane already live inside OpenClaw.
+Definitions and conventions used throughout the reference.
 
 ## The main layers
 
