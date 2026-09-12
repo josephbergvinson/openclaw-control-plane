@@ -46,9 +46,11 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
   including regression tests. The reconstruction helper verifies the patch checksum
   and resulting Git tree. Production source is unchanged from the reference deployment;
   two labels in one test fixture are normalized.
-- **The working policy:** detailed AGENTS, SOUL, TOOLS, WRITING, bootstrap and memory
-  templates covering initiative, approval, source authority, tool selection, writing,
-  long work and verification.
+- **Identity and working policy:** IDENTITY, AGENTS, SOUL, USER, TOOLS, WRITING,
+  bootstrap and memory templates covering the assistant persona and defaults,
+  initiative, approval, source authority, tool selection, writing, long work and
+  verification. The [identity template](templates/IDENTITY.example.md) preserves the
+  source installation's role, defaults and authority boundary with fictional names.
 - **Workspace implementation:** capability routing and adapters, release activation,
   guarded maintenance, backup supervision and supporting contracts and tests.
 - **Configuration and adoption guidance:** model preferences, context behavior,

@@ -1,6 +1,6 @@
 # USER.md — Durable working preferences
 
-This file supplies durable preferences and interpretation context. `AGENTS.md` owns authority. A preference does not establish a current provider fact or grant an unrelated action.
+Durable preferences, not runtime facts. **Hard cap 4,000 chars.** `AGENTS.md` owns authority. A preference does not establish a current provider fact or grant an unrelated action.
 
 ## Working context
 

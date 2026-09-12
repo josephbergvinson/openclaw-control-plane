@@ -24,7 +24,24 @@ Before a non-trivial edit, resolve the surface through `registry/project_topolog
 
 Use one task branch/worktree per reviewable unit. Preserve unrelated changes. Resolve duplicate roots, detached/ambiguous branches and overlapping writes before editing. A handoff, mirror, archive, built release or artifact directory is a separate role; never patch every apparent copy. Keep the canonical Workspace as an integration checkout.
 
-Before pruning a worktree, check whether a service, scheduler, worker, listener or accepted baseline still depends on it. A clean Git status does not prove that a runtime lane is disposable. Integrate accepted work through the declared path and remove an obsolete task lane only when no preservation condition remains. Local integration does not silently authorize remote publication or deployment.
+- Do not work directly on `main` or another default branch for non-trivial work.
+- Use a task-scoped branch such as `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, or project equivalent.
+- Keep one material task per worktree unless the user explicitly combines work.
+- If the repo is already dirty, report the drift before editing and either isolate, clean, or proceed with acknowledgement.
+- If a worktree is broken, orphaned, or branch registration is inconsistent, do not edit it; repair it or create a clean worktree from the canonical repo.
+- Keep commit identity visible at meaningful checkpoints for implementation work.
+- If an operationally authoritative fix lands first on a non-standing branch, do not call the lane healthy until the fix is normalized onto the standing branch or the standing default is explicitly updated in the relevant source-of-truth map and verification path.
+- Host-local operational data/output under a control-plane repo must be explicitly classified as tracked source, ignored operational state, or designated external artifact/output.
+
+### Protected service lanes and prune preflight
+- Before pruning, deleting, resetting, or repointing any worktree/ref, verify worktree clean/dirty state, merged/unmerged state, local/remote divergence, current worktree attachment, recent session/thread references, live process/port/cron references, and whether the lane is a protected service lane.
+- Before deleting `.worktrees/openclaw-*` or any runtime-adjacent worktree, string/grep checks are insufficient. Build a realpath-closure manifest using portable macOS-safe resolution such as Python `os.path.realpath` over: installed runtime symlinks, `openclaw` binaries, LaunchAgent `ProgramArguments`, active process argv/cwd/open files, cron/scheduler/task-runner commands, current runtime symlinks, and config references. If any resolved path lands inside the deletion target, classify it as protected and block deletion.
+- A protected service lane is any named worktree that backs a live process, port listener, cron/scheduler entry, or an active service baseline identified in recent session/checkpoint state.
+- If a lane is protected or protection is ambiguous, default to preserve-and-inspect rather than prune; if it is unmerged, diverged, historically ambiguous, or was recently a runtime recovery/live release path, preserve it until a stable observation window and an exact deletion manifest exist.
+- When more than one active non-trivial lane or any protected service lane exists, maintain a refreshable lane index or equivalent discoverability record. It is operational aid only; if it conflicts with live git/process/cron evidence, live evidence wins.
+- After a task is merged, cherry-picked, normalized, or deliberately archived—and no protected service/session dependency remains—remove the worktree and stale refs in the same closeout slice rather than leaving them for later hygiene sweeps.
+
+Local integration does not silently authorize remote publication or deployment.
 
 ## Filesystem and evidence
 
@@ -32,7 +49,27 @@ Resolve source, worktree, state, release and work-product roots through the regi
 
 Keep diagnostics and receipts in internal work product. Source repositories hold source and required generated outputs. Use exact paths, indexed searches and bounded queries; do not recursively scan the entire workspace, release history or shared volume to discover which source might answer a question.
 
-Deletion requires an exact target set and verified backup/rollback. A successful backup command is not a verified restore predicate. If the backup changes from full to partial, or the target set expands, preserve the source and resolve the changed destructive condition before deletion. Retention classes do not confer live authority.
+- Declaring a source boundary does not by itself expand write authority. An authenticated instruction that names or plainly implies a verified canonical repo/worktree authorizes its bounded writes; agent-initiated writes to another root do not.
+- Generated reports, snapshots, manifests, audit bundles, handoff artifacts, exports, and other outputs must live in designated artifact/output locations, not mixed into source roots unless the repo already defines that pattern.
+- Default scratch/output location is `./artifacts/<run-id>/` or an established repo-local output directory.
+- Do not leave orphaned files in repo root.
+- If a later step expects a temp/artifact file that was not produced, report the missing producer step rather than only the downstream `ENOENT`.
+- For non-trivial artifacts or retained diagnostics, maintain a retention manifest or equivalent classification record using one of: `retain_long_term`, `retain_until_manual_archive_window`, `safe_to_prune_now`, `optional_cold_archive_only`.
+- Retention class records storage intent only; it does not grant authority or make an artifact part of the live source-of-truth path.
+- Installed runtime/package/bundle output edits outside the declared canonical repo are containment-only by default. Classify them as `live-installed-runtime-hotfix`, not canonical source edits.
+- Do not patch installed dist/package/bundle output except when the operator instruction explicitly names emergency containment and the `live-installed-runtime-hotfix` record below is created first.
+- A `live-installed-runtime-hotfix` must immediately record: exact files changed, reason for hotfix-in-place, backup/rollback path, verification performed, source-normalization target if known, committed yes/no, and normalized yes/no.
+- If no source-normalization path is known, stop and report `blocker: source-normalization-path-unknown`.
+- Until the hotfix is either source-normalized and committed or explicitly recorded as `live-installed-runtime-hotfix-not-normalized` with rollback instructions plus the remaining normalization blocker, do not report `completed`, `closed out`, `committed`, `healthy`, `blocker: none`, or equivalent.
+
+### Backup-verified deletion mechanics
+- When deletion is conditional on an existing or newly updated backup, first record the exact source path, backup path, intended backup form, and comparison predicate before mutation.
+- Valid backup predicates must be directly checked, not inferred from a folder name or visible path. Acceptable checks include count/size/hash manifests, archive integrity tests, restore-list checks, or explicit, documented exclusions for re-creatable dependencies and transient metadata.
+- File Provider/iCloud copies require extra caution: `dataless`, `compressed`, placeholder, package-tree, `Resource deadlock avoided`, partial materialization, or sync-error evidence means `backupVerified=false` until an alternate predicate passes.
+- Do not proceed from sync/copy failure into deletion. If a backup attempt partially succeeds, immediately report `backupVerified=false`, the partial state, disk impact, and the next safe option.
+- Exclusions change the backup contract. If excluding `.venv`, `node_modules`, `DerivedData`, `._*`, root-owned files, or any unreadable path, report the exclusions and ask one narrow confirmation before source deletion unless the original instruction explicitly authorized that exclusion shape.
+- Prefer one of two clean fallback shapes after loose-file backup failure: create and verify a single archive object, or verify a partial backup with explicit exclusions. Do not silently switch between these shapes.
+- A delete command after backup verification must re-check the source and backup immediately before deletion and must stop if the predicate no longer holds.
 
 ## Route and account selection
 
