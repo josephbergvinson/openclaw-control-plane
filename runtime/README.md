@@ -17,12 +17,12 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed custom commit | `f31686e33ce3fa8564cecf97e3f36f39a69f57dd` |
-| Sanitized source tree | `cc032d12126f13922aad858d6104ec1c62e71abc` |
-| Patch SHA-256 | `c358067965fe7079a0ea6bfcd2c31635517a8bc85c509a3b3835578fde85ae6d` |
+| Deployed custom commit | `39d61ba70ec77e39ead3a51cf22f66fc6321068f` |
+| Sanitized source tree | `7df03421b5eb7d267c111c24321b7f333883b5e3` |
+| Patch SHA-256 | `bfe5fd6808abae10eacf557868d43c5366b252c0c798aed37bf73493ed217a44` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,511,568 bytes and changes 477 paths. The custom commit is a lineage
+The patch is 1,558,666 bytes and changes 487 paths. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
@@ -59,7 +59,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `cc032d12126f13922aad858d6104ec1c62e71abc`.
+`git write-tree` must print `7df03421b5eb7d267c111c24321b7f333883b5e3`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -118,11 +118,12 @@ as workflow artifacts; environment values are not recorded in the plan. A cancel
 run or partial command log does not qualify the reference.
 
 
-The steering and cron changes in this source were qualified together in
+The steering and cron changes in predecessor source `f31686e` were qualified together in
 [run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151):
 ten steering regression cases, 525 tests across twelve native test files, all 34
-native check commands, and the full build passed against this normalized tree.
-The corresponding canonical source also completed a full macOS build. These are
+native check commands, and the full build passed against its normalized tree
+`cc032d12126f13922aad858d6104ec1c62e71abc`.
+That predecessor canonical source also completed a full macOS build. These are
 source and build results; they do not establish another host's channel or device
 acceptance. The [steering regression workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/steering-regression.yml)
 now exercises the included fix directly, while the reference workflow retains the
@@ -130,9 +131,41 @@ complete native-check and build requirements.
 
 Published base `707dc70` also passed [qualification run 34669121956](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34669121956):
 reference checks, the full native plan, the runtime build and the aggregate gate.
-The documentation-only acceptance update preserves that qualified runtime source.
+That qualification covered the predecessor runtime; it is historical evidence for
+the changes retained here, not qualification of the newly pinned source.
 
 The originating host separately passed a naturalistic two-message Discord steering
-case on the adopted release on 12 September, with one visible final response and
+case on the adopted `f31686e` release on 12 September, with one visible final response and
 no premature compaction. See the [source chapter](../docs/20-runtime-source-changes.md)
 for the observed scope and limits; this does not replace an adopter's live checks.
+
+The predecessor candidate, source `a8cbb37`, passed on 12 September 2026 the originating host's native
+changed-source check against `f31686e`; every selected guard completed. One full
+`pnpm build`, including the UI, also passed. The self-contained staged release
+passed the direct runtime policy import and was sealed against its complete file
+inventory. Source identity and a clean checkout were verified throughout.
+These are local source and candidate-artifact results. Hosted qualification of the
+updated public reconstruction remains pending; the earlier workflow results above
+retain their original scope.
+
+Source `39d61ba` additionally prevents failure alerts when an active automation is removed, while retaining cancellation history and isolating a replacement with the same ID. Its 62 focused tests passed, and independent P0–P2 review found no actionable issues. On 13 September 2026, this source passed the originating host's full native changed-source check against `a8cbb37`, followed by one complete build including the UI. The self-contained release passed the direct runtime policy import and was sealed; the source commit and clean checkout remained unchanged. These results qualify the local candidate, with activation and live acceptance recorded separately below.
+
+Source `39d61ba` was activated on 13 September 2026 after an idle native suspension
+and a fresh stopped-state rollback snapshot. The activation receipt verified the
+selected release and directly owned gateway/node processes. Subsequent health and
+readiness checks passed; Discord and Telegram were connected with successful
+probes, and supported scheduler listing and history reads succeeded. The configured
+authentication profile order was preserved.
+
+A fresh Journal window capture passed through the native scheduled-command route;
+the actual image was inspected and its permission/process binding renewed. This
+establishes that manual capture route after activation. Natural scheduled Journal
+synchronization remains a separate check.
+
+The updated Discord `/goal` acknowledgement, privacy, progress and final-delivery
+user path has not yet been repeated on `39d61ba`: the originating browser session
+requires renewed Discord sign-in. Regression tests cover the changed paths, but
+channel connectivity and the predecessor steering result above do not establish
+those new user-path results. Interaction-expiry behavior also remains untested live.
+Adopters should complete the [live acceptance checks](../docs/17-adoption-guide.md)
+against their own installation.

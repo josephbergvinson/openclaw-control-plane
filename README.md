@@ -36,7 +36,7 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 
 ## What is included
 
-- **The complete runtime delta:** 477 changed paths from the official release,
+- **The complete runtime delta:** 487 changed paths from the official release,
   including regression tests. The reconstruction helper verifies the patch checksum
   and resulting Git tree. Production source is unchanged from the reference deployment;
   two labels in one test fixture are normalized.
@@ -52,7 +52,7 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 
 The runtime [manifest](runtime/manifest.json) pins official commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, custom lineage
-`f31686e33ce3fa8564cecf97e3f36f39a69f57dd`, the public reconstruction tree and Node.js
+`39d61ba70ec77e39ead3a51cf22f66fc6321068f`, the public reconstruction tree and Node.js
 24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
 
 ## Start using the reference
