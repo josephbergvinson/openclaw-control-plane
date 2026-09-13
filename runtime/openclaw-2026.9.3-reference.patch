@@ -69,6 +69,19 @@ index 7321bb6e507f4fa0690027fe34853f66056a633b..145c0f6629b48b419a7074b1372a988b
  29d7abfcdefe9fbdf5c9e2eac31fefba0d6c8225e876ae03c9fedb62f4394e53  config-baseline.channel.json
 -17bfcfce606c3d1830b2cebb78c970e2f8d9806af2e515b50ac608697a12ecb8  config-baseline.plugin.json
 +4f474cabe7ac62e08ef06a4ab80edf8ccc459b3095be9a9b38c9f84bf13ffdfb  config-baseline.plugin.json
+diff --git a/docs/automation/cron-jobs/managing-jobs.md b/docs/automation/cron-jobs/managing-jobs.md
+index a2c56c32da5f89e8c1d4c8bfb8ee04031cf2871d..416b8f45390263fa7c87dd1142a7eeab9accddc0 100644
+--- a/docs/automation/cron-jobs/managing-jobs.md
++++ b/docs/automation/cron-jobs/managing-jobs.md
+@@ -135,6 +135,8 @@ Run history keeps payload execution in `status` (`ok`, `error`, or `skipped`) an
+ 
+ Intentional silence (`NO_REPLY`), intentionally empty output, heartbeat acknowledgments, and channel reply transforms record `deliverySuppressionReason` without claiming delivery or triggering delivery-failure alerts. These successful non-outcomes and successful executions with explicit `delivery.bestEffort: true` delete one-shots normally. A transport hook veto instead records a delivery error without an intentional-suppression reason. Active descendants without a final reply, stale interim output, and output emptied by TTS instead record a delivery error. Retained one-shot jobs do not automatically rerun; inspect their history and delivery outcome before retrying or removing them.
+ 
++Removing an automation during an active run retains that run's terminal history, including the removal reason when cancellation ends the run. Removal does not generate a new failure alert. A replacement created with the same job ID keeps its own schedule and outcome state.
++
+ Direct Gateway event sources can use `cron.run` with `mode: "if-enabled"` to run immediately without overriding an operator-disabled or auto-disabled job. Explicit operator run-now commands continue to use `force`.
+ 
+ The agent `automations` tool returns compact job summaries (`id`, `name`, `enabled`, `effectiveAgentId`, `nextRunAt`, `nextRunAtMs`, `scheduleKind`, `lastRunAt`, `lastRunStatus`) from `automations(action: "list")`. `effectiveAgentId` identifies the resolved execution owner, or is `null` when ownership is unresolved. Run dates are exact ISO timestamps, or `null` when absent; the millisecond fields remain available for programmatic callers. Time-based jobs also include their exact `schedule` (`at`, `every`, or `cron`), including disabled jobs with no next run. Event-driven schedules, payloads, and delivery definitions remain omitted; use `automations(action: "get", jobId: "...")` for one full job definition. Direct Gateway callers can pass `compact: true` to `cron.list`; omitting it preserves the full response with delivery previews. `cron.add` includes the same dry-run preview on the created job so create-time output names a resolved route or fail-closed outcome.
 diff --git a/docs/channels/discord.md b/docs/channels/discord.md
 index eeb310e537477036818504f423f48912f1c8a3f6..59f027510912a684cff11d195ddc91cc1eb4cc73 100644
 --- a/docs/channels/discord.md
@@ -187,10 +200,23 @@ index 8287d3fd329c001e09e3d02328ca654c14b5d395..ca98dab2011d14f171853cd34d147eeb
  The examples below place these settings under top-level `memory.search`. You can also
  apply equivalent settings in a per-agent `memory.search` override when only one
 diff --git a/docs/tools/goal.md b/docs/tools/goal.md
-index 748d4b926d24825777aee6df7cad5101a3880da8..60f5b9925b362dad76c416f3e4dee54055098cbf 100644
+index 748d4b926d24825777aee6df7cad5101a3880da8..44f3d8ed180a858113e54470bc75bb59e4235e70 100644
 --- a/docs/tools/goal.md
 +++ b/docs/tools/goal.md
-@@ -114,16 +114,31 @@ start fresh session context.
+@@ -24,6 +24,12 @@ Detached command completions return to the originating user-facing thread, so
+ the next turn continues to see the same goal even when command execution used
+ a separate sandbox policy session.
+ 
++On Discord, `/goal start` and `/goal resume` confirm the saved goal before its
++work continues. The confirmation follows the slash command's privacy setting;
++progress and results arrive as ordinary messages in the originating conversation.
++They remain deliverable after the slash interaction expires. Goal status,
++validation errors, and other native control replies retain their normal privacy.
++
+ ## Quick start
+ 
+ ```text
+@@ -114,16 +120,31 @@ start fresh session context.
  
  Goals can have an optional positive token budget, set through the
  `create_goal` tool's `token_budget` parameter. The budget is measured from the
@@ -228,7 +254,7 @@ index 748d4b926d24825777aee6df7cad5101a3880da8..60f5b9925b362dad76c416f3e4dee540
  
  Token budgets are a session-goal guardrail, not a billing cap. Provider
  quota, cost reporting, and context-window behavior still use the normal
-@@ -265,9 +280,10 @@ channel, change queue behavior, approve tools, or schedule work.
+@@ -265,9 +286,10 @@ channel, change queue behavior, approve tools, or schedule work.
  | `Goal error: goal not found`           | The session has no goal yet. Start one with `/goal start <objective>`.                                                                       |
  | `Goal error: goal is already complete` | The goal is terminal. Clear it before starting or resuming another objective.                                                                |
  
@@ -4106,10 +4132,101 @@ index f7e5409373df9fafc181e475310d5ff7435076a8..4c9907c0a1bb55bb00af8862ac839178
  type TerminalFailureDelivery = (
    payload: { text: string; isError: true },
 diff --git a/extensions/discord/src/monitor/native-command-agent-reply.ts b/extensions/discord/src/monitor/native-command-agent-reply.ts
-index c004f47d23dff892adf46f3ebe56a94297456205..e3356ed6d14631b9394b67e74e06af7c6a6178a4 100644
+index c004f47d23dff892adf46f3ebe56a94297456205..5a2d71e9730678bcded812c176ce8144fd754834 100644
 --- a/extensions/discord/src/monitor/native-command-agent-reply.ts
 +++ b/extensions/discord/src/monitor/native-command-agent-reply.ts
-@@ -156,7 +156,9 @@ export async function dispatchDiscordNativeAgentReply(params: {
+@@ -15,7 +15,7 @@ import { resolveChunkMode, resolveTextChunkLimit } from "openclaw/plugin-sdk/rep
+ import type { ReplyPayload } from "openclaw/plugin-sdk/reply-dispatch-runtime";
+ import type { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
+ import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+-import { resolveDiscordMaxLinesPerMessage } from "../accounts.js";
++import { resolveDiscordAccount, resolveDiscordMaxLinesPerMessage } from "../accounts.js";
+ import type {
+   ButtonInteraction,
+   CommandInteraction,
+@@ -44,6 +44,7 @@ type DispatchDiscordNativeAgentReplyResult = {
+ };
+ 
+ export async function dispatchDiscordNativeAgentReply(params: {
++  commandName?: string;
+   cfg: OpenClawConfig;
+   discordConfig: DiscordConfig;
+   accountId: string;
+@@ -64,6 +65,7 @@ export async function dispatchDiscordNativeAgentReply(params: {
+   let didReply = false;
+   let finalReplyOutcome: "accepted" | "failed" | "suppressed" | undefined;
+   let hiddenFinalReply: ReplyPayload | undefined;
++  let goalContinuationStarted = false;
+   const turnResult = await nativeCommandRuntime.dispatchChannelInboundTurn({
+     cfg: params.cfg,
+     channel: "discord",
+@@ -75,16 +77,63 @@ export async function dispatchDiscordNativeAgentReply(params: {
+     ctxPayload: params.ctxPayload,
+     dispatchReplyFromConfig: params.dispatchReplyFromConfig,
+     delivery: {
+-      deliver: async (payload) => {
++      deliver: async (payload, info) => {
+         if (params.suppressReplies) {
+           return {
+             visibleReplySent: false,
+             suppression: { reason: "channel_transform" as const },
+           };
+         }
++        const goalAcknowledgment =
++          !goalContinuationStarted &&
++          params.commandName === "goal" &&
++          info.kind === "block" &&
++          payload.isStatusNotice === true;
++        if (goalAcknowledgment) {
++          // The core goal owner emits this notice only after storing start/resume.
++          // Keep the control receipt private, then use the session's normal route
++          // for its work, whose lifetime can exceed the interaction token's lifetime.
++          goalContinuationStarted = true;
++        } else if (goalContinuationStarted) {
++          const target = params.ctxPayload.OriginatingTo?.trim();
++          if (params.ctxPayload.OriginatingChannel !== "discord" || !target) {
++            throw new Error("Discord goal continuation has no originating conversation");
++          }
++          const { deliverDiscordReply } = await import("./reply-delivery.js");
++          const result = await deliverDiscordReply({
++            cfg: params.cfg,
++            replies: [payload],
++            target,
++            token: resolveDiscordAccount({
++              cfg: params.cfg,
++              accountId: params.effectiveRoute.accountId,
++            }).token,
++            accountId: params.effectiveRoute.accountId,
++            sessionKey:
++              params.ctxPayload.CommandTargetSessionKey ?? params.effectiveRoute.sessionKey,
++            mediaLocalRoots: params.mediaLocalRoots,
++            textLimit: resolveTextChunkLimit(params.cfg, "discord", params.accountId, {
++              fallbackLimit: 2000,
++            }),
++            maxLinesPerMessage: resolveDiscordMaxLinesPerMessage({
++              cfg: params.cfg,
++              discordConfig: params.discordConfig,
++              accountId: params.accountId,
++            }),
++            chunkMode: resolveChunkMode(params.cfg, "discord", params.accountId),
++            kind: info.kind,
++          });
++          didReply ||= result.visibleReplySent;
++          return result;
++        }
+         const payloadDelivered = await deliverDiscordInteractionReply({
+           interaction: params.interaction,
+-          payload,
++          payload: goalAcknowledgment
++            ? {
++                ...payload,
++                text: `${payload.text ?? "Goal accepted."}\n\nProgress and results will appear in this conversation.`,
++              }
++            : payload,
+           mediaLocalRoots: params.mediaLocalRoots,
+           textLimit: resolveTextChunkLimit(params.cfg, "discord", params.accountId, {
+             fallbackLimit: 2000,
+@@ -156,7 +205,9 @@ export async function dispatchDiscordNativeAgentReply(params: {
      finalReplyOutcome === "suppressed" ||
      (turnResult.dispatched &&
        (turnResult.dispatchResult.deliberateSilentTerminalReply === true ||
@@ -4200,6 +4317,225 @@ index aacb4a10cad22f73e277329bc8f9e33e90f9309f..a1c02abd4bc6972b4dd50e1814917fae
  
  function isDiscordUnknownInteraction(error: unknown): boolean {
    if (!error || typeof error !== "object") {
+diff --git a/extensions/discord/src/monitor/native-command.goal-delivery.test.ts b/extensions/discord/src/monitor/native-command.goal-delivery.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..877a86c7bc8a7e90f088a15612e057f1f3aa964c
+--- /dev/null
++++ b/extensions/discord/src/monitor/native-command.goal-delivery.test.ts
+@@ -0,0 +1,213 @@
++import { ChannelType } from "discord-api-types/v10";
++import type { ReplyPayload } from "openclaw/plugin-sdk/reply-dispatch-runtime";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { dispatchDiscordNativeAgentReply } from "./native-command-agent-reply.js";
++import { buildDiscordNativeCommandContext } from "./native-command-context.js";
++import { nativeCommandRuntime } from "./native-command.runtime.js";
++import { createMockCommandInteraction } from "./native-command.test-helpers.js";
++
++const { deliverDiscordReply } = vi.hoisted(() => ({ deliverDiscordReply: vi.fn() }));
++vi.mock("./reply-delivery.js", () => ({ deliverDiscordReply }));
++
++const targetSession = "agent:main:discord:channel:channel-1";
++
++function createParams(commandName = "goal") {
++  const interaction = createMockCommandInteraction({
++    channelType: ChannelType.GuildText,
++    channelId: "channel-1",
++    guildId: "guild-1",
++  });
++  interaction.responseState = "deferred";
++  return {
++    commandName,
++    cfg: { channels: { discord: { token: "test-token" } } },
++    discordConfig: {},
++    accountId: "default",
++    interactionMock: interaction,
++    interaction: interaction as unknown as Parameters<
++      typeof dispatchDiscordNativeAgentReply
++    >[0]["interaction"],
++    ctxPayload: buildDiscordNativeCommandContext({
++      prompt: `/${commandName} reconcile the directory`,
++      commandArgs: {},
++      sessionKey: "agent:main:discord:slash:owner",
++      commandTargetSessionKey: targetSession,
++      accountId: "default",
++      interactionId: "interaction-1",
++      channelId: "channel-1",
++      guildId: "guild-1",
++      commandAuthorized: true,
++      isDirectMessage: false,
++      isGroupDm: false,
++      isGuild: true,
++      isThreadChannel: false,
++      user: { id: "owner", username: "tester" },
++      sender: { id: "owner", name: "Tester" },
++    }),
++    effectiveRoute: { accountId: "default", agentId: "main", sessionKey: targetSession },
++    channelConfig: null,
++    mediaLocalRoots: ["/tmp/goal-artifacts"],
++    preferFollowUp: true,
++    responseEphemeral: true,
++    pluginCommandDispatch: { kind: "non-plugin" as const },
++    log: { error: vi.fn() } as unknown as Parameters<
++      typeof dispatchDiscordNativeAgentReply
++    >[0]["log"],
++  };
++}
++
++function arrangeTurn(
++  messages: Array<{ payload: ReplyPayload; kind: "block" | "final"; at?: number }>,
++) {
++  vi.spyOn(nativeCommandRuntime, "dispatchChannelInboundTurn").mockImplementation(async (plan) => {
++    if (!("deliver" in plan.delivery)) {
++      throw new Error("Expected native direct delivery adapter");
++    }
++    for (const message of messages) {
++      if (message.at !== undefined) {
++        vi.setSystemTime(message.at);
++      }
++      const info = { kind: message.kind };
++      try {
++        const result = await plan.delivery.deliver(message.payload, info);
++        await plan.delivery.onDelivered?.(message.payload, info, result);
++      } catch (error) {
++        plan.delivery.onError?.(error, info);
++      }
++    }
++    return {
++      admission: { kind: "dispatch" },
++      dispatched: true,
++      ctxPayload: plan.ctxPayload,
++      routeSessionKey: plan.route.sessionKey,
++      dispatchResult: { counts: { final: 1, block: 1, tool: 0 }, queuedFinal: false },
++    };
++  });
++}
++
++describe("native goal continuation delivery", () => {
++  beforeEach(() => {
++    vi.useFakeTimers({ toFake: ["Date"] });
++    vi.setSystemTime(0);
++    deliverDiscordReply.mockResolvedValue({ visibleReplySent: true, messageIds: ["goal-result"] });
++  });
++
++  afterEach(() => {
++    vi.restoreAllMocks();
++    vi.clearAllMocks();
++    vi.useRealTimers();
++  });
++
++  it("acknowledges the goal privately, then delivers its result after the interaction expires", async () => {
++    const params = createParams();
++    const followUp = vi.fn(async () => {
++      if (Date.now() >= 15 * 60_000) {
++        throw new Error("Invalid Webhook Token");
++      }
++      return { ok: true };
++    });
++    params.interactionMock.followUp = followUp;
++    const final = { text: "Directory reconciled." };
++    arrangeTurn([
++      {
++        payload: { text: "Goal started: reconcile the directory", isStatusNotice: true },
++        kind: "block",
++      },
++      { payload: final, kind: "final", at: 22 * 60_000 },
++    ]);
++
++    await dispatchDiscordNativeAgentReply(params);
++
++    expect(followUp).toHaveBeenCalledTimes(1);
++    expect(followUp).toHaveBeenCalledWith(
++      expect.objectContaining({
++        content: expect.stringContaining("Goal started:"),
++        ephemeral: true,
++      }),
++    );
++    expect(deliverDiscordReply).toHaveBeenCalledWith(
++      expect.objectContaining({
++        target: "channel:channel-1",
++        sessionKey: targetSession,
++        accountId: "default",
++        replies: [final],
++        mediaLocalRoots: ["/tmp/goal-artifacts"],
++        kind: "final",
++      }),
++    );
++    expect(params.interactionMock.deleteReply).not.toHaveBeenCalled();
++  });
++
++  it("keeps goal work deliverable when its private acknowledgment fails", async () => {
++    const params = createParams();
++    params.interactionMock.followUp.mockRejectedValue(new Error("Invalid Webhook Token"));
++    arrangeTurn([
++      { payload: { text: "Goal resumed.", isStatusNotice: true }, kind: "block" },
++      { payload: { text: "Finished the review." }, kind: "final" },
++    ]);
++    await dispatchDiscordNativeAgentReply(params);
++    expect(params.log.error).toHaveBeenCalledOnce();
++    expect(params.interactionMock.followUp).toHaveBeenCalledOnce();
++    expect(deliverDiscordReply).toHaveBeenCalledWith(
++      expect.objectContaining({
++        target: "channel:channel-1",
++        replies: [{ text: "Finished the review." }],
++      }),
++    );
++  });
++
++  it("preserves the originating direct-message target for goal work", async () => {
++    const params = createParams();
++    params.ctxPayload.OriginatingTo = "user:owner";
++    params.ctxPayload.CommandTargetSessionKey = "agent:main:discord:direct:owner";
++    arrangeTurn([
++      { payload: { text: "Goal started.", isStatusNotice: true }, kind: "block" },
++      { payload: { text: "Private goal result." }, kind: "final" },
++    ]);
++    await dispatchDiscordNativeAgentReply(params);
++    expect(deliverDiscordReply).toHaveBeenCalledWith(
++      expect.objectContaining({
++        target: "user:owner",
++        sessionKey: "agent:main:discord:direct:owner",
++      }),
++    );
++  });
++
++  it.each(["Goal error: goal already exists", "Goal\nStatus: active"])(
++    "keeps the goal control response private: %s",
++    async (text) => {
++      const params = createParams();
++      arrangeTurn([{ payload: { text }, kind: "final" }]);
++      await dispatchDiscordNativeAgentReply(params);
++      expect(params.interactionMock.followUp).toHaveBeenCalledWith(
++        expect.objectContaining({
++          content: text,
++          ephemeral: true,
++        }),
++      );
++      expect(deliverDiscordReply).not.toHaveBeenCalled();
++    },
++  );
++
++  it("does not turn an ordinary private native reply into a channel message", async () => {
++    const params = createParams("learn");
++    arrangeTurn([
++      { payload: { text: "Starting.", isStatusNotice: true }, kind: "block" },
++      { payload: { text: "Private result." }, kind: "final" },
++    ]);
++    await dispatchDiscordNativeAgentReply(params);
++    expect(params.interactionMock.followUp).toHaveBeenCalledTimes(2);
++    expect(deliverDiscordReply).not.toHaveBeenCalled();
++  });
++
++  it("preserves explicit reply suppression for goal work", async () => {
++    const params = { ...createParams(), suppressReplies: true };
++    arrangeTurn([
++      { payload: { text: "Goal started.", isStatusNotice: true }, kind: "block" },
++      { payload: { text: "Hidden result." }, kind: "final" },
++    ]);
++    await dispatchDiscordNativeAgentReply(params);
++    expect(params.interactionMock.followUp).not.toHaveBeenCalled();
++    expect(deliverDiscordReply).not.toHaveBeenCalled();
++  });
++});
 diff --git a/extensions/discord/src/monitor/native-command.model-picker.test.ts b/extensions/discord/src/monitor/native-command.model-picker.test.ts
 index 79cfd2544d2e01aaa1ab06dfffa32a4d63cda2f8..280378a669b9188fd323f8326bf623a725566fde 100644
 --- a/extensions/discord/src/monitor/native-command.model-picker.test.ts
@@ -4454,6 +4790,31 @@ index b16576645216a0993ea02090f1e26f848f511198..dd12f4f4fff619ae103914369ee42fa9
          ]);
        },
      );
+diff --git a/extensions/discord/src/monitor/native-command.ts b/extensions/discord/src/monitor/native-command.ts
+index 9030e4f1b7a2e57a024dc059d9063bd1545a148f..dc273350e3cbd3075ab9e455f045dad5378bed11 100644
+--- a/extensions/discord/src/monitor/native-command.ts
++++ b/extensions/discord/src/monitor/native-command.ts
+@@ -778,6 +778,7 @@ async function dispatchDiscordCommandInteraction(params: {
+   }
+ 
+   const { dispatched, hiddenFinalReply } = await dispatchDiscordNativeAgentReply({
++    commandName,
+     cfg,
+     discordConfig,
+     accountId,
+diff --git a/extensions/discord/src/monitor/reply-delivery.ts b/extensions/discord/src/monitor/reply-delivery.ts
+index 2bf86617b4dbbcd4cefbdd24cfab23e3c2385b62..f5c5848a987c6efc8ffad1be36957b694a5b29af 100644
+--- a/extensions/discord/src/monitor/reply-delivery.ts
++++ b/extensions/discord/src/monitor/reply-delivery.ts
+@@ -217,7 +217,7 @@ export async function deliverDiscordReply(params: {
+   token: string;
+   accountId?: string;
+   rest?: RequestClient;
+-  runtime: RuntimeEnv;
++  runtime?: RuntimeEnv;
+   textLimit: number;
+   maxLinesPerMessage?: number;
+   replyToId?: string;
 diff --git a/extensions/discord/src/monitor/thread-bindings.persona.ts b/extensions/discord/src/monitor/thread-bindings.persona.ts
 index 8c582c805102044614405ff3e500118d0465cafa..18aa14c551d69029f9b9bef10ab84052224ea653 100644
 --- a/extensions/discord/src/monitor/thread-bindings.persona.ts
@@ -4684,10 +5045,10 @@ index 0000000000000000000000000000000000000000..bb77418467f29228999ef5512f6faa9d
 +});
 diff --git a/extensions/lane-contract/src/detached-lane-checkpoint.ts b/extensions/lane-contract/src/detached-lane-checkpoint.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..d81b6f4051c5f38cd1b740899aa55723213d72c2
+index 0000000000000000000000000000000000000000..89b3f72651500979312bfcbff27452c7f9c56f70
 --- /dev/null
 +++ b/extensions/lane-contract/src/detached-lane-checkpoint.ts
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,216 @@
 +import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 +import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 +
@@ -4708,10 +5069,10 @@ index 0000000000000000000000000000000000000000..d81b6f4051c5f38cd1b740899aa55723
 +  runId: string;
 +  taskId: string;
 +  ownerSessionKey: string;
-+  presentationRetired: boolean;
 +  pendingCheckpoint?: DetachedLaneCheckpoint;
 +  lastCheckpoint: { at: number; key: string };
 +  checkpointRequest?: AbortController;
++  checkpointRequestNotBefore?: number;
 +};
 +
 +export function createDetachedLaneCheckpointRequests<Lane extends CheckpointRequestLane>(params: {
@@ -4729,19 +5090,19 @@ index 0000000000000000000000000000000000000000..d81b6f4051c5f38cd1b740899aa55723
 +      if (
 +        lane.checkpointRequest ||
 +        lane.pendingCheckpoint ||
++        progressNow() < (lane.checkpointRequestNotBefore ?? 0) ||
 +        progressNow() - lane.lastCheckpoint.at < DETACHED_LANE_CHECKPOINT_GAP_MS
 +      ) {
 +        return;
 +      }
-+      // One request per visible gap, including rejected or unconfirmed admission.
-+      // Only an actual checkpoint receipt or lane closure releases this reservation.
++      // Keep one request outstanding until a receipt, lane closure, or a
++      // failed delivery attempt releases it with a separate retry cooldown.
 +      const request = new AbortController();
 +      lane.checkpointRequest = request;
 +      const canInject = () =>
 +        !isDisposed() &&
 +        !request.signal.aborted &&
 +        isCurrentLane(lane) &&
-+        !lane.presentationRetired &&
 +        !lane.pendingCheckpoint &&
 +        lane.checkpointRequest === request &&
 +        resolveCurrentLaneTask(lane)?.status === "running";
@@ -4772,6 +5133,17 @@ index 0000000000000000000000000000000000000000..d81b6f4051c5f38cd1b740899aa55723
 +      lane.lastCheckpoint = { at: progressNow(), key: checkpoint.key };
 +      lane.checkpointRequest?.abort();
 +      lane.checkpointRequest = undefined;
++      lane.checkpointRequestNotBefore = undefined;
++    },
++    recordUnconfirmedAttempt(lane: Lane, checkpoint: DetachedLaneCheckpoint): void {
++      // An ambiguous send may already be visible. Do not replay it or turn
++      // its missing receipt into permanent silence for the rest of the task.
++      if (lane.pendingCheckpoint === checkpoint) {
++        lane.pendingCheckpoint = undefined;
++      }
++      lane.checkpointRequest?.abort();
++      lane.checkpointRequest = undefined;
++      lane.checkpointRequestNotBefore = progressNow() + DETACHED_LANE_CHECKPOINT_GAP_MS;
 +    },
 +  };
 +}
@@ -4892,36 +5264,313 @@ index 0000000000000000000000000000000000000000..d81b6f4051c5f38cd1b740899aa55723
 +    }
 +    return this.completeItem(itemId);
 +  }
-+
-+  clear(): void {
-+    this.lastEventSeq = 0;
-+    this.commentaryTextByItem.clear();
-+    this.completedCommentaryItems.clear();
-+    this.completedToolBoundaries.clear();
-+    this.activeCommentary = undefined;
-+  }
 +}
-diff --git a/extensions/lane-contract/src/detached-lane-runtime.test.ts b/extensions/lane-contract/src/detached-lane-runtime.test.ts
+diff --git a/extensions/lane-contract/src/detached-lane-delivery.test.ts b/extensions/lane-contract/src/detached-lane-delivery.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf08cdb2ee
+index 0000000000000000000000000000000000000000..100cbfcc5382fb9118065f68f97d9c1bbd95ba6a
 --- /dev/null
-+++ b/extensions/lane-contract/src/detached-lane-runtime.test.ts
-@@ -0,0 +1,1042 @@
-+import { rm, writeFile } from "node:fs/promises";
-+import path from "node:path";
-+import type { AnyAgentTool } from "openclaw/plugin-sdk/channel-entry-contract";
++++ b/extensions/lane-contract/src/detached-lane-delivery.test.ts
+@@ -0,0 +1,281 @@
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
++import { describe, expect, it, vi } from "vitest";
++import {
++  DISCORD_ROUTE,
++  OWNER_SESSION,
++  cliPreamble,
++  makeHarness,
++  makeTask,
++} from "./detached-lane-runtime.test-support.js";
++
++describe("detached Discord lane contract", () => {
++  it("dispatches an unreceipted natural checkpoint once and keeps later commentary deliverable", async () => {
++    const harness = makeHarness();
++    harness.sendResults.push({});
++    harness.setTasks(OWNER_SESSION, [makeTask()]);
++    await harness.receive();
++    await harness.start();
++    await harness.emitAgentEvent({
++      data: {
++        kind: "preamble",
++        phase: "update",
++        progressText: "I've finished the first pass and am checking the remaining edge cases.",
++        completed: true,
++      },
++    });
++
++    await harness.controller.tick();
++    await harness.controller.tick();
++    expect(harness.sendCalls()).toHaveLength(1);
++    expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
++      "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++    ]);
++    expect(harness.sendCalls()[0]?.[1]).toMatchObject({
++      message: "I've finished the first pass and am checking the remaining edge cases.",
++    });
++
++    await harness.emitAgentEvent({
++      ...cliPreamble(2, {
++        itemId: "next-checkpoint",
++        progressText: "The remaining edge cases are verified; I am preparing the handoff.",
++        completed: true,
++      }),
++    });
++    await harness.controller.tick();
++    await harness.controller.tick();
++    expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
++      "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++      "lane-contract:checkpoint:run-1:commentary:next-checkpoint:completed",
++    ]);
++    expect(harness.sendCalls()[1]?.[1]).toMatchObject({
++      message: "The remaining edge cases are verified; I am preparing the handoff.",
++    });
++  });
++
++  it.each(["natural commentary", "overdue checkpoint request"] as const)(
++    "does not let an unresolved send block another lane's %s",
++    async (progress) => {
++      const harness = makeHarness();
++      const delivery = createDeferred<{ messageId: string }>();
++      harness.sendResults.push(delivery.promise);
++      harness.setTasks(OWNER_SESSION, [makeTask()]);
++      await harness.receive();
++      await harness.start();
++
++      const otherOwner = "agent:main:discord:channel-2";
++      const otherChild = "agent:main:subagent:child-2";
++      const otherRoute = { ...DISCORD_ROUTE, to: "channel-2", threadId: "thread-2" };
++      harness.setTasks(otherOwner, [
++        makeTask({
++          id: "task-2",
++          runId: "run-2",
++          ownerKey: otherOwner,
++          sessionKey: otherChild,
++          childSessionKey: otherChild,
++        }),
++      ]);
++      await harness.receive({
++        messageId: "message-2",
++        sessionKey: otherOwner,
++        route: otherRoute,
++      });
++      await harness.start({
++        runId: "run-2",
++        childSessionKey: otherChild,
++        messageId: "message-2",
++        route: otherRoute,
++      });
++      await harness.emitAgentEvent({});
++      if (progress === "natural commentary") {
++        await harness.emitAgentEvent({
++          runId: "run-2",
++          sessionKey: otherChild,
++          ...cliPreamble(1, {
++            itemId: "other-checkpoint",
++            progressText: "The independent review is complete; I am checking its final notes.",
++            completed: true,
++          }),
++        });
++      } else {
++        harness.setNow(180_000);
++      }
++
++      const tick = harness.controller.tick();
++      try {
++        await vi.waitFor(
++          () => {
++            expect(harness.sendCalls()[0]?.[1]).toMatchObject({
++              to: DISCORD_ROUTE.to,
++              idempotencyKey: "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++            });
++            if (progress === "natural commentary") {
++              expect(harness.sendCalls()[1]?.[1]).toMatchObject({
++                to: otherRoute.to,
++                message: "The independent review is complete; I am checking its final notes.",
++                idempotencyKey:
++                  "lane-contract:checkpoint:run-2:commentary:other-checkpoint:completed",
++              });
++            } else {
++              expect(harness.queueMessage).toHaveBeenCalledWith(
++                expect.objectContaining({ taskId: "task-2", runId: "run-2" }),
++              );
++            }
++          },
++          { timeout: 1_000, interval: 10 },
++        );
++      } finally {
++        delivery.resolve({ messageId: "provider-first-checkpoint" });
++        await tick;
++        harness.controller.dispose();
++      }
++    },
++  );
++
++  it.each(["unconfirmed", "rejected"] as const)(
++    "preserves newer pending commentary when an earlier send is %s",
++    async (outcome) => {
++      const harness = makeHarness();
++      const delivery = createDeferred<unknown>();
++      harness.sendResults.push(delivery.promise);
++      harness.setTasks(OWNER_SESSION, [makeTask()]);
++      await harness.receive();
++      await harness.start();
++      await harness.emitAgentEvent({});
++      const tick = harness.controller.tick();
++      try {
++        await vi.waitFor(() => expect(harness.sendCalls()).toHaveLength(1), {
++          timeout: 1_000,
++          interval: 10,
++        });
++        await harness.emitAgentEvent({
++          ...cliPreamble(2, {
++            itemId: "newer-checkpoint",
++            progressText: "The final checks passed; I am preparing the release notes.",
++            completed: true,
++          }),
++        });
++        expect(harness.sendCalls()).toHaveLength(1);
++
++        if (outcome === "unconfirmed") {
++          delivery.resolve({});
++        } else {
++          delivery.reject(new Error("send observation rejected"));
++        }
++        await tick;
++        await vi.waitFor(
++          async () => {
++            await harness.controller.tick();
++            expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
++              "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++              "lane-contract:checkpoint:run-1:commentary:newer-checkpoint:completed",
++            ]);
++          },
++          { timeout: 1_000, interval: 10 },
++        );
++        await harness.controller.tick();
++        expect(harness.sendCalls()).toHaveLength(2);
++        expect(harness.sendCalls()[1]?.[1]).toMatchObject({
++          message: "The final checks passed; I am preparing the release notes.",
++        });
++      } finally {
++        delivery.resolve({});
++        await tick;
++        harness.controller.dispose();
++      }
++    },
++  );
++
++  it.each(["dispose", "task identity loss"] as const)(
++    "does not revive a lane when its held send settles after %s",
++    async (change) => {
++      const harness = makeHarness();
++      const delivery = createDeferred<{ messageId: string }>();
++      harness.sendResults.push(delivery.promise);
++      harness.setTasks(OWNER_SESSION, [makeTask()]);
++      await harness.receive();
++      await harness.start();
++      await harness.emitAgentEvent({});
++      const tick = harness.controller.tick();
++      try {
++        await vi.waitFor(() => expect(harness.sendCalls()).toHaveLength(1), {
++          timeout: 1_000,
++          interval: 10,
++        });
++        await harness.emitAgentEvent({
++          ...cliPreamble(2, {
++            itemId: "queued-checkpoint",
++            progressText: "The review is complete; I am collecting the final evidence.",
++            completed: true,
++          }),
++        });
++        if (change === "dispose") {
++          harness.controller.dispose();
++        } else {
++          harness.setTasks(OWNER_SESSION, []);
++        }
++
++        delivery.resolve({ messageId: "provider-late-checkpoint" });
++        await harness.gatewayRequest.mock.results[0]?.value;
++        await tick;
++        harness.setTasks(OWNER_SESSION, [makeTask()]);
++        await harness.controller.tick();
++        await harness.emitAgentEvent({ seq: 3 });
++        harness.setNow(600_000);
++        await harness.controller.tick();
++
++        expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
++          "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++        ]);
++        expect(harness.queueMessage).not.toHaveBeenCalled();
++        expect(harness.registeredTool(harness.toolContext())).toBeNull();
++      } finally {
++        delivery.resolve({ messageId: "provider-late-checkpoint" });
++        await tick;
++        harness.controller.dispose();
++      }
++    },
++  );
++
++  it("waits out an unconfirmed send cooldown without replacing the last confirmed receipt", async () => {
++    const harness = makeHarness();
++    harness.setTasks(OWNER_SESSION, [makeTask()]);
++    await harness.receive();
++    await harness.start();
++    harness.setNow(10_000);
++    await harness.emitAgentEvent({});
++    await harness.controller.tick();
++    await harness.controller.tick();
++    harness.setNow(190_000);
++    await harness.controller.tick();
++    expect(harness.queueMessage).toHaveBeenCalledOnce();
++    const firstCue = harness.queueMessage.mock.calls[0]?.[0];
++
++    harness.setNow(200_000);
++    harness.sendResults.push({});
++    await harness.emitAgentEvent({
++      ...cliPreamble(2, {
++        itemId: "unconfirmed-checkpoint",
++        progressText: "The integration review is complete; I am checking the final packaging.",
++        completed: true,
++      }),
++    });
++    await harness.controller.tick();
++    await harness.controller.tick();
++    expect(firstCue?.signal.aborted).toBe(true);
++
++    harness.setNow(379_999);
++    await harness.controller.tick();
++    expect(harness.queueMessage).toHaveBeenCalledOnce();
++    harness.setNow(380_000);
++    await harness.controller.tick();
++    expect(harness.queueMessage).toHaveBeenCalledTimes(2);
++    expect(harness.queueMessage.mock.calls[1]?.[0]).toMatchObject({
++      queueIdentity: "lane-contract:progress:run-1:commentary:item:1:completed",
++    });
++    expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
++      "lane-contract:checkpoint:run-1:commentary:item:1:completed",
++      "lane-contract:checkpoint:run-1:commentary:unconfirmed-checkpoint:completed",
++    ]);
++    harness.controller.dispose();
++  });
++});
+diff --git a/extensions/lane-contract/src/detached-lane-runtime.test-support.ts b/extensions/lane-contract/src/detached-lane-runtime.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1533524f0afa32aa231e449eb72af39d5eebee2d
+--- /dev/null
++++ b/extensions/lane-contract/src/detached-lane-runtime.test-support.ts
+@@ -0,0 +1,267 @@
++import type { AnyAgentTool } from "openclaw/plugin-sdk/channel-entry-contract";
 +import type {
 +  OpenClawPluginApi,
 +  OpenClawPluginToolContext,
 +} from "openclaw/plugin-sdk/plugin-entry";
 +import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
-+import { afterEach, describe, expect, it, vi } from "vitest";
++import { expect, vi } from "vitest";
 +import type { DetachedLaneCheckpointProjector } from "./detached-lane-checkpoint.js";
 +import { registerDetachedLaneContract } from "./detached-lane-runtime.js";
 +
-+type BoundTaskRuns = ReturnType<OpenClawPluginApi["runtime"]["tasks"]["runs"]["bindSession"]>;
++export type BoundTaskRuns = ReturnType<
++  OpenClawPluginApi["runtime"]["tasks"]["runs"]["bindSession"]
++>;
 +type TaskRun = ReturnType<BoundTaskRuns["list"]>[number];
 +type HookHandler = (event: unknown, ctx: unknown) => unknown;
 +type AgentEventSubscription = Parameters<OpenClawPluginApi["registerAgentEventSubscription"]>[0];
@@ -4930,17 +5579,16 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +  ctx: OpenClawPluginToolContext,
 +) => AnyAgentTool | AnyAgentTool[] | null | undefined;
 +
-+const OWNER_SESSION = "agent:main:discord:channel-1";
-+const CHILD_SESSION = "agent:main:subagent:child-1";
++export const OWNER_SESSION = "agent:main:discord:channel-1";
++export const CHILD_SESSION = "agent:main:subagent:child-1";
 +const OWNER_SENDER = "discord-owner-1";
-+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 +type DiscordRoute = Readonly<{
 +  channel: "discord";
 +  to: string;
 +  accountId: string;
 +  threadId: string;
 +}>;
-+const DISCORD_ROUTE: DiscordRoute = {
++export const DISCORD_ROUTE: DiscordRoute = {
 +  channel: "discord",
 +  to: "channel-1",
 +  accountId: "account-1",
@@ -4948,23 +5596,26 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +};
 +type CheckpointEvent = Parameters<DetachedLaneCheckpointProjector["projectCheckpoint"]>[0];
 +
-+const assistantCommentary = (seq: number, data: Record<string, unknown>): CheckpointEvent => ({
++export const assistantCommentary = (
++  seq: number,
++  data: Record<string, unknown>,
++): CheckpointEvent => ({
 +  seq,
 +  stream: "assistant",
 +  data: { phase: "commentary", ...data },
 +});
-+const cliPreamble = (seq: number, data: Record<string, unknown>): CheckpointEvent => ({
++export const cliPreamble = (seq: number, data: Record<string, unknown>): CheckpointEvent => ({
 +  seq,
 +  stream: "item",
 +  data: { kind: "preamble", phase: "update", ...data },
 +});
-+const toolStart = (
++export const toolStart = (
 +  seq: number,
 +  toolCallId: string,
 +  data: Record<string, unknown> = {},
 +): CheckpointEvent => ({ seq, stream: "tool", data: { phase: "start", toolCallId, ...data } });
 +
-+function makeTask(overrides: Partial<TaskRun> = {}): TaskRun {
++export function makeTask(overrides: Partial<TaskRun> = {}): TaskRun {
 +  return {
 +    id: "task-1",
 +    runtime: "subagent",
@@ -4983,7 +5634,7 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +  };
 +}
 +
-+function makeHarness(options: { maxAttachmentBytes?: number } = {}) {
++export function makeHarness(options: { maxAttachmentBytes?: number } = {}) {
 +  const hooks = new Map<string, HookHandler>();
 +  const tasksByOwner = new Map<string, TaskRun[]>();
 +  const sendResults: unknown[] = [];
@@ -5174,6 +5825,30 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +    warn,
 +  };
 +}
+diff --git a/extensions/lane-contract/src/detached-lane-runtime.test.ts b/extensions/lane-contract/src/detached-lane-runtime.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c40d76a1699b6a8b78186075923326b64019abc2
+--- /dev/null
++++ b/extensions/lane-contract/src/detached-lane-runtime.test.ts
+@@ -0,0 +1,774 @@
++import { rm, writeFile } from "node:fs/promises";
++import path from "node:path";
++import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
++import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  type BoundTaskRuns,
++  CHILD_SESSION,
++  DISCORD_ROUTE,
++  OWNER_SESSION,
++  assistantCommentary,
++  cliPreamble,
++  makeHarness,
++  makeTask,
++  toolStart,
++} from "./detached-lane-runtime.test-support.js";
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 +
 +describe("detached Discord lane contract", () => {
 +  it("requests one overdue checkpoint and delivers the child's normal commentary through its relay", async () => {
@@ -5211,6 +5886,13 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +      message: "The desktop swap quote works. I am checking the mobile layout next.",
 +      idempotencyKey: "lane-contract:checkpoint:run-1:commentary:real-checkpoint:completed",
 +    });
++    expect(harness.gatewayRequest).toHaveBeenCalledWith(
++      "send",
++      expect.objectContaining({
++        idempotencyKey: "lane-contract:checkpoint:run-1:commentary:real-checkpoint:completed",
++      }),
++      { timeoutMs: 60_000 },
++    );
 +    expect(cue?.signal.aborted).toBe(true);
 +    harness.setNow(780_000);
 +    await harness.controller.tick();
@@ -5477,32 +6159,6 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +    await harness.controller.tick();
 +    await harness.controller.tick();
 +    expect(harness.sendCalls()).toHaveLength(0);
-+  });
-+
-+  it("dispatches an unreceipted natural checkpoint once and retires presentation", async () => {
-+    const harness = makeHarness();
-+    harness.sendResults.push({});
-+    harness.setTasks(OWNER_SESSION, [makeTask()]);
-+    await harness.receive();
-+    await harness.start();
-+    await harness.emitAgentEvent({
-+      data: {
-+        kind: "preamble",
-+        phase: "update",
-+        progressText: "I've finished the first pass and am checking the remaining edge cases.",
-+        completed: true,
-+      },
-+    });
-+
-+    await harness.controller.tick();
-+    await harness.controller.tick();
-+    expect(harness.sendCalls()).toHaveLength(1);
-+    expect(harness.sendCalls().map((call) => call[1].idempotencyKey)).toEqual([
-+      "lane-contract:checkpoint:run-1:commentary:item:1:completed",
-+    ]);
-+    expect(harness.sendCalls()[0]?.[1]).toMatchObject({
-+      message: "I've finished the first pass and am checking the remaining edge cases.",
-+    });
 +  });
 +
 +  it("publishes only completed natural child commentary and stays silent afterward", async () => {
@@ -5951,7 +6607,7 @@ index 0000000000000000000000000000000000000000..44294604cce6d15792f1590b6534d5bf
 +});
 diff --git a/extensions/lane-contract/src/detached-lane-runtime.ts b/extensions/lane-contract/src/detached-lane-runtime.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9890a7414
+index 0000000000000000000000000000000000000000..57cf97af1957fd69f8a1be2f9fbd4d54f2260606
 --- /dev/null
 +++ b/extensions/lane-contract/src/detached-lane-runtime.ts
 @@ -0,0 +1,747 @@
@@ -5975,6 +6631,7 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +const DETACHED_TASK_RUNTIMES = new Set(["subagent", "acp"]);
 +
 +const DETACHED_LANE_CHECK_INTERVAL_MS = 10_000;
++const DETACHED_LANE_SEND_TIMEOUT_MS = 60_000;
 +const DETACHED_LANE_MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024;
 +
 +const ActiveLaneBindSchema = Type.Object(
@@ -6012,12 +6669,12 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +  ownerSessionKey: string;
 +  childSessionKey: string;
 +  route: DiscordRoute;
-+  presentationRetired: boolean;
 +  checkpointProjector: DetachedLaneCheckpointProjector;
 +  pendingCheckpoint?: DetachedLaneCheckpoint;
-+  deliveryInFlight?: Promise<string | undefined>;
++  deliveryInFlight?: Promise<void>;
 +  lastCheckpoint: { at: number; key: string };
 +  checkpointRequest?: AbortController;
++  checkpointRequestNotBefore?: number;
 +};
 +
 +type RuntimeOptions = {
@@ -6197,45 +6854,6 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +    return task;
 +  };
 +
-+  const retirePresentation = (lane: TrackedLane): void => {
-+    if (lanes.get(lane.runId) !== lane) {
-+      return;
-+    }
-+    lane.presentationRetired = true;
-+    lane.checkpointRequest?.abort();
-+    lane.pendingCheckpoint = undefined;
-+    lane.checkpointProjector.clear();
-+  };
-+
-+  const sendVisible = async (params: {
-+    lane: TrackedLane;
-+    text: string;
-+    idempotencyKey: string;
-+  }): Promise<string | undefined> => {
-+    if (params.lane.deliveryInFlight) {
-+      return undefined;
-+    }
-+    const pending = api.runtime.gateway
-+      .request("send", {
-+        channel: "discord",
-+        to: params.lane.route.to,
-+        ...(params.lane.route.accountId ? { accountId: params.lane.route.accountId } : {}),
-+        ...(params.lane.route.threadId ? { threadId: params.lane.route.threadId } : {}),
-+        sessionKey: params.lane.ownerSessionKey,
-+        message: params.text,
-+        idempotencyKey: params.idempotencyKey,
-+      })
-+      .then(parseProviderMessageId);
-+    params.lane.deliveryInFlight = pending;
-+    try {
-+      return await pending;
-+    } finally {
-+      if (params.lane.deliveryInFlight === pending) {
-+        params.lane.deliveryInFlight = undefined;
-+      }
-+    }
-+  };
-+
 +  const bindTrackedLane = (params: {
 +    task: TaskRun;
 +    ownerSessionKey: string;
@@ -6271,7 +6889,6 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +      ownerSessionKey: params.ownerSessionKey,
 +      childSessionKey,
 +      route: params.route,
-+      presentationRetired: false,
 +      checkpointProjector: new DetachedLaneCheckpointProjector(),
 +      lastCheckpoint: { at: progressNow(), key: "initial" },
 +    };
@@ -6411,18 +7028,81 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +    warn: (message) => api.logger.warn(message),
 +  });
 +
++  const sendCheckpoint = (lane: TrackedLane, checkpoint: DetachedLaneCheckpoint): void => {
++    // Hold only this lane through receipt bookkeeping. A slow send must not
++    // prevent other tasks from publishing progress or requesting a checkpoint.
++    const delivery = (async () => {
++      let messageId: string | undefined;
++      try {
++        messageId = parseProviderMessageId(
++          await api.runtime.gateway.request(
++            "send",
++            {
++              channel: "discord",
++              to: lane.route.to,
++              ...(lane.route.accountId ? { accountId: lane.route.accountId } : {}),
++              ...(lane.route.threadId ? { threadId: lane.route.threadId } : {}),
++              sessionKey: lane.ownerSessionKey,
++              message: checkpoint.text,
++              idempotencyKey: `lane-contract:checkpoint:${lane.runId}:${checkpoint.key}`,
++            },
++            // This bounds observation, not transport execution. A timed-out
++            // send can arrive late, so its checkpoint is never replayed here.
++            { timeoutMs: DETACHED_LANE_SEND_TIMEOUT_MS },
++          ),
++        );
++      } catch {
++        // Missing and rejected receipts have the same ambiguous-send policy.
++      }
++      if (disposed || lanes.get(lane.runId) !== lane) {
++        return;
++      }
++      const task = resolveCurrentLaneTask(lane);
++      if (!task) {
++        api.logger.warn(`lane-contract detached task identity unavailable: run=${lane.runId}`);
++        releaseTrackedLane(lane);
++        return;
++      }
++      if (messageId) {
++        checkpoints.recordReceipt(lane, checkpoint);
++      } else {
++        checkpoints.recordUnconfirmedAttempt(lane, checkpoint);
++        api.logger.warn(
++          `lane-contract checkpoint delivery unconfirmed; preserving later progress: run=${lane.runId}`,
++        );
++      }
++      if (
++        !lane.pendingCheckpoint &&
++        TERMINAL_TASK_STATUSES.has(task.status) &&
++        task.deliveryStatus !== "pending"
++      ) {
++        releaseTrackedLane(lane);
++      }
++    })()
++      .catch(() => {
++        api.logger.warn(`lane-contract checkpoint settlement failed: run=${lane.runId}`);
++      })
++      .finally(() => {
++        if (lane.deliveryInFlight === delivery) {
++          lane.deliveryInFlight = undefined;
++        }
++      });
++    lane.deliveryInFlight = delivery;
++  };
++
 +  const runTick = async (): Promise<void> => {
 +    await reconcilePendingInbound();
++    if (disposed) {
++      return;
++    }
 +    for (const lane of lanes.values()) {
 +      const task = resolveCurrentLaneTask(lane);
 +      if (!task) {
++        api.logger.warn(`lane-contract detached task identity unavailable: run=${lane.runId}`);
 +        releaseTrackedLane(lane);
 +        continue;
 +      }
-+      if (lane.presentationRetired) {
-+        if (TERMINAL_TASK_STATUSES.has(task.status) && task.deliveryStatus !== "pending") {
-+          releaseTrackedLane(lane);
-+        }
++      if (lane.deliveryInFlight) {
 +        continue;
 +      }
 +      const terminal = TERMINAL_TASK_STATUSES.has(task.status);
@@ -6432,36 +7112,18 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +      if (!terminal && !ACTIVE_TASK_STATUSES.has(task.status)) {
 +        continue;
 +      }
-+      try {
-+        if (lane.pendingCheckpoint) {
-+          const checkpoint = lane.pendingCheckpoint;
-+          const messageId = await sendVisible({
-+            lane,
-+            text: checkpoint.text,
-+            idempotencyKey: `lane-contract:checkpoint:${lane.runId}:${checkpoint.key}`,
-+          });
-+          if (!messageId) {
-+            retirePresentation(lane);
-+            continue;
-+          }
-+          checkpoints.recordReceipt(lane, checkpoint);
-+          if (terminal && task.deliveryStatus !== "pending") {
-+            releaseTrackedLane(lane);
-+          }
-+          continue;
++      if (lane.pendingCheckpoint) {
++        sendCheckpoint(lane, lane.pendingCheckpoint);
++        continue;
++      }
++      if (terminal) {
++        if (task.deliveryStatus !== "pending") {
++          releaseTrackedLane(lane);
 +        }
-+        if (terminal) {
-+          if (task.deliveryStatus !== "pending") {
-+            releaseTrackedLane(lane);
-+          }
-+          continue;
-+        }
-+        if (task.status === "running") {
-+          checkpoints.requestOverdue(lane);
-+        }
-+      } catch {
-+        retirePresentation(lane);
-+        api.logger.warn("lane-contract provider-visible delivery failed");
++        continue;
++      }
++      if (task.status === "running") {
++        checkpoints.requestOverdue(lane);
 +      }
 +    }
 +  };
@@ -6581,13 +7243,7 @@ index 0000000000000000000000000000000000000000..9e74bf125d0261cf6681a86a1af6d0d9
 +      const lane = lanes.get(event.runId);
 +      const sessionMatches = !event.sessionKey || event.sessionKey === lane?.childSessionKey;
 +      const task = lane ? resolveCurrentLaneTask(lane) : undefined;
-+      if (
-+        !lane ||
-+        lane.presentationRetired ||
-+        !sessionMatches ||
-+        !task ||
-+        !ACTIVE_TASK_STATUSES.has(task.status)
-+      ) {
++      if (!lane || !sessionMatches || !task || !ACTIVE_TASK_STATUSES.has(task.status)) {
 +        return;
 +      }
 +      const checkpoint = lane.checkpointProjector.projectCheckpoint(event);
@@ -21323,10 +21979,204 @@ index a6d5cd109f07e4a847cf8bf0f9403aa413bb157d..938cb13d1beba7093322a0ff51ae3721
  
      const debugParams = buildParams("/debug show", {
 diff --git a/src/auto-reply/reply/commands-goal.test.ts b/src/auto-reply/reply/commands-goal.test.ts
-index 101e21ff2757745fa60a00043277c4aa2331e69d..175c067b257163411a85055b84c54b8d36f1cce6 100644
+index 101e21ff2757745fa60a00043277c4aa2331e69d..a01ed053874b4b1ebf5c1c62f4d3bc4d4cc3bf8f 100644
 --- a/src/auto-reply/reply/commands-goal.test.ts
 +++ b/src/auto-reply/reply/commands-goal.test.ts
-@@ -323,7 +323,7 @@ describe("goal commands", () => {
+@@ -2,10 +2,12 @@
+ import fs from "node:fs/promises";
+ import os from "node:os";
+ import path from "node:path";
+-import { afterEach, describe, expect, it } from "vitest";
++import { afterEach, describe, expect, it, vi } from "vitest";
+ import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import { getReplyPayloadMetadata } from "../reply-payload.js";
++import type { ReplyPayload } from "../types.js";
+ import { takeCommandSessionMetadataChanges } from "./command-session-metadata.js";
+ import { handleGoalCommand, parseGoalCommand } from "./commands-goal.js";
+ import type { HandleCommandsParams } from "./commands-types.js";
+@@ -104,32 +106,61 @@ describe("goal commands", () => {
+     });
+   });
+ 
+-  it("starts a goal from Codex-style bare /goal objective text", async () => {
+-    const storePath = await createStorePath();
+-    await upsertSessionEntry({
+-      storePath,
+-      sessionKey,
+-      entry: {
+-        sessionId: "sess-main",
+-        updatedAt: 1,
+-        totalTokens: 0,
+-        totalTokensFresh: true,
+-        totalTokensVersion: 1,
+-      },
+-    });
+-
+-    const params = buildGoalParams("/goal build a 3d game", storePath);
+-    const result = await handleGoalCommand(params, true);
+-
+-    expect(result?.shouldContinue).toBe(true);
+-    expect(result?.reply).toBeUndefined();
+-    expect(params.command.commandBodyNormalized).toBe("build a 3d game");
+-    expect((params.ctx as { BodyForAgent?: string }).BodyForAgent).toBe("build a 3d game");
+-    expect(getSessionEntry({ storePath, sessionKey })?.goal?.objective).toBe("build a 3d game");
+-    expect(takeCommandSessionMetadataChanges(params.ctx)).toEqual([
+-      { sessionKey, reason: "command-metadata" },
+-    ]);
+-  });
++  it.each(["/goal", "/goal start", "/goal set", "/goal create"])(
++    "acknowledges the persisted goal before continuing from %s",
++    async (command) => {
++      const storePath = await createStorePath();
++      await upsertSessionEntry({
++        storePath,
++        sessionKey,
++        entry: {
++          sessionId: "sess-main",
++          updatedAt: 1,
++          totalTokens: 0,
++          totalTokensFresh: true,
++          totalTokensVersion: 1,
++        },
++      });
++
++      const params = buildGoalParams(`${command} build a 3d game`, storePath);
++      const snapshots: Array<{ entry?: SessionEntry; command: string }> = [];
++      const onBlockReply = vi.fn(async (_payload: ReplyPayload) => {
++        snapshots.push({
++          entry: getSessionEntry({ storePath, sessionKey }),
++          command: params.command.commandBodyNormalized,
++        });
++      });
++      params.opts = { onBlockReply };
++      const result = await handleGoalCommand(params, true);
++
++      expect(onBlockReply).toHaveBeenCalledOnce();
++      const acknowledgment = onBlockReply.mock.calls[0]?.[0];
++      expect(acknowledgment).toMatchObject({
++        text: "Goal started: build a 3d game",
++        isStatusNotice: true,
++      });
++      expect(
++        acknowledgment &&
++          getReplyPayloadMetadata(acknowledgment)?.deliverDespiteSourceReplySuppression,
++      ).toBe(true);
++      expect(snapshots).toEqual([
++        {
++          entry: expect.objectContaining({
++            goal: expect.objectContaining({ objective: "build a 3d game", status: "active" }),
++          }),
++          command: "build a 3d game",
++        },
++      ]);
++      expect(result?.shouldContinue).toBe(true);
++      expect(result?.reply).toBeUndefined();
++      expect(params.command.commandBodyNormalized).toBe("build a 3d game");
++      expect((params.ctx as { BodyForAgent?: string }).BodyForAgent).toBe("build a 3d game");
++      expect(getSessionEntry({ storePath, sessionKey })?.goal?.objective).toBe("build a 3d game");
++      expect(takeCommandSessionMetadataChanges(params.ctx)).toEqual([
++        { sessionKey, reason: "command-metadata" },
++      ]);
++    },
++  );
+ 
+   it("wraps command-prefixed goal objectives before continuing", async () => {
+     const storePath = await createStorePath();
+@@ -203,15 +234,91 @@ describe("goal commands", () => {
+     });
+ 
+     const params = buildGoalParams("/goal resume CI passed", storePath);
++    const snapshots: Array<{ entry?: SessionEntry; command: string }> = [];
++    const onBlockReply = vi.fn(async (_payload: ReplyPayload) => {
++      snapshots.push({
++        entry: getSessionEntry({ storePath, sessionKey }),
++        command: params.command.commandBodyNormalized,
++      });
++    });
++    params.opts = { onBlockReply };
+     const result = await handleGoalCommand(params, true);
+ 
++    expect(onBlockReply).toHaveBeenCalledOnce();
++    expect(onBlockReply.mock.calls[0]?.[0]).toMatchObject({
++      text: "Goal resumed: finish the migration",
++      isStatusNotice: true,
++    });
++    expect(snapshots).toEqual([
++      {
++        entry: expect.objectContaining({
++          goal: expect.objectContaining({ objective: "finish the migration", status: "active" }),
++        }),
++        command: "Continue pursuing the current goal. Note: CI passed",
++      },
++    ]);
+     expect(result?.shouldContinue).toBe(true);
++    expect(result?.reply).toBeUndefined();
+     expect(params.command.commandBodyNormalized).toBe(
+       "Continue pursuing the current goal. Note: CI passed",
+     );
+     expect(getSessionEntry({ storePath, sessionKey })?.goal?.status).toBe("active");
+   });
+ 
++  it("continues the persisted goal when acknowledgment delivery rejects", async () => {
++    const storePath = await createStorePath();
++    await upsertSessionEntry({
++      storePath,
++      sessionKey,
++      entry: { sessionId: "sess-main", updatedAt: 1 },
++    });
++    const params = buildGoalParams("/goal start /status", storePath);
++    const onBlockReply = vi.fn(async (_payload: ReplyPayload) => {
++      throw new Error("synthetic acknowledgment delivery failure");
++    });
++    params.opts = { onBlockReply };
++
++    const result = await handleGoalCommand(params, true);
++
++    expect(onBlockReply).toHaveBeenCalledOnce();
++    expect(result?.shouldContinue).toBe(true);
++    expect(result?.reply).toBeUndefined();
++    expect(getSessionEntry({ storePath, sessionKey })?.goal).toMatchObject({
++      objective: "/status",
++      status: "active",
++    });
++    expect(params.command.commandBodyNormalized).toBe(
++      `Pursue this goal exactly as written from this JSON string: "\\/status"`,
++    );
++  });
++
++  it.each([
++    { command: "/goal status", authorized: true },
++    { command: "/goal start", authorized: true },
++    { command: "/goal resume", authorized: true },
++    { command: "/goal start do the review", authorized: false },
++  ])(
++    "does not acknowledge a continuation for $command (authorized=$authorized)",
++    async ({ command, authorized }) => {
++      const storePath = await createStorePath();
++      await upsertSessionEntry({
++        storePath,
++        sessionKey,
++        entry: { sessionId: "sess-main", updatedAt: 1 },
++      });
++      const params = buildGoalParams(command, storePath);
++      const onBlockReply = vi.fn(async () => {});
++      params.command.isAuthorizedSender = authorized;
++      params.opts = { onBlockReply };
++
++      const result = await handleGoalCommand(params, true);
++
++      expect(onBlockReply).not.toHaveBeenCalled();
++      expect(result?.shouldContinue).toBe(false);
++      expect(getSessionEntry({ storePath, sessionKey })?.goal).toBeUndefined();
++    },
++  );
++
+   it("wraps command-looking resume notes before continuing", async () => {
+     const storePath = await createStorePath();
+     await upsertSessionEntry({
+@@ -323,7 +430,7 @@ describe("goal commands", () => {
            tokenStart: 0,
            tokenStartFresh: true,
            tokenBudget: 20,
@@ -21335,6 +22185,45 @@ index 101e21ff2757745fa60a00043277c4aa2331e69d..175c067b257163411a85055b84c54b8d
            continuationTurns: 0,
          },
        },
+diff --git a/src/auto-reply/reply/commands-goal.ts b/src/auto-reply/reply/commands-goal.ts
+index e36eaa233fc9c7e9b8274400c8a9cd3d41e0f411..8c9e8246b964cf7d317c0db494cbd0504616eb71 100644
+--- a/src/auto-reply/reply/commands-goal.ts
++++ b/src/auto-reply/reply/commands-goal.ts
+@@ -13,6 +13,8 @@ import {
+ } from "../../config/sessions.js";
+ import { loadSessionEntry as getSessionEntry } from "../../config/sessions/session-accessor.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
++import { createSubsystemLogger } from "../../logging/subsystem.js";
++import { markReplyPayloadForSourceSuppressionDelivery } from "../reply-payload.js";
+ import { applyCommandTextToParams } from "./command-context-rewrite.js";
+ import { commandReply as goalReply, defineAuthorizedTextCommand } from "./command-gates.js";
+ import { markCommandSessionMetadataChanged } from "./command-session-metadata.js";
+@@ -23,6 +25,7 @@ import type {
+ } from "./commands-types.js";
+ 
+ const GOAL_COMMAND_PREFIX = "/goal";
++const log = createSubsystemLogger("auto-reply/commands-goal");
+ const GOAL_CONTINUATION_PROMPT_PREFIX =
+   "Pursue this goal exactly as written from this JSON string:";
+ const GOAL_RESUME_NOTE_PROMPT_PREFIX =
+@@ -241,6 +244,17 @@ export const handleGoalCommand: CommandHandler = defineAuthorizedTextCommand(
+       }
+       if (result.continuationPrompt) {
+         applyCommandTextToParams(params, result.continuationPrompt);
++        try {
++          await params.opts?.onBlockReply?.(
++            markReplyPayloadForSourceSuppressionDelivery({
++              text: result.text,
++              isStatusNotice: true,
++            }),
++          );
++        } catch {
++          // The goal is already persisted; a missing acknowledgment must not stop its work.
++          log.warn("Goal acknowledgment delivery failed; continuing the persisted goal.");
++        }
+         return goalContinuation();
+       }
+       return goalReply(result.text);
 diff --git a/src/auto-reply/reply/commands-info.ts b/src/auto-reply/reply/commands-info.ts
 index 6e301557a9f931e142eb1ee39e6f1675eff4c6c5..3b406eb320a93631a1790015fc895cffad0c1138 100644
 --- a/src/auto-reply/reply/commands-info.ts
@@ -27712,6 +28601,129 @@ index 51a7716e647324ca8b92c11bc6aa6eb9744ea48a..bb6389114bc52c1a58ea0edb5d714879
  export async function deleteCronSessionViaGateway(params: {
    agentSessionKey: string;
    sessionId: string;
+diff --git a/src/cron/service.one-shot-schedule-ownership.test.ts b/src/cron/service.one-shot-schedule-ownership.test.ts
+index 92fd5c6d3a9f5d7844ac6056b3fd69bcf11e049a..d86b0b1b554f84e5628c8eadf90b47e26ddf4ea8 100644
+--- a/src/cron/service.one-shot-schedule-ownership.test.ts
++++ b/src/cron/service.one-shot-schedule-ownership.test.ts
+@@ -29,6 +29,7 @@ function createCron(params: {
+   storePath: string;
+   runIsolatedAgentJob: CronServiceDeps["runIsolatedAgentJob"];
+   onEvent?: (event: CronEvent) => void;
++  sendCronFailureAlert?: CronServiceDeps["sendCronFailureAlert"];
+ }) {
+   return new CronService({
+     storePath: params.storePath,
+@@ -37,6 +38,7 @@ function createCron(params: {
+     enqueueSystemEvent: vi.fn(),
+     requestHeartbeat: vi.fn(),
+     runIsolatedAgentJob: params.runIsolatedAgentJob,
++    ...(params.sendCronFailureAlert ? { sendCronFailureAlert: params.sendCronFailureAlert } : {}),
+     ...(params.onEvent ? { onEvent: params.onEvent } : {}),
+   });
+ }
+@@ -89,21 +91,24 @@ async function expectFutureOneShot(params: {
+ }
+ 
+ describe("cron one-shot schedule ownership", () => {
+-  it.each([
+-    { mode: "direct", deleteAfterRun: false },
+-    { mode: "direct", deleteAfterRun: true },
+-    { mode: "queued", deleteAfterRun: false },
+-    { mode: "queued", deleteAfterRun: true },
+-  ] as const)(
+-    "does not finalize an active $mode run into a removed and recreated one-shot (deleteAfterRun=$deleteAfterRun)",
+-    async ({ mode, deleteAfterRun }) => {
++  it.each(
++    (["direct", "queued", "scheduled"] as const).flatMap((mode) =>
++      [false, true].flatMap((deleteAfterRun) =>
++        [false, true].map((recreate) => ({ mode, deleteAfterRun, recreate })),
++      ),
++    ),
++  )(
++    "retains an active $mode run's removal history without alerting or changing a replacement (deleteAfterRun=$deleteAfterRun, recreate=$recreate)",
++    async ({ mode, deleteAfterRun, recreate }) => {
+       const store = await makeStorePath();
+       const started = createDeferred();
+       const release = createDeferred<{ status: "ok"; summary: string }>();
+       const finished = createDeferred();
+       const events: CronEvent[] = [];
++      const sendCronFailureAlert = vi.fn(async () => undefined);
+       const cron = createCron({
+         storePath: store.storePath,
++        sendCronFailureAlert,
+         runIsolatedAgentJob: vi.fn(async () => {
+           started.resolve();
+           return await release.promise;
+@@ -126,6 +131,9 @@ describe("cron one-shot schedule ownership", () => {
+           atMs,
+           deleteAfterRun,
+         });
++        await cron.update(original.id, {
++          failureAlert: { after: 1, cooldownMs: 0, channel: "discord", to: "channel:123" },
++        });
+         const directRun = mode === "direct" ? cron.run(original.id, "force") : undefined;
+         if (mode === "queued") {
+           await expect(cron.enqueueRun(original.id, "force")).resolves.toMatchObject({
+@@ -133,16 +141,21 @@ describe("cron one-shot schedule ownership", () => {
+             enqueued: true,
+           });
+         }
++        if (mode === "scheduled") {
++          await vi.advanceTimersByTimeAsync(atMs - Date.now());
++        }
+         await started.promise;
+ 
+         await expect(cron.remove(original.id)).resolves.toEqual({ ok: true, removed: true });
+-        await addOneShot({
+-          cron,
+-          id: original.id,
+-          name: "independent replacement one-shot",
+-          atMs,
+-          deleteAfterRun,
+-        });
++        if (recreate) {
++          await addOneShot({
++            cron,
++            id: original.id,
++            name: "independent replacement one-shot",
++            atMs,
++            deleteAfterRun,
++          });
++        }
+ 
+         release.resolve({ status: "ok", summary: "original run finished" });
+         if (directRun) {
+@@ -151,12 +164,17 @@ describe("cron one-shot schedule ownership", () => {
+           await finished.promise;
+         }
+         await cron.status();
++        expect(sendCronFailureAlert).not.toHaveBeenCalled();
+ 
+         for (const jobs of [
+           await cron.list({ includeDisabled: true }),
+           (await loadCronStore(store.storePath)).jobs,
+         ]) {
+           const replacement = jobs.find((job) => job.id === original.id);
++          if (!recreate) {
++            expect(replacement).toBeUndefined();
++            continue;
++          }
+           expect(replacement).toMatchObject({
+             id: original.id,
+             name: "independent replacement one-shot",
+@@ -183,6 +201,12 @@ describe("cron one-shot schedule ownership", () => {
+             job: expect.objectContaining({ name: "removed original one-shot" }),
+           }),
+         ]);
++        if (mode === "scheduled") {
++          expect(finishedEvents[0]?.failureNotificationDelivery).toBeUndefined();
++          expect(finishedEvents[0]?.job?.state.lastFailureNotificationDeliveryStatus).toBe(
++            "not-requested",
++          );
++        }
+         const history = readCronTaskRunHistoryPage({
+           storeKey: cronStoreKey(store.storePath),
+           jobId: original.id,
 diff --git a/src/cron/service/auto-disable.ts b/src/cron/service/auto-disable.ts
 index 63e5ec55fc2b39b89be63b9ddc3624a7c133992b..95e4cf8c692174fd497b157f8965ec96937edd4d 100644
 --- a/src/cron/service/auto-disable.ts
@@ -27725,6 +28737,78 @@ index 63e5ec55fc2b39b89be63b9ddc3624a7c133992b..95e4cf8c692174fd497b157f8965ec96
      ...cronFailureDetailLines(errorReason),
      `Fix the underlying cause, then run \`openclaw automations enable ${job.id}\` to re-enable it.`,
    ].join("\n");
+diff --git a/src/cron/service/timer-outcome-finalization.ts b/src/cron/service/timer-outcome-finalization.ts
+index 0b1db18db6a13ac436df73b3e45159bf5f37576f..7e11c62610c5cb312c6defa573f2bc6dfc535798 100644
+--- a/src/cron/service/timer-outcome-finalization.ts
++++ b/src/cron/service/timer-outcome-finalization.ts
+@@ -111,12 +111,13 @@ export async function finalizeCompletedCronRunOutcomes(
+       // evaluations have no payload outcome and finalize only after the commit.
+       for (const outcome of outcomes) {
+         if (outcome.status !== "ok" || outcome.triggerEval?.fired !== false) {
+-          const taskJob = structuredClone(
+-            state.store?.jobs.find((job) => job.id === outcome.jobId) ?? outcome.job,
+-          );
++          const currentJob = state.store?.jobs.find((job) => job.id === outcome.jobId);
++          const jobRemoved = !currentJob || outcome.activeJobMarker?.jobRemoved === true;
++          const taskJob = structuredClone(jobRemoved ? outcome.job : currentJob);
+           applyOutcomeToAuthoritativeJob(state, taskJob, outcome, {
+             deferredNotifications: [],
+             emit: false,
++            failureAlerts: !jobRemoved,
+           });
+           recordCronOutcomeForJob(state, taskJob, outcome);
+         }
+diff --git a/src/cron/service/timer-outcomes.ts b/src/cron/service/timer-outcomes.ts
+index 256ea7cdf6f2598f07f976b70b7f2d3e00d95925..7fae4a0e18a3beb97e5b1d01ce32d54a658abe48 100644
+--- a/src/cron/service/timer-outcomes.ts
++++ b/src/cron/service/timer-outcomes.ts
+@@ -91,6 +91,8 @@ export function applyJobResult(
+     // Startup recovery restores historical notification facts separately.
+     replay?: boolean;
+     replaySchedule?: { nextRunAtMs?: number };
++    // Removed jobs retain terminal history without authoring new failure alerts.
++    failureAlerts?: boolean;
+     deferredNotifications?: DeferredCronNotifications;
+   },
+ ): boolean {
+@@ -157,7 +159,7 @@ export function applyJobResult(
+   // Track consecutive errors for backoff / auto-disable; skipped runs use a
+   // separate counter so opt-in skip alerts do not affect retry behavior.
+   const previousConsecutiveErrors = job.state.consecutiveErrors ?? 0;
+-  const alertConfig = resolveFailureAlert(state, job);
++  const alertConfig = opts?.failureAlerts === false ? null : resolveFailureAlert(state, job);
+   if (result.status === "error") {
+     job.state.consecutiveErrors = (job.state.consecutiveErrors ?? 0) + 1;
+     job.state.consecutiveSkipped = 0;
+@@ -665,6 +667,7 @@ export function applyOutcomeToStoredJob(
+     // snapshot so operator history survives without reviving the stored job.
+     applyJobResult(state, result.job, result, {
+       scheduleOwnership: "stale",
++      failureAlerts: false,
+       deferredNotifications: opts?.deferredNotifications,
+     });
+     emitCronOutcomeForJob(state, result.job, result);
+@@ -687,7 +690,11 @@ export function applyOutcomeToAuthoritativeJob(
+   state: CronServiceState,
+   job: CronJob,
+   result: TimedCronRunOutcome,
+-  opts?: { deferredNotifications?: DeferredCronNotifications; emit?: boolean },
++  opts?: {
++    deferredNotifications?: DeferredCronNotifications;
++    emit?: boolean;
++    failureAlerts?: boolean;
++  },
+ ): boolean {
+   const scheduleOwnership = resolveCronRunScheduleOwnership({
+     admittedJob: result.job,
+@@ -728,6 +735,7 @@ export function applyOutcomeToAuthoritativeJob(
+ 
+   const shouldDelete = applyJobResult(state, job, result, {
+     scheduleOwnership,
++    failureAlerts: opts?.failureAlerts,
+     deferredNotifications: opts?.deferredNotifications,
+   });
+   applyTriggerRunResult(job, result, { scheduleOwnership, triggerOwnership });
 diff --git a/src/cron/session-reaper.test.ts b/src/cron/session-reaper.test.ts
 index 88b3c204bc923daec166b081c5b6a8ce22999ab7..1a5e27539c641956ced34ce8d7000535c7a4c21f 100644
 --- a/src/cron/session-reaper.test.ts
