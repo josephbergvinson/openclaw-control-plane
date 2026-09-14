@@ -8,6 +8,8 @@ constraints, and lane-order evidence an operator/agent must inspect. An explicit
 without a shell; it never persists or accepts caller-supplied probe receipts.
 Provider APIs, connectors, MCP integrations, and supported CLIs are all
 first-class declared-native routes.
+``--compact`` projects only the selected lanes and requested operation for agent
+consumption; it does not change resolution, probe execution, or exit status.
 """
 
 from __future__ import annotations
@@ -5808,6 +5810,80 @@ def resolve(
     return payload
 
 
+def compact_output(payload: dict[str, Any]) -> dict[str, Any]:
+    """Present a resolved decision without duplicating the diagnostic catalogue.
+
+    Keep authority, execution/fallback guards and actual probe results intact.
+    Registry selection is not execution authority, and a probe never establishes
+    completion of the requested operation. The full payload remains the default.
+    """
+
+    operation = payload["required_operation"]
+
+    def requested_operations(operations: dict[str, Any]) -> dict[str, Any]:
+        return (
+            {operation: operations[operation]}
+            if operation in operations
+            else {}
+        )
+
+    def lane_summary(lane: dict[str, Any]) -> dict[str, Any]:
+        summary = {
+            key: value
+            for key, value in lane.items()
+            if key not in {
+                "readiness", "operations", "default_contexts",
+                "probe_expected_signal", "probe_safe_lane", "probe_ttl_days",
+            }
+        }
+        summary["operations"] = requested_operations(lane.get("operations") or {})
+        readiness = lane.get("readiness") or {}
+        summary["readiness"] = {
+            key: readiness[key]
+            for key in (
+                "state", "last_verified_utc", "slo_breached",
+                "constraint_or_fallback", "evidence_effects", "evidence_operations",
+            )
+            if key in readiness
+        }
+        return summary
+
+    output = {
+        key: value
+        for key, value in payload.items()
+        if key not in {
+            "checked_lanes", "routing_defaults", "failure_report_template",
+        }
+    }
+    output["output_detail"] = "compact"
+    preferred = payload["preferred_lane"]
+    output["preferred_lane"] = lane_summary(preferred) if preferred else None
+    read_set = payload["portfolio_read_set"]
+    if read_set["applies"]:
+        selected_ids = {binding["route_id"] for binding in read_set["account_bindings"]}
+        output["portfolio_read_set"] = {
+            **read_set,
+            "lanes": [
+                lane_summary(lane)
+                for lane in payload["checked_lanes"]
+                if lane["route_id"] in selected_ids
+            ],
+        }
+    contract = payload["operation_contract"]
+    output["operation_contract"] = {
+        key: value
+        for key, value in contract.items()
+        if key not in {
+            "operations", "native_supported_operations",
+            "authenticated_ui_required_operations", "operation_effects",
+        }
+    }
+    output["operation_contract"]["operations"] = requested_operations(
+        contract.get("operations") or {}
+    )
+    return output
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -5926,6 +6002,15 @@ def main(
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON (default; kept for explicit callers)")
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help=(
+            "Emit selected routes and the requested operation without the full "
+            "candidate/status catalogue; omit for full diagnostics. Does not "
+            "change resolution, probes, authority, or exit status"
+        ),
+    )
     args = parser.parse_args(argv)
 
     route_evidence: dict[str, str] = {}
@@ -5971,7 +6056,12 @@ def main(
         run_exact_probe=args.run_exact_probe,
         probe_transport=probe_transport,
     )
-    json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+    json.dump(
+        compact_output(payload) if args.compact else payload,
+        sys.stdout,
+        indent=2,
+        sort_keys=True,
+    )
     sys.stdout.write("\n")
     execution_guard = payload.get("execution_guard")
     browser_fallback_gate = payload.get("browser_fallback_gate")

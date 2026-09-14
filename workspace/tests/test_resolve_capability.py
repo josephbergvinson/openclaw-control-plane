@@ -6935,5 +6935,170 @@ class ResolveCapabilityTests(unittest.TestCase):
             )
 
 
+class CompactOutputTests(unittest.TestCase):
+    """Exercise the CLI presentation boundary without contacting providers."""
+
+    def setUp(self) -> None:
+        self.resolver = runpy.run_path(str(RESOLVER))
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 9, 14, 12, tzinfo=timezone.utc)
+
+        clock = mock.patch.dict(
+            self.resolver["main"].__globals__, {"datetime": FixedDatetime}
+        )
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def invoke(self, args, transport=None):
+        def no_probe(argv, timeout):
+            self.fail("Presentation alone must not run a provider probe")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = self.resolver["main"](
+                args, probe_transport=transport or no_probe
+            )
+        return code, json.loads(stdout.getvalue()), stdout.getvalue()
+
+    def assert_decision_unchanged(self, full, compact):
+        for field in (
+            "route_selection", "route_selection_blocker", "route_binding",
+            "execution_guard", "route_guard", "identity_contract",
+            "exact_probe_execution", "authoritative_probe_evidence",
+            "route_readiness", "mutation_readiness", "browser_fallback_gate",
+            "fallback_order", "constraints", "portfolio_authoritative_read_sources",
+        ):
+            self.assertEqual(full.get(field), compact.get(field), field)
+        for field, value in compact["operation_contract"].items():
+            if field != "operations":
+                self.assertEqual(full["operation_contract"][field], value, field)
+
+    def test_default_cli_and_resolve_keep_full_diagnostic_contract(self):
+        args = ["--system", "google-workspace", "--intent", "read",
+                "--required-operation", "calendar-read", "--portfolio", "company-beta"]
+        code, full, text = self.invoke(args)
+        expected = self.resolver["resolve"](
+            "google-workspace", "read", "", required_operation="calendar-read",
+            requested_portfolio="company-beta",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(full, expected)
+        self.assertEqual(text, json.dumps(expected, indent=2, sort_keys=True) + "\n")
+        self.assertEqual(self.invoke(args + ["--json"]), (code, full, text))
+        self.assertEqual(len(full["checked_lanes"]), 6)
+        self.assertNotIn("output_detail", full)
+
+    def test_compact_source_read_set_and_destination_preserve_exact_routing(self):
+        cases = [
+            (["--system", "google-workspace", "--intent", "read",
+              "--required-operation", "calendar-read", "--portfolio", "company-beta"],
+             {_operator_binding("identifiers.accounts.company_beta_admin_google"), _operator_binding("identifiers.accounts.company_beta_operator_google")}, {"google-company-beta"}),
+            (["--system", "google-calendar", "--intent", "write",
+              "--required-operation", "event-create", "--portfolio", "personal",
+              "--account", _operator_binding("identifiers.accounts.personal_google")],
+             {_operator_binding("identifiers.accounts.personal_google")}, {"google-personal"}),
+            (["--system", "apple-calendar", "--intent", "write",
+              "--required-operation", "event-create", "--portfolio", "personal",
+              "--account", "local-apple-calendar"],
+             {"local-apple-calendar"}, {"apple-local"}),
+        ]
+        for args, accounts, workspaces in cases:
+            with self.subTest(system=args[1]):
+                code, full, text = self.invoke(args)
+                compact_code, compact, compact_text = self.invoke(args + ["--compact"])
+                self.assertEqual(compact_code, code)
+                self.assertEqual(code, 0)
+                self.assert_decision_unchanged(full, compact)
+                self.assertEqual(compact["output_detail"], "compact")
+                self.assertNotIn("checked_lanes", compact)
+                lanes = ([compact["preferred_lane"]] if compact["preferred_lane"]
+                         else compact["portfolio_read_set"]["lanes"])
+                self.assertEqual({lane["required_account"] for lane in lanes}, accounts)
+                self.assertEqual({value for lane in lanes for value in lane["workspace_ids"]}, workspaces)
+                originals = {lane["route_id"]: lane for lane in full["checked_lanes"]}
+                for lane in lanes:
+                    original = originals[lane["route_id"]]
+                    for field in ("required_principal", "required_account", "workspace_ids",
+                                  "network_ids", "provider_adapter", "credential_handle_ids"):
+                        self.assertEqual(lane[field], original[field])
+                    self.assertEqual(lane["operations"], {
+                        full["required_operation"]: original["operations"][full["required_operation"]]
+                    })
+                if compact["portfolio_read_set"]["applies"]:
+                    self.assertLess(len(compact_text.encode()), len(text.encode()) // 2)
+
+    def test_compact_omits_raw_status_evidence_without_mutating_full_payload(self):
+        _, payload, _ = self.invoke([
+            "--system", "google-calendar", "--intent", "read",
+            "--required-operation", "event-list",
+            "--account", _operator_binding("identifiers.accounts.personal_google"),
+        ])
+        payload["preferred_lane"]["readiness"]["evidence"] = "private-selected-status"
+        for lane in payload["checked_lanes"]:
+            lane["readiness"]["evidence"] = "private-unselected-status"
+        original = json.dumps(payload, sort_keys=True)
+        compact = self.resolver["compact_output"](payload)
+        output = json.dumps(compact)
+        self.assertNotIn("private-selected-status", output)
+        self.assertNotIn("private-unselected-status", output)
+        self.assertEqual(json.dumps(payload, sort_keys=True), original)
+        self.assert_decision_unchanged(payload, compact)
+
+    def test_compact_keeps_failure_and_browser_fallback_exit_status(self):
+        base = ["--system", "google-calendar", "--intent", "read",
+                "--required-operation", "event-list"]
+        cases = [
+            (base, 2),
+            (base + ["--account", _operator_binding("identifiers.accounts.personal_google"), "--workspace", "google-company-beta"], 2),
+            (["--system", "google-calendar", "--intent", "write",
+              "--required-operation", "unregistered-mutation",
+              "--account", _operator_binding("identifiers.accounts.personal_google")], 3),
+            (base + ["--account", _operator_binding("identifiers.accounts.personal_google"),
+                     "--candidate-lane", "browser", "--native-operation-support", "unsupported"], 3),
+        ]
+        for args, expected_code in cases:
+            with self.subTest(args=args):
+                code, full, _ = self.invoke(args)
+                compact_code, compact, _ = self.invoke(args + ["--compact"])
+                self.assertEqual(code, expected_code)
+                self.assertEqual(compact_code, code)
+                self.assert_decision_unchanged(full, compact)
+                self.assertFalse(compact["browser_fallback_gate"]["provider_operation_allowed"])
+                self.assertFalse(compact["browser_fallback_gate"]["completion_claim_allowed"])
+
+    def test_compact_preserves_probe_outcomes_and_never_echoes_provider_body(self):
+        args = ["--system", "google-calendar", "--intent", "read",
+                "--required-operation", "calendar-list",
+                "--account", _operator_binding("identifiers.accounts.personal_google"), "--run-exact-probe"]
+        cases = [(0, "completed", "passed"),
+                 (1, "completed", "blocked_exact_probe_failed"),
+                 (1, "timeout", "blocked_exact_probe_timeout")]
+        for returncode, outcome, expected in cases:
+            calls = []
+
+            def transport(argv, timeout):
+                calls.append((argv, timeout))
+                return self.resolver["ProbeCommandResult"](
+                    returncode=returncode, outcome=outcome,
+                    stdout=json.dumps({"calendars": [{
+                        "id": _operator_binding("identifiers.accounts.personal_google"), "primary": True,
+                        "accessRole": "owner", "summary": "private-calendar-title",
+                    }]}),
+                )
+
+            with self.subTest(outcome=expected):
+                code, full, _ = self.invoke(args, transport)
+                compact_code, compact, text = self.invoke(args + ["--compact"], transport)
+                self.assertEqual(compact_code, code)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(calls[0], calls[1])
+                self.assertEqual(compact["exact_probe_execution"]["result"], expected)
+                self.assertNotIn("private-calendar-title", text)
+                self.assert_decision_unchanged(full, compact)
+
+
 if __name__ == "__main__":
     unittest.main()

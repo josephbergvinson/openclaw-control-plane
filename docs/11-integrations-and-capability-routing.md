@@ -28,6 +28,7 @@ The interface accepts typed facts:
 
 ```text
 python3 scripts/resolve_capability.py \
+  --compact \
   --system gmail \
   --intent read_search \
   --required-operation gmail-search \
@@ -36,6 +37,8 @@ python3 scripts/resolve_capability.py \
 ```
 
 The operation spelling must match the installed route's supported operation list. The example demonstrates the argument contract; it does not provision the fictional account or grant access. Additional selectors are `--workspace`, `--network` and `--principal`. `--context` is a legacy exact route tag, not a place to paste the user prompt.
+
+For ordinary route selection, `--compact` retains the selected lanes, account/workspace bindings, requested operation, probe outcomes, constraints and execution/fallback guards. It omits the full candidate/status catalogue and unrelated operations. Omit the flag for full diagnostics. This is a presentation option: `resolve()` and the default JSON contract remain unchanged, as do route selection, authority, probe execution and exit status. The selected lane information is sufficient to perform the next bounded operation without reprinting the full registry.
 
 An exact account wins over a portfolio label or legacy context. Explicit workspace, network and principal facts must still agree. Selectors narrow candidates; they never authorize the operation. Do not infer them through keyword matching, a channel name, a persistent portfolio mode or a convenient signed-in tab.
 
