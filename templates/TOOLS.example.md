@@ -81,7 +81,9 @@ Prefer a supported native/upstream capability, then a maintained integration/API
 
 A registered team Discord guild may be a source-only portfolio route. That does not establish an inbound assistant binding or authority to post, reply, react or mutate there. Membership and an open logged-in tab are not operator authority.
 
-Use the installed resolver with established typed facts: `python3 scripts/resolve_capability.py --system <system> --intent <intent> --required-operation <operation>` plus the applicable `--account`, `--portfolio`, `--workspace`, `--network` and `--principal`. `--context` is a legacy exact route tag, not prompt text. Resolution does not perform the requested provider mutation. `--run-exact-probe` requests an optional bounded registry-bound read-only probe; `--native-operation-support unsupported` expresses an actual provider API gap, and `--authenticated-ui-required` expresses a task whose required state exists only in the signed-in UI.
+Use the installed resolver with established typed facts: `python3 scripts/resolve_capability.py --compact --system <system> --intent <intent> --required-operation <operation>` plus the applicable `--account`, `--portfolio`, `--workspace`, `--network` and `--principal`. `--context` is a legacy exact route tag, not prompt text. Resolution does not perform the requested provider mutation. `--run-exact-probe` requests an optional bounded registry-bound read-only probe; `--native-operation-support unsupported` expresses an actual provider API gap, and `--authenticated-ui-required` expresses a task whose required state exists only in the signed-in UI.
+
+Use `--compact` for ordinary route selection. It retains the selected account/workspace bindings, requested operation, probe outcomes, constraints and execution/fallback guards without repeating the full candidate/status catalogue. Omit it for full diagnostics. The flag changes presentation only; resolution, authority, probe execution and exit status are unchanged.
 
 ## Exact resources and email
 
@@ -142,6 +144,8 @@ Keep reads narrow, subject-scoped and read-only. Never expose DSNs, secrets or u
 Use existing registered signed-in browser state. Reinspect the actual tab, origin, account and current UI before acting. Do not start a fresh login because an earlier observation or stale identifier failed. Keep credentials inside the managed browser/profile or sanctioned opaque broker boundary; never copy cookies or authentication values into another process.
 
 Use state assertions, text/anchors and observable waits rather than blind clicks or fixed delays. Reconfirm app/window/focus after a context change. A click is not evidence of the requested effect; read back the target object or observable UI state. Unexpected layout or account changes require renewed identification, not guessing.
+
+For `AGENTS.md` §11 cleanup, recheck the recorded tab/window or app-instance identity and current activity, use supported close controls on the same lane, and verify that only the intended resource closed.
 
 CAPTCHA, passkey/biometric/hardware-key presence, one-time MFA, credential creation/reset/recovery and custody changes remain human-presence boundaries. An operator's permission to handle ordinary system dialogs does not invent a secure credential channel or bypass those native boundaries.
 
