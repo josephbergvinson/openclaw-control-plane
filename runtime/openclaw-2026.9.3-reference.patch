@@ -111,6 +111,56 @@ index 74ac444a15de38b2262cc38b3e85b78671d6cdfb..0a67ef5334eeea0b4948f73408401f83
      - `streaming.preview.toolProgress` controls whether tool/progress updates reuse the same edited preview message in `partial` and `block` modes (default: `true` when preview streaming is active)
      - `streaming.preview.commandText` controls command/exec detail inside those lines: `status` (default, tool label only) or `raw` (explicit command text)
      - `streaming.progress.commentary` (default: `false`) opts into assistant commentary/preamble text in the temporary progress draft
+diff --git a/docs/cli/cron.md b/docs/cli/cron.md
+index 49ecca5e9fe514ff5e9a2ceb4454ca17de9414c5..ff8295ad997600675e6ce6a8a5f765dc833030bb 100644
+--- a/docs/cli/cron.md
++++ b/docs/cli/cron.md
+@@ -349,6 +349,11 @@ An unresolved owner does not stop the scheduler: that job is skipped with an exp
+ 
+ `automations runs` entries include delivery diagnostics with the intended automation target, the resolved target, message-tool sends, fallback use, and delivered state.
+ 
++Run-history entries also include `configRevision` when a retained execution receipt
++uniquely identifies the configuration used for that run. The value comes from
++that receipt, so later job edits do not change it. The field is absent when no
++valid retained receipt can be matched unambiguously.
++
+ Private per-job scratch (heartbeat checklists and similar monitor context):
+ 
+ ```bash
+diff --git a/docs/cli/message.md b/docs/cli/message.md
+index e53434b2ee712a7448fe85bf95cd18463db2be08..26814bb6e91a8488eb668e93eb3629fe656f7323 100644
+--- a/docs/cli/message.md
++++ b/docs/cli/message.md
+@@ -92,6 +92,9 @@ unresolved SecretRef on the selected channel/account fails the action closed.
+ The legacy `message read --include-thread` spelling remains accepted for existing
+ scripts but has no effect.
+ 
++For Discord, `read --message-id <id>` returns that exact message or an error; it
++cannot be combined with `--limit`, `--before`, `--after`, or `--around`.
++
+ ### Send
+ 
+ ```bash
+diff --git a/docs/concepts/progress-drafts.md b/docs/concepts/progress-drafts.md
+index 12490b2586f4a29b4261cade6ad20a0bc6648c94..b7685f992945118f59d1be006fd5bdbf7ae8ef5a 100644
+--- a/docs/concepts/progress-drafts.md
++++ b/docs/concepts/progress-drafts.md
+@@ -444,6 +444,15 @@ The fallback is intentional: sending a fresh final answer beats losing text,
+ mis-threading a reply, or overwriting a draft with a payload the channel
+ cannot represent safely.
+ 
++When a child finishes and resumes its requester, an externally delivered
++continuation retains typing and sends completed commentary through the normal
++outbound hooks to the source channel, account, and thread. Commentary follows
++that account's `streaming.mode: "progress"` and `progress.commentary` setting;
++typing follows `typingMode`, including delayed message/thinking triggers and
++the usual direct-chat and group defaults. These updates do not count as a final answer.
++Hidden child work, internal runs, and cron or heartbeat commands do not gain
++continuation commentary or typing from this path.
++
+ ## Troubleshooting
+ 
+ **I only see the final answer.**
 diff --git a/docs/concepts/streaming.md b/docs/concepts/streaming.md
 index d9be75ac82d89759a1f1ff98ce216d3300f23aea..f3abfc7938baf5db61042196a9768681553ca800 100644
 --- a/docs/concepts/streaming.md
@@ -139,6 +189,19 @@ index d9be75ac82d89759a1f1ff98ce216d3300f23aea..f3abfc7938baf5db61042196a9768681
    keep tool-progress lines visible while hiding command/exec text,
    set `streaming.preview.commandText` or `streaming.progress.commandText` to
    `"status"` (the default). Set either option to `"raw"` to opt into command
+diff --git a/docs/gateway/heartbeat.md b/docs/gateway/heartbeat.md
+index fd398c22c77976aab6231a6612da922063842593..f7832ab0c2cf5d42e5b9e953d974dbd650c3c5be 100644
+--- a/docs/gateway/heartbeat.md
++++ b/docs/gateway/heartbeat.md
+@@ -80,7 +80,7 @@ Example config:
+ - When recurring heartbeats are disabled with `0m`, the monitor automation job stays but is disabled, and its scratch is retained for when you re-enable the cadence. Targeted event-driven wakes remain available.
+ - When automations are disabled entirely, scheduled heartbeats do not run even if heartbeat cadence remains enabled.
+ - Active hours (`heartbeat.activeHours`) are checked in the configured timezone. Outside the window, heartbeats are skipped until the next tick inside the window.
+-- Scheduled heartbeats defer while the main queue or automation work is active or queued, while any reply or embedded run for the same agent is active, and while the resolved target session has active or queued work. Immediate and manual wakes bypass the broad same-agent active-run check, but still honor the main, automation, and target-session busy guards. Sibling agents do not pause each other.
++- Scheduled heartbeats defer while the main queue or automation work is active or queued, while any reply or embedded run for the same agent is active, and while the resolved target session has active or queued work. Immediate and manual wakes bypass the broad same-agent active-run check, but still honor the main, automation, and target-session busy guards. Sibling agents do not pause each other. The target-session guard also preserves a yielded requester's pending final reply through child cleanup and settlement backoff. It clears when that continuation settles or retires; ordinary user turns and the native completion continuation can still proceed.
+ 
+ ## What the heartbeat prompt is for
+ 
 diff --git a/docs/plugins/compatibility.md b/docs/plugins/compatibility.md
 index d1a3ea7cb545d4dd9d7ac456be9d20251566c311..6913043fc9de40e71f4806770642b1c7e0fde0f8 100644
 --- a/docs/plugins/compatibility.md
@@ -3602,6 +3665,164 @@ index 5ee48af1e7aca6eef8dd1c861118b83888e0c547..3b7fe7ddc71a8af3ba775faf5b4c77fe
        if (
          !statusRead.isCurrent() ||
          this.childStates.get(candidate.childThreadId) !== childBeforeRead
+diff --git a/extensions/discord/src/actions/handle-action.ts b/extensions/discord/src/actions/handle-action.ts
+index 1bba1866d3565b277a674c0f211107ef51d71242..84affbeaef91c6dd494a4910baefb14d4e87659c 100644
+--- a/extensions/discord/src/actions/handle-action.ts
++++ b/extensions/discord/src/actions/handle-action.ts
+@@ -356,11 +356,13 @@ export async function handleDiscordMessageAction(
+ 
+   if (action === "read") {
+     const limit = readPositiveIntegerParam(params, "limit");
++    const messageId = readStringParam(params, "messageId");
+     return await handleDiscordAction(
+       {
+         action: "readMessages",
+         accountId: accountId ?? undefined,
+         channelId: resolveChannelId(),
++        ...(messageId ? { messageId } : {}),
+         limit,
+         before: readStringParam(params, "before"),
+         after: readStringParam(params, "after"),
+diff --git a/extensions/discord/src/actions/runtime.messaging.messages.ts b/extensions/discord/src/actions/runtime.messaging.messages.ts
+index 8385c20a4a1f24b7c1cc3272416e34ece40194d9..73a20f1029a28894b865c565b955481720a894ef 100644
+--- a/extensions/discord/src/actions/runtime.messaging.messages.ts
++++ b/extensions/discord/src/actions/runtime.messaging.messages.ts
+@@ -107,9 +107,28 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
+         after: readStringParam(ctx.params, "after"),
+         around: readStringParam(ctx.params, "around"),
+       };
+-      const messages = assertDiscordMessageListResult(
+-        await discordMessagingActionRuntime.readMessagesDiscord(channelId, query, ctx.withOpts()),
+-      );
++      const messageId = readStringParam(ctx.params, "messageId");
++      let messages: unknown[];
++      if (messageId) {
++        if (Object.values(query).some((value) => value !== undefined)) {
++          throw new Error(
++            "Discord exact message reads cannot combine messageId with list selectors.",
++          );
++        }
++        const message = await discordMessagingActionRuntime.fetchMessageDiscord(
++          channelId,
++          messageId,
++          ctx.withOpts(),
++        );
++        if (message.id !== messageId) {
++          throw new Error("Discord exact message read returned a different message.");
++        }
++        messages = [message];
++      } else {
++        messages = assertDiscordMessageListResult(
++          await discordMessagingActionRuntime.readMessagesDiscord(channelId, query, ctx.withOpts()),
++        );
++      }
+       return jsonResult({
+         ok: true,
+         channelId,
+diff --git a/extensions/discord/src/actions/runtime.test.ts b/extensions/discord/src/actions/runtime.test.ts
+index 80abd185e41afce1d45cf70841b03025bdb8c986..a286f3221d86e828fdca2bb6566373e57655cb88 100644
+--- a/extensions/discord/src/actions/runtime.test.ts
++++ b/extensions/discord/src/actions/runtime.test.ts
+@@ -1233,6 +1233,99 @@ describe("handleDiscordMessagingAction", () => {
+     expect(message.timestampUtc).toBe(new Date(expectedMs).toISOString());
+   });
+ 
++  it("reads an exact message through the public read action without loading history", async () => {
++    fetchMessageDiscord.mockResolvedValueOnce({
++      id: "M1",
++      channel_id: "C1",
++      content: "The requested meeting details",
++      timestamp: "2026-01-15T10:00:00.000Z",
++    });
++
++    const result = await handleDiscordMessageAction({
++      action: "read",
++      params: { channelId: "channel:C1", messageId: "M1" },
++      cfg: DISCORD_TEST_CFG,
++      accountId: "default",
++      senderIsOwner: true,
++      conversationReadOrigin: "direct-operator",
++    });
++
++    expect(fetchMessageDiscord).toHaveBeenCalledWith("C1", "M1", {
++      cfg: DISCORD_TEST_CFG,
++      accountId: "default",
++    });
++    expect(readMessagesDiscord).not.toHaveBeenCalled();
++    expect(result.details).toMatchObject({
++      ok: true,
++      channelId: "C1",
++      messages: [
++        {
++          id: "M1",
++          content: "The requested meeting details",
++          timestampMs: Date.parse("2026-01-15T10:00:00.000Z"),
++          timestampUtc: "2026-01-15T10:00:00.000Z",
++        },
++      ],
++    });
++  });
++
++  it.each(["limit", "before", "after", "around"])(
++    "rejects an exact message read combined with %s instead of broadening it",
++    async (selector) => {
++      await expect(
++        handleMessagingAction(
++          "readMessages",
++          { channelId: "C1", messageId: "M1", [selector]: selector === "limit" ? 1 : "M2" },
++          enableAllActions,
++        ),
++      ).rejects.toThrow(
++        "Discord exact message reads cannot combine messageId with list selectors.",
++      );
++      expect(fetchMessageDiscord).not.toHaveBeenCalled();
++      expect(readMessagesDiscord).not.toHaveBeenCalled();
++    },
++  );
++
++  it("preserves exact message provider failures without substituting recent history", async () => {
++    fetchMessageDiscord.mockRejectedValueOnce(new Error("Unknown Message"));
++
++    await expect(
++      handleMessagingAction("readMessages", { channelId: "C1", messageId: "M1" }, enableAllActions),
++    ).rejects.toThrow("Unknown Message");
++    expect(readMessagesDiscord).not.toHaveBeenCalled();
++  });
++
++  it("rejects an exact message response for a different message", async () => {
++    fetchMessageDiscord.mockResolvedValueOnce({ id: "M2", channel_id: "C1" });
++
++    await expect(
++      handleMessagingAction("readMessages", { channelId: "C1", messageId: "M1" }, enableAllActions),
++    ).rejects.toThrow("Discord exact message read returned a different message.");
++    expect(readMessagesDiscord).not.toHaveBeenCalled();
++  });
++
++  it("enforces target authorization before fetching an exact message", async () => {
++    fetchChannelInfoDiscord.mockResolvedValueOnce({
++      id: "444",
++      guild_id: "111",
++      type: ChannelType.GuildText,
++    });
++    const cfg = discordAllowlistCfg({
++      "111": { channels: { "222": { enabled: true } } },
++    });
++
++    await expect(
++      handleMessagingAction(
++        "readMessages",
++        { channelId: "444", messageId: "M1" },
++        enableAllActions,
++        cfg,
++      ),
++    ).rejects.toThrow("Discord read target channel is not allowed.");
++    expect(fetchMessageDiscord).not.toHaveBeenCalled();
++    expect(readMessagesDiscord).not.toHaveBeenCalled();
++  });
++
+   it("rejects unexpected readMessages payloads with a boundary error", async () => {
+     readMessagesDiscord.mockResolvedValueOnce({ ok: true } as never);
+ 
 diff --git a/extensions/discord/src/monitor/agent-components-context.ts b/extensions/discord/src/monitor/agent-components-context.ts
 index 6f79e2325696eaf09a597f0128e9f8aebb715f78..7ea16506100e27ff97fd753b8b43eda428aaae84 100644
 --- a/extensions/discord/src/monitor/agent-components-context.ts
@@ -3754,6 +3975,39 @@ index c6f06157ebbca581730f63b2d3f1e04f334a9ba5..2a2558c8ead8b4fde6a6e6f9ffcb405a
  
    it("restores direct-message bindings by user target instead of DM channel id", async () => {
      registerSessionBindingAdapter({
+diff --git a/extensions/discord/src/monitor/message-handler.process-progress.ts b/extensions/discord/src/monitor/message-handler.process-progress.ts
+index 75b3fca0bb742484ad1ec9cb81f49a3b308bac7b..1742683170b8176882d0556df9c0e1200f30dbbc 100644
+--- a/extensions/discord/src/monitor/message-handler.process-progress.ts
++++ b/extensions/discord/src/monitor/message-handler.process-progress.ts
+@@ -2,6 +2,7 @@ import { resolveAgentConfig } from "openclaw/plugin-sdk/agent-scope-runtime";
+ import type { StatusReactionController } from "openclaw/plugin-sdk/channel-feedback";
+ // Discord plugin module owns progress-window state and agent-event rendering.
+ import type { GetReplyOptions } from "openclaw/plugin-sdk/reply-runtime";
++import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+ import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
+ import type { createDiscordDraftPreviewController } from "./message-handler.draft-preview.js";
+ import type { DiscordMessagePreflightContext } from "./message-handler.preflight.js";
+@@ -179,5 +180,19 @@ export function createDiscordMessageProgressRuntime(params: {
+     },
+   };
+ 
+-  return { replyOptions };
++  return {
++    replyOptions,
++    async retainContinuationProgress(eligible: boolean) {
++      if (!eligible) {
++        return;
++      }
++      try {
++        // A yielded parent still owns unfinished work. Retain its progress
++        // without claiming that the eventual final reply was delivered.
++        await draftPreview.finalizeProgressDraft();
++      } catch (error) {
++        logVerbose(`discord: failed to retain continuation progress (${String(error)})`);
++      }
++    },
++  };
+ }
 diff --git a/extensions/discord/src/monitor/message-handler.process-reply-runtime.ts b/extensions/discord/src/monitor/message-handler.process-reply-runtime.ts
 index f510de5779b3a001b2568e273441fa061ff94ad2..af1c5b714a09821e7ce3b5ccecc385ac12ecfdfd 100644
 --- a/extensions/discord/src/monitor/message-handler.process-reply-runtime.ts
@@ -3895,10 +4149,58 @@ index ea142e1430198feb945accd911a11cb56d9be876..9b9622681949c176bb24b8297344a404
      });
      expect(deliverDiscordReply).not.toHaveBeenCalled();
 diff --git a/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts b/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
-index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c7269aae3 100644
+index b30b8c554290bb1147ff0a2efd5889a02b037768..57c60a6787484836c29366ddac9f36ccd95a8689 100644
 --- a/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
 +++ b/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
-@@ -94,7 +94,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -9,6 +9,7 @@ import {
+   createNonTerminalToolWarningPayload,
+   deliverDiscordReply,
+   dispatchInboundMessageForTest as dispatchInboundMessage,
++  readAgentRunTerminalOutcomeForTest,
+   runProcessDiscordMessage,
+   registerDiscordProcessTestLifecycle,
+ } from "./message-handler.process.test-harness.js";
+@@ -24,6 +25,39 @@ import {
+ registerDiscordProcessTestLifecycle();
+ 
+ describe("processDiscordMessage draft streaming progress", () => {
++  it.each([false, true])(
++    "retains visible progress while a delegated continuation owns the unfinished task unless it failed (failed=%s)",
++    async (failed) => {
++      const draftStream = createMockDraftStreamForTest();
++      readAgentRunTerminalOutcomeForTest.mockReturnValue(failed ? "failed" : undefined);
++      dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
++        await params?.replyOptions?.onItemEvent?.({
++          itemId: "delegated-preamble",
++          kind: "preamble",
++          progressText: "I am checking the meeting details before copying them.",
++        });
++        return { ...createNoQueuedDispatchResult(), pendingContinuation: true };
++      });
++      const ctx = await createAutomaticDraftContext({
++        discordConfig: {
++          streaming: {
++            mode: "progress",
++            progress: { label: false, toolProgress: false, commentary: true },
++          },
++        },
++      });
++
++      await runProcessDiscordMessage(ctx);
++
++      expect(draftStream.clear).toHaveBeenCalledTimes(failed ? 1 : 0);
++      expect(draftStream.update.mock.lastCall?.[0]).toBe(
++        "I am checking the meeting details before copying them.",
++      );
++      expect(draftStream.stop).toHaveBeenCalledTimes(failed ? 0 : 1);
++      expect(deliverDiscordReply).not.toHaveBeenCalled();
++    },
++  );
++
+   it("moves progress and final delivery into a thread created from the source message", async () => {
+     const draftStream = createMockDraftStreamForTest();
+     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+@@ -94,7 +128,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      expect(draftStream.retarget).toHaveBeenCalledWith("thread-1");
      expect(draftStream.update).toHaveBeenLastCalledWith(
@@ -3907,7 +4209,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
      );
      expect(draftStream.stop).toHaveBeenCalledTimes(1);
      expect(draftStream.clear).not.toHaveBeenCalled();
-@@ -152,7 +152,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -152,7 +186,7 @@ describe("processDiscordMessage draft streaming progress", () => {
      await runProcessDiscordMessage(ctx);
  
      expect(draftStream.update).toHaveBeenLastCalledWith(
@@ -3916,7 +4218,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
        { complete: true },
      );
      const updates = draftStream.update.mock.calls.map((call) => call[0]).join("\n");
-@@ -367,7 +367,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -367,7 +401,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      await runProcessDiscordMessage(ctx);
  
@@ -3925,7 +4227,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
      expect(draftStream.update.mock.calls.flat().join("\n")).not.toContain("Temporary note.");
      // Cleanup still removes the unfinished tool-progress draft at run end.
      expect(draftStream.clear).toHaveBeenCalledTimes(1);
-@@ -408,7 +408,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -408,7 +442,7 @@ describe("processDiscordMessage draft streaming progress", () => {
      await runProcessDiscordMessage(ctx);
  
      const updates = draftStream.update.mock.calls.map((call) => call[0]);
@@ -3934,7 +4236,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
      expectFinalAnswerText("done");
    });
  
-@@ -462,7 +462,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -462,7 +496,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      await runProcessDiscordMessage(ctx);
  
@@ -3943,7 +4245,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
        complete: true,
      });
      expectFinalAnswerText("done");
-@@ -496,7 +496,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -496,7 +530,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      await runProcessDiscordMessage(ctx);
  
@@ -3952,7 +4254,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
        complete: true,
      });
      // The delivered final consumed the draft; the later tool warning must not
-@@ -697,7 +697,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -697,7 +731,7 @@ describe("processDiscordMessage draft streaming progress", () => {
      await runProcessDiscordMessage(ctx);
  
      expect(draftStream.update).toHaveBeenCalledWith(
@@ -3961,7 +4263,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
        { complete: true },
      );
    });
-@@ -733,7 +733,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -733,7 +767,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      await runProcessDiscordMessage(ctx);
  
@@ -3970,7 +4272,7 @@ index b30b8c554290bb1147ff0a2efd5889a02b037768..ff23766714d7ce816f3622965502db3c
        complete: true,
      });
    });
-@@ -798,7 +798,7 @@ describe("processDiscordMessage draft streaming progress", () => {
+@@ -798,7 +832,7 @@ describe("processDiscordMessage draft streaming progress", () => {
  
      await runProcessDiscordMessage(ctx);
  
@@ -4118,6 +4420,101 @@ index 4252e7849fc8e278dbd694e2fc1f0d006abc0a8c..904926041ee878ff65c7d4922b6c4ce7
        complete: true,
      });
      expect(draftStream.forceNewMessage).not.toHaveBeenCalled();
+diff --git a/extensions/discord/src/monitor/message-handler.process.draft-recovery.test.ts b/extensions/discord/src/monitor/message-handler.process.draft-recovery.test.ts
+index 2161deaba0c22c22060146b8ad610bb5541ba4c2..a54cc326c2bf5a4ca879363a9e835a23c68f6a1d 100644
+--- a/extensions/discord/src/monitor/message-handler.process.draft-recovery.test.ts
++++ b/extensions/discord/src/monitor/message-handler.process.draft-recovery.test.ts
+@@ -383,17 +383,17 @@ describe("processDiscordMessage draft streaming recovery", () => {
+     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+   });
+ 
+-  it("renders reasoning block payloads as a 🧠 blockquote", async () => {
++  it("renders reasoning block payloads as a plain blockquote", async () => {
+     mockDispatchSingleBlockReply({ text: "thinking...", isReasoning: true });
+     await processStreamOffDiscordMessage();
+ 
+     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+     expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+-      replies: [{ text: "> 🧠 thinking..." }],
++      replies: [{ text: "> thinking..." }],
+     });
+   });
+ 
+-  it("renders reasoning-tagged final payloads as a 🧠 blockquote, never the final", async () => {
++  it("renders reasoning-tagged final payloads as a plain blockquote, never the final", async () => {
+     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+       await params?.dispatcher.sendFinalReply({
+         text: "Reasoning:\nthis renders as a quoted thinking message",
+@@ -410,7 +410,7 @@ describe("processDiscordMessage draft streaming recovery", () => {
+ 
+     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+     expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+-      replies: [{ text: "> 🧠 this renders as a quoted thinking message" }],
++      replies: [{ text: "> this renders as a quoted thinking message" }],
+     });
+   });
+ 
+@@ -483,7 +483,7 @@ describe("processDiscordMessage draft streaming recovery", () => {
+ 
+     expect(draftStream.update).toHaveBeenCalledTimes(1);
+     expect(draftStream.update).toHaveBeenCalledWith(
+-      "Claiming my square footage. Tastefully, but with claws.\n\n🛠️ Exec\n• exec done",
++      "Claiming my square footage. Tastefully, but with claws.\n\n• Exec\n• exec done",
+       { complete: true },
+     );
+     // With no label override, the implicit label stays hidden under the status headline.
+@@ -525,7 +525,7 @@ describe("processDiscordMessage draft streaming recovery", () => {
+     await runProcessDiscordMessage(ctx);
+ 
+     expect(draftStream.update).toHaveBeenLastCalledWith(
+-      "Checking private context before replying.\n\n🛠️ Exec",
++      "Checking private context before replying.\n\n• Exec",
+       { complete: true },
+     );
+     expectFinalAnswerText("done");
+@@ -557,7 +557,7 @@ describe("processDiscordMessage draft streaming recovery", () => {
+     await runProcessDiscordMessage(ctx);
+ 
+     expect(draftStream.update).toHaveBeenCalledWith(
+-      "Implementing the change.\n\n✅ Inspect\n▸ Patch\n▢ Test",
++      "Implementing the change.\n\nCompleted: Inspect\nIn progress: Patch\nPending: Test",
+       { complete: true },
+     );
+     expect(draftStream.flush).toHaveBeenCalledTimes(1);
+diff --git a/extensions/discord/src/monitor/message-handler.process.ts b/extensions/discord/src/monitor/message-handler.process.ts
+index 139c9d0be33bf856d85e87e0b300dcaff46a447a..409df25818c1f8afa49b35c97e6a861785c80d96 100644
+--- a/extensions/discord/src/monitor/message-handler.process.ts
++++ b/extensions/discord/src/monitor/message-handler.process.ts
+@@ -78,13 +78,6 @@ type DiscordProviderDeliveryInfo = {
+ export async function processDiscordMessage(
+   ctx: DiscordMessagePreflightContext,
+   observer?: DiscordMessageProcessObserver,
+-) {
+-  await processDiscordMessageInner(ctx, observer);
+-}
+-
+-async function processDiscordMessageInner(
+-  ctx: DiscordMessagePreflightContext,
+-  observer?: DiscordMessageProcessObserver,
+ ) {
+   const dispatchStartedAt = Date.now();
+   const {
+@@ -712,8 +705,14 @@ async function processDiscordMessageInner(
+   } finally {
+     activeThreadRoute.end();
+     endDeliveryCorrelation();
+-    await draftPreview.cleanup();
+     dispatchError ||= readAgentRunTerminalOutcome(dispatchResult) === "failed";
++    await progress.retainContinuationProgress(
++      Boolean(dispatchResult?.pendingContinuation) &&
++        !dispatchAborted &&
++        !dispatchError &&
++        !userFacingFinalDelivered,
++    );
++    await draftPreview.cleanup();
+     const finalReceipt = dispatchResult?.settledReceipt?.counts.final;
+     const finalDeliveryFailed =
+       (finalReceipt?.failedBeforeSend ?? 0) + (finalReceipt?.failedAfterSend ?? 0) > 0;
 diff --git a/extensions/discord/src/monitor/message-handler.retry.ts b/extensions/discord/src/monitor/message-handler.retry.ts
 index f7e5409373df9fafc181e475310d5ff7435076a8..4c9907c0a1bb55bb00af8862ac83917897e47548 100644
 --- a/extensions/discord/src/monitor/message-handler.retry.ts
@@ -9400,6 +9797,46 @@ index 122af51d51ce7485840e398403baf5950fc41257..95ec8d425e811de9ea43dbec5b93be45
    });
  
    it("observes only SSE when automatic WebSocket fallback happens before send", async () => {
+diff --git a/packages/gateway-protocol/src/cron-validators.test.ts b/packages/gateway-protocol/src/cron-validators.test.ts
+index f11e15dfac097f1b91ab449086feb2aee80abb48..d300e81bf5fb942c29ee2efa43d4676e4b848e95 100644
+--- a/packages/gateway-protocol/src/cron-validators.test.ts
++++ b/packages/gateway-protocol/src/cron-validators.test.ts
+@@ -491,3 +491,23 @@ describe("cron protocol validators", () => {
+     ]);
+   });
+ });
++
++describe("cron history config revision contract", () => {
++  it.each([
++    { revision: undefined, valid: true },
++    { revision: "sha256:retained", valid: true },
++    { revision: "x".repeat(128), valid: true },
++    { revision: "", valid: false },
++    { revision: "x".repeat(129), valid: false },
++    { revision: 1, valid: false },
++    { revision: null, valid: false },
++  ])("validates retained revision $revision", ({ revision, valid }) => {
++    const entry = {
++      ts: 1,
++      jobId: "job-1",
++      action: "finished",
++      ...(revision === undefined ? {} : { configRevision: revision }),
++    };
++    expect(Value.Check(CronRunLogEntrySchema, entry)).toBe(valid);
++  });
++});
+diff --git a/packages/gateway-protocol/src/schema/cron.ts b/packages/gateway-protocol/src/schema/cron.ts
+index a232c741779e91b17633cf337ea2eb40031866f7..160387a52eceb48541b0c8dafd1c50fc241b0a14 100644
+--- a/packages/gateway-protocol/src/schema/cron.ts
++++ b/packages/gateway-protocol/src/schema/cron.ts
+@@ -697,6 +697,7 @@ export const CronRunsParamsSchema = closedObject({
+ export const CronRunLogEntrySchema = closedObject({
+   ts: Type.Integer({ minimum: 0 }),
+   jobId: NonEmptyString,
++  configRevision: Type.Optional(CronConfigRevisionSchema),
+   action: Type.Literal("finished"),
+   status: Type.Optional(CronRunStatusSchema),
+   completionStatus: Type.Optional(CronCompletionStatusSchema),
 diff --git a/packages/gateway-protocol/src/schema/sessions-create.ts b/packages/gateway-protocol/src/schema/sessions-create.ts
 index 5f5678303615d7dc5852995ce0e6ba57383c137e..79f385be4053c8b51ebb18c2a9fa7d3c17f2813a 100644
 --- a/packages/gateway-protocol/src/schema/sessions-create.ts
@@ -9514,10 +9951,34 @@ index 0000000000000000000000000000000000000000..d2e5e81c654ce3564e4a464ea0d2d3bc
 +  });
 +});
 diff --git a/src/agents/agent-command.ts b/src/agents/agent-command.ts
-index d06a8ccb49412d23f6a594ce69c01c4bfd5bede7..0a803bb3d6ca5d72df8ef336d9502752676dad72 100644
+index d06a8ccb49412d23f6a594ce69c01c4bfd5bede7..8ef98af49b5432ebaa08fa481672e81659fa8d73 100644
 --- a/src/agents/agent-command.ts
 +++ b/src/agents/agent-command.ts
-@@ -174,7 +174,10 @@ async function agentCommandInternal(
+@@ -42,6 +42,7 @@ import {
+ import { runAcpAgentCommand } from "./command/acp-execution.js";
+ import { repairPendingAssistantTranscriptTurns } from "./command/assistant-transcript-repair.js";
+ import { persistAgentSession } from "./command/attempt-execution.shared.js";
++import { runPresentedAgentCommandAttempt } from "./command/continuation-presentation.js";
+ import { emitIngressModelUsageDiagnostic } from "./command/ingress-diagnostics.js";
+ import { prepareCommandForegroundRun } from "./command/maintenance.js";
+ import { resolveEmbeddedModelSelection } from "./command/model-selection.js";
+@@ -54,7 +55,6 @@ import {
+   prepareAgentCommandExecution,
+   type PreparedAgentCommandRuntimeContext,
+ } from "./command/prepare.js";
+-import { runEmbeddedAgentAttempt } from "./command/run-embedded-attempt.js";
+ import { loadSessionStoreRuntime, resolveAgentCommandDeps } from "./command/runtime-loaders.js";
+ import { prepareCurrentRunDelivery } from "./command/session-helpers.js";
+ import { prepareEmbeddedSessionState } from "./command/session-preparation.js";
+@@ -166,6 +166,7 @@ async function agentCommandInternal(
+   let releaseForeground: (() => void) | undefined;
+   let maintenanceRequest: SessionMaintenanceRequest | undefined;
+   let preparedRunAdmission: ReturnType<typeof prepareAgentCommandExecutionIdentity> | undefined;
++  let cleanupContinuationPresentation: (() => void) | undefined;
+   try {
+     if (
+       sessionStateActor.actorType === "human" &&
+@@ -174,7 +175,10 @@ async function agentCommandInternal(
        opts.bootstrapContextRunKind !== "heartbeat" &&
        opts.bootstrapContextRunKind !== "cron"
      ) {
@@ -9529,6 +9990,35 @@ index d06a8ccb49412d23f6a594ce69c01c4bfd5bede7..0a803bb3d6ca5d72df8ef336d9502752
      }
      assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
      const sessionStoreRuntime =
+@@ -504,7 +508,7 @@ async function agentCommandInternal(
+         runOwnedSessionId = attemptPrepared.sessionId;
+         compactionSessionIdReporter.onCompactionCommitted(runOwnedSessionId);
+       }
+-      const embeddedAttempt = await runEmbeddedAgentAttempt({
++      const embeddedAttempt = await runPresentedAgentCommandAttempt({
+         prepared: attemptPrepared,
+         opts,
+         sessionEntry,
+@@ -526,6 +530,11 @@ async function agentCommandInternal(
+         embeddedSessionState,
+         trackInternalModelRunTarget,
+         preparedRunAdmission,
++        source: currentRunDeliveryContext,
++        deps: resolvedDeps,
++        onPresentation: (presentation) => {
++          cleanupContinuationPresentation = presentation?.cleanup;
++        },
+       });
+       if (embeddedAttempt.fallbackExhausted) {
+         opts.onModelFallbackExhausted?.();
+@@ -561,6 +570,7 @@ async function agentCommandInternal(
+       return finalized.deliveryResult;
+     });
+   } finally {
++    cleanupContinuationPresentation?.();
+     try {
+       compactionSessionIdReporter.reportCommitted();
+       await preparedRunAdmission?.finish();
 diff --git a/src/agents/agent-hooks/compaction-safeguard.test.ts b/src/agents/agent-hooks/compaction-safeguard.test.ts
 index 6509e409c492a927879e7a3562762d9de106bb13..b6b9ce394efd5a93d740c0b622a0af267cd66dbd 100644
 --- a/src/agents/agent-hooks/compaction-safeguard.test.ts
@@ -10804,6 +11294,568 @@ index a22f4e2caa57f43a034026ddb47b22f61320ebef..95ac8242e53e05b3fa5e3ab484deebd7
    }
    const policySessionKey = params.runtimePolicySessionKey ?? params.sessionKey;
    // Capture the requester before admission replaces agentId with the execution owner.
+diff --git a/src/agents/command/attempt-callbacks.ts b/src/agents/command/attempt-callbacks.ts
+index 2918a5ab432168b89195caeb581027a80892c096..7151a6077abff653bd4a1e734167cd27715e651e 100644
+--- a/src/agents/command/attempt-callbacks.ts
++++ b/src/agents/command/attempt-callbacks.ts
+@@ -2,6 +2,7 @@
+  * Lifecycle callback state helpers for a single agent attempt.
+  */
+ import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
++import type { RunEmbeddedAgentInternalParams } from "../embedded-agent-runner/run/internal-params.js";
+ import type { AgentMessage } from "../runtime/index.js";
+ 
+ /** Mutable lifecycle flags observed while a single agent attempt runs. */
+@@ -20,44 +21,67 @@ type AgentAttemptLifecycleEvent = {
+   sessionKey?: string;
+ };
+ 
++export type AgentAttemptPresentationCallbacks = Pick<
++  RunEmbeddedAgentInternalParams,
++  "onReasoningStream" | "onExecutionPhase"
++> & {
++  onAgentEvent?: (event: AgentAttemptLifecycleEvent) => void | Promise<void>;
++};
++
++export function createAgentAttemptLifecycleState(): AgentAttemptLifecycleState {
++  return {
++    currentTurnUserMessagePersisted: false,
++    lifecycleFinishing: false,
++    lifecycleEnded: false,
++  };
++}
++
+ /** Creates callbacks that update lifecycle flags for persistence decisions. */
+ export function createAgentAttemptLifecycleCallbacks(
+   state: AgentAttemptLifecycleState,
+   onRuntimeTurnStarted?: () => void | Promise<void>,
++  presentation?: AgentAttemptPresentationCallbacks,
+ ): {
+   onUserMessagePersisted: (message: Extract<AgentMessage, { role: "user" }>) => void;
+   onAgentEvent: (evt: AgentAttemptLifecycleEvent) => void | Promise<void>;
+-} {
++} & Pick<AgentAttemptPresentationCallbacks, "onReasoningStream" | "onExecutionPhase"> {
++  const onLifecycleEvent = (evt: AgentAttemptLifecycleEvent) => {
++    if (evt.stream !== "lifecycle" || typeof evt.data?.phase !== "string") {
++      return;
++    }
++    if (evt.data.phase === "start") {
++      // A same-candidate retry replaces deferred terminal state from the
++      // preceding attempt; retaining it would abort a recovered run.
++      state.lifecycleError = undefined;
++      state.lifecycleErrorObservation = undefined;
++      state.lifecycleFinishing = false;
++      state.lifecycleEnded = false;
++      return onRuntimeTurnStarted?.();
++    }
++    if (typeof evt.data.error === "string" && evt.data.error.trim()) {
++      state.lifecycleError = evt.data.error;
++      state.lifecycleErrorObservation = asOptionalRecord(evt.data.errorObservation);
++    }
++    // Finishing means output ended but transcript/session persistence may still
++    // need to run; end/error means the runtime lifecycle is complete.
++    if (evt.data.phase === "finishing") {
++      state.lifecycleFinishing = true;
++      return;
++    }
++    if (evt.data.phase === "end" || evt.data.phase === "error") {
++      state.lifecycleEnded = true;
++    }
++  };
+   return {
+     onUserMessagePersisted: () => {
+       state.currentTurnUserMessagePersisted = true;
+     },
+     onAgentEvent: (evt) => {
+-      if (evt.stream !== "lifecycle" || typeof evt.data?.phase !== "string") {
+-        return;
+-      }
+-      if (evt.data.phase === "start") {
+-        // A same-candidate retry replaces deferred terminal state from the
+-        // preceding attempt; retaining it would abort a recovered run.
+-        state.lifecycleError = undefined;
+-        state.lifecycleErrorObservation = undefined;
+-        state.lifecycleFinishing = false;
+-        state.lifecycleEnded = false;
+-        return onRuntimeTurnStarted?.();
+-      }
+-      if (typeof evt.data.error === "string" && evt.data.error.trim()) {
+-        state.lifecycleError = evt.data.error;
+-        state.lifecycleErrorObservation = asOptionalRecord(evt.data.errorObservation);
+-      }
+-      // Finishing means output ended but transcript/session persistence may still
+-      // need to run; end/error means the runtime lifecycle is complete.
+-      if (evt.data.phase === "finishing") {
+-        state.lifecycleFinishing = true;
+-        return;
+-      }
+-      if (evt.data.phase === "end" || evt.data.phase === "error") {
+-        state.lifecycleEnded = true;
+-      }
++      const lifecycleUpdate = onLifecycleEvent(evt);
++      const presentationUpdate = presentation?.onAgentEvent?.(evt);
++      return Promise.all([lifecycleUpdate, presentationUpdate]).then(() => undefined);
+     },
++    onReasoningStream: presentation?.onReasoningStream,
++    onExecutionPhase: presentation?.onExecutionPhase,
+   };
+ }
+diff --git a/src/agents/command/attempt-execution.ts b/src/agents/command/attempt-execution.ts
+index 35ebb8dac2dc01bb8f78d95873e81efa4b89fe0f..1f9911508e3f177173eb009ff14d0aa84befb7fa 100644
+--- a/src/agents/command/attempt-execution.ts
++++ b/src/agents/command/attempt-execution.ts
+@@ -606,6 +606,8 @@ export function runAgentAttempt(params: {
+     data?: Record<string, unknown>;
+     sessionKey?: string;
+   }) => void | Promise<void>;
++  onReasoningStream?: RunEmbeddedAgentInternalParams["onReasoningStream"];
++  onExecutionPhase?: RunEmbeddedAgentInternalParams["onExecutionPhase"];
+   deferTerminalLifecycle?: boolean;
+   deferredLifecycle?: DeferredEmbeddedRunLifecycleManager;
+   authProfileProvider: string;
+@@ -632,12 +634,15 @@ export function runAgentAttempt(params: {
+     authProfileIdSource?: "auto" | "user";
+   }) => void;
+ }) {
+-  const onRuntimeActivity = (info: { phase: string }) => {
++  const onRuntimeActivity: NonNullable<RunEmbeddedAgentInternalParams["onExecutionPhase"]> = (
++    info,
++  ) => {
+     // CLI preparation and child launch do not prove a native turn. Parsed
+     // assistant/tool activity does, even when the backend omits lifecycle events.
+     if (info.phase === "assistant_output_started" || info.phase === "tool_execution_started") {
+       void params.onAgentEvent({ stream: "lifecycle", data: { phase: "start" } });
+     }
++    params.onExecutionPhase?.(info);
+   };
+   const sessionAuthProfileId = params.sessionEntry?.authProfileOverride?.trim();
+   const sessionAuthProfileSource = resolveCollapsedSessionAuthPinSource(params.sessionEntry);
+@@ -1407,6 +1412,7 @@ export function runAgentAttempt(params: {
+     disableTools,
+     allowEmptyAssistantReplyAsSilent: isSubagentLane || isSubagentAnnounceHandoff,
+     onAgentEvent: params.onAgentEvent,
++    onReasoningStream: params.onReasoningStream,
+     onExecutionPhase: onRuntimeActivity,
+     deferTerminalLifecycle: params.deferTerminalLifecycle,
+     onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
+diff --git a/src/agents/command/continuation-presentation.ts b/src/agents/command/continuation-presentation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7beafc2aeddf
+--- /dev/null
++++ b/src/agents/command/continuation-presentation.ts
+@@ -0,0 +1,356 @@
++import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
++import { normalizeReplyPayloadOutcome } from "../../auto-reply/reply/normalize-reply.js";
++import { createTypingSignaler, resolveTypingMode } from "../../auto-reply/reply/typing-mode.js";
++import { createTypingController } from "../../auto-reply/reply/typing.js";
++import { createChannelReplyTransform } from "../../channels/message/reply-transform.js";
++import { getChannelPlugin } from "../../channels/plugins/index.js";
++import { sanitizeProgressStatusText } from "../../channels/progress-draft-status-text.js";
++import {
++  resolveChannelPreviewStreamMode,
++  resolveChannelStreamingProgressCommentary,
++} from "../../channels/streaming.js";
++import { createTypingCallbacks } from "../../channels/typing.js";
++import type { CliDeps } from "../../cli/deps.types.js";
++import { createOutboundSendDeps } from "../../cli/outbound-send-deps.js";
++import { mergeAccountConfig } from "../../config/channel-account-config.js";
++import type { TypingMode } from "../../config/types.base.js";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
++import { resolveAgentOutboundIdentity } from "../../infra/outbound/identity.js";
++import type { OutboundSessionContext } from "../../infra/outbound/session-context.js";
++import { createSubsystemLogger } from "../../logging/subsystem.js";
++import { resolveAccountEntry } from "../../routing/account-lookup.js";
++import { isSubagentSessionKey, normalizeAccountId } from "../../routing/session-key.js";
++import { isCompletionReportInputProvenance } from "../../sessions/input-provenance.js";
++import { isCronSessionKey } from "../../sessions/session-key-utils.js";
++import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
++import { isDeliverableMessageChannel } from "../../utils/message-channel.js";
++import { sanitizeUserFacingText } from "../embedded-agent-helpers/sanitize-user-facing-text.js";
++import type { RunEmbeddedAgentInternalParams } from "../embedded-agent-runner/run/internal-params.js";
++import type { createAgentAttemptLifecycleCallbacks } from "./attempt-callbacks.js";
++import { runEmbeddedAgentAttempt } from "./run-embedded-attempt.js";
++import type { AgentCommandOpts } from "./types.js";
++
++const log = createSubsystemLogger("agents/continuation-presentation");
++type AgentEvent = Parameters<
++  ReturnType<typeof createAgentAttemptLifecycleCallbacks>["onAgentEvent"]
++>[0];
++
++type AgentCommandContinuationPresentation = {
++  onAgentEvent: (event: AgentEvent) => Promise<void>;
++  onReasoningStream: NonNullable<RunEmbeddedAgentInternalParams["onReasoningStream"]>;
++  onExecutionPhase: NonNullable<RunEmbeddedAgentInternalParams["onExecutionPhase"]>;
++  finish: () => Promise<void>;
++  cleanup: () => void;
++};
++
++/** The command owner retains source presentation when a child resumes its requester. */
++function createAgentCommandContinuationPresentation(params: {
++  cfg: OpenClawConfig;
++  opts: AgentCommandOpts;
++  source?: DeliveryContext;
++  sessionKey?: string;
++  agentId: string;
++  runId: string;
++  outboundSession?: OutboundSessionContext;
++  deps: CliDeps;
++  timeoutMs: number;
++  typingMode?: TypingMode;
++  assertCurrent: () => void;
++}): AgentCommandContinuationPresentation | undefined {
++  const { opts, source, sessionKey } = params;
++  if (
++    opts.deliver !== true ||
++    opts.sessionEffects === "internal" ||
++    opts.modelRun === true ||
++    opts.promptMode === "none" ||
++    opts.sourceReplyDeliveryMode === "message_tool_only" ||
++    opts.bootstrapContextRunKind === "heartbeat" ||
++    opts.bootstrapContextRunKind === "cron" ||
++    isCronSessionKey(sessionKey) ||
++    isSubagentSessionKey(sessionKey) ||
++    !isCompletionReportInputProvenance(opts.inputProvenance) ||
++    !source?.channel ||
++    !source.to ||
++    !isDeliverableMessageChannel(source.channel)
++  ) {
++    return undefined;
++  }
++  // Command delivery preflight already resolved the source route and account.
++  // Reusing it prevents progress from following an unrelated session-last route.
++  const channel = source.channel;
++  const to = source.to;
++  const accountId = source.accountId;
++  const plugin = getChannelPlugin(channel);
++  const channelConfig = asOptionalRecord(params.cfg.channels?.[channel]);
++  // Channel owners define account inheritance (for example, Slack merges
++  // streaming fields while Discord replaces the object). Keep their policy.
++  const resolvedAccount = asOptionalRecord(plugin?.config.resolveAccount(params.cfg, accountId));
++  const accountConfig =
++    asOptionalRecord(resolvedAccount?.config) ??
++    mergeAccountConfig({
++      channelConfig,
++      accountConfig: asOptionalRecord(
++        resolveAccountEntry(
++          asOptionalRecord(channelConfig?.accounts),
++          normalizeAccountId(accountId),
++        ),
++      ),
++    });
++  const streamMode = resolveChannelPreviewStreamMode(
++    accountConfig,
++    channel === "telegram" || channel === "slack" ? "progress" : "off",
++  );
++  const commentaryEnabled = resolveChannelStreamingProgressCommentary(
++    accountConfig,
++    false,
++    streamMode,
++  );
++  const transport = plugin?.threading?.resolveReplyTransport?.({
++    cfg: params.cfg,
++    accountId,
++    threadId: source.threadId,
++  });
++  const threadId =
++    transport && Object.hasOwn(transport, "threadId")
++      ? (transport.threadId ?? null)
++      : (source.threadId ?? null);
++  const lifetime = new AbortController();
++  const signal = opts.abortSignal
++    ? AbortSignal.any([opts.abortSignal, lifetime.signal])
++    : lifetime.signal;
++  let accepting = true;
++  let closed = false;
++  let pending = Promise.resolve();
++  const completedItems = new Set<string>();
++  const assertCurrent = () => {
++    signal.throwIfAborted();
++    if (closed) {
++      throw new Error("requester continuation presentation is closed");
++    }
++    params.assertCurrent();
++  };
++  const typingTarget = { cfg: params.cfg, to, accountId, threadId };
++  const typingMode = resolveTypingMode({
++    configured: params.typingMode,
++    isGroupChat: params.outboundSession?.conversationType === "group",
++    // Completion continuations have no new inbound mention.
++    wasMentioned: false,
++    isHeartbeat: false,
++  });
++  const typingCallbacks =
++    typingMode !== "never" && plugin?.heartbeat?.sendTyping
++      ? createTypingCallbacks({
++          start: async () => {
++            assertCurrent();
++            await plugin.heartbeat?.sendTyping?.(typingTarget);
++          },
++          stop: plugin.heartbeat.clearTyping
++            ? async () => {
++                await plugin.heartbeat?.clearTyping?.(typingTarget);
++              }
++            : undefined,
++          keepaliveIntervalMs: (params.cfg.agents?.defaults?.typingIntervalSeconds ?? 6) * 1000,
++          maxDurationMs: params.timeoutMs,
++          onStartError: (error) => log.debug(`continuation typing failed: ${String(error)}`),
++        })
++      : undefined;
++  const typing = createTypingController({
++    onReplyStart: typingCallbacks?.onReplyStart,
++    onCleanup: typingCallbacks?.onCleanup,
++    // The channel callbacks already own keepalive and terminal provider cleanup.
++    keepalive: false,
++    typingTtlMs: params.timeoutMs,
++  });
++  const typingSignals = createTypingSignaler({ typing, mode: typingMode, isHeartbeat: false });
++  const signalTyping = (notify: () => Promise<void>) => {
++    if (!accepting || signal.aborted) {
++      return Promise.resolve();
++    }
++    return notify().catch((error: unknown) => {
++      if (!signal.aborted) {
++        log.debug(`continuation typing failed: ${String(error)}`);
++      }
++    });
++  };
++  const transformReplyPayload = createChannelReplyTransform({
++    cfg: params.cfg,
++    accountId,
++    messaging: plugin?.messaging,
++  });
++
++  return {
++    onReasoningStream(payload) {
++      return payload.text?.trim()
++        ? signalTyping(() => typingSignals.signalReasoningDelta())
++        : Promise.resolve();
++    },
++    onExecutionPhase(info) {
++      if (
++        info.phase === "turn_accepted" ||
++        info.phase === "process_spawned" ||
++        info.phase === "model_call_started" ||
++        info.phase === "tool_execution_started" ||
++        info.phase === "assistant_output_started"
++      ) {
++        void signalTyping(() => typingSignals.signalExecutionActivity?.() ?? Promise.resolve());
++      }
++    },
++    onAgentEvent(event) {
++      if (!accepting || signal.aborted) {
++        return Promise.resolve();
++      }
++      if (event.stream === "lifecycle" && event.data?.phase === "start") {
++        return signalTyping(() => typingSignals.signalRunStart());
++      }
++      let typingUpdate = Promise.resolve();
++      if (event.stream === "assistant" && typeof event.data?.text === "string") {
++        const text = sanitizeUserFacingText(event.data.text);
++        typingUpdate = signalTyping(() => typingSignals.signalTextDelta(text));
++      } else if (
++        event.stream === "tool" &&
++        event.data?.hideFromChannelProgress !== true &&
++        (event.data?.phase === "start" || event.data?.phase === "update")
++      ) {
++        typingUpdate = signalTyping(() => typingSignals.signalToolStart());
++      } else if (
++        commentaryEnabled &&
++        event.stream === "item" &&
++        event.data?.kind === "preamble" &&
++        event.data.hideFromChannelProgress !== true &&
++        event.data.suppressChannelProgress !== true &&
++        typeof event.data.progressText === "string"
++      ) {
++        const text = sanitizeUserFacingText(event.data.progressText, { streaming: true });
++        typingUpdate = signalTyping(() => typingSignals.signalTextDelta(text));
++      }
++      if (
++        !commentaryEnabled ||
++        event.stream !== "item" ||
++        event.data?.kind !== "preamble" ||
++        event.data.hideFromChannelProgress === true ||
++        event.data.suppressChannelProgress === true ||
++        event.data.phase !== "end" ||
++        typeof event.data.progressText !== "string"
++      ) {
++        return typingUpdate;
++      }
++      const text = sanitizeProgressStatusText(
++        sanitizeUserFacingText(event.data.progressText, { streaming: true }),
++      );
++      const itemId =
++        typeof event.data.itemId === "string" && event.data.itemId ? event.data.itemId : text;
++      if (!text || completedItems.has(itemId)) {
++        return Promise.all([typingUpdate, pending]).then(() => undefined);
++      }
++      // Reserve synchronously because native event callbacks are detached.
++      completedItems.add(itemId);
++      pending = pending
++        .then(async () => {
++          assertCurrent();
++          const normalized = normalizeReplyPayloadOutcome(
++            { text, isCommentary: true },
++            { transformReplyPayload },
++          );
++          if (normalized.kind === "suppress") {
++            return;
++          }
++          const { sendDurableMessageBatchCore } = await import("../../channels/message/runtime.js");
++          assertCurrent();
++          const result = await sendDurableMessageBatchCore({
++            cfg: params.cfg,
++            channel,
++            to,
++            accountId,
++            threadId,
++            replyToId: transport?.replyToId ?? null,
++            payloads: [normalized.payload],
++            session: params.outboundSession,
++            runId: params.runId,
++            identity: resolveAgentOutboundIdentity(params.cfg, params.agentId),
++            replyPayloadSendingHook: {
++              kind: "block",
++              channel,
++              sessionKey,
++              runId: params.runId,
++              context: {
++                channelId: channel,
++                accountId,
++                conversationId: to,
++                sessionKey,
++                runId: params.runId,
++              },
++            },
++            signal,
++            bestEffort: true,
++            durability: "best_effort",
++            deps: createOutboundSendDeps(params.deps),
++            assertDirectAdapterHandoff: assertCurrent,
++            onPlatformSendDispatch: async () => {
++              assertCurrent();
++            },
++          });
++          if (result.status === "failed" || result.status === "partial_failed") {
++            throw result.error;
++          }
++        })
++        .catch((error: unknown) => {
++          if (!signal.aborted) {
++            log.warn(`continuation progress delivery failed: ${String(error)}`);
++          }
++        });
++      return Promise.all([typingUpdate, pending]).then(() => undefined);
++    },
++    async finish() {
++      accepting = false;
++      // Progress is not a final receipt. Drain it before the normal final sender.
++      await pending;
++    },
++    cleanup() {
++      accepting = false;
++      closed = true;
++      lifetime.abort(new Error("requester continuation presentation closed"));
++      typing.cleanup();
++    },
++  };
++}
++
++/** The command's final sender owns cleanup before execution starts and until delivery settles. */
++export async function runPresentedAgentCommandAttempt(
++  params: Omit<Parameters<typeof runEmbeddedAgentAttempt>[0], "presentation"> & {
++    source?: DeliveryContext;
++    deps: CliDeps;
++    onPresentation: (presentation: AgentCommandContinuationPresentation | undefined) => void;
++  },
++) {
++  const { prepared, opts } = params;
++  let lifecycleGeneration = params.lifecycleGeneration;
++  const presentation = createAgentCommandContinuationPresentation({
++    cfg: prepared.cfg,
++    opts,
++    source: params.source,
++    sessionKey: prepared.sessionKey,
++    agentId: prepared.sessionAgentId,
++    runId: prepared.runId,
++    outboundSession: prepared.outboundSession,
++    deps: params.deps,
++    timeoutMs: prepared.timeoutMs,
++    typingMode: prepared.agentCfg?.typingMode ?? prepared.cfg.agents?.defaults?.typingMode,
++    assertCurrent: () => {
++      opts.abortSignal?.throwIfAborted();
++      assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
++      params.preparedRunAdmission.assertSourceCurrent();
++    },
++  });
++  params.onPresentation(presentation);
++  const attempt = await runEmbeddedAgentAttempt({
++    ...params,
++    presentation,
++    onLifecycleGenerationChanged: (nextLifecycleGeneration) => {
++      lifecycleGeneration = nextLifecycleGeneration;
++      params.onLifecycleGenerationChanged(nextLifecycleGeneration);
++    },
++  });
++  await presentation?.finish();
++  return attempt;
++}
+diff --git a/src/agents/command/run-embedded-attempt.ts b/src/agents/command/run-embedded-attempt.ts
+index e4ae674130d6b94cd4d05228450d6f0928f81286..7a200e5d27219e572c9501b328e23e427bcc8ce3 100644
+--- a/src/agents/command/run-embedded-attempt.ts
++++ b/src/agents/command/run-embedded-attempt.ts
+@@ -51,7 +51,8 @@ import {
+ } from "../thinking-runtime.js";
+ import {
+   createAgentAttemptLifecycleCallbacks,
+-  type AgentAttemptLifecycleState,
++  createAgentAttemptLifecycleState,
++  type AgentAttemptPresentationCallbacks,
+ } from "./attempt-callbacks.js";
+ import { persistAgentSession } from "./attempt-execution.shared.js";
+ import { createCommandCompactionAccounting } from "./compaction-accounting.js";
+@@ -79,6 +80,7 @@ export async function runEmbeddedAgentAttempt(params: {
+   modelSelection: EmbeddedModelSelection;
+   embeddedSessionState: EmbeddedSessionState;
+   trackInternalModelRunTarget: (target: AgentRunSessionTarget | undefined) => void;
++  presentation?: AgentAttemptPresentationCallbacks;
+ }) {
+   const {
+     cfg,
+@@ -156,14 +158,11 @@ export async function runEmbeddedAgentAttempt(params: {
+   const attemptSessionFile = internalSessionTarget?.sessionFile ?? sessionFile;
+ 
+   const startedAt = Date.now();
+-  const attemptLifecycleState: AgentAttemptLifecycleState = {
+-    currentTurnUserMessagePersisted: false,
+-    lifecycleFinishing: false,
+-    lifecycleEnded: false,
+-  };
++  const attemptLifecycleState = createAgentAttemptLifecycleState();
+   const attemptLifecycleCallbacks = createAgentAttemptLifecycleCallbacks(
+     attemptLifecycleState,
+     params.preparedRunAdmission.onRuntimeTurnStarted,
++    params.presentation,
+   );
+   const transcriptMedia = params.opts.transcriptMedia ?? [];
+   const hasTranscriptMedia = transcriptMedia.length > 0;
+@@ -547,7 +546,7 @@ export async function runEmbeddedAgentAttempt(params: {
+               assistantErrorTranscript: runOptions.assistantErrorTranscript,
+               contextEngineLogicalTurnLease: runOptions.contextEngineLogicalTurnLease,
+               onContextEngineTurnCandidate: runOptions.onContextEngineTurnCandidate,
+-              onUserMessagePersisted: attemptLifecycleCallbacks.onUserMessagePersisted,
++              ...attemptLifecycleCallbacks,
+               onCompactionAccounting: candidateAccounting.observe,
+               onCompactionRequestBudget: candidateAccounting.observeRequestBudget,
+               onSuccessfulAuthProfile: (selection) => {
+@@ -558,7 +557,6 @@ export async function runEmbeddedAgentAttempt(params: {
+                 lifecycleGeneration = nextLifecycleGeneration;
+                 params.onLifecycleGenerationChanged(nextLifecycleGeneration);
+               },
+-              onAgentEvent: attemptLifecycleCallbacks.onAgentEvent,
+               deferTerminalLifecycle: true,
+               deferredLifecycle,
+             });
 diff --git a/src/agents/embedded-agent-helpers.formatassistanterrortext.test.ts b/src/agents/embedded-agent-helpers.formatassistanterrortext.test.ts
 index f7c5f6f82fef95985e894d342b3f2561c77a0d13..56efc50bab35ca0141bb9cae1db7e0e9da18c588 100644
 --- a/src/agents/embedded-agent-helpers.formatassistanterrortext.test.ts
@@ -17904,6 +18956,29 @@ index 0000000000000000000000000000000000000000..cf43758b8cd6c3c9319fe6a17d1d974a
 +  };
 +  return batch;
 +}
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
+index f1b81ed113e42e41274c74bca0f294668967a175..7c17c5627d4d4766fcf476104143d9ced4b5fb4d 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
+@@ -43,6 +43,7 @@ import {
+   recordAnnounceDeliveryResult,
+   safeSetSubagentTaskDeliveryStatus,
+ } from "./subagent-registry-lifecycle-delivery.js";
++import { isSubagentCompletionOwnedByRequesterYield } from "./subagent-registry-requester-yield.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
+ import { loadSubagentSessionEntry } from "./subagent-session-reconciliation.js";
+@@ -566,9 +567,7 @@ export const startSubagentAnnounceCleanupFlow = (
+       entry.suppressCompletionDelivery !== true &&
+       (entry.delivery?.status !== "delivered" || entry.delivery === committedDelivery) &&
+       context.isCleanupAttemptCurrent(runId, entry, cleanupGeneration),
+-    isCompletionOwnedByRequesterYield: () =>
+-      entry.requesterTurnYielded === true ||
+-      entry.requesterSettleWake?.requesterYieldBatch === true,
++    isCompletionOwnedByRequesterYield: () => isSubagentCompletionOwnedByRequesterYield(entry),
+     onBeforeDeleteChildSession:
+       cleanup === "delete"
+         ? () => {
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
 index 088bd25fac7983c5695bcb4de938cc996c2689f9..6e434e7319bf4b9a8f889a82e860bcfaa47d3b52 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
@@ -18551,6 +19626,71 @@ index 5f14e6663f62f95c93a8d48d944aedcc997421b5..f88facd984bcd38ea05d3c222411515a
      for (const scope of this.retirementScopes) {
        const previous = scope.observation.entry;
        if (
+diff --git a/src/agents/subagents/registry/subagent-registry-read.ts b/src/agents/subagents/registry/subagent-registry-read.ts
+index cadbbf431f3e27a0aff1680fd0d2d67c9ea33d17..164c6d5f5aa0915ae9cfd609274b426a0213a903 100644
+--- a/src/agents/subagents/registry/subagent-registry-read.ts
++++ b/src/agents/subagents/registry/subagent-registry-read.ts
+@@ -28,11 +28,13 @@ import {
+   type LatestSubagentRunReadIndex,
+   type SubagentRunReadIndex,
+ } from "./subagent-registry-queries.js";
++import { isSubagentCompletionOwnedByRequesterYield } from "./subagent-registry-requester-yield.js";
+ import {
+   getSubagentSessionListRunsSnapshotForRead,
+   getSubagentRunsSnapshotForChildSession,
+   getSubagentRunsSnapshotForController,
+   getSubagentRunsSnapshotForRead,
++  getSubagentRunsSnapshotForRequester,
+ } from "./subagent-registry-state.js";
+ import type { SubagentRunReadRecord, SubagentRunRecord } from "./subagent-registry.types.js";
+ 
+@@ -45,6 +47,46 @@ export {
+   resolveSubagentSessionStatus,
+ } from "./subagent-session-metrics.js";
+ 
++/** A retained yield owns its requester even after child execution and cleanup end. */
++export function hasPendingRequesterYieldContinuation(
++  sessionKey: string,
++  agentId?: string,
++): boolean {
++  const requester = sessionKey.trim();
++  if (!requester) {
++    return false;
++  }
++  const runs = getSubagentRunsSnapshotForRequester(subagentRuns, requester);
++  const latest = buildLatestSubagentRunReadIndexFromRuns(runs);
++  for (const entry of runs.values()) {
++    if (
++      entry.requesterSessionKey !== requester ||
++      (agentId !== undefined && entry.requesterAgentId !== agentId) ||
++      entry.expectsCompletionMessage !== true ||
++      !isSubagentCompletionOwnedByRequesterYield(entry)
++    ) {
++      continue;
++    }
++    if (latest.getLatestSubagentRun(entry.childSessionKey) !== entry) {
++      continue;
++    }
++    // The lifecycle clears or retires this outbox on both success and failure.
++    // Backoff and completed child execution do not relinquish final delivery.
++    if (entry.requesterSettleWake?.requesterYieldBatch === true) {
++      return true;
++    }
++    // Before the outbox is armed, only the still-admitted yielding turn owns it.
++    // Historical flags without a live requester must not starve heartbeats.
++    const turn = entry.requesterTurnRunId
++      ? getAgentRunContext(entry.requesterTurnRunId)
++      : undefined;
++    if (turn?.lifecycleGeneration === getAgentRunLifecycleGeneration()) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ /** Builds the session-list index without hydrating full retained registry payloads. */
+ export function buildSubagentSessionListReadIndex(
+   now = Date.now(),
 diff --git a/src/agents/subagents/registry/subagent-registry-recovery-acceptance.test.ts b/src/agents/subagents/registry/subagent-registry-recovery-acceptance.test.ts
 index 852023843ce4ea3246aa74439cb0ca5c2598e081..ece7c211736aaa93be3957f9a9c09ada68a53666 100644
 --- a/src/agents/subagents/registry/subagent-registry-recovery-acceptance.test.ts
@@ -18885,10 +20025,24 @@ index ea9f3017b2e57abdd42a487b6142f9bc3f208820..3484b4a33b9b33c1402b104de6c5c2b0
    );
  
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-index 9d60357eaf9189e65c90b853280fab87552544b5..9c06d17882f2fe1edacba8ea8458c1ba292104f6 100644
+index 9d60357eaf9189e65c90b853280fab87552544b5..8e41d406b253ef500623da6849eadfa508797999 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-@@ -55,24 +55,46 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -2,6 +2,13 @@
+ import type { AcceptedSessionSpawn } from "../../accepted-session-spawn.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ 
++/** Explicit yield assigns completion to the requester turn or its retained wake. */
++export function isSubagentCompletionOwnedByRequesterYield(entry: SubagentRunRecord): boolean {
++  return (
++    entry.requesterTurnYielded === true || entry.requesterSettleWake?.requesterYieldBatch === true
++  );
++}
++
+ /** Persists explicit yield intent before the requester run is aborted. */
+ export function markRequesterTurnYieldedInRuns(params: {
+   requesterSessionKey: string;
+@@ -55,24 +62,46 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
    const spawnsByRunId = new Map(
      params.acceptedSessionSpawns.map((spawn) => [spawn.runId, spawn] as const),
    );
@@ -18964,6 +20118,76 @@ index 3dfb8626065ccb82a95c19ad4fbf8298666129bf..4aea81b5418ba71b47fa315ac6415bd0
        // Restart recovery exclusively owns receipt-bearing source rows until it
        // remaps or terminalizes them. Generic resume would wait on an obsolete run.
        if (entry.execution.restartRecovery || entry.killIntent || entry.killReconciliation) {
+diff --git a/src/agents/subagents/registry/subagent-registry-run-launch.ts b/src/agents/subagents/registry/subagent-registry-run-launch.ts
+index 40fb7715789d4b9ba23a43b8b2ac79c6eb2ab5e9..3953a099fc145886a345b670dd3fc7769910ac2d 100644
+--- a/src/agents/subagents/registry/subagent-registry-run-launch.ts
++++ b/src/agents/subagents/registry/subagent-registry-run-launch.ts
+@@ -11,9 +11,13 @@ import {
+   createQueuedTaskRun,
+   createRunningTaskRun,
+   finalizeTaskRunByRunId,
++  findDetachedTaskRun,
+   startTaskRunByRunId,
+ } from "../../../tasks/detached-task-runtime.js";
+-import { createSubagentTaskBackingDetail } from "../../../tasks/task-backing-authority.js";
++import {
++  createSubagentTaskBackingDetail,
++  readTaskBackingInstance,
++} from "../../../tasks/task-backing-authority.js";
+ import { normalizeDeliveryContext } from "../../../utils/delivery-context.shared.js";
+ import type { DeliveryContext } from "../../../utils/delivery-context.types.js";
+ import { resolveSubagentRequesterAgentId } from "../../subagent-requester-owner.js";
+@@ -90,8 +94,8 @@ export type RegisterSubagentRunParams = {
+   outputSchema?: Record<string, unknown>;
+   queuedLaunch?: SwarmQueuedLaunch;
+   queued?: boolean;
+-  /** Required when direct dispatch suppresses Gateway tracking. Out-of-process launches keep
+-      Gateway's existing best-effort CLI policy; other callers create a best-effort row here. */
++  /** Required for native requester completion and when direct dispatch suppresses Gateway
++      tracking. Other socket launches may retain Gateway's best-effort CLI task policy. */
+   taskRowOwnership?: "required" | "gateway_best_effort";
+   gatewayContextResolver?: GatewayContextResolver;
+ };
+@@ -258,13 +262,37 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
+             throw new Error(`detached task runtime created no task row for run ${runId}`);
+           }
+           log.warn("Failed to persist background task for subagent run", { runId });
++        } else if (registerParams.taskRowOwnership === "required") {
++          const persistedTask = findDetachedTaskRun({
++            runtime: "subagent",
++            runId,
++            sessionKey: childSessionKey,
++            createdAtOrAfter: now,
++          }).task;
++          const backing = readTaskBackingInstance(persistedTask?.detail);
++          if (
++            !persistedTask ||
++            persistedTask.taskId !== task.taskId ||
++            persistedTask.runtime !== "subagent" ||
++            persistedTask.scopeKind !== "session" ||
++            persistedTask.runId !== runId ||
++            persistedTask.childSessionKey !== childSessionKey ||
++            persistedTask.ownerKey !== requesterSessionKey ||
++            persistedTask.requesterSessionKey !== requesterSessionKey ||
++            backing?.runtime !== "subagent" ||
++            backing.generation !== generation
++          ) {
++            throw new Error(
++              `detached task runtime did not establish native task ownership for run ${runId}`,
++            );
++          }
+         }
+       } catch (error) {
+         if (registerParams.taskRowOwnership !== "required") {
+           log.warn("Failed to create background task for subagent run", { runId, error });
+         } else {
+-          // Direct dispatch suppressed Gateway's CLI fallback. Persist the rollback before
+-          // asking the caller to abort; if that write fails, memory must match durable state.
++          // The required native completion owner was not established. Persist the rollback
++          // before asking the caller to abort; if it fails, memory must match durable state.
+           rollbackRegistration();
+           try {
+             this.options.persistOrThrow(...registeredRunIds);
 diff --git a/src/agents/subagents/registry/subagent-registry-run-recovery.ts b/src/agents/subagents/registry/subagent-registry-run-recovery.ts
 index e9a4ecedc8cda087e5fcb5d8dc64e7c6c7709526..a7cd715b9380e0cf5f3bbf4619e7c1a87872cc4c 100644
 --- a/src/agents/subagents/registry/subagent-registry-run-recovery.ts
@@ -19045,6 +20269,58 @@ index e9a4ecedc8cda087e5fcb5d8dc64e7c6c7709526..a7cd715b9380e0cf5f3bbf4619e7c1a8
        entry.suppressAnnounceReason === "steer-restart"
      ) {
        return undefined;
+diff --git a/src/agents/subagents/registry/subagent-registry-state.ts b/src/agents/subagents/registry/subagent-registry-state.ts
+index a2aa775d0a09a3991c6c7f5ec53d154434016083..5b3293d7c6fcda47939dab71963fb36bfe2b7c93 100644
+--- a/src/agents/subagents/registry/subagent-registry-state.ts
++++ b/src/agents/subagents/registry/subagent-registry-state.ts
+@@ -12,6 +12,7 @@ import { subagentRuns } from "./subagent-registry-memory.js";
+ import {
+   loadSubagentRunsForChildSessionFromSqlite,
+   loadSubagentRunsForControllerFromSqlite,
++  loadSubagentRunsForRequesterFromSqlite,
+   loadSubagentRegistryFromSqlite,
+   loadSubagentSessionListRunsFromSqlite,
+   saveSubagentRegistryChangesToSqlite,
+@@ -340,6 +341,7 @@ function getSubagentRunsSnapshot<T extends SubagentRunReadRecord>(
+   cache: SubagentRunsCache<T>,
+   scope?: {
+     load?: () => Iterable<T>;
++    readFresh?: boolean;
+     matches: (entry: T) => boolean;
+   },
+ ): Map<string, T> {
+@@ -348,7 +350,10 @@ function getSubagentRunsSnapshot<T extends SubagentRunReadRecord>(
+     try {
+       // Persisted state lets other worker processes observe active runs.
+       // Scoped reads use indexed SQL unless a fresh local write owns the result.
+-      const cached = scope?.load ? getFreshPersistedSubagentRunsSnapshot(cache, Date.now()) : null;
++      const cached =
++        scope?.load && !scope.readFresh
++          ? getFreshPersistedSubagentRunsSnapshot(cache, Date.now())
++          : null;
+       const persisted = scope?.load
+         ? (cached?.values() ?? scope.load())
+         : loadPersistedSubagentRunsForRead(cache).values();
+@@ -417,3 +422,19 @@ export function getSubagentRunsSnapshotForChildSession(
+     matches: (entry) => entry.childSessionKey === key,
+   });
+ }
++
++/** Admission must observe cross-process yields even within the ordinary snapshot TTL. */
++export function getSubagentRunsSnapshotForRequester(
++  inMemoryRuns: Map<string, SubagentRunRecord>,
++  requesterSessionKey: string,
++): Map<string, SubagentRunRecord> {
++  const key = requesterSessionKey.trim();
++  if (!key) {
++    return new Map();
++  }
++  return getSubagentRunsSnapshot(inMemoryRuns, persistedSubagentRunsReadCache, {
++    load: () => loadSubagentRunsForRequesterFromSqlite(key),
++    readFresh: true,
++    matches: (entry) => entry.requesterSessionKey === key,
++  });
++}
 diff --git a/src/agents/subagents/registry/subagent-registry-sweeper.ts b/src/agents/subagents/registry/subagent-registry-sweeper.ts
 index 9f88d08b2dd9bf17c595bf80b42ed460fd5b5290..1b3d3a132896a4148d5ca37a137a357c48b7df5a 100644
 --- a/src/agents/subagents/registry/subagent-registry-sweeper.ts
@@ -19105,6 +20381,43 @@ index 98efa5c845acbc48529be94deff0fd4f91969988..8dd5a505b813045e33ad1c06a2f2ba77
            afterRequesterYield: true,
            rearmGeneration: 3,
            lastError: "provider timeout",
+diff --git a/src/agents/subagents/registry/subagent-registry.store.sqlite.ts b/src/agents/subagents/registry/subagent-registry.store.sqlite.ts
+index c02eee2a2c57b50af3b8fcaf227acd86e2029d78..2162fcf7a045aff835d6fc2c49d588203df6ea7f 100644
+--- a/src/agents/subagents/registry/subagent-registry.store.sqlite.ts
++++ b/src/agents/subagents/registry/subagent-registry.store.sqlite.ts
+@@ -204,7 +204,8 @@ function writeSubagentRunValues(
+ 
+ type SubagentRegistryReadScope =
+   | { kind: "controller"; sessionKey: string }
+-  | { kind: "child"; sessionKey: string };
++  | { kind: "child"; sessionKey: string }
++  | { kind: "requester"; sessionKey: string };
+ 
+ function readSubagentRegistryRows(scope?: SubagentRegistryReadScope): SubagentRunSqliteRow[] {
+   const { db } = openOpenClawStateDatabase();
+@@ -212,6 +213,8 @@ function readSubagentRegistryRows(scope?: SubagentRegistryReadScope): SubagentRu
+   let query = stateDb.selectFrom("subagent_runs").selectAll();
+   if (scope?.kind === "child") {
+     query = query.where("child_session_key", "=", scope.sessionKey);
++  } else if (scope?.kind === "requester") {
++    query = query.where("requester_session_key", "=", scope.sessionKey);
+   } else if (scope?.kind === "controller") {
+     // The writer trims controller keys; older null/empty rows belong to their requester.
+     query = query.where((eb) =>
+@@ -386,6 +389,13 @@ export function loadSubagentRunsForChildSessionFromSqlite(
+   return loadScopedSubagentRuns({ kind: "child", sessionKey: childSessionKey });
+ }
+ 
++/** Loads current durable ownership records for one requester without a read cache. */
++export function loadSubagentRunsForRequesterFromSqlite(
++  requesterSessionKey: string,
++): SubagentRunRecord[] {
++  return loadScopedSubagentRuns({ kind: "requester", sessionKey: requesterSessionKey });
++}
++
+ /** Loads the canonical subagent registry from shared SQLite state. */
+ export function loadSubagentRegistryFromSqlite(): Map<string, SubagentRunRecord> {
+   // Retired file-era runs are intentionally not recovered here: after SQLite
 diff --git a/src/agents/subagents/registry/subagent-registry.ts b/src/agents/subagents/registry/subagent-registry.ts
 index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6dea2772334 100644
 --- a/src/agents/subagents/registry/subagent-registry.ts
@@ -19183,6 +20496,387 @@ index 27b73b1f8cc0339afff48fab74589338a19c65f7..27aecf67b7c9dc806c3c4b95041ab55f
    /** Present only when an idle requester needs a new turn after yielding. */
    afterRequesterYield?: true;
    /** Monotonic process generation protecting a newer yield from stale completion. */
+diff --git a/src/agents/subagents/spawn/subagent-spawn.fallback-ownership.test-support.ts b/src/agents/subagents/spawn/subagent-spawn.fallback-ownership.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ad69ecebf3d643a99cfdabda85afdb3528661e1
+--- /dev/null
++++ b/src/agents/subagents/spawn/subagent-spawn.fallback-ownership.test-support.ts
+@@ -0,0 +1,213 @@
++import { expectDefined } from "@openclaw/normalization-core";
++import { expect, it } from "vitest";
++import type {
++  GatewayRequestContext,
++  GatewayRequestOptions,
++} from "../../../gateway/server-methods/types.js";
++import { withPluginRuntimeGatewayRequestScope } from "../../../plugins/runtime/gateway-request-scope.js";
++import { openOpenClawStateDatabase } from "../../../state/openclaw-state-db.js";
++import {
++  createRunningTaskRun,
++  getDetachedTaskLifecycleRuntime,
++} from "../../../tasks/detached-task-runtime.js";
++import { setDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.test-support.js";
++import {
++  findTaskByRunId,
++  getTaskById,
++  listTasksForOwnerKey,
++} from "../../../tasks/runtime-internal.js";
++import { publishTaskRecordAfterAtomicStore } from "../../../tasks/task-registry.js";
++import { settleSubagentCompletionDelivery } from "../completion/subagent-completion-admission.store.js";
++import {
++  armRequesterWake,
++  records,
++  requesterWakeDriver,
++} from "../completion/subagent-completion-admission.test-helpers.js";
++import { subagentRuns } from "../registry/subagent-registry-memory.js";
++import { loadSubagentRegistryFromSqlite } from "../registry/subagent-registry.store.sqlite.js";
++import {
++  resetSubagentRegistryForTests,
++  testing as subagentRegistryTesting,
++} from "../registry/subagent-registry.test-helpers.js";
++import { spawnSubagentDirect } from "./subagent-spawn.js";
++import { testing as subagentSpawnTesting } from "./subagent-spawn.test-support.js";
++
++/** Registers socket-fallback ownership cases under the caller's shared lifecycle hooks. */
++export function registerFallbackOwnershipTests({
++  makeGatewayContext,
++  externalCliClient,
++}: {
++  makeGatewayContext: () => GatewayRequestContext;
++  externalCliClient: () => GatewayRequestOptions["client"];
++}): void {
++  it("registers the native completion owner beside a silent fallback CLI task and settles a failed wake once", async () => {
++    const gatewayContext = makeGatewayContext();
++    const requests: string[] = [];
++    const runId = "gateway-owned-run";
++    // The synthetic terminal event below owns completion; do not contact a real gateway.
++    subagentRegistryTesting.setDepsForTest({
++      loadAgentRuntimePluginRegistryHandle: () => undefined,
++      persistSubagentRunsToDisk: () => {},
++      persistSubagentRunsToDiskOrThrow: () => {},
++      restoreSubagentRunsFromDisk: () => 0,
++      callGateway: async () => new Promise<never>(() => {}),
++    });
++    let cliTaskId = "";
++    subagentSpawnTesting.setDepsForTest({
++      hasInProcessGatewayContext: () => false,
++      callGateway: async <T>(request: { method: string; params?: unknown }) => {
++        requests.push(request.method);
++        if (request.method === "agent") {
++          const params = request.params as { sessionKey: string };
++          cliTaskId = expectDefined(
++            createRunningTaskRun({
++              runtime: "cli",
++              sourceId: runId,
++              ownerKey: params.sessionKey,
++              scopeKind: "session",
++              childSessionKey: params.sessionKey,
++              runId,
++              task: "check the invitation",
++              deliveryStatus: "not_applicable",
++              startedAt: Date.now(),
++            }),
++            "silent CLI transport task",
++          ).taskId;
++        }
++        return { runId: request.method === "agent" ? runId : undefined, status: "accepted" } as T;
++      },
++    });
++    const result = await withPluginRuntimeGatewayRequestScope(
++      { context: gatewayContext, client: externalCliClient(), isWebchatConnect: () => false },
++      () =>
++        spawnSubagentDirect(
++          { task: "check the invitation", context: "isolated", lightContext: true },
++          { agentSessionKey: "agent:main:main", requesterRunId: "parent-run" },
++        ),
++    );
++    expect(result.status).toBe("accepted");
++    const task = expectDefined(findTaskByRunId(runId), "native completion task");
++    expect(task).toMatchObject({
++      runtime: "subagent",
++      runId,
++      ownerKey: "agent:main:main",
++      requesterSessionKey: "agent:main:main",
++      childSessionKey: result.childSessionKey,
++      deliveryStatus: "pending",
++    });
++    expect(listTasksForOwnerKey("agent:main:main").map((entry) => entry.taskId)).toEqual([
++      task.taskId,
++    ]);
++    expect(getTaskById(cliTaskId)).toMatchObject({
++      runtime: "cli",
++      notifyPolicy: "silent",
++      deliveryStatus: "not_applicable",
++    });
++    expect(requests.filter((method) => method === "agent")).toHaveLength(1);
++    expect(requests).not.toContain("chat.abort");
++
++    const subagent = expectDefined(subagentRuns.get(runId), "registered subagent run");
++    // The scoped settlement controller below owns the synthetic completion event.
++    resetSubagentRegistryForTests({ persist: false });
++    subagentRuns.set(runId, subagent);
++    // Feed the completed child into the real settlement store while the requester is unavailable.
++    subagent.execution = {
++      ...subagent.execution,
++      status: "terminal",
++      endedAt: Date.now(),
++      outcome: { status: "ok" },
++    };
++    subagent.completion = {
++      required: true,
++      resultText: "invitation found",
++      capturedAt: Date.now(),
++    };
++    const input = armRequesterWake({ ...records(), subagent, task });
++    const completedTask = { ...task, status: "succeeded" as const, endedAt: Date.now() };
++    settleSubagentCompletionDelivery({ subagent, task: completedTask });
++    publishTaskRecordAfterAtomicStore(completedTask);
++    const driver = requesterWakeDriver([input]);
++    try {
++      await driver.run();
++      expect(driver.warn).not.toHaveBeenCalledWith(
++        "failed to persist requester settle wake rejection",
++        expect.any(Object),
++      );
++      expect(subagent.requesterSettleWake).toBeUndefined();
++      expect(subagent.delivery).toMatchObject({
++        status: "failed",
++        lastError: "requester unavailable",
++      });
++      expect(getTaskById(task.taskId)).toMatchObject({
++        deliveryStatus: "failed",
++        terminalOutcome: "blocked",
++        error: "requester unavailable",
++      });
++      expect(loadSubagentRegistryFromSqlite().get(runId)?.requesterSettleWake).toBeUndefined();
++      expect(driver.controller.getRequesterSettleWakeTimer(runId)).toBeUndefined();
++      expect(driver.wake).toHaveBeenCalledOnce();
++      const database = openOpenClawStateDatabase();
++      expect(
++        database.db
++          .prepare(
++            "SELECT COUNT(*) AS count FROM delivery_queue_entries WHERE entry_kind = 'systemEvent'",
++          )
++          .get(),
++      ).toMatchObject({ count: 1 });
++      expect(getTaskById(cliTaskId)).toMatchObject({
++        runtime: "cli",
++        notifyPolicy: "silent",
++        deliveryStatus: "not_applicable",
++      });
++    } finally {
++      driver.controller.clearScheduledResumeTimers();
++    }
++  });
++
++  it.each(["missing", "wrong identity"] as const)(
++    "aborts a fallback child when its canonical task is %s",
++    async (fault) => {
++      const unrelated = expectDefined(
++        createRunningTaskRun({
++          runtime: "subagent",
++          sourceId: "other-run",
++          runId: "other-run",
++          ownerKey: "agent:other:main",
++          scopeKind: "session",
++          childSessionKey: "agent:other:subagent:child",
++          task: "unrelated work",
++          startedAt: Date.now(),
++        }),
++        "unrelated task",
++      );
++      const requests: string[] = [];
++      subagentSpawnTesting.setDepsForTest({
++        hasInProcessGatewayContext: () => false,
++        callGateway: async <T>(request: { method: string; params?: unknown }) => {
++          requests.push(request.method);
++          return { runId: "fallback-rejected-run", status: "accepted" } as T;
++        },
++      });
++      setDetachedTaskLifecycleRuntime({
++        ...getDetachedTaskLifecycleRuntime(),
++        createRunningTaskRun: () => (fault === "missing" ? null : unrelated),
++      });
++      const result = await withPluginRuntimeGatewayRequestScope(
++        {
++          context: makeGatewayContext(),
++          client: externalCliClient(),
++          isWebchatConnect: () => false,
++        },
++        () =>
++          spawnSubagentDirect(
++            { task: "check the invitation", context: "isolated", lightContext: true },
++            { agentSessionKey: "agent:main:main", requesterRunId: "parent-run" },
++          ),
++      );
++      expect(result.status).toBe("error");
++      expect(requests).toContain("chat.abort");
++      expect(subagentRuns.size).toBe(0);
++      expect(getTaskById(unrelated.taskId)).toEqual(unrelated);
++    },
++  );
++}
+diff --git a/src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts b/src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts
+index 8e7e2848a574633ffd2b83341def219edc03381c..6132a7ee503f0497b257bf83a4d27e996f123dbf 100644
+--- a/src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts
++++ b/src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts
+@@ -39,11 +39,13 @@ import {
+   resetGatewayWorkAdmission,
+   tryBeginGatewayRootWorkAdmission,
+ } from "../../../process/gateway-work-admission.js";
++import { closeOpenClawStateDatabaseForTest } from "../../../state/openclaw-state-db.js";
+ import { getDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
+ import {
+   resetDetachedTaskLifecycleRuntimeForTests,
+   setDetachedTaskLifecycleRuntime,
+ } from "../../../tasks/detached-task-runtime.test-support.js";
++import { resetTaskRegistryForTests } from "../../../tasks/task-runtime.test-helpers.js";
+ import { captureEnv, setTestEnvValue } from "../../../test-utils/env.js";
+ import { createOperationalRunInstanceRef } from "../../admitted-run-context.js";
+ import { withGatewayToolCallerIdentity } from "../../tools/gateway-caller-context.js";
+@@ -57,6 +59,7 @@ import { testing as swarmSchedulerTesting } from "../swarm/swarm-scheduler.test-
+ import { withParentExecutionIdentity } from "./execution-identity-spawn-context.js";
+ import { buildSubagentExecutionSessionSpawnContext } from "./subagent-spawn-execution-identity.js";
+ import { callSubagentGateway } from "./subagent-spawn-gateway.js";
++import { registerFallbackOwnershipTests } from "./subagent-spawn.fallback-ownership.test-support.js";
+ import { spawnSubagentDirect } from "./subagent-spawn.js";
+ import { testing as subagentSpawnTesting } from "./subagent-spawn.test-support.js";
+ 
+@@ -187,6 +190,7 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
+       })}\n`,
+     );
+     clearConfigCache();
++    resetTaskRegistryForTests({ persist: false });
+   });
+ 
+   it("leaves shared agent dispatches unmarked unless native spawn claims the task row", async () => {
+@@ -221,6 +225,8 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
+     resetDetachedTaskLifecycleRuntimeForTests();
+     clearRuntimeConfigSnapshot();
+     clearConfigCache();
++    resetTaskRegistryForTests({ persist: false });
++    closeOpenClawStateDatabaseForTest();
+     envSnapshot.restore();
+     if (stateDir) {
+       await rm(stateDir, { recursive: true, force: true });
+@@ -828,53 +834,7 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
+     },
+   );
+ 
+-  it("keeps the Gateway-owned task row on an out-of-process fallback", async () => {
+-    const gatewayContext = makeGatewayContext();
+-    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+-    const createTaskRun = vi.fn(() => {
+-      throw new Error("registry task creation must be skipped");
+-    });
+-    subagentSpawnTesting.setDepsForTest({
+-      hasInProcessGatewayContext: () => false,
+-      callGateway: async <T>(request: { method: string; params?: unknown }) => {
+-        requests.push({
+-          method: request.method,
+-          params: (request.params ?? {}) as Record<string, unknown>,
+-        });
+-        return {
+-          runId: request.method === "agent" ? "gateway-owned-run" : undefined,
+-          status: "accepted",
+-        } as T;
+-      },
+-    });
+-    setDetachedTaskLifecycleRuntime({
+-      ...getDetachedTaskLifecycleRuntime(),
+-      createQueuedTaskRun: createTaskRun,
+-      createRunningTaskRun: createTaskRun,
+-    });
+-
+-    const result = await withPluginRuntimeGatewayRequestScope(
+-      {
+-        context: gatewayContext,
+-        client: externalCliClient(),
+-        isWebchatConnect: () => false,
+-      },
+-      () =>
+-        spawnSubagentDirect(
+-          { task: "use the remote gateway row", context: "isolated", lightContext: true },
+-          { agentSessionKey: "agent:main:main", requesterRunId: "parent-run" },
+-        ),
+-    );
+-
+-    expect(result.status).toBe("accepted");
+-    expect(result.runId).toBe("gateway-owned-run");
+-    expect(createTaskRun).not.toHaveBeenCalled();
+-    expect(subagentRuns.get("gateway-owned-run")).toMatchObject({
+-      childSessionKey: result.childSessionKey,
+-    });
+-    expect(requests.filter((request) => request.method === "agent")).toHaveLength(1);
+-    expect(requests.some((request) => request.method === "chat.abort")).toBe(false);
+-  });
++  registerFallbackOwnershipTests({ makeGatewayContext, externalCliClient });
+ 
+   it("keeps the queued registry row when a collector starts out of process", async () => {
+     const gatewayContext = makeGatewayContext();
+@@ -931,7 +891,7 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
+     });
+   });
+ 
+-  it("does not abort an out-of-process run when registry persistence fails", async () => {
++  it("aborts an out-of-process announce run when registry persistence fails", async () => {
+     const gatewayContext = makeGatewayContext();
+     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+     subagentSpawnTesting.setDepsForTest({
+@@ -971,7 +931,7 @@ describe("spawnSubagentDirect in-process Gateway collector launch", () => {
+ 
+     expect(result.status).toBe("error");
+     expect(result.error ?? "").toContain("Failed to register subagent run");
+-    expect(requests.some((request) => request.method === "chat.abort")).toBe(false);
++    expect(requests.some((request) => request.method === "chat.abort")).toBe(true);
+   });
+ 
+   it("launches child runs as a Gateway client that does not own a second task row", async () => {
+diff --git a/src/agents/subagents/spawn/subagent-spawn.test.ts b/src/agents/subagents/spawn/subagent-spawn.test.ts
+index 1dc1d1e6b9191a1d11b1081140f8f2f0f860b713..05f6708c42335ee5dd7d2452fb330de0878c9215 100644
+--- a/src/agents/subagents/spawn/subagent-spawn.test.ts
++++ b/src/agents/subagents/spawn/subagent-spawn.test.ts
+@@ -1588,9 +1588,9 @@ describe("spawnSubagentDirect seam flow", () => {
+     });
+     const registerInput = firstRegisteredSubagentRun();
+     const requesterOrigin = requireRecord(registerInput.requesterOrigin);
+-    // Out-of-process dispatch leaves the Gateway-owned task row in place, so
+-    // registration must not also claim it (contrast with the in-process case above).
+-    expect(registerInput.taskRowOwnership).toBe("gateway_best_effort");
++    // Socket transport may retain a CLI row, but native requester completion still
++    // requires its canonical subagent owner.
++    expect(registerInput.taskRowOwnership).toBe("required");
+     expect(registerInput.runId).toBe("run-1");
+     expect(registerInput.childSessionKey).toBe(childSessionKey);
+     expect(registerInput.requesterSessionKey).toBe("agent:main:main");
+diff --git a/src/agents/subagents/spawn/subagent-spawn.ts b/src/agents/subagents/spawn/subagent-spawn.ts
+index f9649c2845ec23666c3822be5ada9b8875f5760b..420d24f6b6fb2011c775245d1356c2063fca6532 100644
+--- a/src/agents/subagents/spawn/subagent-spawn.ts
++++ b/src/agents/subagents/spawn/subagent-spawn.ts
+@@ -435,7 +435,9 @@ export async function spawnSubagentDirect(
+           return { runId: childIdem };
+         }
+         const launch = await launchChildRun(assertActive);
+-        taskRowOwnership = launch.taskRowOwnership;
++        // Socket fallback may retain a silent CLI execution record, but requester
++        // completion must have its own canonical native task before acceptance.
++        taskRowOwnership = completionMode === "announce" ? "required" : launch.taskRowOwnership;
+         acceptedChildRunId = readGatewayRunId(launch.response) ?? childIdem;
+         recordSessionParticipantBestEffort({
+           promptedAt,
+@@ -451,10 +453,9 @@ export async function spawnSubagentDirect(
+           await cleanupFailedSpawn();
+           return;
+         }
+-        // The gateway skips its fallback CLI task row because this launch claims
+-        // the run's row, and registration is what delivers it. A register failure
+-        // means no owner ever recorded the run, so abort the run the gateway
+-        // already accepted instead of leaving it executing unrecorded.
++        // A required native owner must exist even when socket fallback kept a CLI
++        // execution record. Abort an accepted run if registration cannot establish
++        // that owner; the CLI record cannot settle requester completion.
+         if (phase === "register" && acceptedChildRunId && taskRowOwnership === "required") {
+           await terminateAcceptedCollectorRun({
+             childSessionKey,
 diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
 index edebaec447eed52402d43f97ac43196c14da8693..805bab9c66b4eb7999111f114dd7a090500027d6 100644
 --- a/src/agents/system-prompt.ts
@@ -24185,6 +25879,30 @@ index bc65974ed8c85901dc726dcb1f67e27714f18ad6..6e04363f74bd41ef1c96cc017dedbbfe
      isActive,
      authProfileId,
      authProfileIdSource,
+diff --git a/src/auto-reply/reply/get-reply-run-context.ts b/src/auto-reply/reply/get-reply-run-context.ts
+index 9faf319fbedf52d6dd16ffba46bc8dc4760837ad..7d1d6d1613e75d1f542b7edc256c8f179cd5c9af 100644
+--- a/src/auto-reply/reply/get-reply-run-context.ts
++++ b/src/auto-reply/reply/get-reply-run-context.ts
+@@ -222,12 +222,14 @@ export async function prepareReplyRunContext(params: RunPreparedReplyParams) {
+   const isDirectedTurn = isDirectedSourceReplyTurn(ctx, cfg, isDirectChat, inboundEventKind);
+   const isAmbientRoomEvent = inboundEventKind === "room_event" && !isDirectedTurn;
+   const allowEmptyAssistantReplyAsSilent =
+-    isGroupChat &&
+-    !isDirectedTurn &&
+-    (isAmbientRoomEvent || silentReplySettings.policy === "allow");
+-  // Heartbeats retain the embedded runner's trigger-owned optional default.
++    isHeartbeat ||
++    (isGroupChat &&
++      !isDirectedTurn &&
++      (isAmbientRoomEvent || silentReplySettings.policy === "allow"));
++  // Heartbeat delivery can filter NO_REPLY out of the collected assistant text.
++  // Keep its reply optional explicitly so recovery cannot demand a visible answer.
+   const terminalReplyExpectation = isHeartbeat
+-    ? undefined
++    ? "optional"
+     : isAmbientRoomEvent
+       ? "optional"
+       : "required";
 diff --git a/src/auto-reply/reply/get-reply-run-execute.ts b/src/auto-reply/reply/get-reply-run-execute.ts
 index c8df6dacb419ca3118f5d183f6e7ac0752f2a82c..5af6aca00f7f762aa5b021ff500030bcf13de74b 100644
 --- a/src/auto-reply/reply/get-reply-run-execute.ts
@@ -24244,7 +25962,7 @@ index ee642c46a63a4ad5d2e16318e735f2bec7765dc8..d1004d080e12a233167f00cf2e35a43e
  /** Resolves whether a new reply may continue after active-run queue handling. */
  export async function resolvePreparedReplyQueueState(params: {
 diff --git a/src/auto-reply/reply/get-reply-run.media-only.test.ts b/src/auto-reply/reply/get-reply-run.media-only.test.ts
-index 83f78ed1abf44545c218d575add9330c0765f399..b71772da1ac0dd1f44706ac4ff90a57faf42a8d9 100644
+index 83f78ed1abf44545c218d575add9330c0765f399..51ad427693489df863538c03a7d250b0bb3d0351 100644
 --- a/src/auto-reply/reply/get-reply-run.media-only.test.ts
 +++ b/src/auto-reply/reply/get-reply-run.media-only.test.ts
 @@ -2,6 +2,7 @@
@@ -24274,7 +25992,66 @@ index 83f78ed1abf44545c218d575add9330c0765f399..b71772da1ac0dd1f44706ac4ff90a57f
    it("loads configured and canonical workspace skills for managed-worktree sessions", async () => {
      const params = baseParams({
        workspaceDir: "/tmp/agent-workspace",
-@@ -3217,7 +3230,7 @@ describe("runPreparedReply media-only handling", () => {
+@@ -727,6 +740,49 @@ describe("runPreparedReply media-only handling", () => {
+     expect(call?.followupRun.run.terminalReplyExpectation).toBe("required");
+   });
+ 
++  it.each([true, false])(
++    "preserves terminal reply ownership after filtered silence (heartbeat: %s)",
++    async (isHeartbeat) => {
++      await runPrepared({
++        opts: { isHeartbeat },
++        ctx: { ...baseParams().ctx, WasMentioned: true },
++      });
++
++      const call = requireLastRunReplyAgentCall();
++      const { buildEmbeddedRunnerAssistant, makeEmbeddedRunnerAttempt } =
++        await import("../../agents/test-helpers/embedded-agent-runner-e2e-fixtures.js");
++      const { makeTerminalInput } =
++        await import("../../agents/embedded-agent-runner/run/terminal-resolution.test-support.js");
++      const { resolveEmbeddedRunTerminal } =
++        await import("../../agents/embedded-agent-runner/run/terminal-resolution.js");
++      const assistant = buildEmbeddedRunnerAssistant({
++        content: [{ type: "text", text: "NO_REPLY" }],
++      });
++      // Delivery-disabled heartbeat streams retain the authored sentinel in the
++      // transcript while exposing no text to the reply collector.
++      const attempt = makeEmbeddedRunnerAttempt({
++        assistantTexts: [],
++        lastAssistant: assistant,
++        currentAttemptAssistant: assistant,
++        currentAttemptReplayMetadata: { hadPotentialSideEffects: false, replaySafe: true },
++      });
++      const input = makeTerminalInput({
++        attempt,
++        runParams: {
++          trigger: isHeartbeat ? "heartbeat" : "user",
++          allowEmptyAssistantReplyAsSilent: call.followupRun.run.allowEmptyAssistantReplyAsSilent,
++          terminalReplyExpectation: call.followupRun.run.terminalReplyExpectation,
++        },
++      });
++      const result = await resolveEmbeddedRunTerminal(input);
++      expect(result.action).toBe(isHeartbeat ? "complete" : "retry");
++      expect(input.retryState.emptyResponseAttempts).toBe(isHeartbeat ? 0 : 1);
++      if (isHeartbeat) {
++        expect(input.activateInternalPrompt).not.toHaveBeenCalled();
++      }
++    },
++  );
++
+   it.each([
+     {
+       name: "mention",
+@@ -2789,7 +2845,7 @@ describe("runPreparedReply media-only handling", () => {
+     expect(call?.shouldSteer).toBe(false);
+     expect(call?.shouldFollowup).toBe(true);
+     expect(call?.isActive).toBe(true);
+-    expect(call?.followupRun.run.terminalReplyExpectation).toBeUndefined();
++    expect(call?.followupRun.run.terminalReplyExpectation).toBe("optional");
+   });
+ 
+   it.each([
+@@ -3217,7 +3273,7 @@ describe("runPreparedReply media-only handling", () => {
      nextRun.setPhase("running");
  
      const assertion = expect(runPromise).resolves.toEqual({
@@ -24283,7 +26060,7 @@ index 83f78ed1abf44545c218d575add9330c0765f399..b71772da1ac0dd1f44706ac4ff90a57f
      });
      await vi.advanceTimersByTimeAsync(15_000);
      await assertion;
-@@ -3269,7 +3282,7 @@ describe("runPreparedReply media-only handling", () => {
+@@ -3269,7 +3325,7 @@ describe("runPreparedReply media-only handling", () => {
      nextRun.setPhase("running");
  
      const assertion = expect(runPromise).resolves.toEqual({
@@ -24533,18 +26310,19 @@ index 38473d6275600639449b7e13149d5b4d8f8f7453..4b28b7f83bb2e63edb926d094e72bacd
      if (
        replyRunState.activeKeysBySessionId.get(params.sessionId) === params.sessionKey &&
 diff --git a/src/auto-reply/reply/reply-turn-admission.test.ts b/src/auto-reply/reply/reply-turn-admission.test.ts
-index ab72b8b3324a708065ee5a514c8bbd1a5fe38260..ba086438ea3458b207151843cd6442295b68e0e6 100644
+index ab72b8b3324a708065ee5a514c8bbd1a5fe38260..5510dbe53def207aa1ef2ba157107af88d4075e3 100644
 --- a/src/auto-reply/reply/reply-turn-admission.test.ts
 +++ b/src/auto-reply/reply/reply-turn-admission.test.ts
-@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
+@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  import { createDeferred } from "../../../test/helpers/promise.js";
  import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
  import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../agents/main-session-recovery/main-session-recovery-admission.js";
 +import { createSessionMaintenanceOwner } from "../../agents/session-maintenance/coordinator.js";
++import { subagentRuns } from "../../agents/subagents/registry/subagent-registry-memory.js";
  import { SESSION_RESTART_RECOVERY_TOMBSTONE_ERROR_CODE } from "../../config/sessions/lifecycle.js";
  import {
    deleteSessionEntryLifecycle,
-@@ -116,6 +117,57 @@ async function readSessionEntry(
+@@ -116,6 +118,57 @@ async function readSessionEntry(
  }
  
  describe("reply turn admission", () => {
@@ -24602,18 +26380,121 @@ index ab72b8b3324a708065ee5a514c8bbd1a5fe38260..ba086438ea3458b207151843cd644229
    afterEach(() => {
      testing.resetReplyRunRegistry();
      resetDiagnosticRunActivityForTest();
+@@ -432,6 +485,95 @@ describe("reply turn admission", () => {
+     expect(mutationRan).toBe(true);
+   });
+ 
++  it("keeps yielded-heartbeat lifecycle admission through durable recovery release", async () => {
++    const sessionKey = "agent:main:telegram:topic:yielded-recovery-release";
++    const sessionId = "interrupted-yielded-session";
++    const storePath = createSessionStore({
++      [sessionKey]: {
++        sessionId,
++        updatedAt: 100,
++        status: "running",
++        abortedLastRun: true,
++        mainRestartRecovery: { cycleId: "yield-cycle", revision: 1, chargedAttempts: 0 },
++      },
++    });
++    const runId = "yielded-recovery-child";
++    subagentRuns.set(runId, {
++      runId,
++      childSessionKey: "agent:main:subagent:yielded-recovery-child",
++      requesterSessionKey: sessionKey,
++      requesterAgentId: "main",
++      requesterDisplayKey: "main",
++      task: "finish the delegated check",
++      cleanup: "keep",
++      createdAt: 100,
++      execution: { status: "terminal", endedAt: 200 },
++      completion: { required: true },
++      delivery: { status: "pending" },
++      expectsCompletionMessage: true,
++      requesterSettleWake: {
++        status: "pending",
++        attemptCount: 0,
++        requesterYieldBatch: true,
++        batchRunIds: [runId],
++      },
++    });
++    const releaseStarted = createDeferred();
++    const allowRelease = createDeferred();
++    recoveryOwnerReleaseMocks.beforeRelease.mockImplementationOnce(async () => {
++      releaseStarted.resolve();
++      await allowRelease.promise;
++    });
++    const admission = admitTestReplyTurn({
++      agentId: "main",
++      sessionKey,
++      sessionId,
++      expectedSessionId: sessionId,
++      storePath,
++      kind: "heartbeat",
++    });
++    let mutation: Promise<void> | undefined;
++    try {
++      await releaseStarted.promise;
++      expect(
++        (await readSessionEntry(storePath, sessionKey))?.mainRestartRecovery?.foregroundClaims,
++      ).toBeDefined();
++      const mutationStarted = createDeferred();
++      let mutationRan = false;
++      mutation = runExclusiveSessionLifecycleMutation({
++        scope: storePath,
++        identities: [sessionKey, sessionId],
++        prepare: async () => {
++          mutationStarted.resolve();
++          await interruptSessionWorkAdmissions({
++            scope: storePath,
++            identities: [sessionKey, sessionId],
++          });
++        },
++        run: async () => {
++          mutationRan = true;
++        },
++      });
++      await mutationStarted.promise;
++      await new Promise<void>((resolve) => {
++        setImmediate(resolve);
++      });
++      expect(mutationRan).toBe(false);
++      allowRelease.resolve();
++      await expect(admission).resolves.toMatchObject({ status: "skipped", reason: "active-run" });
++      await mutation;
++      expect(mutationRan).toBe(true);
++      expect(
++        (await readSessionEntry(storePath, sessionKey))?.mainRestartRecovery?.foregroundClaims,
++      ).toBeUndefined();
++    } finally {
++      allowRelease.resolve();
++      await admission;
++      await mutation;
++      subagentRuns.delete(runId);
++    }
++  });
++
+   it.each(["visible", "heartbeat", "queued_followup"] as const)(
+     "fences restart recovery from %s reply admission until the operation clears",
+     async (kind) => {
 diff --git a/src/auto-reply/reply/reply-turn-admission.ts b/src/auto-reply/reply/reply-turn-admission.ts
-index 959a64cb2867a51213bc880f5d6f5c8c92e2d5c2..a6b06052300b2ffe302991d9939b5155d9651f95 100644
+index 959a64cb2867a51213bc880f5d6f5c8c92e2d5c2..50cec910fe5c58f6feb715b08d1f41304653ac31 100644
 --- a/src/auto-reply/reply/reply-turn-admission.ts
 +++ b/src/auto-reply/reply/reply-turn-admission.ts
-@@ -203,10 +203,20 @@ export async function admitReplyTurn(
+@@ -202,11 +202,27 @@ type ReplyTurnAdmissionParams = {
+ export async function admitReplyTurn(
    params: ReplyTurnAdmissionParams,
  ): Promise<ReplyTurnAdmission> {
-   const activeAtAdmission = replyRunRegistry.get(params.sessionKey);
+-  const activeAtAdmission = replyRunRegistry.get(params.sessionKey);
 -  const releaseForeground =
 -    params.kind === "visible"
 -      ? await beginForegroundSessionMaintenance(params.sessionKey)
--      : undefined;
++  // Load only for heartbeat turns; invoke synchronously at the final claim boundary.
++  const hasPendingRequesterYieldContinuation =
++    params.kind === "heartbeat"
++      ? (await import("../../agents/subagents/registry/subagent-registry-read.js"))
++          .hasPendingRequesterYieldContinuation
+       : undefined;
++  const activeAtAdmission = replyRunRegistry.get(params.sessionKey);
 +  let releaseForeground: (() => void) | undefined;
 +  try {
 +    if (params.kind === "visible") {
@@ -24631,6 +26512,21 @@ index 959a64cb2867a51213bc880f5d6f5c8c92e2d5c2..a6b06052300b2ffe302991d9939b5155
    let foregroundTransferred = false;
    // Maintenance may finish after the observed reply rotates and clears its slot.
    let sessionId = activeAtAdmission?.result ? activeAtAdmission.sessionId : params.sessionId;
+@@ -462,6 +478,14 @@ export async function admitReplyTurn(
+             });
+           }
+           assertDatabaseOwnerCurrent();
++          // Recheck after lifecycle/recovery waits: a foreground turn may have
++          // yielded since monitor preflight, transferring its final to the outbox.
++          if (hasPendingRequesterYieldContinuation?.(params.sessionKey, params.agentId)) {
++            const pendingRecovery = await releaseReplyRecoveryOwner(recoveryOwnerLease);
++            admission?.release();
++            scheduleMainSessionRecoveryPendingTarget(pendingRecovery);
++            return { status: "skipped", reason: "active-run" };
++          }
+           if (params.adoptOperation) {
+             // The dispatch closures own this object's abort/delivery lifecycle,
+             // so the reservation must move rather than be recreated. Throws
 diff --git a/src/auto-reply/reply/session-usage.ts b/src/auto-reply/reply/session-usage.ts
 index 7f4e301e719b4658ac7ec674cfebb84fc9ece082..d536c4fb240c50f805cbc21ee874b3cb190df33c 100644
 --- a/src/auto-reply/reply/session-usage.ts
@@ -26082,6 +27978,518 @@ index 08123bc1867063543c8788754b86b0e1d94b0654..1ea40d5ebeb5a8fd9cdf52e5867d353e
 +    }
    });
  });
+diff --git a/src/commands/agent.test.ts b/src/commands/agent.test.ts
+index a021546904ebcd17d2071cd9ae11551b9ec0f9b9..543d6fe0d0229bdb9ef35b1eda4442178ec6b169 100644
+--- a/src/commands/agent.test.ts
++++ b/src/commands/agent.test.ts
+@@ -45,12 +45,18 @@ import { runBootOnce } from "../gateway/boot.js";
+ import { emitAgentEvent, onAgentEvent, resetAgentEventsForTest } from "../infra/agent-events.js";
+ import { buildOutboundBaseSessionKey } from "../infra/outbound/base-session-key.js";
+ import { loadEnabledClaudeBundleCommands } from "../plugins/bundle-commands.js";
++import {
++  initializeGlobalHookRunner,
++  resetGlobalHookRunner,
++} from "../plugins/hook-runner-global.js";
++import type { PluginHookHandlerMap } from "../plugins/hook-types.js";
+ import type { PluginProviderRegistration } from "../plugins/registry.test-fixtures.js";
+ import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
+ import type { RuntimeEnv } from "../runtime.js";
+ import { AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE } from "../sessions/agent-harness-session-key.js";
+ import { MODEL_SELECTION_LOCKED_MESSAGE } from "../sessions/model-overrides.js";
+ import { interruptSessionWorkAdmissions } from "../sessions/session-lifecycle-admission.js";
++import { createDeferredCore } from "../shared/deferred.js";
+ import { resolveEffectiveAgentSkillFilter } from "../skills/discovery/agent-filter.js";
+ import {
+   loadVisibleSkills,
+@@ -315,6 +321,8 @@ vi.mock("../agents/command/attempt-execution.runtime.js", () => {
+         promptMode: opts.promptMode,
+         disableTools: opts.modelRun === true,
+         onAgentEvent: params.onAgentEvent,
++        onReasoningStream: params.onReasoningStream,
++        onExecutionPhase: params.onExecutionPhase,
+       } as never);
+     }),
+     sessionTranscriptHasContent: vi.fn(async () => false),
+@@ -564,6 +572,7 @@ function installThinkingTestProviders(channels: Parameters<typeof createTestRegi
+     }),
+   );
+   setActivePluginRegistry(registry);
++  return registry;
+ }
+ 
+ function createOutboundSessionRouteFixture(params: {
+@@ -591,6 +600,7 @@ beforeEach(() => {
+   vi.clearAllMocks();
+   attemptExecutionMocks.useRealRunAgentAttempt = false;
+   resetPluginRuntimeStateForTest();
++  resetGlobalHookRunner();
+   installThinkingTestProviders();
+   clearSessionStoreCacheForTest();
+   resetAgentEventsForTest();
+@@ -1998,6 +2008,463 @@ describe("agentCommand", () => {
+     });
+   });
+ 
++  it.each([
++    "unchanged",
++    "modified",
++    "cancelled",
++    "internal",
++    "heartbeat",
++    "cron",
++    "child",
++    "tool_only",
++    "undelivered",
++    "ordinary",
++    "commentary_disabled",
++    "streaming_off",
++    "account_off",
++    "typing_never",
++  ] as const)(
++    "presents requester continuation progress with %s delivery policy",
++    async (hookMode) => {
++      await withTempHome(async (home) => {
++        const visible = ["unchanged", "modified", "cancelled", "typing_never"].includes(hookMode);
++        const typingVisible = visible
++          ? hookMode !== "typing_never"
++          : ["commentary_disabled", "streaming_off", "account_off"].includes(hookMode);
++        const store = path.join(home, "sessions.json");
++        const cfg = mockConfig(home, store, {
++          typingMode: hookMode === "typing_never" ? "never" : "instant",
++        });
++        cfg.channels = {
++          discord: {
++            streaming: {
++              mode: hookMode === "streaming_off" ? "off" : "progress",
++              progress: { commentary: hookMode !== "commentary_disabled" },
++            },
++            ...(hookMode === "account_off"
++              ? { accounts: { work: { streaming: { mode: "off" } } } }
++              : {}),
++          },
++        };
++        const sendText = vi.fn(async () => ({ channel: "discord", messageId: "progress-1" }));
++        const sendTyping = vi.fn(async () => {});
++        const clearTyping = vi.fn(async () => {});
++        const plugin = createOutboundTestPlugin({
++          id: "discord",
++          outbound: { ...createDirectOutboundTestAdapter({ channel: "discord" }), sendText },
++        });
++        plugin.heartbeat = { sendTyping, clearTyping };
++        const registry = installThinkingTestProviders([
++          { pluginId: "discord", source: "test", plugin },
++        ]);
++        const hook = vi.fn<PluginHookHandlerMap["reply_payload_sending"]>((event) =>
++          hookMode === "cancelled"
++            ? { cancel: true }
++            : {
++                payload: {
++                  ...event.payload,
++                  text: hookMode === "modified" ? "Reviewed progress." : event.payload.text,
++                },
++              },
++        );
++        registry.typedHooks.push({
++          pluginId: "progress-guard",
++          hookName: "reply_payload_sending",
++          handler: hook,
++          source: "test",
++        });
++        initializeGlobalHookRunner(registry);
++        vi.mocked(runEmbeddedAgent).mockImplementationOnce(async (params) => {
++          await params.onAgentEvent?.({ stream: "lifecycle", data: { phase: "start" } });
++          await params.onAgentEvent?.({
++            stream: "item",
++            data: {
++              kind: "preamble",
++              itemId: "commentary-1",
++              phase: "update",
++              progressText: "Checking",
++            },
++          });
++          expect(sendText).not.toHaveBeenCalled();
++          const completed = {
++            stream: "item",
++            data: {
++              kind: "preamble",
++              itemId: "commentary-1",
++              phase: "end",
++              progressText: "Checking the calendar.",
++            },
++          };
++          await params.onAgentEvent?.(completed);
++          await params.onAgentEvent?.(completed);
++          expect(hook).toHaveBeenCalledTimes(visible ? 1 : 0);
++          if (visible) {
++            expect(hook.mock.calls[0]?.[0]).toMatchObject({
++              kind: "block",
++              payload: { isCommentary: true },
++            });
++          }
++          if (!visible || hookMode === "cancelled") {
++            expect(sendText).not.toHaveBeenCalled();
++          } else {
++            expect(sendText).toHaveBeenCalledExactlyOnceWith(
++              expect.objectContaining({
++                to: "channel:source",
++                accountId: "work",
++                threadId: "thread-source",
++                text: hookMode === "modified" ? "Reviewed progress." : "Checking the calendar.",
++              }),
++            );
++          }
++          if (typingVisible) {
++            expect(sendTyping).toHaveBeenCalledWith(
++              expect.objectContaining({
++                to: "channel:source",
++                accountId: "work",
++                threadId: "thread-source",
++              }),
++            );
++          } else {
++            expect(sendTyping).not.toHaveBeenCalled();
++          }
++          expect(deliverAgentCommandResult).not.toHaveBeenCalled();
++          return createDefaultAgentResult({ payloads: [{ text: "Calendar checked." }] }) as never;
++        });
++        await agentCommand(
++          {
++            message: "Continue after the child settled",
++            sessionKey:
++              hookMode === "child"
++                ? "agent:main:subagent:child"
++                : hookMode === "cron"
++                  ? "agent:main:cron:quiet"
++                  : "agent:main:discord:channel:source",
++            deliver: hookMode !== "undelivered",
++            channel: "discord",
++            to: "channel:source",
++            accountId: "work",
++            threadId: "thread-source",
++            ...(hookMode === "internal" ? { sessionEffects: "internal" } : {}),
++            ...(hookMode === "heartbeat" ? { bootstrapContextRunKind: "heartbeat" } : {}),
++            ...(hookMode === "tool_only" ? { sourceReplyDeliveryMode: "message_tool_only" } : {}),
++            ...(hookMode === "ordinary"
++              ? {}
++              : {
++                  inputProvenance: {
++                    kind: "inter_session",
++                    sourceChannel: "internal",
++                    sourceTool: "subagent_settle",
++                  },
++                }),
++          },
++          runtime,
++        );
++        await getLastEmbeddedCall()?.onAgentEvent?.({
++          stream: "item",
++          data: {
++            kind: "preamble",
++            itemId: "late-commentary",
++            phase: "end",
++            progressText: "Late callback.",
++          },
++        });
++        expect(hook).toHaveBeenCalledTimes(visible ? 1 : 0);
++        expect(clearTyping).toHaveBeenCalledTimes(typingVisible ? 1 : 0);
++        expect(deliverAgentCommandResult).toHaveBeenCalledTimes(1);
++        expect(vi.mocked(deliverAgentCommandResult).mock.calls[0]?.[0].payloads).toEqual([
++          { text: "Calendar checked." },
++        ]);
++      });
++    },
++  );
++
++  it.each([
++    { mode: "instant", activity: "none", direct: false },
++    { mode: "never", activity: "text", direct: false },
++    { mode: "message", activity: "none", direct: false },
++    { mode: "message", activity: "text", direct: false },
++    { mode: "thinking", activity: "none", direct: false },
++    { mode: "thinking", activity: "reasoning", direct: false },
++    { mode: undefined, activity: "none", direct: false },
++    { mode: undefined, activity: "execution", direct: false },
++    { mode: undefined, activity: "none", direct: true },
++  ] as const)(
++    "respects continuation typing mode $mode with $activity activity (direct=$direct)",
++    async ({ mode, activity, direct }) => {
++      await withTempHome(async (home) => {
++        const cfg = mockConfig(home, path.join(home, "sessions.json"), { typingMode: mode });
++        cfg.channels = { discord: { streaming: { mode: "off" } } };
++        const sendText = vi.fn(async () => ({ channel: "discord", messageId: "unused" }));
++        const sendTyping = vi.fn(async () => {});
++        const clearTyping = vi.fn(async () => {});
++        const plugin = createOutboundTestPlugin({
++          id: "discord",
++          outbound: { ...createDirectOutboundTestAdapter({ channel: "discord" }), sendText },
++        });
++        plugin.heartbeat = { sendTyping, clearTyping };
++        installThinkingTestProviders([{ pluginId: "discord", source: "test", plugin }]);
++        const immediate = mode === "instant" || (mode === undefined && direct);
++        const active = mode !== "never" && (immediate || activity !== "none");
++        vi.mocked(runEmbeddedAgent).mockImplementationOnce(async (params) => {
++          await params.onAgentEvent?.({ stream: "lifecycle", data: { phase: "start" } });
++          params.onExecutionPhase?.({ phase: "context_assembled" });
++          await params.onAgentEvent?.({ stream: "assistant", data: { text: "NO_REPLY" } });
++          await params.onAgentEvent?.({
++            stream: "item",
++            data: { kind: "preamble", phase: "update", progressText: "Hidden commentary." },
++          });
++          expect(sendTyping).toHaveBeenCalledTimes(immediate ? 1 : 0);
++          if (activity === "text") {
++            await params.onReasoningStream?.({ text: "Reasoning alone is not a message." });
++            expect(sendTyping).toHaveBeenCalledTimes(immediate ? 1 : 0);
++            await params.onAgentEvent?.({
++              stream: "assistant",
++              data: { text: "Calendar checked." },
++            });
++          } else if (activity === "reasoning") {
++            await params.onReasoningStream?.({ text: "Checking the calendar source." });
++          } else if (activity === "execution") {
++            params.onExecutionPhase?.({ phase: "model_call_started" });
++          }
++          expect(sendTyping).toHaveBeenCalledTimes(active ? 1 : 0);
++          expect(sendText).not.toHaveBeenCalled();
++          return createDefaultAgentResult({ payloads: [{ text: "Calendar checked." }] }) as never;
++        });
++        await agentCommand(
++          {
++            message: "Continue after the child settled",
++            sessionKey: direct
++              ? "agent:main:discord:direct:source"
++              : "agent:main:discord:channel:source",
++            deliver: true,
++            channel: "discord",
++            to: direct ? "user:source" : "channel:source",
++            inputProvenance: {
++              kind: "inter_session",
++              sourceChannel: "internal",
++              sourceTool: "subagent_settle",
++            },
++          },
++          runtime,
++        );
++        expect(clearTyping).toHaveBeenCalledTimes(active ? 1 : 0);
++        expect(deliverAgentCommandResult).toHaveBeenCalledTimes(1);
++      });
++    },
++  );
++
++  it.each([
++    {
++      policy: "Discord whole replacement",
++      channel: "discord",
++      rootMode: "progress",
++      accountStreaming: { progress: { commentary: true } },
++      resolvedStreaming: { progress: { commentary: true } },
++      visible: false,
++    },
++    {
++      policy: "Slack inherited progress",
++      channel: "slack",
++      rootMode: "progress",
++      accountStreaming: { progress: { label: false } },
++      resolvedStreaming: { mode: "progress", progress: { commentary: true, label: false } },
++      visible: true,
++    },
++    {
++      policy: "Slack inherited off",
++      channel: "slack",
++      rootMode: "off",
++      accountStreaming: { progress: { commentary: true } },
++      resolvedStreaming: { mode: "off", progress: { commentary: true } },
++      visible: false,
++    },
++  ] as const)(
++    "uses the channel owner streaming config for $policy",
++    async ({ channel, rootMode, accountStreaming, resolvedStreaming, visible }) => {
++      await withTempHome(async (home) => {
++        const cfg = mockConfig(home, path.join(home, "sessions.json"));
++        cfg.channels = {
++          [channel]: {
++            streaming: { mode: rootMode, progress: { commentary: true } },
++            accounts: { work: { streaming: accountStreaming } },
++          },
++        };
++        const sendText = vi.fn(async () => ({ channel, messageId: "progress-1" }));
++        const plugin = createOutboundTestPlugin({
++          id: channel,
++          outbound: { ...createDirectOutboundTestAdapter({ channel }), sendText },
++        });
++        // Account inheritance belongs to each channel. The command consumes
++        // this boundary result; channel account suites exercise the merge rules.
++        plugin.config.resolveAccount = vi.fn(() => ({
++          accountId: "work",
++          config: { streaming: resolvedStreaming },
++        }));
++        installThinkingTestProviders([{ pluginId: channel, source: "test", plugin }]);
++        vi.mocked(runEmbeddedAgent).mockImplementationOnce(async (params) => {
++          await params.onAgentEvent?.({
++            stream: "item",
++            data: {
++              kind: "preamble",
++              itemId: "commentary-1",
++              phase: "end",
++              progressText: "Checking the calendar.",
++            },
++          });
++          expect(sendText).toHaveBeenCalledTimes(visible ? 1 : 0);
++          if (visible) {
++            expect(sendText).toHaveBeenCalledWith(
++              expect.objectContaining({
++                to: "channel:source",
++                accountId: "work",
++                text: "Checking the calendar.",
++              }),
++            );
++          }
++          return createDefaultAgentResult({ payloads: [{ text: "Calendar checked." }] }) as never;
++        });
++        await agentCommand(
++          {
++            message: "Continue after the child settled",
++            sessionKey: `agent:main:${channel}:channel:source`,
++            deliver: true,
++            channel,
++            to: "channel:source",
++            accountId: "work",
++            inputProvenance: {
++              kind: "inter_session",
++              sourceChannel: "internal",
++              sourceTool: "subagent_settle",
++            },
++          },
++          runtime,
++        );
++        expect(deliverAgentCommandResult).toHaveBeenCalledTimes(1);
++      });
++    },
++  );
++
++  it("keeps continuation typing active while commentary delivery drains", async () => {
++    await withTempHome(async (home) => {
++      const cfg = mockConfig(home, path.join(home, "sessions.json"), { typingMode: "instant" });
++      cfg.channels = {
++        discord: { streaming: { mode: "progress", progress: { commentary: true } } },
++      };
++      const deliveryEntered = createDeferredCore();
++      const releaseDelivery = createDeferredCore();
++      const finalEntered = createDeferredCore();
++      const releaseFinal = createDeferredCore();
++      const sendTyping = vi.fn(async () => {});
++      const clearTyping = vi.fn(async () => {});
++      const plugin = createOutboundTestPlugin({
++        id: "discord",
++        outbound: {
++          ...createDirectOutboundTestAdapter({ channel: "discord" }),
++          sendText: async () => {
++            deliveryEntered.resolve();
++            await releaseDelivery.promise;
++            return { channel: "discord", messageId: "progress-1" };
++          },
++        },
++      });
++      plugin.heartbeat = { sendTyping, clearTyping };
++      installThinkingTestProviders([{ pluginId: "discord", source: "test", plugin }]);
++      const deliverFinal = expectDefined(
++        vi.mocked(deliverAgentCommandResult).getMockImplementation(),
++        "default final-delivery implementation",
++      );
++      vi.mocked(deliverAgentCommandResult).mockImplementationOnce(async (params) => {
++        finalEntered.resolve();
++        await releaseFinal.promise;
++        return await deliverFinal(params);
++      });
++      vi.mocked(runEmbeddedAgent).mockImplementationOnce(async (params) => {
++        await params.onAgentEvent?.({ stream: "lifecycle", data: { phase: "start" } });
++        // Native commentary callbacks are detached; the command must drain delivery.
++        void params.onAgentEvent?.({
++          stream: "item",
++          data: { kind: "preamble", phase: "end", itemId: "preamble-1", progressText: "Checking." },
++        });
++        return createDefaultAgentResult({ payloads: [{ text: "Calendar checked." }] }) as never;
++      });
++      const run = agentCommand(
++        {
++          message: "Continue after the child settled",
++          sessionKey: "agent:main:discord:channel:source",
++          deliver: true,
++          channel: "discord",
++          to: "channel:source",
++          inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
++        },
++        runtime,
++      );
++      try {
++        await deliveryEntered.promise;
++        expect(sendTyping).toHaveBeenCalledOnce();
++        expect(clearTyping).not.toHaveBeenCalled();
++        expect(deliverAgentCommandResult).not.toHaveBeenCalled();
++        releaseDelivery.resolve();
++        await finalEntered.promise;
++        expect(clearTyping).not.toHaveBeenCalled();
++      } finally {
++        releaseDelivery.resolve();
++        releaseFinal.resolve();
++        await run;
++      }
++      expect(clearTyping).toHaveBeenCalledOnce();
++    });
++  });
++
++  it("keeps continuation typing active until final delivery settles", async () => {
++    await withTempHome(async (home) => {
++      const cfg = mockConfig(home, path.join(home, "sessions.json"), { typingMode: "instant" });
++      cfg.channels = { discord: { streaming: { mode: "off" } } };
++      const finalEntered = createDeferredCore();
++      const releaseFinal = createDeferredCore();
++      const sendTyping = vi.fn(async () => {});
++      const clearTyping = vi.fn(async () => {});
++      const plugin = createOutboundTestPlugin({
++        id: "discord",
++        outbound: createDirectOutboundTestAdapter({ channel: "discord" }),
++      });
++      plugin.heartbeat = { sendTyping, clearTyping };
++      installThinkingTestProviders([{ pluginId: "discord", source: "test", plugin }]);
++      const deliverFinal = expectDefined(
++        vi.mocked(deliverAgentCommandResult).getMockImplementation(),
++        "default final-delivery implementation",
++      );
++      vi.mocked(deliverAgentCommandResult).mockImplementationOnce(async (params) => {
++        finalEntered.resolve();
++        await releaseFinal.promise;
++        return await deliverFinal(params);
++      });
++      vi.mocked(runEmbeddedAgent).mockImplementationOnce(async (params) => {
++        await params.onAgentEvent?.({ stream: "lifecycle", data: { phase: "start" } });
++        return createDefaultAgentResult({ payloads: [{ text: "Calendar checked." }] }) as never;
++      });
++      const run = agentCommand(
++        {
++          message: "Continue after the child settled",
++          sessionKey: "agent:main:discord:channel:source",
++          deliver: true,
++          channel: "discord",
++          to: "channel:source",
++          inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
++        },
++        runtime,
++      );
++      try {
++        await finalEntered.promise;
++        expect(sendTyping).toHaveBeenCalledOnce();
++        expect(clearTyping).not.toHaveBeenCalled();
++      } finally {
++        releaseFinal.resolve();
++        await run;
++      }
++      expect(clearTyping).toHaveBeenCalledOnce();
++    });
++  });
++
+   it("probes the configured primary first for origin-backed auto session model overrides", async () => {
+     await withTempHome(async (home) => {
+       const store = path.join(home, "sessions.json");
 diff --git a/src/commands/backup-resource-inventory.ts b/src/commands/backup-resource-inventory.ts
 index 3d31078ee7e7f623517f3cb72d2e5fe604ae53a1..78500d7498200ec0ab1e2a4d07fadbc048ca0f26 100644
 --- a/src/commands/backup-resource-inventory.ts
@@ -28855,6 +31263,326 @@ index c7ef5338f35afede478ea7e822741dc00ab1ff73..aa5a9b7ffb0265f02b20008876c47980
            continue;
          }
        }
+diff --git a/src/cron/task-run-history.test.ts b/src/cron/task-run-history.test.ts
+index b06983eaf6c8821376510afa61cee6e76d8b7f5c..a1d9fb38e24ef2677620077d3ef132dd4c7f71df 100644
+--- a/src/cron/task-run-history.test.ts
++++ b/src/cron/task-run-history.test.ts
+@@ -1,7 +1,10 @@
+-import { expectDefined } from "@openclaw/normalization-core";
++import { asOptionalRecord, expectDefined } from "@openclaw/normalization-core";
+ import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
+ import { describe, expect, it, vi } from "vitest";
+ import { FAILOVER_REASONS } from "../../packages/gateway-protocol/src/failover-reasons.js";
++import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
++import type { DB as OpenClawStateDatabase } from "../state/openclaw-state-db.generated.js";
++import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+ import type { TaskRecord } from "../tasks/task-registry.types.js";
+ import { resetTaskRegistryForTests } from "../tasks/task-runtime.test-helpers.js";
+ import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+@@ -10,6 +13,7 @@ import type { CronRunLogEntry } from "./run-log-types.js";
+ import { CronService } from "./service.js";
+ import { createNoopLogger } from "./service.test-harness.js";
+ import { cronStoreKey } from "./store/key.js";
++import { prepareCronRunReceiptAdjudication } from "./store/run-receipt-store.js";
+ import {
+   cronQuietTriggerTaskDetail,
+   cronRunLogEntryToTaskDetail,
+@@ -203,6 +207,7 @@ describe("cron task run history", () => {
+             "skipped",
+           ]);
+           expect(ledger.entries[0]).toMatchObject({
++            configRevision: expect.stringMatching(/^sha256:/),
+             deliveryStatus: "delivered",
+             triggerFired: true,
+             nextRunAtMs: expect.any(Number),
+@@ -670,3 +675,160 @@ describe("cron task run history", () => {
+     }
+   });
+ });
++
++describe("cron history retained config revisions", () => {
++  const receiptId = "11111111-1111-4111-8111-111111111111";
++  const otherReceiptId = "22222222-2222-4222-8222-222222222222";
++  const entry: CronRunLogEntry = {
++    ts: 1_100,
++    jobId: JOB_ID,
++    action: "finished",
++    status: "ok",
++    runAtMs: 1_000,
++  };
++
++  function seedReceipt(
++    storePath: string,
++    overrides: {
++      id?: string;
++      storeKey?: string;
++      jobId?: string;
++      startedAt?: number;
++      revision?: string;
++    } = {},
++  ) {
++    prepareCronRunReceiptAdjudication({ storePath, jobId: JOB_ID });
++    const { db } = openOpenClawStateDatabase();
++    executeSqliteQuerySync(
++      db,
++      getNodeSqliteKysely<OpenClawStateDatabase>(db)
++        .insertInto("cron_run_receipts")
++        .values({
++          receipt_id: overrides.id ?? receiptId,
++          store_key: overrides.storeKey ?? cronStoreKey(storePath),
++          job_id: overrides.jobId ?? JOB_ID,
++          config_revision: overrides.revision ?? "sha256:retained",
++          agent_id: "main",
++          request_run_id: null,
++          status: "ok",
++          owner_pid: 1,
++          owner_start_time: null,
++          started_at_ms: overrides.startedAt ?? 1_000,
++          finished_at_ms: 1_100,
++          error_text: null,
++        }),
++    );
++  }
++
++  it.each([
++    {
++      name: "exact receipt with a public suffix",
++      runId: `cron:${JOB_ID}:1000:${receiptId}:manual:request`,
++      duplicate: true,
++      expected: "sha256:retained",
++    },
++    { name: "unique legacy tuple", runId: `cron:${JOB_ID}:1000`, expected: "sha256:retained" },
++    { name: "ambiguous legacy tuple", runId: `cron:${JOB_ID}:1000`, duplicate: true },
++    { name: "pruned explicit receipt", runId: `cron:${JOB_ID}:1000:${otherReceiptId}` },
++    { name: "non-receipt discriminator", runId: `cron:${JOB_ID}:1000:manual:request` },
++    { name: "missing discriminator", runId: `cron:${JOB_ID}:1000:` },
++    { name: "non-cron run", runId: "manual:request" },
++    { name: "noncanonical start spelling", runId: `cron:${JOB_ID}:01000` },
++    {
++      name: "store mismatch",
++      runId: `cron:${JOB_ID}:1000:${receiptId}`,
++      storeKey: "different-store",
++    },
++    { name: "job mismatch", runId: `cron:${JOB_ID}:1000:${receiptId}`, jobId: "different-job" },
++    { name: "start mismatch", runId: `cron:${JOB_ID}:1000:${receiptId}`, startedAt: 999 },
++    { name: "empty revision", runId: `cron:${JOB_ID}:1000`, revision: "" },
++    { name: "oversized revision", runId: `cron:${JOB_ID}:1000`, revision: "x".repeat(129) },
++  ])("uses only retained receipt identity: $name", async (testCase) => {
++    await withOpenClawTestState(
++      { layout: "state-only", prefix: "cron-revision-identity-" },
++      async (state) => {
++        const storePath = state.path("jobs.json");
++        const storeKey = cronStoreKey(storePath);
++        seedReceipt(storePath, testCase);
++        if (testCase.duplicate) {
++          seedReceipt(storePath, { id: otherReceiptId });
++        }
++        const task = taskFromEntry(entry, 1, storeKey);
++        task.runId = testCase.runId;
++        task.detail = {
++          ...expectDefined(asOptionalRecord(task.detail), "cron task detail"),
++          configRevision: "sha256:untrusted-detail",
++        };
++        seedTaskRegistryRowsForTests([task]);
++        const result = readCronTaskRunHistoryPage({ storeKey, jobId: JOB_ID });
++        expect(result.entries).toHaveLength(1);
++        expect(expectDefined(result.entries[0], "history entry").configRevision).toBe(
++          testCase.expected,
++        );
++      },
++    );
++  });
++
++  it("enriches full pages without hiding ambiguity or changing paging", async () => {
++    await withOpenClawTestState(
++      { layout: "state-only", prefix: "cron-revision-pages-" },
++      async (state) => {
++        const storePath = state.path("jobs.json");
++        const storeKey = cronStoreKey(storePath);
++        const tasks = Array.from({ length: 205 }, (_, i) => {
++          const startedAt = 1_000 + i;
++          seedReceipt(storePath, { id: `receipt-${i}`, startedAt, revision: `revision-${i}` });
++          return taskFromEntry({ ...entry, ts: 2_000 + i, runAtMs: startedAt }, i, storeKey);
++        });
++        seedReceipt(storePath, {
++          id: "duplicate-at-page-edge",
++          startedAt: 1_004,
++          revision: "revision-4",
++        });
++        seedTaskRegistryRowsForTests(tasks);
++        const first = readCronTaskRunHistoryPage({ storeKey, limit: 200, sortDir: "asc" });
++        expect(first.total).toBe(205);
++        expect(first.entries).toHaveLength(200);
++        expect(first.nextOffset).toBe(200);
++        expect(first.hasMore).toBe(true);
++        expect(
++          expectDefined(first.entries[4], "ambiguous history entry").configRevision,
++        ).toBeUndefined();
++        expect(expectDefined(first.entries[199], "last history entry").configRevision).toBe(
++          "revision-199",
++        );
++        const second = readCronTaskRunHistoryPage({
++          storeKey,
++          limit: 200,
++          offset: first.nextOffset!,
++          sortDir: "asc",
++        });
++        expect(second.entries.map((row) => row.configRevision)).toEqual(
++          Array.from({ length: 5 }, (_, i) => `revision-${200 + i}`),
++        );
++        expect(second.hasMore).toBe(false);
++        expect(second.nextOffset).toBeNull();
++      },
++    );
++  });
++
++  it("leaves legacy history without receipts readable and does not create the receipt table", async () => {
++    await withOpenClawTestState(
++      { layout: "state-only", prefix: "cron-revision-no-table-" },
++      async (state) => {
++        const storeKey = cronStoreKey(state.path("jobs.json"));
++        seedTaskRegistryRowsForTests([taskFromEntry(entry, 1, storeKey)]);
++        const { db } = openOpenClawStateDatabase();
++        db.exec("DROP TABLE IF EXISTS cron_run_receipts");
++        const table = () =>
++          db.prepare("SELECT name FROM sqlite_schema WHERE name = 'cron_run_receipts'").get();
++        expect(table()).toBeUndefined();
++        expect(
++          expectDefined(readCronTaskRunHistoryPage({ storeKey }).entries[0], "legacy history entry")
++            .configRevision,
++        ).toBeUndefined();
++        expect(table()).toBeUndefined();
++      },
++    );
++  });
++});
+diff --git a/src/cron/task-run-history.ts b/src/cron/task-run-history.ts
+index df22c6c240332eaf22ecce71222c01d33cb104d9..580ca104168a5c1581d4d59754bf82031d3097d1 100644
+--- a/src/cron/task-run-history.ts
++++ b/src/cron/task-run-history.ts
+@@ -4,9 +4,13 @@ import {
+   normalizeOptionalString,
+ } from "@openclaw/normalization-core/string-coerce";
+ import { uniqueValues } from "@openclaw/normalization-core/string-normalization";
++import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+ import { normalizeAgentId } from "../routing/session-key.js";
++import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
++import type { DB as OpenClawStateDatabase } from "../state/openclaw-state-db.generated.js";
+ import { listTaskRegistryRecordsByRuntimeSourceIdFromSqlite } from "../tasks/task-registry.store.sqlite.js";
+ import type { TaskRecord } from "../tasks/task-registry.types.js";
++import { createCronExecutionId } from "./run-id.js";
+ import type { CronRunLogEntry } from "./run-log-types.js";
+ import {
+   cronTaskRecordStoreKey,
+@@ -111,6 +115,97 @@ function attachJobNames(entries: CronRunLogEntry[], jobNameById?: Record<string,
+   }
+ }
+ 
++/** Enrich only this page from persisted receipts, never current job metadata. */
++function attachConfigRevisions(
++  rows: Array<{ entry: CronRunLogEntry; task: TaskRecord }>,
++  storeKey: string,
++): void {
++  for (const { entry } of rows) {
++    delete entry.configRevision;
++  }
++  if (rows.length === 0) {
++    return;
++  }
++  try {
++    withExistingOpenClawStateDatabaseReadOnly(({ db }) => {
++      const database = getNodeSqliteKysely<Pick<OpenClawStateDatabase, "cron_run_receipts">>(db);
++      const lookups = rows.flatMap(({ entry, task }, index) => {
++        const startedAtMs = entry.runAtMs;
++        if (
++          typeof startedAtMs !== "number" ||
++          !Number.isSafeInteger(startedAtMs) ||
++          startedAtMs < 0
++        ) {
++          return [];
++        }
++        const executionId = createCronExecutionId(entry.jobId, startedAtMs);
++        let receiptId: string | undefined;
++        if (typeof task.runId !== "string") {
++          return [];
++        }
++        if (task.runId !== executionId) {
++          if (!task.runId.startsWith(`${executionId}:`)) {
++            return [];
++          }
++          const discriminator = task.runId.slice(executionId.length + 1).split(":", 1)[0];
++          if (
++            !discriminator ||
++            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(discriminator)
++          ) {
++            return [];
++          }
++          receiptId = discriminator;
++        }
++        let lookup = database
++          .selectFrom("cron_run_receipts")
++          .select("config_revision")
++          .where("store_key", "=", storeKey)
++          .where("job_id", "=", entry.jobId)
++          .where("started_at_ms", "=", startedAtMs);
++        if (receiptId) {
++          // An explicit UUID mismatch or pruned UUID never falls back to a tuple.
++          lookup = lookup.where("receipt_id", "=", receiptId);
++        }
++        // Two rows already prove ambiguity. Aggregate after this local bound,
++        // so global truncation cannot turn a duplicate tuple into a unique one.
++        return [
++          database
++            .selectFrom(lookup.limit(2).as("matched_receipts"))
++            .select((eb) => [
++              eb.val(index).as("entry_index"),
++              eb.fn.countAll<number>().as("match_count"),
++              eb.fn.min("matched_receipts.config_revision").as("config_revision"),
++            ]),
++        ];
++      });
++      const first = lookups.shift();
++      if (!first) {
++        return;
++      }
++      // The public page limit is 200: ≤200 branches, ≤1200 parameters, one SELECT.
++      const statement = lookups.reduce((query, lookup) => query.unionAll(lookup), first);
++      for (const match of executeSqliteQuerySync(db, statement).rows) {
++        const row = rows[match.entry_index];
++        const revision = match.config_revision;
++        if (
++          row &&
++          match.match_count === 1 &&
++          typeof revision === "string" &&
++          revision.length > 0 &&
++          revision.length <= 128
++        ) {
++          row.entry.configRevision = revision;
++        }
++      }
++    });
++  } catch (error) {
++    // Legacy state may predate receipts. Do not create or repair that table.
++    if (!(error instanceof Error) || error.message !== "no such table: cron_run_receipts") {
++      throw error;
++    }
++  }
++}
++
+ /** Reads and filters cron task rows with the legacy run-history paging contract. */
+ export function readCronTaskRunHistoryPage(
+   options: ReadCronTaskRunHistoryPageOptions,
+@@ -155,7 +250,9 @@ export function readCronTaskRunHistoryPage(
+     .toSorted((left, right) => compareHistoryRows(left, right, sortDir));
+   const total = rows.length;
+   const boundedOffset = Math.min(total, offset);
+-  const entries = rows.slice(boundedOffset, boundedOffset + limit).map(({ entry }) => entry);
++  const pageRows = rows.slice(boundedOffset, boundedOffset + limit);
++  attachConfigRevisions(pageRows, options.storeKey);
++  const entries = pageRows.map(({ entry }) => entry);
+   attachJobNames(entries, options.jobNameById);
+   const nextOffset = boundedOffset + entries.length;
+   return {
 diff --git a/src/gateway/server-methods/agent-session-reset.ts b/src/gateway/server-methods/agent-session-reset.ts
 index 7bcf6ea2b9ed8362b70e6eb9be289427bce26687..64c033cd73d8ded9821d5f36d03b3ae001f55c24 100644
 --- a/src/gateway/server-methods/agent-session-reset.ts
@@ -30928,6 +33656,335 @@ index 258992554f150f3ccc058cbd95e2973c4f807bf5..70d15d47b5f01695da125406683f41ab
  export function snapshotFromExecApprovalsRow(params: {
    path: string;
    row?: ExecApprovalsConfigRow;
+diff --git a/src/infra/heartbeat-runner-execution.ts b/src/infra/heartbeat-runner-execution.ts
+index ea48d31f86e71a476e672e944563e382fc5a05b7..ad0a3eccb4bc2766ff4a5b95b022ef527697276e 100644
+--- a/src/infra/heartbeat-runner-execution.ts
++++ b/src/infra/heartbeat-runner-execution.ts
+@@ -298,6 +298,13 @@ export async function resolveHeartbeatWakeStage(opts: HeartbeatRunOptions) {
+     return skippedHeartbeatStage(preflight.skipReason, startedAt);
+   }
+   const { sessionKey } = preflight.session;
++  // Yield releases the running slot while the requester still owes its final.
++  // A background turn must not consume that work under heartbeat delivery policy.
++  const { hasPendingRequesterYieldContinuation } =
++    await import("../agents/subagents/registry/subagent-registry-read.js");
++  if (hasPendingRequesterYieldContinuation(sessionKey, agentId)) {
++    return skippedHeartbeatStage(HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT, startedAt);
++  }
+   const isReplyRunActive =
+     opts.deps?.isReplyRunActive ?? ((key: string) => replyRunRegistry.isActive(key));
+   if (isReplyRunActive(sessionKey) || hasActiveRunForSession(sessionKey, listActiveEmbeddedRuns)) {
+diff --git a/src/infra/heartbeat-runner.yielded-requester.test.ts b/src/infra/heartbeat-runner.yielded-requester.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f96237df0ad3aafe581af364dd21850e9bdd34ab
+--- /dev/null
++++ b/src/infra/heartbeat-runner.yielded-requester.test.ts
+@@ -0,0 +1,305 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
++import {
++  markRequesterTurnYieldedInRuns,
++  settleRequesterTurnAfterSessionSpawns,
++} from "../agents/subagents/registry/subagent-registry-requester-yield.js";
++import {
++  clearSubagentRunsReadCacheForTest,
++  getSubagentRunsSnapshotForRead,
++} from "../agents/subagents/registry/subagent-registry-state.js";
++import { saveSubagentRegistryToSqlite } from "../agents/subagents/registry/subagent-registry.store.sqlite.js";
++import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
++import { testing as replyRegistryTesting } from "../auto-reply/reply/reply-run-registry.test-support.js";
++import { admitReplyTurn } from "../auto-reply/reply/reply-turn-admission.js";
++import type { OpenClawConfig } from "../config/config.js";
++import {
++  recordSubagentSpawned,
++  recordSubagentTerminalState,
++} from "../sessions/session-state-events.js";
++import { enqueueSessionStateNotice } from "../sessions/session-state-notices.js";
++import { resetHeartbeatEventsForTest } from "./heartbeat-events.js";
++import { resolveHeartbeatWakeStage } from "./heartbeat-runner-execution.js";
++import { runHeartbeatOnce } from "./heartbeat-runner.js";
++import { seedSessionStore, withTempHeartbeatSandbox } from "./heartbeat-runner.test-utils.js";
++import { setHeartbeatWakeHandler, type HeartbeatWakeRequest } from "./heartbeat-wake.js";
++import { peekSystemEvents, resetSystemEventsForTest } from "./system-events.js";
++
++const REQUESTER = "agent:main:main";
++const REQUESTER_RUN = "requester-turn";
++
++function child(): SubagentRunRecord {
++  return {
++    runId: "child-run",
++    childSessionKey: "agent:main:subagent:child",
++    requesterSessionKey: REQUESTER,
++    requesterAgentId: "main",
++    requesterDisplayKey: "main",
++    requesterTurnRunId: REQUESTER_RUN,
++    task: "check the calendar",
++    cleanup: "keep",
++    createdAt: Date.now(),
++    generation: 1,
++    execution: { status: "running", startedAt: Date.now() },
++    expectsCompletionMessage: true,
++    completion: { required: true },
++    delivery: { status: "pending" },
++  };
++}
++
++function yieldRequester(entry: SubagentRunRecord) {
++  subagentRuns.set(entry.runId, entry);
++  const owner = {
++    requesterSessionKey: REQUESTER,
++    requesterAgentId: "main",
++    requesterTurnRunId: REQUESTER_RUN,
++    runs: subagentRuns,
++    persistOrThrow: () => {},
++  };
++  markRequesterTurnYieldedInRuns(owner);
++  expect(
++    settleRequesterTurnAfterSessionSpawns({
++      ...owner,
++      requesterYielded: true,
++      acceptedSessionSpawns: [],
++      schedule: () => {},
++    }),
++  ).toBe(true);
++}
++
++async function withRequester(
++  run: (args: {
++    cfg: OpenClawConfig;
++    storePath: string;
++    replySpy: Parameters<Parameters<typeof withTempHeartbeatSandbox>[0]>[0]["replySpy"];
++    wake: (request?: Partial<HeartbeatWakeRequest>) => ReturnType<typeof runHeartbeatOnce>;
++  }) => Promise<void>,
++) {
++  await withTempHeartbeatSandbox(async ({ storePath, replySpy }) => {
++    const cfg: OpenClawConfig = {
++      session: { store: storePath },
++      agents: { defaults: { heartbeat: { every: "30m", target: "none" } } },
++    };
++    await seedSessionStore(storePath, REQUESTER, { sessionId: "requester-session" });
++    const wake = (request: Partial<HeartbeatWakeRequest> = {}) =>
++      runHeartbeatOnce({
++        cfg,
++        agentId: "main",
++        sessionKey: REQUESTER,
++        source: "session-state",
++        intent: "immediate",
++        ...request,
++        deps: { getReplyFromConfig: replySpy, getQueueSize: () => 0 },
++      });
++    await run({ cfg, storePath, replySpy, wake });
++  });
++}
++
++beforeEach(() => {
++  subagentRuns.clear();
++  clearSubagentRunsReadCacheForTest();
++  replyRegistryTesting.resetReplyRunRegistry();
++  resetSystemEventsForTest();
++  resetHeartbeatEventsForTest();
++});
++
++afterEach(() => {
++  setHeartbeatWakeHandler(null);
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++  vi.unstubAllEnvs();
++  subagentRuns.clear();
++  replyRegistryTesting.resetReplyRunRegistry();
++  resetSystemEventsForTest();
++});
++
++describe("heartbeat preserves yielded requester ownership", () => {
++  it.each(["preflight", "admission"] as const)(
++    "observes a cross-process yield after a cached empty read at %s",
++    async (boundary) => {
++      await withRequester(async ({ cfg, storePath, wake, replySpy }) => {
++        vi.stubEnv("OPENCLAW_TEST_READ_SUBAGENT_RUNS_FROM_SQLITE", "1");
++        vi.spyOn(Date, "now").mockReturnValue(Date.now());
++        expect(getSubagentRunsSnapshotForRead(subagentRuns).size).toBe(0);
++        if (boundary === "admission") {
++          expect(
++            (await resolveHeartbeatWakeStage({ cfg, source: "session-state", intent: "immediate" }))
++              .kind,
++          ).toBe("ready");
++        }
++        const entry = child();
++        yieldRequester(entry);
++        saveSubagentRegistryToSqlite(new Map([[entry.runId, entry]]));
++        subagentRuns.clear();
++        // Model another process's commit: the old reader cache still says empty.
++        expect(getSubagentRunsSnapshotForRead(subagentRuns).size).toBe(0);
++        if (boundary === "preflight") {
++          expect(await wake({ source: "session-state" })).toMatchObject({
++            status: "skipped",
++            reason: "requests-in-flight",
++          });
++          expect(replySpy).not.toHaveBeenCalled();
++        } else {
++          const admission = await admitReplyTurn({
++            agentId: "main",
++            sessionKey: REQUESTER,
++            sessionId: "requester-session",
++            storePath,
++            kind: "heartbeat",
++            resetTriggered: false,
++          });
++          if (admission.status === "owned") {
++            admission.operation.complete();
++          }
++          expect(admission).toMatchObject({ status: "skipped", reason: "active-run" });
++        }
++      });
++    },
++  );
++
++  it("leaves a watched-session notice queued for its native requester continuation", async () => {
++    await withRequester(async ({ wake, replySpy }) => {
++      const entry = child();
++      yieldRequester(entry);
++      recordSubagentSpawned({
++        childSessionKey: entry.childSessionKey,
++        childRunId: entry.runId,
++        requesterSessionKey: REQUESTER,
++        agentId: "main",
++      });
++      vi.useFakeTimers();
++      const heartbeat = vi.fn(wake);
++      const dispose = setHeartbeatWakeHandler(heartbeat);
++      try {
++        entry.execution = { status: "terminal", endedAt: Date.now(), outcome: { status: "ok" } };
++        recordSubagentTerminalState({
++          childSessionKey: entry.childSessionKey,
++          runId: entry.runId,
++          requesterSessionKey: REQUESTER,
++          outcomeStatus: "ok",
++        });
++        // A watched-session notice can race the separate completion owner.
++        // Terminal signals themselves currently remain non-notifying.
++        enqueueSessionStateNotice({
++          watcherSessionKey: REQUESTER,
++          targetSessionKey: entry.childSessionKey,
++          lastSeenSequence: 1,
++        });
++        await vi.advanceTimersByTimeAsync(20_001);
++        expect(heartbeat).toHaveBeenCalledOnce();
++        expect(await heartbeat.mock.results[0]?.value).toMatchObject({
++          status: "skipped",
++          reason: "requests-in-flight",
++        });
++        expect(replySpy).not.toHaveBeenCalled();
++        expect(peekSystemEvents(REQUESTER)).toHaveLength(1);
++        const continuation = await admitReplyTurn({
++          sessionKey: REQUESTER,
++          sessionId: "requester-session",
++          agentId: "main",
++          kind: "visible",
++          resetTriggered: false,
++        });
++        expect(continuation.status).toBe("owned");
++        if (continuation.status === "owned") {
++          continuation.operation.complete();
++        }
++      } finally {
++        dispose();
++        vi.useRealTimers();
++      }
++      subagentRuns.delete(entry.runId);
++      await wake();
++      expect(replySpy).toHaveBeenCalledOnce();
++    });
++  });
++
++  it.each(["pending", "dispatching"] as const)(
++    "preserves a cleaned-up child whose requester settlement is %s",
++    async (status) => {
++      await withRequester(async ({ wake, replySpy }) => {
++        const entry = child();
++        yieldRequester(entry);
++        entry.execution = { status: "terminal", endedAt: Date.now() };
++        entry.cleanupCompletedAt = Date.now();
++        entry.requesterSettleWake = {
++          ...entry.requesterSettleWake!,
++          status,
++          attemptCount: 2,
++          nextAttemptAt: Date.now() + 120_000,
++        };
++        expect(await wake()).toMatchObject({ status: "skipped", reason: "requests-in-flight" });
++        expect(replySpy).not.toHaveBeenCalled();
++        entry.requesterSettleWake = undefined;
++        entry.delivery = { status: "failed", disposition: "permanent_failure" };
++        await wake();
++        expect(replySpy).toHaveBeenCalledOnce();
++      });
++    },
++  );
++
++  it.each(["other requester", "other agent", "superseded generation", "orphaned yield flag"])(
++    "does not defer for %s",
++    async (reason) => {
++      await withRequester(async ({ wake, replySpy }) => {
++        const entry = child();
++        yieldRequester(entry);
++        if (reason === "other requester") {
++          entry.requesterSessionKey = "agent:main:other";
++        }
++        if (reason === "other agent") {
++          entry.requesterAgentId = "other";
++        }
++        if (reason === "orphaned yield flag") {
++          entry.requesterSettleWake = undefined;
++          entry.requesterTurnYielded = true;
++          entry.requesterTurnRunId = undefined;
++          entry.cleanupCompletedAt = Date.now();
++        }
++        if (reason === "superseded generation") {
++          subagentRuns.set("successor", {
++            ...entry,
++            runId: "successor",
++            generation: 2,
++            requesterSettleWake: undefined,
++          });
++        }
++        await wake();
++        expect(replySpy).toHaveBeenCalledOnce();
++      });
++    },
++  );
++
++  it("rechecks ownership at admission after a heartbeat passed preflight", async () => {
++    await withRequester(async ({ cfg, storePath }) => {
++      expect(
++        (await resolveHeartbeatWakeStage({ cfg, source: "session-state", intent: "immediate" }))
++          .kind,
++      ).toBe("ready");
++      yieldRequester(child());
++      const admission = await admitReplyTurn({
++        agentId: "main",
++        sessionKey: REQUESTER,
++        sessionId: "requester-session",
++        storePath,
++        kind: "heartbeat",
++        resetTriggered: false,
++      });
++      if (admission.status === "owned") {
++        admission.operation.complete();
++      }
++      expect(admission).toMatchObject({ status: "skipped", reason: "active-run" });
++    });
++  });
++
++  it("defers a manual heartbeat on the same pending requester", async () => {
++    await withRequester(async ({ wake, replySpy }) => {
++      yieldRequester(child());
++      expect(await wake({ source: "manual", intent: "manual" })).toMatchObject({
++        status: "skipped",
++        reason: "requests-in-flight",
++      });
++      expect(replySpy).not.toHaveBeenCalled();
++    });
++  });
++});
 diff --git a/src/infra/openclaw-cli-invocation.test.ts b/src/infra/openclaw-cli-invocation.test.ts
 index 5b6503079fbb635687e01997412cec8f9511886b..d0275ac1c47522cddff15b52ca31b2bb6e21b311 100644
 --- a/src/infra/openclaw-cli-invocation.test.ts

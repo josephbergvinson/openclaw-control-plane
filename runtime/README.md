@@ -17,12 +17,12 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed custom commit | `39d61ba70ec77e39ead3a51cf22f66fc6321068f` |
-| Sanitized source tree | `7df03421b5eb7d267c111c24321b7f333883b5e3` |
-| Patch SHA-256 | `bfe5fd6808abae10eacf557868d43c5366b252c0c798aed37bf73493ed217a44` |
+| Deployed custom commit | `7fbb56e134a70c63d1404af547db71bd4870dc3c` |
+| Sanitized source tree | `d300952e487e0979151a201fc5ec7225b4a0b890` |
+| Patch SHA-256 | `bf70682c84cc0b84bdf653a9b6b1b4a9496591d61e3d5a5ea08dadc5f6465c5d` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,558,666 bytes and changes 487 paths. The custom commit is a lineage
+The patch is 1,694,393 bytes and changes 518 paths across 62 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
@@ -59,7 +59,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `7df03421b5eb7d267c111c24321b7f333883b5e3`.
+`git write-tree` must print `d300952e487e0979151a201fc5ec7225b4a0b890`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -117,6 +117,32 @@ build to succeed. Command plans, actual command outcomes and build logs are reta
 as workflow artifacts; environment values are not recorded in the plan. A cancelled
 run or partial command log does not qualify the reference.
 
+### Current source qualification
+
+The public patch now includes deployed source `7fbb56e`, including five commits
+after the former `39d61ba` pin: retained cron configuration revisions, exact Discord
+message reads, continuation progress and typing, optional silent heartbeat results,
+and durable requester ownership through child completion. The normalization still
+changes only two labels in the same test fixture; production source is preserved.
+
+A fresh independent clone of the official tag passed the published reconstruction
+helper's apply and normalized-tree checks. Comparison of all 39,482 tracked entries
+with deployed source confirmed identical production blobs and all file modes; the
+sole difference was the two established test-label substitutions. The repository's
+41 unit tests and seven native-plan adapter tests also passed. These checks verify
+the package and reconstruction mechanics, before hosted runtime qualification.
+
+The originating host passed the current source's production/test type checks,
+required native checks, full build and sealed-release activation. Four subsequent
+Discord checks verified the observed calendar, document-steering and controlled
+worker delivery paths. The [delivery qualification](../docs/13-delivery-and-control-surface.md#successor-live-retest)
+retains their timings and the limits on attachment-byte and resumed-typing evidence.
+
+Fresh hosted reconstruction, native checks and build qualification for this updated
+public pin remain pending. Earlier green workflow runs qualify their recorded
+predecessors; they do not qualify this new package.
+
+### Historical qualification
 
 The steering and cron changes in predecessor source `f31686e` were qualified together in
 [run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151):
@@ -144,9 +170,9 @@ changed-source check against `f31686e`; every selected guard completed. One full
 `pnpm build`, including the UI, also passed. The self-contained staged release
 passed the direct runtime policy import and was sealed against its complete file
 inventory. Source identity and a clean checkout were verified throughout.
-These are local source and candidate-artifact results. Hosted qualification of the
-updated public reconstruction remains pending; the earlier workflow results above
-retain their original scope.
+These were local source and candidate-artifact results. Hosted qualification of
+that update was pending at the time; the earlier workflow results above retain
+their original scope.
 
 Source `39d61ba` additionally prevents failure alerts when an active automation is removed, while retaining cancellation history and isolating a replacement with the same ID. Its 62 focused tests passed, and independent P0–P2 review found no actionable issues. On 13 September 2026, this source passed the originating host's full native changed-source check against `a8cbb37`, followed by one complete build including the UI. The self-contained release passed the direct runtime policy import and was sealed; the source commit and clean checkout remained unchanged. These results qualify the local candidate, with activation and live acceptance recorded separately below.
 
@@ -162,10 +188,10 @@ the actual image was inspected and its permission/process binding renewed. This
 establishes that manual capture route after activation. Natural scheduled Journal
 synchronization remains a separate check.
 
-The updated Discord `/goal` acknowledgement, privacy, progress and final-delivery
-user path has not yet been repeated on `39d61ba`: the originating browser session
-requires renewed Discord sign-in. Regression tests cover the changed paths, but
-channel connectivity and the predecessor steering result above do not establish
-those new user-path results. Interaction-expiry behavior also remains untested live.
+The 13 September qualification did not repeat the updated Discord `/goal`
+acknowledgement, privacy, progress and final-delivery user path on `39d61ba`;
+browser sign-in was pending then. The later ordinary-request checks on `7fbb56e`
+are recorded above, but do not establish fresh slash-command or interaction-expiry
+acceptance. Those paths retain their separate live-check requirement.
 Adopters should complete the [live acceptance checks](../docs/17-adoption-guide.md)
 against their own installation.

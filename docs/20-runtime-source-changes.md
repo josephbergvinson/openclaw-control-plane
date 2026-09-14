@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-57 local commits and 487 changed paths from the official release. It includes
+62 local commits and 518 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -28,6 +28,11 @@ The source paths are relative to the reconstructed OpenClaw checkout.
 | Visible child deadlines | The initial visible-session timeout reaches the existing execution owner in milliseconds. Explicit zero, default/omitted values and seconds compatibility retain their distinct contracts. Generated protocol types and regression cases travel with the patch. |
 | Cron and child custody | Native cron, subagent registry and task runtime changes retain parent custody through child completion, retries, cancellation and restart recovery. A parent does not lose responsibility merely because execution moved into a child. In `src/cron/command-runner.ts`, explicit numeric `timeoutSeconds: 0` disables the command wall timer; omission, positive deadlines, no-output limits and cancellation keep their separate contracts. |
 | Automation removal | `src/cron/service/timer-outcomes.ts` and `timer-outcome-finalization.ts` retain terminal history for a removed run without generating a new failure alert. A replacement with the same ID retains its own state. Existing alerts for execution and required-delivery failures remain enabled. |
+| Retained cron configuration | `src/cron/task-run-history.ts` adds `configRevision` only when a retained execution receipt identifies that run's configuration unambiguously. Later job edits cannot rewrite it; missing or ambiguous receipts leave the field absent. The gateway schema and regression tests carry the same contract. |
+| Exact Discord reads | `extensions/discord/src/actions/runtime.messaging.messages.ts` returns the specified message or an error for `read --message-id`, preserving target authorization and rejecting conflicting history selectors. It cannot silently substitute channel history. |
+| Continuation presentation | `src/agents/command/continuation-presentation.ts` and the Discord message handler retain eligible progress at yield and route resumed commentary and typing through native presentation settings. Hidden child, cron and heartbeat work does not acquire that visible continuation path. |
+| Optional silent heartbeat results | `src/auto-reply/reply/get-reply-run-context.ts` and the embedded attempt path allow an intentionally silent heartbeat to settle without a retry demanding a visible answer. Ordinary requests retain their answer requirement. |
+| Yielded requester ownership | Subagent registry reads, heartbeat preflight and reply admission recheck durable and live requester ownership through cleanup and settlement backoff. Announcement socket fallback registers the canonical child task before dispatch while preserving a separate silent CLI task row. |
 | OAuth refresh persistence | `src/agents/auth-profiles/oauth-manager.ts` retains refresh ownership and durable adoption after a caller's wait times out. Queue and cross-process locks prevent overlapping refresh owners; writes reject identity mismatch or credential regression. Failures remain associated with the credentials actually attempted. |
 | Compaction and maintenance | Embedded compaction resolves the selected runtime/model policy and retains ingress/writer custody. Maintenance waits can be cancelled without releasing another operation's writer. Native notices describe supported lifecycle events. |
 | Plain channel responses | Shared progress rendering and Discord/Telegram adapters omit synthetic emoji markers. Disabled tool progress also hides failed-tool progress rows while preserving approvals and final errors. Group prompt guidance respects reaction preferences. |
@@ -92,10 +97,10 @@ Never copy another operator's account database into a fresh installation.
 
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records deployed source
-`39d61ba70ec77e39ead3a51cf22f66fc6321068f`. Its public derivative changes only two
+`7fbb56e134a70c63d1404af547db71bd4870dc3c`. Its public derivative changes only two
 company-specific strings in one regression fixture. All production source bytes
 and file modes match that deployed source. The resulting tree is
-`7df03421b5eb7d267c111c24321b7f333883b5e3`.
+`d300952e487e0979151a201fc5ec7225b4a0b890`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
@@ -126,13 +131,22 @@ name and size were observed in Discord. CDN bytes were not downloaded again.
 This verifies that specific user path on the originating host; it does not cover
 every future steering, compaction or device case or replace adoption checks.
 
-The newly pinned `39d61ba` source passed native checks, a complete build, direct
+The historical `39d61ba` source passed native checks, a complete build, direct
 runtime import and sealed-release activation on 13 September. Fresh health, channel
 and scheduler reads passed, as did a manually invoked Journal capture with visual
 acceptance and renewed process binding. These checks retain their exact scope. The
-new Discord `/goal` acknowledgement and delivery behavior still requires a fresh
-user-path run after browser sign-in; regression evidence is recorded separately.
-See the [runtime evidence](../runtime/README.md) for the current results and limits.
+Discord `/goal` acknowledgement and delivery path was not repeated in that
+qualification; browser sign-in was pending at that time.
+
+The current `7fbb56e` source subsequently passed local native checks, production/test
+type checks, the full build and sealed-release activation. Four fresh Discord
+checks verified calendar read and verification, same-run document steering, and a
+controlled two-worker yield/resume with final delivery. See the
+[delivery evidence](13-delivery-and-control-surface.md#successor-live-retest) for
+the exact scopes, timings and remaining attachment-byte and resumed-typing limits.
+These ordinary-request checks do not establish fresh `/goal` or interaction-expiry
+acceptance. Fresh hosted reconstruction CI for the updated public pin remains
+pending; historical green runs above retain their original source identity.
 
 The repository's operating policies, service layout, scheduled maintenance,
 integrations and backup procedures remain necessary alongside this source package.
