@@ -32,7 +32,7 @@ A legitimate yield is not a failed empty answer. The runtime patch preserves pen
 
 The additional repair has operator source commit [6e5890826b64df455be0c50756ef917aa6ee1211](https://github.com/josephbergvinson/openclaw-runtime-source/commit/6e5890826b64df455be0c50756ef917aa6ee1211). Local qualification passed 570 behavior tests and the native type, lint, import, state, security and dead-export checks. The aggregate build, release staging, candidate import, source seal and initial activation also passed. A private exact-message fetch passed after activation. The first live Discord retest nevertheless failed delivery acceptance; the deployed successor subsequently passed the bounded live checks described below.
 
-The public [runtime manifest](../runtime/manifest.json) now reconstructs deployed source `7fbb56e134a70c63d1404af547db71bd4870dc3c`, including these repairs in the consolidated patch. Its normalized tree is `d300952e487e0979151a201fc5ec7225b4a0b890`; only the two existing company labels in one regression fixture differ from deployed source. Private repository access is unnecessary for public reconstruction. Fresh hosted reconstruction, native-check and build qualification for this pin remain pending; the local and live results below retain their separate scope. The compact resolver change is included in the workspace helper and has its own fixture tests.
+The public [runtime manifest](../runtime/manifest.json) now reconstructs deployed source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`, retaining these repairs and the later ownership and access changes described in the [source map](20-runtime-source-changes.md). Its normalized tree is `f17a5e36a59028eb8638e333d7e0864b546519e1`; only the two existing company labels in one regression fixture differ from the pinned source. Private repository access is unnecessary for public reconstruction. The source has passed activation and the scoped Discord acceptance below. Hosted qualification is established separately by the matching public commit’s workflow results. Every result below retains its original source revision. The compact resolver change is included in the workspace helper and has its own fixture tests.
 
 The baseline calendar request took 598.812 seconds from submission to its final Discord reply. Its trace contained 42 successful tool calls, no tool errors or timeouts, and no compaction. Broad searches, a full resolver result and an exact-message read that incorrectly returned channel history added large outputs to the context. These observations identify unnecessary input volume; they do not establish how much of the delay each output caused. The repair preserves model and reasoning settings.
 
@@ -76,6 +76,84 @@ A controlled two-worker request retained its acknowledgment after 25.393 seconds
 These four checks passed their observed delivery and calendar-state boundaries. The controlled worker test establishes the exercised yield-and-resume path; it does not establish blanket production readiness. The initial failure remains documented above, and the attachment-byte and resumed-typing limits remain explicit.
 
 The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. Actual cleanup behavior and memory savings remain unmeasured.
+
+## Later ownership and access repairs
+
+The current source addresses a separate memory-search lifecycle race:
+background cleanup could close a shared manager after search returned but before
+the tool finalized its status, exposing a false index/model mismatch. Search now
+holds the existing manager lease through result and status finalization. Closing
+waits for admitted work; the lease does not admit work after its callback ends.
+
+Before automatic compaction, a foreground memory checkpoint can itself require
+substantial work. That checkpoint now retains the existing reply-operation and
+ingress-watchdog ownership, including deferred finalization, and can emit a native
+checkpoint notice. This fixes a gap before compaction begins without increasing a
+global timeout or adding another maintenance loop. The observed incident involved
+an already large conversation; it does not show aggressive compaction of a fresh
+short request.
+
+The same source includes registered-project routing for visible source workers,
+a run-bound Gateway context for delegated tools and an authenticated owner access
+default. Accepted provider-profile and steering authority remain bound to the
+admitted operation. The public templates use these controls and avoid inventing a
+hard deadline for work the operator did not timebox. An explicit worker deadline
+still takes effect; a deadline ending before handoff is distinct from lost delivery.
+
+These are source repairs and operating-policy changes. Their focused regressions
+and independent review do not replace activation or fresh destination readback.
+The four live checks above remain attached to predecessor source `7fbb56e`.
+
+### Discord host-context regression
+
+Source `1f38d05` passed native checks, a full build and sealed-release activation.
+Its subsequent ordinary Discord request failed before provider execution with
+“embedded tool authority lost its source execution claim.” This was failed live
+acceptance despite successful activation.
+
+Discord preflight had omitted the host-provided `buildContext` function when
+constructing its next processing context. The later raw builder therefore lost the
+Gateway ownership binding required by the admitted reply operation. Successor
+`b3ee068` forwards that existing builder through the preflight type and value fields.
+It preserves the authority check: unbound and retired owners still receive no valid
+Gateway binding. The three-case regression exercises ordinary Discord preflight
+and message processing, and a downstream execution regression verifies the bound
+tool route. No global fallback or broader permission grant was added.
+
+The successor passed native checks, scoped review, a complete build and
+sealed-release activation. The fresh live check below then established the exercised
+Discord path; the earlier failure retains its original outcome.
+
+### Activated successor check
+
+On deployed source `b3ee068`, a request submitted through an existing Discord
+session received its first visible progress update after about 29 seconds. A
+follow-up arrived during the active run and was consumed by that same run with
+explicit steering ownership. The final response was visible about 3 minutes
+38 seconds after the initial request.
+
+The task used a native helper bound to a registered project with the operator's
+admitted access. Temporary notes in two registered project roots were written,
+read back and removed. Parent execution, helper execution and requester continuation
+succeeded, and the configured reasoning and fast-mode preferences were preserved.
+No compaction or timeout was observed. Visible final delivery was checked in the
+existing Discord interface.
+
+This verifies the exercised authority, project-routing, steering, reversible file
+effects and final-delivery path on the activated source. It is not blanket account
+acceptance or a latency comparison with the earlier calendar request.
+
+A separate request through the existing Discord session exercised the native
+`typeSecret` route using a configured opaque alias. The source credential stayed
+within its existing secure route; the exact origin and configured account matched,
+and two application pages loaded real data. The first visible progress update
+arrived after about 17 seconds. The result was delivered, and an explicit follow-up
+verified the account and closed the test tab. Keeping that tab open for the original
+requested handoff was appropriate. No timeout or compaction was observed, and the
+configured reasoning and fast-mode preferences were preserved.
+
+This verifies the exercised browser account route. It does not supply missing
+credentials for other accounts or prove their login and application workflows.
 
 ## Context notices
 

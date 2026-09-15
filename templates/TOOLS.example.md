@@ -8,6 +8,10 @@ Keep tool availability, authenticated authority and actual execution distinct. A
 
 Act on natural authenticated instructions within their objective, target, account/workspace, operation and risk envelope. `GO`, `STRONG GO`, `SEND` and similar phrases are understood affirmations, not required grammar. Preserve native action gates, human-presence authentication and the boundaries in AGENTS. Execution-security settings are chosen for the installation; they never create operator authority.
 
+Full host execution, ordinary file access and patch access have separate settings. For the adopted full-access setup, use `tools.profile:"full"`, `tools.exec.mode:"full"`, `tools.fs.workspaceOnly:false`, `tools.exec.applyPatch.workspaceOnly:false`, `agents.defaults.sandbox.mode:"off"`, and `agents.defaults.ownerPermissionMode:"full"`. The owner default applies at authenticated admission and follows delegated work; do not persist it into shared-channel session state as a grant to other people. Explicit session restrictions remain separate. Inspect the actual session or worker override when a tool reports a restriction. A failed patch does not establish that ordinary editing, shell execution or the repository is unavailable.
+
+A read-only helper or connector describes that route, not an account-wide ban on authorized writes. Resolve an authenticated native API, CLI or existing browser route for the operation; verify the actual provider permission. Retain signed-in accounts and select the correct account from the request and registry.
+
 If the preferred route fails, inspect the real failure and use the next registered supported route when its source/account/effect boundary is unchanged. A route-specific stop condition wins over generic fallback. Do not repeat a failed call until something material changes. Ask only for a real missing choice, human-only step or unplanned external package.
 
 ## Commands, processes and working directories
@@ -32,6 +36,14 @@ Use one task branch/worktree per reviewable unit. Preserve unrelated changes. Re
 - Keep commit identity visible at meaningful checkpoints for implementation work.
 - If an operationally authoritative fix lands first on a non-standing branch, do not call the lane healthy until the fix is normalized onto the standing branch or the standing default is explicitly updated in the relevant source-of-truth map and verification path.
 - Host-local operational data/output under a control-plane repo must be explicitly classified as tracked source, ignored operational state, or designated external artifact/output.
+
+For durable research and coding workers, use native `sessions_spawn` with `runtime:"subagent", visible:true`. For source work, resolve the repository in `registry/project_topology.json`, read its `native_openclaw_project_id`, and verify that ID against `openclaw gateway call projects.list --json`. Pass the returned native `projectId` with `worktree:true`; omit `cwd` and `execNode` on this route. The Gateway creates and binds the worktree. Preserve completion ownership and resume a suitable existing worker before creating another.
+
+For open-ended implementation or goals, omit `runTimeoutSeconds` and inherit `agents.defaults.subagents.runTimeoutSeconds: 0` (no worker deadline). Supply a positive value only for the operator’s explicit timebox; do not turn an estimate of task duration into a hard stop. Use purposeful per-command or network timeouts and stall handling for individual operations.
+
+If a worker ends at a deadline, inspect its existing session, worktree, commits, and external effect receipts before continuing. Resume from the verified committed and applied state, finish remaining verification and delivery, and never repeat a write merely because the final reply was interrupted.
+
+If registration is missing, verify the canonical Git root and use `openclaw gateway call projects.register --json --params '{"path":"<verified canonical root>","name":"<repository name>"}'` through the authorized operator route. Persist its returned ID in the matching registry entry and read it back with `projects.list`. Never derive an ID from a folder name or copy one from another installation. Project setup does not require the operator to start a new session or repeat the request. Use `runtime:"acp"` for an explicitly selected external coding harness; a retained legacy coding-slice helper is a resume route for that existing slice, not a second worker beside its native session.
 
 ### Protected service lanes and prune preflight
 - Before pruning, deleting, resetting, or repointing any worktree/ref, verify worktree clean/dirty state, merged/unmerged state, local/remote divergence, current worktree attachment, recent session/thread references, live process/port/cron references, and whether the lane is a protected service lane.
@@ -143,11 +155,17 @@ Keep reads narrow, subject-scoped and read-only. Never expose DSNs, secrets or u
 
 Use existing registered signed-in browser state. Reinspect the actual tab, origin, account and current UI before acting. Do not start a fresh login because an earlier observation or stale identifier failed. Keep credentials inside the managed browser/profile or sanctioned opaque broker boundary; never copy cookies or authentication values into another process.
 
+For a password challenge, discover configured aliases with `browser action:"credentialBindings", target:"host"`. On an existing approved Playwright/CDP host profile, use `browser action:"act"` with `request:{kind:"typeSecret", alias:"<binding alias>", targetId:"<observed tab>", ref:"<observed password field>", submit:true}` and an optional observed `submitRef`. The native browser resolves the SecretRef after exact-origin, field and trace checks; supply only the alias and observed controls. Verify the resulting account and requested service. Do not put secret text in generic `type/fill` or invoke a SecretRef provider into tool output.
+
+`typeSecret` is host/CDP-only. The Chrome-MCP existing-session route rejects it, as do node and sandbox targets; a handed-off signed-in Chrome tab remains usable without credential entry. When entry is needed, select an existing supported authenticated or host/CDP route without extracting cookies/passwords or changing global browser state. An OS login dialog or password-manager installation does not by itself establish an opaque automation route.
+
+If a binding cannot resolve, check its registered Keychain service/account, SecretRef or approved environment-file metadata before concluding that the credential is missing. An expired session, wrong account or unsupported tool route is a different issue. Reuse an existing sanctioned secure input facility to enroll an available existing credential under the registered alias, preserving existing items. Request one-time secure enrollment only for a missing credential; never ask for its value in chat, copy it into arguments/logs, reset it, or reauthorize working OAuth accounts to compensate.
+
 Use state assertions, text/anchors and observable waits rather than blind clicks or fixed delays. Reconfirm app/window/focus after a context change. A click is not evidence of the requested effect; read back the target object or observable UI state. Unexpected layout or account changes require renewed identification, not guessing.
 
 For `AGENTS.md` §11 cleanup, recheck the recorded tab/window or app-instance identity and current activity, use supported close controls on the same lane, and verify that only the intended resource closed.
 
-CAPTCHA, passkey/biometric/hardware-key presence, one-time MFA, credential creation/reset/recovery and custody changes remain human-presence boundaries. An operator's permission to handle ordinary system dialogs does not invent a secure credential channel or bypass those native boundaries.
+Apply AGENTS §5 to the actual challenge. Use an existing authorized secure facility for verification it supports, including one-time-code or MFA entry, without exposing the value. Request human action when the provider requires physical biometric/security-key or CAPTCHA presence, or no supported secure route is available. Secure enrollment of an existing credential remains distinct from provider credential creation/reset/recovery or custody changes. Ordinary system-dialog authorization does not invent a secure channel or bypass a provider-required human step.
 
 ## Authorized wallet and economic operations
 
