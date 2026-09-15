@@ -53,10 +53,9 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 The runtime [manifest](runtime/manifest.json) pins official commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, deployed gateway source
 `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`, and reconstructed reference
-`275f120c13b84f150a1bd2c1f9129183e535f2a3`. The reference adds the Mac companion
-and matching private-worker repair;
-the running gateway retains its separately recorded deployment identity.
-This candidate records source reconstruction while native app activation is pending.
+`3498293635372bd128eb4d3cddd520ffb0cfb6ae`. The reference includes the Mac companion
+and matching bundled worker repair. Their scoped installation and workflow acceptance
+are recorded separately from the running gateway's deployment identity.
 The manifest also pins the public
 reconstruction tree and Node.js 24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
 

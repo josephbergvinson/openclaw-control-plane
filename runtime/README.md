@@ -18,21 +18,27 @@ and the boundary between source reconstruction and installation.
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
 | Deployed gateway source | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
-| Reconstructed reference source | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
-| Sanitized source tree | `115954a382331b70ab7f3818e5c02e449bc60752` |
-| Patch SHA-256 | `cb399c00052f1d914d11f6fd587d34e25650d11c9a746647679274eb11f4d4fb` |
+| Deployed Mac companion and bundled worker source | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
+| Reconstructed reference source | `3498293635372bd128eb4d3cddd520ffb0cfb6ae` |
+| Sanitized source tree | `4afd5efe52ae0ba136f738538477f4256500bc5a` |
+| Patch SHA-256 | `7af8cdaf648be9f3ae08e5729667b3426559551fbf1b68425b0372a4eeeb7538` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,918,417 bytes and changes 582 paths across 75 local commits. The custom commit is a lineage
+The patch is 1,919,055 bytes and changes 582 paths across 76 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
 The gateway remains on `b3ee068c6c6`. The reference advances the native Mac
 app and its bundled private worker. The manifest explicitly scopes
 `deployedCommit` to the gateway and records exact paths, blobs and file modes
-under `productionDelta`, `testOnlyDelta` and `documentationDelta`. The
-`components.macCompanion` identity is separate and currently awaits activation
-acceptance. These production differences are not labeled test-only.
+under `productionDelta`, `testOnlyDelta`, `documentationDelta` and
+`toolingOnlyDelta`. The
+`components.macCompanion` identity records the separately accepted app and worker.
+These production differences are not labeled test-only.
+The reference is one tooling-only commit beyond the deployed companion:
+`config/knip.config.ts` models an intentional focused-test export in the production
+scan, while the full-tree scan still audits the test consumers. Every executable
+source blob and file mode is unchanged from the accepted app source.
 
 The two privacy substitutions in the lane-contract fixture remain the only
 export normalization; every other exported blob and file mode matches the
@@ -71,7 +77,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `115954a382331b70ab7f3818e5c02e449bc60752`.
+`git write-tree` must print `4afd5efe52ae0ba136f738538477f4256500bc5a`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -131,16 +137,43 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
-The candidate package reconstructs reference `275f120c13b`, retaining the
+The package reconstructs reference `34982936353`, retaining the
 previously accepted gateway repairs and adding the local Mac SecretRef
 bootstrap described in the [source map](../docs/20-runtime-source-changes.md#mac-companion-authentication).
-Mac app activation remains pending. Hosted qualification must use this new
-reference; earlier green workflows do not qualify it.
+Hosted qualification is bound to this source, independently of earlier green
+workflows and the subsequent acceptance record.
 
 A fresh standalone clone of the exact official tag passed the unchanged public
 helper's preflight, apply and normalized-tree checks. Comparison of all 39,495
 tracked entries confirmed matching production blobs and every file mode against
 the new source. Only the two established fixture labels differ.
+
+The signed companion and its matching bundled worker were activated on 15 September
+from source `275f120c13b`, build
+`2026.9.3-275f120c13b8-2026-09-15T11-39-13.000Z`. All 18 post-activation metadata
+checks passed. Native executable lookup, a valid PNG screen capture, cursor query
+and execution cleanup passed. An ordinary registered-project agent read completed
+in 23.494 seconds and verified the requested path, source commit and heading.
+Rejected probe setup attempts are excluded from these accepted results.
+The gateway process remained on `b3ee068c6c6` throughout the handover.
+
+The retired standalone CLI node is persistently disabled in launchd; its plist
+and pairing identity are retained. The native app and gateway remain enabled,
+and their processes were unchanged by that startup correction. To roll back,
+first retire the native app and its workers, then enable the retained CLI service
+before bootstrapping its plist. A bootout alone does not prevent startup at the
+next login.
+
+These checks do not establish live gateway-token rotation, iOS operation or
+protected native Apple/Mac password entry. Rotation and connection invalidation
+have focused synthetic test coverage; broader production readiness is not claimed.
+
+The first companion reference candidate's [hosted native plan](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34964946596)
+passed full typechecking but rejected the resolver's intentional test export in
+its production-only dead-export scan. Its build and [steering checks](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34964946780)
+passed; those results do not qualify this corrected reference. The two-line Knip
+classification correction is recorded in source `34982936353`. Qualification of
+that exact new reference remains pending; no gate is skipped or disabled.
 
 The following gateway evidence retains its earlier deployment identity.
 
