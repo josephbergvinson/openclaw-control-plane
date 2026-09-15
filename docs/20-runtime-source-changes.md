@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-74 local commits and 569 changed paths from the official release. It includes
+75 local commits and 582 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -46,12 +46,41 @@ The source paths are relative to the reconstructed OpenClaw checkout.
 | Accepted-profile steering authority | `src/agents/embedded-agent-runner/run/attempt-stream.ts` captures the selected authentication profile only after provider acceptance, invalidates capture on abort and preserves operation ownership. `src/auto-reply/reply/agent-runner-steer-adoption.ts` also requires current tool authority before live steering injection. |
 | Foreground checkpoint custody | `src/auto-reply/reply/agent-runner-memory.ts` and the execution owner extend existing ingress and deferred-lifecycle custody through the pre-compaction memory checkpoint. Native presentation can show the checkpoint; cleanup releases ownership on all settlement paths. |
 | Observed macOS permission denials | The native Mac input path checks Accessibility and Event Posting separately before input dispatch and reports the observed missing capability. Screen Recording remains a separate capture check; a denial is not attributed to an unverified stale app build or TCC record. |
+| Local Mac gateway authentication | `apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift` and `src/node-host/local-gateway-auth.ts` resolve configured local gateway SecretRefs through the app's matching bundled worker. The exchange uses bounded private pipes and checks the current configuration before returning credentials. The accepted connection owns in-memory reuse; disconnect or a changed configuration retires it. |
 | State, approvals and backup compatibility | Native state-root migration, approval inspection/migration gates, read-only state access and backup resource inventory preserve the owners of persisted configuration and approval state. |
 
 The patch also carries regression tests, Plugin SDK compatibility documentation,
 the lane-contract lockfile importer and generated protocol/schema changes. These
 are part of the reconstruction. Omitting tests or selecting a few recent commits
 would produce a different reference package.
+
+## Mac companion authentication
+
+A local Mac app launched from Finder may not inherit the environment available to
+the gateway service or a terminal. A configured token or password SecretRef therefore
+needs the existing runtime secret resolver, even while the gateway itself is healthy.
+The companion asks its own bundled `node worker --resolve-local-auth` helper to
+resolve that reference. Packaged apps use their signed worker payload, including
+after relocation; they do not depend on a source worktree or a globally installed
+CLI having the same private command.
+
+The helper accepts only a bounded pipe request matching the current local gateway
+authentication configuration. Its native verifier checks the owning app or
+boolean-only diagnostic against the matching signed bundle before and after secret
+resolution; pipe type alone does not authorize a caller. The helper also checks
+the configuration again before returning credentials through the private output
+pipe and suppresses provider diagnostics. No credential export file or new
+persistent credential copy is created. The app, native CLI and private Node binary
+must share their signing identity; unsigned or ad-hoc builds cannot use this bridge.
+Literal and environment-string settings retain their native paths; a selected
+structured SecretRef remains authoritative over ambient credentials. Remote gateway
+configuration remains outside this local resolver.
+
+Source reconstruction, Mac app installation and gateway deployment have separate
+identities. An app and its matching worker can advance together while the running
+gateway remains on its previously accepted release. The manifest records that
+production difference explicitly; a newer reference commit alone is not evidence
+that the gateway was rebuilt or activated.
 
 ## Models, harnesses and goals
 
@@ -104,14 +133,16 @@ Never copy another operator's account database into a fresh installation.
 ## Reproduction and verification boundaries
 
 The manifest starts at official tag `v2026.9.3`, commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records both deployed source
-`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` and reconstructed reference
-`a9aa626e7db64306efd3abb30ca93fdc5fefc9a3`. The reference changes one test file,
-recorded with its deployed/reference blobs in `testOnlyDelta`; every production
-blob and file mode matches deployed source. The public derivative additionally
-changes only the two established company strings in the separate lane-contract
-fixture. No other export normalization is applied. The resulting tree is
-`74b9cb49179e10461aac1bb4700c76251f88ea5d`.
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
+gateway source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` and reconstructed
+reference `275f120c13b84f150a1bd2c1f9129183e535f2a3`. The reference includes production
+changes for the native Mac app and matching bundled worker; gateway deployment
+has not advanced. Exact endpoint differences are classified by path, blob and
+file mode in `productionDelta`, `testOnlyDelta` and `documentationDelta`.
+
+The public derivative changes only the two established company strings in the
+lane-contract test fixture relative to that reference. No other export
+normalization is applied. The resulting tree is `115954a382331b70ab7f3818e5c02e449bc60752`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
@@ -159,7 +190,7 @@ These ordinary-request checks do not establish fresh `/goal` or interaction-expi
 acceptance. Those results qualify the predecessor only; historical green runs above retain
 their original source identity.
 
-The current `a9aa626e7db` reference passed independent reconstruction from a clean
+The preceding `a9aa626e7db` reference passed independent reconstruction from a clean
 official-tag checkout, with all 39,490 tracked paths and file modes compared against
 source. Every production blob matched; the two established fixture labels are the
 only changes. Focused regressions and scoped independent review accompany the new
@@ -171,14 +202,14 @@ passed. A fresh Discord task then passed visible progress, same-run steering,
 registered-project delegation, verified reversible file effects and final delivery;
 see the [scoped live result](13-delivery-and-control-surface.md#activated-successor-check).
 A separate browser-credential check passed native opaque entry, configured-account
-verification, live application data and requested tab cleanup. Other missing
-credentials remain unprovisioned. Hosted qualification is established separately
+verification, live application data and requested tab cleanup. At that check, other credentials
+remained unprovisioned. Hosted qualification is established separately
 by the matching public commit’s workflow results. Predecessor `1f38d05` activated
 successfully but failed its
 ordinary Discord test before provider execution; the successor preserves the
-omitted host context builder, as recorded in the [delivery diagnosis](13-delivery-and-control-surface.md#discord-host-context-regression). The macOS diagnostic change
-has source-level regression evidence; no full Mac application installation or
-permission-dialog acceptance is claimed here.
+omitted host context builder, as recorded in the [delivery diagnosis](13-delivery-and-control-surface.md#discord-host-context-regression). That earlier qualification gave the macOS diagnostic change source-level
+regression evidence; it did not establish a full Mac application installation
+or permission-dialog acceptance.
 
 Reference `a9aa626` corrects only the question-recovery fixture discovered in the
 first hosted ownership suite. The original failure reproduced locally; all 20

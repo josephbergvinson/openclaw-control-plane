@@ -1,3 +1,36 @@
+diff --git a/apps/macos/Package.swift b/apps/macos/Package.swift
+index ba25193a512898e39b5e08f40005c0dc41da7a25..c8ae86c98d391a5e624166dc541e5734ed6d3ab2 100644
+--- a/apps/macos/Package.swift
++++ b/apps/macos/Package.swift
+@@ -91,6 +91,7 @@ let package = Package(
+             dependencies: [
+                 "OpenClawIPC",
+                 "OpenClawDiscovery",
++                .product(name: "Subprocess", package: "swift-subprocess"),
+                 .product(name: "OpenClawKit", package: "OpenClawKit"),
+                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
+             ],
+diff --git a/apps/macos/Sources/OpenClaw/BoundedProcess.swift b/apps/macos/Sources/OpenClaw/BoundedProcess.swift
+index 3df076a89923437371a06d6a9b2359c194e402da..7b659e6d40c4d7ba58e8a4f5a84499886c54591d 100644
+--- a/apps/macos/Sources/OpenClaw/BoundedProcess.swift
++++ b/apps/macos/Sources/OpenClaw/BoundedProcess.swift
+@@ -116,6 +116,7 @@ enum BoundedProcess {
+         arguments: [String],
+         environment: [String: String]? = nil,
+         workingDirectory: String? = nil,
++        standardInput: some InputProtocol = .none,
+         standardError: some ErrorOutputProtocol = .combinedWithOutput,
+         timeout: TimeInterval) async throws -> BoundedProcessResult
+     {
+@@ -137,7 +138,7 @@ enum BoundedProcess {
+             platformOptions: platformOptions)
+         let executionResult = try await Subprocess.run(
+             configuration,
+-            input: .none,
++            input: standardInput,
+             output: .bytes(limit: self.outputLimit),
+             error: standardError)
+         { execution in
 diff --git a/apps/macos/Sources/OpenClaw/ComputerActionService.swift b/apps/macos/Sources/OpenClaw/ComputerActionService.swift
 index f0499d4720012d16ce5be01c204f5c7a5eee6bbf..4f456ef6b3c3d379b419e2a556d9dc0a014f43be 100644
 --- a/apps/macos/Sources/OpenClaw/ComputerActionService.swift
@@ -94,6 +127,257 @@ index f0499d4720012d16ce5be01c204f5c7a5eee6bbf..4f456ef6b3c3d379b419e2a556d9dc0a
          }
      }
  
+diff --git a/apps/macos/Sources/OpenClaw/GatewayConnection.swift b/apps/macos/Sources/OpenClaw/GatewayConnection.swift
+index 6e53be7006ae2a6ab62869e0705c9da0438177c2..82a017606d308e94a00bc989e00813aee4e28078 100644
+--- a/apps/macos/Sources/OpenClaw/GatewayConnection.swift
++++ b/apps/macos/Sources/OpenClaw/GatewayConnection.swift
+@@ -1150,6 +1150,9 @@ extension GatewayConnection {
+         guard routeGeneration == self.routeGeneration,
+               retireSocketGeneration(socketGeneration, reason: reason)
+         else { return }
++        if self.supportsSharedEndpointRecovery {
++            GatewayLocalAuthResolver.invalidate()
++        }
+         self.finishRealtimeTalkSubscribers(socketGeneration: socketGeneration)
+         self.lastSnapshot = nil
+         self.resetCanvasPluginSurfaceState()
+diff --git a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
+index 76654a10f6c09ee6daa091a605ffa771538ba803..63aec527abd993fdba4c0d7972a643c7bc92f942 100644
+--- a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
++++ b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
+@@ -1024,19 +1024,33 @@ extension GatewayEndpointStore {
+         }
+         let deviceAuthGatewayID = GatewayDiscoveryPreferences.deviceAuthGatewayID(root: root, connectionMode: mode)
+ 
++        var localCredentials: GatewayLocalAuthResolver.Credentials?
++        let serviceEnvironment = (launchdSnapshot?.environment ?? [:]).merging(env) { _, app in app }
++        if mode == .local, let request = try GatewayLocalAuthResolver.request(root: root, env: serviceEnvironment) {
++            let ownerKey = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
++            localCredentials = try await GatewayLocalAuthResolver.resolve(
++                request: request, ownerKey: ownerKey, env: serviceEnvironment)
++            try Task.checkCancellation()
++            guard NSDictionary(dictionary: root).isEqual(to: OpenClawConfigFile.loadDict()) else {
++                throw CancellationError()
++            }
++        } else {
++            GatewayLocalAuthResolver.invalidate()
++        }
++
+         let source = SourceSnapshot(
+             routingGeneration: app.generation,
+             mode: SourceMode(mode),
+             token: mode == .unconfigured
+                 ? nil
+-                : self.resolveGatewayToken(
++                : localCredentials != nil ? localCredentials?.token : self.resolveGatewayToken(
+                     isRemote: isRemote,
+                     root: root,
+                     env: env,
+                     launchdSnapshot: launchdSnapshot),
+             password: mode == .unconfigured
+                 ? nil
+-                : self.resolveGatewayPassword(
++                : localCredentials != nil ? localCredentials?.password : self.resolveGatewayPassword(
+                     isRemote: isRemote,
+                     root: root,
+                     env: env,
+diff --git a/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift b/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..258a8d5655a09c420d612e354988f2897aa6f1eb
+--- /dev/null
++++ b/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
+@@ -0,0 +1,177 @@
++import ConcurrencyExtras
++import Foundation
++import Security
++import Subprocess
++
++/// Resolves the local config's existing SecretRefs through the matching bundled runtime.
++/// The private pipe is memory-only; no credential copy, shell, or diagnostic output is retained.
++enum GatewayLocalAuthResolver {
++    /// One accepted connection's in-memory auth, shared by operator/node RPCs.
++    /// Disconnect retires it; config changes select a new key. No TTL or persistent copy.
++    final class ConnectionCache: @unchecked Sendable {
++        private struct Entry {
++            let id: UUID
++            let key: Data
++            let task: Task<Credentials, Error>
++        }
++
++        private let current = LockIsolated<Entry?>(nil)
++
++        func invalidate() {
++            self.current.withValue {
++                $0?.task.cancel()
++                $0 = nil
++            }
++        }
++
++        func resolve(
++            key: Data,
++            operation: @escaping @Sendable () async throws -> Credentials) async throws -> Credentials
++        {
++            let entry = self.current.withValue { current in
++                if let current, current.key == key { return current }
++                current?.task.cancel()
++                let entry = Entry(id: UUID(), key: key, task: Task { try await operation() })
++                current = entry
++                return entry
++            }
++            let credentials: Credentials
++            do {
++                credentials = try await entry.task.value
++            } catch {
++                self.current.withValue { current in
++                    if current?.id == entry.id { current = nil }
++                }
++                throw error
++            }
++            // A cancelled waiter does not own the operation shared by other consumers.
++            try Task.checkCancellation()
++            guard self.current.withValue({ $0?.id == entry.id }) else { throw CancellationError() }
++            return credentials
++        }
++    }
++
++    private static let connectionCache = ConnectionCache()
++
++    static func invalidate() {
++        self.connectionCache.invalidate()
++    }
++
++    struct Credentials: Decodable, Equatable, Sendable {
++        let version: Int
++        let token: String?
++        let password: String?
++    }
++
++    enum ResolutionError: LocalizedError {
++        case unavailable
++
++        var errorDescription: String? {
++            "Local Gateway credentials could not be resolved. Check the configured SecretRef."
++        }
++    }
++
++    static func request(root: [String: Any], env: [String: String]) throws -> Data? {
++        guard let gateway = root["gateway"] as? [String: Any],
++              gateway["mode"] as? String != "remote",
++              let auth = gateway["auth"] as? [String: Any]
++        else { return nil }
++        let remoteURL = ((gateway["remote"] as? [String: Any])?["url"] as? String)?
++            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
++        guard gateway["mode"] as? String == "local" || remoteURL.isEmpty else { return nil }
++        let mode = auth["mode"] as? String
++        guard mode != "none", mode != "trusted-proxy" else { return nil }
++        let tokenIsReference = auth["token"] is [String: Any]
++        let hasToken = tokenIsReference ||
++            (auth["token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
++        let hasPassword = auth["password"] is [String: Any] ||
++            (auth["password"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
++        let usePassword = mode == "password" || (mode != "token" && (
++            (env["OPENCLAW_GATEWAY_PASSWORD"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
++                !tokenIsReference) || (!hasToken && hasPassword)))
++        let kind = usePassword ? "password" : "token"
++        // A configured SecretRef is authoritative over ambient credentials.
++        // Literal and environment-string settings retain their native fast paths.
++        let hasReference = auth[kind] is [String: Any]
++        guard hasReference else { return nil }
++        let data = try JSONSerialization.data(withJSONObject: ["version": 1, "auth": auth])
++        guard data.count <= 32 * 1024 else { throw ResolutionError.unavailable }
++        return data
++    }
++
++    static func decode(_ result: BoundedProcessResult) throws -> Credentials {
++        guard result.terminationStatus == 0, result.output.count <= 32 * 1024,
++              let credentials = try? JSONDecoder().decode(Credentials.self, from: result.output),
++              credentials.version == 1,
++              credentials.token?.isEmpty == false || credentials.password?.isEmpty == false
++        else { throw ResolutionError.unavailable }
++        return credentials
++    }
++
++    static func resolve(request: Data, ownerKey: Data, env: [String: String]) async throws -> Credentials {
++        try await self.connectionCache.resolve(key: ownerKey) {
++            try await self.run(request: request, env: env)
++        }
++    }
++
++    private static func validateBundleBeforeLaunch() async throws {
++        let bundle = Bundle.main.bundleURL
++        var own: SecCode?
++        var ownStatic: SecStaticCode?
++        var information: CFDictionary?
++        var requirement: SecRequirement?
++        var requirementString: CFString?
++        guard bundle.pathExtension == "app",
++              SecCodeCopySelf(SecCSFlags(), &own) == errSecSuccess, let own,
++              SecCodeCheckValidity(own, SecCSFlags(), nil) == errSecSuccess,
++              SecCodeCopyStaticCode(own, SecCSFlags(), &ownStatic) == errSecSuccess, let ownStatic,
++              SecCodeCopySigningInformation(ownStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
++              == errSecSuccess,
++              let information,
++              let team = (information as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String, !team.isEmpty,
++              SecCodeCopyDesignatedRequirement(ownStatic, SecCSFlags(), &requirement) == errSecSuccess, let requirement,
++              SecRequirementCopyString(requirement, SecCSFlags(), &requirementString) == errSecSuccess,
++              let requirementString
++        else { throw ResolutionError.unavailable }
++        // Validate resources before executing their JavaScript, with a cancellable process deadline.
++        // Later caller proofs recheck the seal; this does not isolate arbitrary concurrent filesystem writes.
++        let result = try await BoundedProcess.run(
++            path: "/usr/bin/codesign",
++            arguments: ["--verify", "--deep", "--strict", "-R", "=\(requirementString)", bundle.path],
++            standardError: .discarded,
++            timeout: 15)
++        guard result.terminationStatus == 0 else { throw ResolutionError.unavailable }
++    }
++
++    private static func run(request: Data, env: [String: String]) async throws -> Credentials {
++        do {
++            let launch = try await CommandResolver.nodeHostWorkerLaunch()
++            guard let executable = launch.command.first else { throw ResolutionError.unavailable }
++            try await self.validateBundleBeforeLaunch()
++            var environment = env
++            environment.merge(launch.environment) { _, bundled in bundled }
++            if let bundledPath = launch.environment["PATH"], let originalPath = env["PATH"] {
++                environment["PATH"] = "\(bundledPath):\(originalPath)"
++            }
++            for key in environment.keys where key == "NODE_OPTIONS" || key == "NODE_PATH" ||
++                key == "LD_PRELOAD" || key.hasPrefix("DYLD_")
++            {
++                environment.removeValue(forKey: key)
++            }
++            environment["OPENCLAW_NO_RESPAWN"] = "1"
++            let result = try await BoundedProcess.run(
++                path: executable,
++                arguments: Array(launch.command.dropFirst()) + ["--resolve-local-auth"],
++                environment: environment,
++                workingDirectory: launch.currentDirectoryURL?.path,
++                standardInput: .array(Array(request)),
++                standardError: .discarded,
++                timeout: 60)
++            return try self.decode(result)
++        } catch is CancellationError {
++            throw CancellationError()
++        } catch {
++            throw ResolutionError.unavailable
++        }
++    }
++}
+diff --git a/apps/macos/Sources/OpenClaw/NodeMode/MacNodeModeCoordinator.swift b/apps/macos/Sources/OpenClaw/NodeMode/MacNodeModeCoordinator.swift
+index c5d100e4a9ac24dd6a28a5fc029cbfd4e209586b..3da72ff6c01dce5f02ad9a87d1da6b7329994813 100644
+--- a/apps/macos/Sources/OpenClaw/NodeMode/MacNodeModeCoordinator.swift
++++ b/apps/macos/Sources/OpenClaw/NodeMode/MacNodeModeCoordinator.swift
+@@ -702,6 +702,9 @@ final class MacNodeModeCoordinator: NSObject {
+             },
+             onDisconnected: { [weak self] reason in
+                 guard let self else { return }
++                if await self.routeAuthorityAllowsInvoke(attempt.routeAuthorityGeneration) {
++                    GatewayLocalAuthResolver.invalidate()
++                }
+                 await self.channelStatus.record(.unavailable(
+                     reason: reason,
+                     diagnostic: attempt.workerUnavailable?.diagnostic))
 diff --git a/apps/macos/Sources/OpenClaw/NodeMode/MacNodeRuntime.swift b/apps/macos/Sources/OpenClaw/NodeMode/MacNodeRuntime.swift
 index 37fc4444d2fcc7b9fedd9c9e3cb15d3f800371fd..44f0e5c5e07aaa0a9d57d3da4fd4472ce31f8edf 100644
 --- a/apps/macos/Sources/OpenClaw/NodeMode/MacNodeRuntime.swift
@@ -117,6 +401,260 @@ index 37fc4444d2fcc7b9fedd9c9e3cb15d3f800371fd..44f0e5c5e07aaa0a9d57d3da4fd4472c
              case .postEventAccessDenied:
                  return Self.errorResponse(
                      req,
+diff --git a/apps/macos/Sources/OpenClawMacCLI/EntryPoint.swift b/apps/macos/Sources/OpenClawMacCLI/EntryPoint.swift
+index 27ae11d01fd7f33dcf715932f2f3d09fe0127c9b..306114b858e1975a60f00263c7eab5b0556c89f8 100644
+--- a/apps/macos/Sources/OpenClawMacCLI/EntryPoint.swift
++++ b/apps/macos/Sources/OpenClawMacCLI/EntryPoint.swift
+@@ -19,6 +19,15 @@ enum RootCommandAction: Equatable {
+ struct OpenClawMacCLI {
+     static func main() async {
+         let args = Array(CommandLine.arguments.dropFirst())
++        if args == ["_verify-local-auth-parent"] {
++            guard let identity = LocalGatewayAuthIPC.parentIdentity() else { exit(1) }
++            print(identity)
++            return
++        }
++        if args == ["_probe-local-auth"] {
++            await LocalGatewayAuthIPC.probe()
++            return
++        }
+         switch resolveRootCommandAction(args) {
+         case .usage:
+             printUsage()
+diff --git a/apps/macos/Sources/OpenClawMacCLI/LocalGatewayAuthIPC.swift b/apps/macos/Sources/OpenClawMacCLI/LocalGatewayAuthIPC.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..549ee44ef651842c7f094bd178b21ba60332bb1a
+--- /dev/null
++++ b/apps/macos/Sources/OpenClawMacCLI/LocalGatewayAuthIPC.swift
+@@ -0,0 +1,228 @@
++import Darwin
++import Foundation
++import Security
++import Subprocess
++
++@_silgen_name("csops")
++private func localAuthCSOps(
++    _ pid: pid_t,
++    _ operation: UInt32,
++    _ address: UnsafeMutableRawPointer?,
++    _ size: Int) -> Int32
++
++/// Only a matching signed app (or this boolean-only diagnostic) may own the auth helper.
++/// Process paths, ancestry and code hashes come from the kernel, never request arguments.
++enum LocalGatewayAuthIPC {
++    private struct ProcessIdentity {
++        let pid: pid_t
++        let parent: pid_t
++        let startedSeconds: UInt64
++        let startedMicroseconds: UInt64
++        let path: String
++    }
++
++    private static func process(_ pid: pid_t) -> ProcessIdentity? {
++        var info = proc_bsdinfo()
++        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
++        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
++              info.pbi_uid == geteuid()
++        else { return nil }
++        var bytes = [UInt8](repeating: 0, count: 4096)
++        guard proc_pidpath(pid, &bytes, UInt32(bytes.count)) > 0 else { return nil }
++        guard let path = String(bytes: bytes.prefix { $0 != 0 }, encoding: .utf8) else { return nil }
++        return ProcessIdentity(
++            pid: pid,
++            parent: pid_t(info.pbi_ppid),
++            startedSeconds: info.pbi_start_tvsec,
++            startedMicroseconds: info.pbi_start_tvusec,
++            path: path)
++    }
++
++    private static func bundle() -> URL? {
++        guard let own = self.process(getpid()) else { return nil }
++        let executable = URL(fileURLWithPath: own.path).resolvingSymlinksInPath()
++        let bundle = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
++        guard executable.lastPathComponent == "openclaw-mac",
++              executable.deletingLastPathComponent().lastPathComponent == "MacOS",
++              bundle.pathExtension == "app"
++        else { return nil }
++        return bundle
++    }
++
++    private static func signedHash(pid: pid_t, expected: URL) -> Data? {
++        var own: SecCode?
++        var ownStatic: SecStaticCode?
++        var ownInformation: CFDictionary?
++        guard SecCodeCopySelf(SecCSFlags(), &own) == errSecSuccess, let own,
++              SecCodeCheckValidity(own, SecCSFlags(), nil) == errSecSuccess,
++              SecCodeCopyStaticCode(own, SecCSFlags(), &ownStatic) == errSecSuccess, let ownStatic,
++              SecCodeCopySigningInformation(ownStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &ownInformation)
++              == errSecSuccess,
++              let ownInformation,
++              let ownTeam = (ownInformation as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String,
++              !ownTeam.isEmpty,
++              let ownCertificates = (ownInformation as NSDictionary)[kSecCodeInfoCertificates] as? [SecCertificate],
++              let ownCertificate = ownCertificates.first
++        else { return nil }
++        var expectedCode: SecStaticCode?
++        var requirement: SecRequirement?
++        var information: CFDictionary?
++        guard SecStaticCodeCreateWithPath(expected as CFURL, SecCSFlags(), &expectedCode) == errSecSuccess,
++              let expectedCode,
++              SecStaticCodeCheckValidity(expectedCode, SecCSFlags(), nil) == errSecSuccess,
++              SecCodeCopyDesignatedRequirement(expectedCode, SecCSFlags(), &requirement) == errSecSuccess,
++              let requirement,
++              SecCodeCopySigningInformation(expectedCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
++              == errSecSuccess,
++              let information,
++              (information as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String == ownTeam,
++              let certificates = (information as NSDictionary)[kSecCodeInfoCertificates] as? [SecCertificate],
++              let certificate = certificates.first,
++              SecCertificateCopyData(certificate) as Data == SecCertificateCopyData(ownCertificate) as Data,
++              let identifier = (information as NSDictionary)[kSecCodeInfoIdentifier] as? String,
++              expected.lastPathComponent == "OpenClaw"
++              ? (identifier == "ai.openclaw.mac" || identifier.hasPrefix("ai.openclaw.mac."))
++              : expected.lastPathComponent == "node"
++              ? identifier == "node"
++              : identifier == (ownInformation as NSDictionary)[kSecCodeInfoIdentifier] as? String,
++              let expectedHash = (information as NSDictionary)[kSecCodeInfoUnique] as? Data
++        else { return nil }
++        var guest: SecCode?
++        let attributes = [kSecGuestAttributePid as String: NSNumber(value: pid)] as CFDictionary
++        guard SecCodeCopyGuestWithAttributes(nil, attributes, SecCSFlags(), &guest) == errSecSuccess,
++              let guest,
++              SecCodeCheckValidity(guest, SecCSFlags(), requirement) == errSecSuccess
++        else { return nil }
++        // Same requirement alone could admit a replaced bundle's old mapped executable.
++        var hash = [UInt8](repeating: 0, count: 20)
++        guard hash.withUnsafeMutableBytes({ localAuthCSOps(pid, 5, $0.baseAddress, $0.count) }) == 0,
++              Data(hash) == expectedHash
++        else { return nil }
++        return expectedHash
++    }
++
++    private static func sealedBundle(_ bundle: URL) -> Bool {
++        // A signed interpreter alone does not authenticate the JavaScript it executes.
++        // Validate the containing app's resource seal and bind its signer to this running verifier.
++        var own: SecCode?
++        var ownStatic: SecStaticCode?
++        var ownInformation: CFDictionary?
++        var app: SecStaticCode?
++        var appInformation: CFDictionary?
++        let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode | kSecCSCheckAllArchitectures)
++        guard SecCodeCopySelf(SecCSFlags(), &own) == errSecSuccess, let own,
++              SecCodeCheckValidity(own, SecCSFlags(), nil) == errSecSuccess,
++              SecCodeCopyStaticCode(own, SecCSFlags(), &ownStatic) == errSecSuccess, let ownStatic,
++              SecCodeCopySigningInformation(ownStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &ownInformation)
++              == errSecSuccess,
++              let ownInformation,
++              let ownTeam = (ownInformation as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String,
++              !ownTeam.isEmpty,
++              let ownCertificates = (ownInformation as NSDictionary)[kSecCodeInfoCertificates] as? [SecCertificate],
++              let ownCertificate = ownCertificates.first,
++              SecStaticCodeCreateWithPath(bundle as CFURL, SecCSFlags(), &app) == errSecSuccess, let app,
++              SecStaticCodeCheckValidity(app, flags, nil) == errSecSuccess,
++              SecCodeCopySigningInformation(app, SecCSFlags(rawValue: kSecCSSigningInformation), &appInformation)
++              == errSecSuccess,
++              let appInformation,
++              (appInformation as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String == ownTeam,
++              let certificates = (appInformation as NSDictionary)[kSecCodeInfoCertificates] as? [SecCertificate],
++              let certificate = certificates.first,
++              SecCertificateCopyData(certificate) as Data == SecCertificateCopyData(ownCertificate) as Data,
++              let identifier = (appInformation as NSDictionary)[kSecCodeInfoIdentifier] as? String,
++              identifier == "ai.openclaw.mac" || identifier.hasPrefix("ai.openclaw.mac.")
++        else { return false }
++        return true
++    }
++
++    static func parentIdentity() -> String? {
++        guard let bundle = self.bundle(),
++              self.sealedBundle(bundle),
++              let helper = self.process(getppid()),
++              let owner = self.process(helper.parent)
++        else { return nil }
++        #if arch(arm64)
++        let architecture = "arm64"
++        #else
++        let architecture = "x86_64"
++        #endif
++        let node = bundle.appendingPathComponent("Contents/Resources/node-worker/\(architecture)/bin/node")
++        let app = bundle.appendingPathComponent("Contents/MacOS/OpenClaw")
++        let probe = bundle.appendingPathComponent("Contents/MacOS/openclaw-mac")
++        guard helper.path == node.resolvingSymlinksInPath().path,
++              self.signedHash(pid: helper.pid, expected: node) != nil,
++              owner.path == app.path || owner.path == probe.path,
++              let hash = self.signedHash(pid: owner.pid, expected: URL(fileURLWithPath: owner.path)),
++              let current = self.process(helper.pid), current.parent == owner.pid,
++              current.startedSeconds == helper.startedSeconds,
++              current.startedMicroseconds == helper.startedMicroseconds,
++              let currentOwner = self.process(owner.pid), currentOwner.path == owner.path,
++              currentOwner.startedSeconds == owner.startedSeconds,
++              currentOwner.startedMicroseconds == owner.startedMicroseconds
++        else { return nil }
++        return "\(owner.pid):\(owner.startedSeconds):\(owner.startedMicroseconds):" +
++            hash.map { String(format: "%02x", $0) }.joined()
++    }
++
++    static func probe() async {
++        var tokenPresent = false
++        var passwordPresent = false
++        do {
++            guard let bundle = self.bundle(), self.sealedBundle(bundle), isatty(STDIN_FILENO) == 0
++            else { throw ProbeError.unavailable }
++            var input = Data()
++            while let chunk = try FileHandle.standardInput.read(upToCount: 4096), !chunk.isEmpty {
++                input.append(chunk)
++                guard input.count <= 32 * 1024 else { throw ProbeError.unavailable }
++            }
++            #if arch(arm64)
++            let architecture = "arm64"
++            #else
++            let architecture = "x86_64"
++            #endif
++            let root = bundle.appendingPathComponent("Contents/Resources/node-worker/\(architecture)")
++            var options = PlatformOptions()
++            options.createSession = true
++            options.teardownSequence = [.send(signal: .kill, toProcessGroup: true, allowedDurationToNextStep: .zero)]
++            var environment: [Environment.Key: String] = [:]
++            for (key, value) in ProcessInfo.processInfo.environment {
++                guard key != "NODE_OPTIONS", key != "NODE_PATH", key != "LD_PRELOAD",
++                      !key.hasPrefix("DYLD_"), let name = Environment.Key(rawValue: key) else { continue }
++                environment[name] = value
++            }
++            environment["OPENCLAW_NO_RESPAWN"] = "1"
++            let configuration = Configuration(
++                executable: .path(.init(root.appendingPathComponent("bin/node").path)),
++                arguments: Arguments([
++                    root.appendingPathComponent("lib/node_modules/openclaw/dist/entry.js").path,
++                    "node", "worker", "--resolve-local-auth",
++                ]),
++                environment: .custom(environment),
++                platformOptions: options)
++            let request = Array(input)
++            let data = try await withThrowingTaskGroup(of: Data.self) { group in
++                group.addTask {
++                    let result = try await Subprocess.run(
++                        configuration, input: .array(request), output: .bytes(limit: 32 * 1024), error: .discarded)
++                    guard result.terminationStatus.isSuccess else { throw ProbeError.unavailable }
++                    return Data(result.standardOutput)
++                }
++                group.addTask {
++                    try await Task.sleep(for: .seconds(60))
++                    throw ProbeError.unavailable
++                }
++                defer { group.cancelAll() }
++                guard let data = try await group.next() else { throw ProbeError.unavailable }
++                return data
++            }
++            let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
++            tokenPresent = (result?["token"] as? String)?.isEmpty == false
++            passwordPresent = (result?["password"] as? String)?.isEmpty == false
++        } catch {}
++        let ok = tokenPresent || passwordPresent
++        print("{\"ok\":\(ok),\"tokenPresent\":\(tokenPresent),\"passwordPresent\":\(passwordPresent)}")
++        if !ok { exit(1) }
++    }
++
++    private enum ProbeError: Error { case unavailable }
++}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/ComputerActionServiceTests.swift b/apps/macos/Tests/OpenClawIPCTests/ComputerActionServiceTests.swift
 index 4b547c13418555ab1557034533c0d0bcb5d2e717..aca3852a7154ba6ebfd286384b87256ab19a5f6d 100644
 --- a/apps/macos/Tests/OpenClawIPCTests/ComputerActionServiceTests.swift
@@ -216,6 +754,168 @@ index 4b547c13418555ab1557034533c0d0bcb5d2e717..aca3852a7154ba6ebfd286384b87256a
          }
      }
  
+diff --git a/apps/macos/Tests/OpenClawIPCTests/GatewayLocalAuthResolverTests.swift b/apps/macos/Tests/OpenClawIPCTests/GatewayLocalAuthResolverTests.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..a4e465cafe6e7460b245900ba9819a56a787e076
+--- /dev/null
++++ b/apps/macos/Tests/OpenClawIPCTests/GatewayLocalAuthResolverTests.swift
+@@ -0,0 +1,156 @@
++import ConcurrencyExtras
++import Foundation
++import Testing
++@testable import OpenClaw
++
++private actor GatewayLocalAuthTestGate {
++    private var released = false
++    private var continuation: CheckedContinuation<Void, Never>?
++
++    func wait() async {
++        guard !self.released else { return }
++        await withCheckedContinuation { self.continuation = $0 }
++    }
++
++    func release() {
++        self.released = true
++        self.continuation?.resume()
++        self.continuation = nil
++    }
++}
++
++struct GatewayLocalAuthResolverTests {
++    private let reference: [String: Any] = ["source": "store", "provider": "default", "id": "GATEWAY_AUTH"]
++
++    @Test func `structured local refs reach the private pipe resolver`() throws {
++        let root: [String: Any] = ["gateway": ["mode": "local", "auth": ["mode": "token", "token": self.reference]]]
++        let data = try #require(try GatewayLocalAuthResolver.request(root: root, env: [:]))
++        let request = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
++        #expect(request["version"] as? Int == 1)
++        let auth = try #require(request["auth"] as? [String: Any])
++        #expect((auth["token"] as? [String: String]) == self.reference as? [String: String])
++    }
++
++    @Test func `literal env and remote routes retain their original resolution`() throws {
++        for token in ["literal-token", "${GATEWAY_AUTH}"] {
++            let root: [String: Any] = ["gateway": ["mode": "local", "auth": ["mode": "token", "token": token]]]
++            #expect(try GatewayLocalAuthResolver.request(root: root, env: [:]) == nil)
++        }
++        let remote: [String: Any] = ["gateway": ["mode": "remote", "auth": ["mode": "token", "token": self.reference]]]
++        #expect(try GatewayLocalAuthResolver.request(root: remote, env: [:]) == nil)
++        let local: [String: Any] = ["gateway": ["mode": "local", "auth": ["mode": "token", "token": self.reference]]]
++        #expect(try GatewayLocalAuthResolver.request(root: local, env: ["OPENCLAW_GATEWAY_TOKEN": "stale"]) != nil)
++        let password: [String: Any] = ["gateway": ["mode": "local", "auth": [
++            "mode": "password", "password": self.reference,
++        ]]]
++        #expect(try GatewayLocalAuthResolver
++            .request(root: password, env: ["OPENCLAW_GATEWAY_PASSWORD": "stale"]) != nil)
++    }
++
++    @Test func `selected password ref is not masked by a sibling literal token`() throws {
++        let root: [String: Any] = ["gateway": ["mode": "local", "auth": [
++            "mode": "password", "password": self.reference, "token": "stale",
++        ]]]
++        #expect(try GatewayLocalAuthResolver.request(root: root, env: [:]) != nil)
++        let inferred: [String: Any] = ["gateway": ["auth": ["password": self.reference]]]
++        #expect(try GatewayLocalAuthResolver.request(root: inferred, env: ["OPENCLAW_GATEWAY_TOKEN": "ambient"]) != nil)
++        let blankRemote: [String: Any] = ["gateway": [
++            "remote": ["url": "  "], "auth": ["password": self.reference],
++        ]]
++        #expect(try GatewayLocalAuthResolver.request(root: blankRemote, env: [:]) != nil)
++    }
++
++    @Test func `connection auth is single flight reused and refreshed after invalidation`() async throws {
++        let cache = GatewayLocalAuthResolver.ConnectionCache()
++        let calls = LockIsolated(0)
++        let operation: @Sendable () async throws -> GatewayLocalAuthResolver.Credentials = {
++            let number = calls.withValue { $0 += 1
++                return $0
++            }
++            try await Task.sleep(for: .milliseconds(20))
++            return .init(version: 1, token: "synthetic-\(number)", password: nil)
++        }
++        async let first = cache.resolve(key: Data([1]), operation: operation)
++        async let second = cache.resolve(key: Data([1]), operation: operation)
++        let results = try await [first, second]
++        #expect(results[0] == results[1])
++        #expect(calls.value == 1)
++        #expect(try await cache.resolve(key: Data([1]), operation: operation) == results[0])
++        #expect(calls.value == 1)
++        cache.invalidate()
++        #expect(try await cache.resolve(key: Data([1]), operation: operation).token == "synthetic-2")
++        #expect(try await cache.resolve(key: Data([2]), operation: operation).token == "synthetic-3")
++    }
++
++    @Test func `retired in flight auth cannot publish and failures do not poison retry`() async throws {
++        let cache = GatewayLocalAuthResolver.ConnectionCache()
++        let started = LockIsolated(false)
++        let operation = Task {
++            try await cache.resolve(key: Data([1])) {
++                started.setValue(true)
++                try await Task.sleep(for: .seconds(10))
++                return .init(version: 1, token: "retired", password: nil)
++            }
++        }
++        while !started.value {
++            await Task.yield()
++        }
++        cache.invalidate()
++        await #expect(throws: CancellationError.self) { try await operation.value }
++        await #expect(throws: GatewayLocalAuthResolver.ResolutionError.self) {
++            try await cache.resolve(key: Data([1])) { throw GatewayLocalAuthResolver.ResolutionError.unavailable }
++        }
++        let fresh = try await cache.resolve(key: Data([1])) {
++            .init(version: 1, token: "fresh", password: nil)
++        }
++        #expect(fresh.token == "fresh")
++    }
++
++    @Test func `one cancelled consumer does not retire another consumers auth`() async throws {
++        let cache = GatewayLocalAuthResolver.ConnectionCache()
++        let calls = LockIsolated(0)
++        let gate = GatewayLocalAuthTestGate()
++        let resolve: @Sendable () async throws -> GatewayLocalAuthResolver.Credentials = {
++            calls.withValue { $0 += 1 }
++            await gate.wait()
++            return .init(version: 1, token: "shared", password: nil)
++        }
++        let cancelled = Task { try await cache.resolve(key: Data([1]), operation: resolve) }
++        while calls.value == 0 {
++            await Task.yield()
++        }
++        let other = Task { try await cache.resolve(key: Data([1]), operation: resolve) }
++        cancelled.cancel()
++        await gate.release()
++        await #expect(throws: CancellationError.self) { try await cancelled.value }
++        #expect(try await other.value.token == "shared")
++        #expect(try await cache.resolve(key: Data([1]), operation: resolve).token == "shared")
++        #expect(calls.value == 1)
++    }
++
++    @Test func `private subprocess stdin closes and credentials remain captured in memory`() async throws {
++        let bytes = Data(#"{"version":1,"token":"synthetic-pipe-token"}"#.utf8)
++        let result = try await BoundedProcess.run(
++            path: "/bin/cat",
++            arguments: [],
++            standardInput: .array(Array(bytes)),
++            standardError: .discarded,
++            timeout: 5)
++        #expect(try GatewayLocalAuthResolver.decode(result).token == "synthetic-pipe-token")
++    }
++
++    @Test func `helper errors and malformed output reveal no credentials`() throws {
++        for output in [#"{"version":1,"token":"secret-from-error"}"#, "provider diagnostic: secret", "{}"] {
++            #expect(throws: GatewayLocalAuthResolver.ResolutionError.self) {
++                try GatewayLocalAuthResolver.decode(.init(output: Data(output.utf8), terminationStatus: 1))
++            }
++        }
++        #expect(throws: GatewayLocalAuthResolver.ResolutionError.self) {
++            try GatewayLocalAuthResolver.decode(.init(output: Data("{}".utf8), terminationStatus: 0))
++        }
++        let result = try GatewayLocalAuthResolver.decode(.init(
++            output: Data(#"{"version":1,"token":"synthetic-token"}"#.utf8), terminationStatus: 0))
++        #expect(result.token == "synthetic-token")
++        #expect(result.password == nil)
++    }
++}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/MacNodeRuntimeTests.swift b/apps/macos/Tests/OpenClawIPCTests/MacNodeRuntimeTests.swift
 index 2f7f10fd3ce31fdfde61049fc9db984833e0c5b9..5b3bb96a2cd9d0ff2155700b058354d1dff232ea 100644
 --- a/apps/macos/Tests/OpenClawIPCTests/MacNodeRuntimeTests.swift
@@ -497,6 +1197,30 @@ index 96895fa9ab343793d5e735c964087978c705b1c0..17d2c5de4821b7e84fa0fd93ebc18b38
  The Control UI permission picker labels Default with the agent's resolved exec posture when it matches a session mode, for example **Default (Guarded)** for `tools.exec.mode: "ask"` without a stricter host approval policy. Resolution includes global settings, agent overrides, and host approval floors. Without those settings or sandboxing, the default is full access. Allowlist-only policy and non-equivalent `security`/`ask` pairs, including `ask: "always"`, keep the plain **Default** label. Agents whose sandbox configuration could apply to their sessions also keep plain **Default**, because effective policy cannot be stated at agent scope. This is display metadata, not an authorization decision or a filesystem-access guarantee; tool policy still applies. Selecting Default clears the session override; it does not save the displayed mode into the session.
  
  ## Delegated setup and repair
+diff --git a/docs/platforms/mac/bundled-gateway.md b/docs/platforms/mac/bundled-gateway.md
+index 66263d6b36a3d81fa401ab0432dc44bf79c9ba03..180d91d4cdb5b0e9d171c494c2bd93591ae8c777 100644
+--- a/docs/platforms/mac/bundled-gateway.md
++++ b/docs/platforms/mac/bundled-gateway.md
+@@ -18,6 +18,19 @@ manage a per-user launchd service, or attaches to an already-running Gateway.
+ It does not start the Gateway inside its private worker runtime. Packaging the
+ worker never installs, updates, or restarts a Gateway service.
+ 
++For a local Gateway whose token or password is a structured SecretRef, the app
++uses its matching bundled runtime to resolve that existing credential owner.
++The result travels through a bounded private pipe and stays in memory for the
++accepted connection. Config changes and disconnections retire that result, so
++reconnection resolves the current secret without spawning a helper for every
++RPC. This does not copy credentials into app preferences, LaunchAgent plists,
++or plaintext config. Literal and environment-string settings retain their
++existing resolution; remote connection routing is unchanged.
++
++The SecretRef bridge admits only the matching signed native app or its
++boolean-only diagnostic probe. The app, CLI, and private Node executable must
++share their signing identity; an unsigned or ad-hoc build cannot use this bridge.
++
+ The private worker validates core and node configuration through a read-only
+ bootstrap, without Gateway-wide Doctor preflight or channel-schema validation.
+ Node plugins still validate their own settings before publishing commands, and
 diff --git a/docs/platforms/mac/permissions.md b/docs/platforms/mac/permissions.md
 index 1fd289455542babe139aec15d9024f95a71de563..6faa8532516fcabd5d760e35c2116200c17e2634 100644
 --- a/docs/platforms/mac/permissions.md
@@ -31390,6 +32114,25 @@ index 08123bc1867063543c8788754b86b0e1d94b0654..1ea40d5ebeb5a8fd9cdf52e5867d353e
 +    }
    });
  });
+diff --git a/src/cli/node-cli/register.ts b/src/cli/node-cli/register.ts
+index 070789508a45f03cd433530e6942088d081c5f42..f91f7eef239660b277022d311cd84fbeb518287b 100644
+--- a/src/cli/node-cli/register.ts
++++ b/src/cli/node-cli/register.ts
+@@ -41,7 +41,13 @@ export function registerNodeCli(program: Command) {
+   node
+     .command("worker", { hidden: true })
+     .description("Run the private macOS app node-host worker")
+-    .action(async () => {
++    .addOption(new Option("--resolve-local-auth").hideHelp())
++    .action(async (opts) => {
++      if (opts.resolveLocalAuth) {
++        const { runLocalGatewayAuth } = await import("../../node-host/local-gateway-auth.js");
++        await runLocalGatewayAuth();
++        return;
++      }
+       await runNodeHostWorker();
+     });
+ 
 diff --git a/src/commands/agent.test.ts b/src/commands/agent.test.ts
 index a021546904ebcd17d2071cd9ae11551b9ec0f9b9..543d6fe0d0229bdb9ef35b1eda4442178ec6b169 100644
 --- a/src/commands/agent.test.ts
@@ -38409,6 +39152,251 @@ index 2678bc5010b0b255a9aec30846caaac7299cad9c..87c8d37ebe9252083da2f01322b06ab3
  
  function formatEchoTranscript(transcript: string, format: string): string {
    // Function replacer keeps `$` sequences in the transcript literal instead of
+diff --git a/src/node-host/local-gateway-auth.test.ts b/src/node-host/local-gateway-auth.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e10fe29cd793b738538f1ffe73a6560e442ab2c1
+--- /dev/null
++++ b/src/node-host/local-gateway-auth.test.ts
+@@ -0,0 +1,124 @@
++import fs from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { readConfigFileSnapshot } from "../config/config.js";
++import { writeSecretStoreEntry } from "../secrets/store/secret-store.js";
++import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
++import { resolveLocalGatewayAuth } from "./local-gateway-auth.js";
++
++let root: string;
++const ref = { source: "store", provider: "default", id: "NATIVE_GATEWAY_TOKEN" };
++
++beforeEach(async () => {
++  root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-native-auth-"));
++  vi.stubEnv("OPENCLAW_STATE_DIR", root);
++  vi.stubEnv("OPENCLAW_CONFIG_PATH", path.join(root, "openclaw.json"));
++  vi.stubEnv("OPENCLAW_GATEWAY_TOKEN", "");
++  vi.stubEnv("OPENCLAW_GATEWAY_PASSWORD", "");
++});
++
++afterEach(async () => {
++  closeOpenClawStateDatabaseForTest();
++  vi.unstubAllEnvs();
++  await fs.rm(root, { recursive: true, force: true });
++});
++
++async function snapshot(auth: object, mode = "local") {
++  await fs.writeFile(path.join(root, "openclaw.json"), JSON.stringify({ gateway: { mode, auth } }));
++  return readConfigFileSnapshot();
++}
++
++function store(value: string) {
++  writeSecretStoreEntry({
++    scope: { kind: "team" },
++    name: ref.id,
++    value,
++    kind: "secret",
++    updatedBy: "native-auth-test",
++  });
++}
++
++describe("private native local Gateway auth", () => {
++  it("reads the existing store owner and observes rotation on the next resolution", async () => {
++    const auth = { mode: "token", token: ref };
++    const config = await snapshot(auth);
++    store("synthetic-first-token");
++    expect(
++      await resolveLocalGatewayAuth({ version: 1, auth }, config, { OPENCLAW_STATE_DIR: root }),
++    ).toEqual({
++      token: "synthetic-first-token",
++    });
++    store("synthetic-rotated-token");
++    expect(
++      await resolveLocalGatewayAuth({ version: 1, auth }, config, { OPENCLAW_STATE_DIR: root }),
++    ).toEqual({
++      token: "synthetic-rotated-token",
++    });
++    expect(
++      JSON.parse(await fs.readFile(path.join(root, "openclaw.json"), "utf8")).gateway.auth,
++    ).toEqual(auth);
++  });
++
++  it("fails a missing selected ref without using ambient credentials or exposing its diagnostic", async () => {
++    const auth = { mode: "token", token: ref };
++    await expect(
++      resolveLocalGatewayAuth({ version: 1, auth }, await snapshot(auth), {
++        OPENCLAW_STATE_DIR: root,
++        OPENCLAW_GATEWAY_TOKEN: "unrelated-ambient-token",
++      }),
++    ).rejects.toThrow("Local Gateway credentials could not be resolved.");
++  });
++
++  it("rejects a changed auth owner and remote routing before reading credentials", async () => {
++    const auth = { mode: "token", token: ref };
++    store("synthetic-token");
++    const request = { version: 1, auth };
++    await expect(
++      resolveLocalGatewayAuth(request, await snapshot({ mode: "token", token: "changed" }), {
++        OPENCLAW_STATE_DIR: root,
++      }),
++    ).rejects.toThrow("Local Gateway credentials could not be resolved.");
++    await expect(
++      resolveLocalGatewayAuth(request, await snapshot(auth, "remote"), {
++        OPENCLAW_STATE_DIR: root,
++      }),
++    ).rejects.toThrow("Local Gateway credentials could not be resolved.");
++  });
++
++  it("honors password mode instead of a stale sibling token", async () => {
++    store("synthetic-password");
++    const auth = { mode: "password", password: ref, token: "stale-sibling" };
++    expect(
++      await resolveLocalGatewayAuth({ version: 1, auth }, await snapshot(auth), {
++        OPENCLAW_STATE_DIR: root,
++      }),
++    ).toEqual({
++      password: "synthetic-password",
++    });
++  });
++
++  it("uses the canonical environment SecretRef resolver", async () => {
++    const auth = {
++      mode: "token",
++      token: { source: "env", provider: "default", id: "NATIVE_AUTH_ENV" },
++    };
++    expect(
++      await resolveLocalGatewayAuth({ version: 1, auth }, await snapshot(auth), {
++        OPENCLAW_STATE_DIR: root,
++        NATIVE_AUTH_ENV: "synthetic-env-token",
++      }),
++    ).toEqual({ token: "synthetic-env-token" });
++  });
++
++  it("infers a configured password ref without using an unrelated ambient token", async () => {
++    store("synthetic-password");
++    const auth = { password: ref };
++    expect(
++      await resolveLocalGatewayAuth({ version: 1, auth }, await snapshot(auth), {
++        OPENCLAW_STATE_DIR: root,
++        OPENCLAW_GATEWAY_TOKEN: "ambient-token",
++      }),
++    ).toEqual({ password: "synthetic-password" });
++  });
++});
+diff --git a/src/node-host/local-gateway-auth.ts b/src/node-host/local-gateway-auth.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4113d9d4e875b88195ec973efd0dc0947fea7b73
+--- /dev/null
++++ b/src/node-host/local-gateway-auth.ts
+@@ -0,0 +1,109 @@
++/** Private, pipe-only bootstrap auth for the signed Mac app's local connection. */
++import fs from "node:fs";
++import path from "node:path";
++import { isDeepStrictEqual } from "node:util";
++import { requestExitAfterOneShotOutput } from "../cli/one-shot-exit.js";
++import { readConfigFileSnapshot } from "../config/config.js";
++import type { ConfigFileSnapshot } from "../config/types.js";
++import { resolveGatewayInteractiveSurfaceAuth } from "../gateway/auth-surface-resolution.js";
++import { runExec } from "../process/exec.js";
++import { isRecord } from "../utils.js";
++
++const MAX_FRAME_BYTES = 32 * 1024;
++const UNAVAILABLE = "Local Gateway credentials could not be resolved.";
++
++async function verifyNativeParent(): Promise<string> {
++  if (process.platform !== "darwin") {
++    throw new Error(UNAVAILABLE);
++  }
++  let bundle = path.dirname(fs.realpathSync.native(process.execPath));
++  while (!bundle.endsWith(".app") && path.dirname(bundle) !== bundle) {
++    bundle = path.dirname(bundle);
++  }
++  if (!bundle.endsWith(".app")) {
++    throw new Error(UNAVAILABLE);
++  }
++  const result = await runExec(
++    path.join(bundle, "Contents/MacOS/openclaw-mac"),
++    ["_verify-local-auth-parent"],
++    { timeoutMs: 15000, maxBuffer: 1024, logOutput: false },
++  );
++  const identity = result.stdout.trim();
++  if (!/^\d+:\d+:\d+:[a-f0-9]{40}$/.test(identity)) {
++    throw new Error(UNAVAILABLE);
++  }
++  return identity;
++}
++
++export async function resolveLocalGatewayAuth(
++  request: unknown,
++  snapshot: ConfigFileSnapshot,
++  env: NodeJS.ProcessEnv,
++): Promise<{ token?: string; password?: string }> {
++  const parsed = snapshot.parsed;
++  if (
++    !isRecord(request) ||
++    request.version !== 1 ||
++    !snapshot.valid ||
++    !isRecord(parsed) ||
++    !isRecord(parsed.gateway) ||
++    parsed.gateway.mode === "remote" ||
++    (parsed.gateway.mode !== "local" &&
++      isRecord(parsed.gateway.remote) &&
++      typeof parsed.gateway.remote.url === "string" &&
++      parsed.gateway.remote.url.trim() !== "") ||
++    !isDeepStrictEqual(parsed.gateway.auth, request.auth)
++  ) {
++    throw new Error(UNAVAILABLE);
++  }
++  const auth = await resolveGatewayInteractiveSurfaceAuth({
++    config: snapshot.config,
++    env,
++    surface: "local",
++  });
++  if (auth.failureReason || (!auth.token && !auth.password)) {
++    // Provider errors may contain secret material. Never relay their diagnostics.
++    throw new Error(UNAVAILABLE);
++  }
++  return { token: auth.token, password: auth.password };
++}
++
++export async function runLocalGatewayAuth(): Promise<void> {
++  try {
++    // This is app IPC, never terminal output or a credential export file.
++    if (!fs.fstatSync(0).isFIFO() || !fs.fstatSync(1).isFIFO()) {
++      throw new Error(UNAVAILABLE);
++    }
++    const parentIdentity = await verifyNativeParent();
++    const chunks: Buffer[] = [];
++    let size = 0;
++    for await (const chunk of process.stdin) {
++      const bytes = Buffer.from(chunk);
++      size += bytes.length;
++      if (size > MAX_FRAME_BYTES) {
++        throw new Error(UNAVAILABLE);
++      }
++      chunks.push(bytes);
++    }
++    const request: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
++    const snapshot = await readConfigFileSnapshot();
++    const auth = await resolveLocalGatewayAuth(request, snapshot, process.env);
++    // A provider may suspend. Do not return credentials against an edited config.
++    const current = await readConfigFileSnapshot();
++    if (!current.valid || !isDeepStrictEqual(current.sourceConfig, snapshot.sourceConfig)) {
++      throw new Error(UNAVAILABLE);
++    }
++    const output = JSON.stringify({ version: 1, ...auth });
++    if (Buffer.byteLength(output) > MAX_FRAME_BYTES) {
++      throw new Error(UNAVAILABLE);
++    }
++    if ((await verifyNativeParent()) !== parentIdentity) {
++      throw new Error(UNAVAILABLE);
++    }
++    process.stdout.write(`${output}\n`);
++  } catch {
++    process.exitCode = 1;
++    // Neither stdout nor stderr exposes secret values or provider errors.
++  }
++  requestExitAfterOneShotOutput();
++}
 diff --git a/src/plugin-sdk/agent-harness-task-continuation.test.ts b/src/plugin-sdk/agent-harness-task-continuation.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..ef1365971371adb3d25be10ed1040e489cf4a234
