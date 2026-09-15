@@ -172,8 +172,21 @@ The first companion reference candidate's [hosted native plan](https://github.co
 passed full typechecking but rejected the resolver's intentional test export in
 its production-only dead-export scan. Its build and [steering checks](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34964946780)
 passed; those results do not qualify this corrected reference. The two-line Knip
-classification correction is recorded in source `34982936353`. Qualification of
-that exact new reference remains pending; no gate is skipped or disabled.
+classification correction is recorded in source `34982936353`.
+
+The corrected package passed the [complete reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34968616919)
+and [steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34968616962)
+at [candidate manifest `38b00d7`](https://github.com/josephbergvinson/openclaw-control-plane/blob/38b00d7dcc2226c28bcbb83a9edaf518befafea2/runtime/manifest.json).
+The preserved results contain all 34 native commands with zero exit codes, the
+complete runtime build, all ten steering cases and the focused ownership and cron regression suites.
+Both the build and native-plan artifacts identify the normalized tree above.
+The candidate manifest binds that tree to source `34982936353` and the exact patch
+digest. This qualification follow-up changes only prose; every manifest identity
+and patch byte remains unchanged. It does not represent a separate full CI run on
+the prose-only follow-up commit.
+
+The companion acceptance covers local registered-project routing. Remote
+node-backed Codex placement requires its own verification.
 
 The following gateway evidence retains its earlier deployment identity.
 
