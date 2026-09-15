@@ -36,7 +36,7 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 
 ## What is included
 
-- **The complete runtime delta:** 568 changed paths from the official release,
+- **The complete runtime delta:** 569 changed paths from the official release,
   including regression tests. The reconstruction helper verifies the patch checksum
   and resulting Git tree. Production source is unchanged from the pinned source;
   two labels in one test fixture are normalized.
@@ -51,9 +51,11 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
   source layout, account setup, operational definitions and acceptance steps.
 
 The runtime [manifest](runtime/manifest.json) pins official commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, custom lineage
-`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`, the public reconstruction tree and Node.js
-24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, deployed production source
+`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`, and reconstructed reference
+`a9aa626e7db64306efd3abb30ca93fdc5fefc9a3`. The reference adds one corrected test;
+production files and modes are identical. The manifest also pins the public
+reconstruction tree and Node.js 24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
 
 ## Start using the reference
 

@@ -32,7 +32,7 @@ A legitimate yield is not a failed empty answer. The runtime patch preserves pen
 
 The additional repair has operator source commit [6e5890826b64df455be0c50756ef917aa6ee1211](https://github.com/josephbergvinson/openclaw-runtime-source/commit/6e5890826b64df455be0c50756ef917aa6ee1211). Local qualification passed 570 behavior tests and the native type, lint, import, state, security and dead-export checks. The aggregate build, release staging, candidate import, source seal and initial activation also passed. A private exact-message fetch passed after activation. The first live Discord retest nevertheless failed delivery acceptance; the deployed successor subsequently passed the bounded live checks described below.
 
-The public [runtime manifest](../runtime/manifest.json) now reconstructs deployed source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`, retaining these repairs and the later ownership and access changes described in the [source map](20-runtime-source-changes.md). Its normalized tree is `f17a5e36a59028eb8638e333d7e0864b546519e1`; only the two existing company labels in one regression fixture differ from the pinned source. Private repository access is unnecessary for public reconstruction. The source has passed activation and the scoped Discord acceptance below. Hosted qualification is established separately by the matching public commit’s workflow results. Every result below retains its original source revision. The compact resolver change is included in the workspace helper and has its own fixture tests.
+The public [runtime manifest](../runtime/manifest.json) now reconstructs reference `a9aa626e7db64306efd3abb30ca93fdc5fefc9a3`, retaining these repairs and the later ownership and access changes described in the [source map](20-runtime-source-changes.md). Its production files and modes match deployed source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; the reference adds the test-only correction described below. Its normalized tree is `74b9cb49179e10461aac1bb4700c76251f88ea5d`; only the two existing company labels in one regression fixture differ from the pinned source. Private repository access is unnecessary for public reconstruction. Deployed `b3ee068` has passed activation and the scoped Discord acceptance below; the test-only reference commit is not claimed to be deployed. Hosted qualification is established separately by the matching public commit’s workflow results. Every result below retains its original source revision. The compact resolver change is included in the workspace helper and has its own fixture tests.
 
 The baseline calendar request took 598.812 seconds from submission to its final Discord reply. Its trace contained 42 successful tool calls, no tool errors or timeouts, and no compaction. Broad searches, a full resolver result and an exact-message read that incorrectly returned channel history added large outputs to the context. These observations identify unnecessary input volume; they do not establish how much of the delay each output caused. The repair preserves model and reasoning settings.
 
@@ -154,6 +154,24 @@ configured reasoning and fast-mode preferences were preserved.
 
 This verifies the exercised browser account route. It does not supply missing
 credentials for other accounts or prove their login and application workflows.
+
+### Hosted permission-fixture correction
+
+The first hosted qualification of the deployed source passed all ten isolated
+steering cases, but one of 539 focused ownership/cron cases failed. The permission
+test changed only a shared session row, while runtime authority now follows the
+permission captured for the admitted incoming turn. Its expected rejection therefore
+exercised the wrong input.
+
+Reference `a9aa626` sets the guarded permission on the incoming turn and retains the
+rejection assertions. A separate case confirms that changing the shared row alone
+does not replace admitted authority. The original failure was reproduced locally;
+all 20 cases in the corrected file, its selected native checks and scoped review
+passed. The runtime production files are unchanged from deployed `b3ee068`, and
+no second activation or repeated live acceptance is claimed for this test correction.
+The manifest records the exact changed test path and both blobs separately from
+the two existing privacy substitutions in another fixture. Consult the hosted
+workflows for the exact reference commit being adopted.
 
 ## Context notices
 

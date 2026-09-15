@@ -13,7 +13,7 @@ The examples below use explicit paths; replace them with the intended local path
 
 Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.3`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `f17a5e36a59028eb8638e333d7e0864b546519e1`.
+expected tree is `74b9cb49179e10461aac1bb4700c76251f88ea5d`.
 
 Use Node.js 24.16.0 and pnpm 12.3.4. Run the documented frozen dependency installation,
 native changed-source checks and build from that checkout. The source package

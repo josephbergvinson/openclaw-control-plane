@@ -24890,6 +24890,188 @@ index 39ca64f0fae5719018c354cd5a11439e59ba8484..feeb545205dd383e3edffca7cda36478
        pendingInputAuthorityFingerprint: hasRouteOnlyAuthorityMismatch
          ? activeToolAuthorityFingerprint
          : undefined,
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts
+index 5a1c3a50950c18073a3fbd162b97350d7381ad9e..811ac282b12c96c3b23b6d9e566231e58caac7d7 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts
+@@ -335,91 +335,96 @@ describe("question response custody through reply adoption", () => {
+     },
+   );
+ 
+-  it.each(["next-model", "tool-cap", "permission", "sender", "source-closure"] as const)(
+-    "uses creator policy and incoming source authority for %s",
+-    async (change) => {
+-      const key = `agent:main:question-caller-${change}`;
+-      const run = createQueueTestRun({ prompt: text });
+-      run.run.senderIsOwner = true;
+-      run.run.traceAuthorized = true;
+-      run.run.messageProvider = "webchat";
+-      run.run.config = { tools: { toolsBySender: { "*": { allow: [] } } } };
+-      await withQuestionCreator(key, run, async (operation) => {
+-        const source = new AbortController();
+-        const committed = vi.fn();
+-        const gatewayCall: AgentQuestionDispatcher = {
+-          version: 2,
+-          call: async ({ authority }) => {
+-            expect(authority.kind).toBe("source-bound");
+-            await Promise.resolve();
+-            if (change === "source-closure") {
+-              source.abort();
+-            }
+-            if (authority.kind === "source-bound") {
+-              authority.assertCurrent();
+-            }
+-            committed();
+-            return { status: "answered" };
+-          },
+-        };
+-        const claim = registerPendingAgentQuestion({
+-          questionId: `ask_caller_${change}`,
++  it.each([
++    "next-model",
++    "tool-cap",
++    "permission",
++    "session-row-permission",
++    "sender",
++    "source-closure",
++  ] as const)("uses creator policy and incoming source authority for %s", async (change) => {
++    const key = `agent:main:question-caller-${change}`;
++    const run = createQueueTestRun({ prompt: text });
++    run.run.senderIsOwner = true;
++    run.run.traceAuthorized = true;
++    run.run.messageProvider = "webchat";
++    run.run.config = { tools: { toolsBySender: { "*": { allow: [] } } } };
++    await withQuestionCreator(key, run, async (operation) => {
++      const source = new AbortController();
++      const committed = vi.fn();
++      const gatewayCall: AgentQuestionDispatcher = {
++        version: 2,
++        call: async ({ authority }) => {
++          expect(authority.kind).toBe("source-bound");
++          await Promise.resolve();
++          if (change === "source-closure") {
++            source.abort();
++          }
++          if (authority.kind === "source-bound") {
++            authority.assertCurrent();
++          }
++          committed();
++          return { status: "answered" };
++        },
++      };
++      const claim = registerPendingAgentQuestion({
++        questionId: `ask_caller_${change}`,
++        sessionKey: key,
++        questions: [{ id: "answer", header: "Answer", question: "Continue?" }],
++        gatewayCall,
++        answer: Promise.resolve({ status: "pending" }),
++      });
++      claim.attachRegistration(Promise.resolve());
++      const adopted = vi.fn(async () => {});
++      const settled = vi.fn();
++      const state: ReplyOperationRunState = {};
++      const incoming: FollowupRun = {
++        ...run,
++        toolsAllow: change === "tool-cap" ? [] : undefined,
++        turnAdoptionLifecycle: { onAdopted: adopted, onSettled: settled },
++        run: {
++          ...run.run,
++          permissionMode: change === "permission" ? "guarded" : run.run.permissionMode,
++          // A next-turn route never replaces the still-active question creator.
++          provider: "next-provider",
++          model: "next-model",
++          senderIsOwner: change !== "sender",
++        },
++      };
++      try {
++        const result = await runReplyQuestionInput({
++          commandBody: text,
++          followupRun: incoming,
+           sessionKey: key,
+-          questions: [{ id: "answer", header: "Answer", question: "Continue?" }],
+-          gatewayCall,
+-          answer: Promise.resolve({ status: "pending" }),
++          sessionCtx: { Provider: "webchat" },
++          sessionEntry:
++            change === "permission" || change === "session-row-permission"
++              ? { sessionId: run.run.sessionId, updatedAt: 0, permissionMode: "guarded" }
++              : undefined,
++          opts: { abortSignal: source.signal, [REPLY_OPERATION_RUN_STATE]: state },
+         });
+-        claim.attachRegistration(Promise.resolve());
+-        const adopted = vi.fn(async () => {});
+-        const settled = vi.fn();
+-        const state: ReplyOperationRunState = {};
+-        const incoming: FollowupRun = {
+-          ...run,
+-          toolsAllow: change === "tool-cap" ? [] : undefined,
+-          turnAdoptionLifecycle: { onAdopted: adopted, onSettled: settled },
+-          run: {
+-            ...run.run,
+-            // A next-turn route never replaces the still-active question creator.
+-            provider: "next-provider",
+-            model: "next-model",
+-            senderIsOwner: change !== "sender",
+-          },
+-        };
+-        try {
+-          const result = await runReplyQuestionInput({
+-            commandBody: text,
+-            followupRun: incoming,
+-            sessionKey: key,
+-            sessionCtx: { Provider: "webchat" },
+-            sessionEntry:
+-              change === "permission"
+-                ? { sessionId: run.run.sessionId, updatedAt: 0, permissionMode: "guarded" }
+-                : undefined,
+-            opts: { abortSignal: source.signal, [REPLY_OPERATION_RUN_STATE]: state },
++        expect(operation.result).toBeNull();
++        if (change === "next-model" || change === "session-row-permission") {
++          expect(result).toEqual({ handled: true, payload: undefined });
++          expect(committed).toHaveBeenCalledOnce();
++          expect(adopted).toHaveBeenCalledOnce();
++          expect(settled).toHaveBeenCalledOnce();
++        } else {
++          expect(result).toMatchObject({ handled: true, payload: { isError: true } });
++          expect(state.admission).toEqual({
++            status: "skipped",
++            reason: "question-response-refused",
+           });
+-          expect(operation.result).toBeNull();
+-          if (change === "next-model") {
+-            expect(result).toEqual({ handled: true, payload: undefined });
+-            expect(committed).toHaveBeenCalledOnce();
+-            expect(adopted).toHaveBeenCalledOnce();
+-            expect(settled).toHaveBeenCalledOnce();
+-          } else {
+-            expect(result).toMatchObject({ handled: true, payload: { isError: true } });
+-            expect(state.admission).toEqual({
+-              status: "skipped",
+-              reason: "question-response-refused",
+-            });
+-            expect(committed).not.toHaveBeenCalled();
+-            expect(adopted).not.toHaveBeenCalled();
+-            expect(settled).not.toHaveBeenCalled();
+-            expect(claim.isResolving()).toBe(false);
+-          }
+-        } finally {
+-          claim.dispose();
++          expect(committed).not.toHaveBeenCalled();
++          expect(adopted).not.toHaveBeenCalled();
++          expect(settled).not.toHaveBeenCalled();
++          expect(claim.isResolving()).toBe(false);
+         }
+-      });
+-    },
+-  );
++      } finally {
++        claim.dispose();
++      }
++    });
++  });
+ 
+   it.each(
+     [
 diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
 index 2647ddf1156740f5e1be52031e3cfc6af2d1e486..1f57875f8ee8301865d7edb4fc1bbddb344e9dab 100644
 --- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
