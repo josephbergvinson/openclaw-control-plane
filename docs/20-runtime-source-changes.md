@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-75 local commits and 582 changed paths from the official release. It includes
+76 local commits and 582 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -82,6 +82,17 @@ gateway remains on its previously accepted release. The manifest records that
 production difference explicitly; a newer reference commit alone is not evidence
 that the gateway was rebuilt or activated.
 
+The companion at `275f120c13b` passed signed installation, matching worker and local
+authentication checks, native screen/cursor/cleanup probes, and an ordinary
+registered-project agent read. The [acceptance record](../runtime/README.md#current-source-qualification)
+binds those checks to the app build and exact source-qualified package. It does not
+claim live token rotation, iOS acceptance or protected native password entry.
+
+Reference `34982936353` adds only the production Knip classification for the
+resolver export used by focused tests. The full-tree audit still checks those
+test consumers. Every executable source blob remains identical to the accepted
+companion at `275f120c13b`; this tooling correction requires no app rebuild.
+
 ## Models, harnesses and goals
 
 The reference preferences use `openai/gpt-6-astra`, ultra reasoning, fast mode off,
@@ -135,14 +146,15 @@ Never copy another operator's account database into a fresh installation.
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
 gateway source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` and reconstructed
-reference `275f120c13b84f150a1bd2c1f9129183e535f2a3`. The reference includes production
+reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae`. The reference includes production
 changes for the native Mac app and matching bundled worker; gateway deployment
 has not advanced. Exact endpoint differences are classified by path, blob and
-file mode in `productionDelta`, `testOnlyDelta` and `documentationDelta`.
+file mode in `productionDelta`, `testOnlyDelta`, `documentationDelta` and
+`toolingOnlyDelta`.
 
 The public derivative changes only the two established company strings in the
 lane-contract test fixture relative to that reference. No other export
-normalization is applied. The resulting tree is `115954a382331b70ab7f3818e5c02e449bc60752`.
+normalization is applied. The resulting tree is `4afd5efe52ae0ba136f738538477f4256500bc5a`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone

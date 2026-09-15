@@ -990,7 +990,7 @@ index 59804522d4b99e7d4ce021a3968d50d425d69d88..af05539906823112f468096ae9314cd2
          case attachments
          case projectid = "projectId"
 diff --git a/config/knip.config.ts b/config/knip.config.ts
-index c59975373901e34dadfc564210ecd618d0d497d2..5ba7e8e74723636dbec6f217be1b8db60cb7e6fd 100644
+index c59975373901e34dadfc564210ecd618d0d497d2..6cdc65eeafdb525ff317eb67033e428e131dc0cc 100644
 --- a/config/knip.config.ts
 +++ b/config/knip.config.ts
 @@ -203,6 +203,8 @@ const rootEntries = [
@@ -1002,6 +1002,15 @@ index c59975373901e34dadfc564210ecd618d0d497d2..5ba7e8e74723636dbec6f217be1b8db6
    // Uploaded in the worker bundle and launched by rsync; no static host import exists.
    "src/worker/workspace-rsync-receiver.ts!",
    // v2026.9.1 Gateways lazy-import this stable dist entry after an in-place update.
+@@ -474,6 +476,8 @@ const config = {
+     "src/gateway/board-view-ticket.ts": ["exports"],
+     // Focused startup tests consume this explicit seam; production imports only the bootstrap.
+     "src/gateway/server-startup-bootstrap.ts": ["exports"],
++    // Focused auth tests import the resolver seam; production calls it inside the IPC owner.
++    "src/node-host/local-gateway-auth.ts": ["exports"],
+     // Registry facades retain direct registration/reset compatibility seams used by focused
+     // tests; the full-tree scan still audits every named export against those consumers.
+     "src/agents/harness/registry.ts": ["exports"],
 diff --git a/docs/.generated/config-baseline.counts.json b/docs/.generated/config-baseline.counts.json
 index ba72789690ac10ab26cd616b1cc3ca8d2f18d2bc..29763ac7078e2ad3d23add283b49b916796bb2e3 100644
 --- a/docs/.generated/config-baseline.counts.json
