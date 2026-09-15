@@ -17,21 +17,26 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed production source | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
-| Reconstructed reference source | `a9aa626e7db64306efd3abb30ca93fdc5fefc9a3` |
-| Sanitized source tree | `74b9cb49179e10461aac1bb4700c76251f88ea5d` |
-| Patch SHA-256 | `9b0e5f3b1c85b02ef4d2efcbaf8a3e871810fe5e114fedba4d63b3a28ee5646a` |
+| Deployed gateway source | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
+| Reconstructed reference source | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
+| Sanitized source tree | `115954a382331b70ab7f3818e5c02e449bc60752` |
+| Patch SHA-256 | `cb399c00052f1d914d11f6fd587d34e25650d11c9a746647679274eb11f4d4fb` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,870,302 bytes and changes 569 paths across 74 local commits. The custom commit is a lineage
+The patch is 1,918,417 bytes and changes 582 paths across 75 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
-The reference commit differs from deployed source in one question-recovery test.
-The manifest records that path and both Git blob hashes under `testOnlyDelta`.
-Every production blob and file mode is identical. The two privacy substitutions in
-the separate lane-contract fixture remain the only export normalization. The
-reference test commit is not claimed to be deployed.
+The gateway remains on `b3ee068c6c6`. The reference advances the native Mac
+app and its bundled private worker. The manifest explicitly scopes
+`deployedCommit` to the gateway and records exact paths, blobs and file modes
+under `productionDelta`, `testOnlyDelta` and `documentationDelta`. The
+`components.macCompanion` identity is separate and currently awaits activation
+acceptance. These production differences are not labeled test-only.
+
+The two privacy substitutions in the lane-contract fixture remain the only
+export normalization; every other exported blob and file mode matches the
+new pinned reference source. The package does not claim a gateway rebuild.
 
 ## Check and apply
 
@@ -66,7 +71,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `74b9cb49179e10461aac1bb4700c76251f88ea5d`.
+`git write-tree` must print `115954a382331b70ab7f3818e5c02e449bc60752`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -126,18 +131,18 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
-The package reconstructs reference `a9aa626e7db`, with the production source of
-deployed `b3ee068c6c6`, including the retained Discord repairs and
-subsequent fixes for memory-search cleanup ownership, native project routing,
-authenticated owner permission defaults, steering authority and pre-compaction
-checkpoint ownership. It also includes macOS permission-denial diagnostics. The
-[source map](../docs/20-runtime-source-changes.md) identifies their implementations.
+The candidate package reconstructs reference `275f120c13b`, retaining the
+previously accepted gateway repairs and adding the local Mac SecretRef
+bootstrap described in the [source map](../docs/20-runtime-source-changes.md#mac-companion-authentication).
+Mac app activation remains pending. Hosted qualification must use this new
+reference; earlier green workflows do not qualify it.
 
-An independent standalone checkout restored to the exact official tag passed the
-unchanged public reconstruction helper's preflight, apply and normalized-tree
-checks. Comparison of all 39,490 tracked entries with the pinned source confirmed
-identical production blobs and every file mode. Only the two established labels in
-the same regression fixture differ. The package contains no additional normalization.
+A fresh standalone clone of the exact official tag passed the unchanged public
+helper's preflight, apply and normalized-tree checks. Comparison of all 39,495
+tracked entries confirmed matching production blobs and every file mode against
+the new source. Only the two established fixture labels differ.
+
+The following gateway evidence retains its earlier deployment identity.
 
 Deployed `b3ee068c6c6` passed all required native checks, including production
 and test types, all 17 core-test type graphs, extension checks, lint and the
@@ -158,8 +163,8 @@ observed. The [delivery chapter](../docs/13-delivery-and-control-surface.md#acti
 retains the scope and timings. A separate Discord-directed browser check used the
 native opaque credential alias, verified the configured account and two pages with
 live data, and closed its test tab after the requested follow-up. No timeout or
-compaction was observed. Other missing credentials remain unprovisioned; these
-checks do not establish every account or workflow. Hosted qualification is separate:
+compaction was observed. At that check, other credentials remained unprovisioned; those
+checks did not establish every account or workflow. Hosted qualification is separate:
 inspect the matching public commit's reference and steering workflow results.
 
 Predecessor `1f38d05` passed checks, build and activation but failed its ordinary
@@ -172,7 +177,7 @@ shared session row instead of the incoming turn's admitted permission. Reference
 adds a case proving that a later shared-row value cannot replace admitted authority.
 The old failure was reproduced locally; all 20 cases in the corrected test file,
 its selected native checks and scoped independent review passed. No production
-change or second activation was needed. Hosted qualification of this reference
+change or second activation was needed. Hosted qualification of that test reference
 belongs to its matching public commit, not an earlier green job.
 
 ### September 14 predecessor qualification
