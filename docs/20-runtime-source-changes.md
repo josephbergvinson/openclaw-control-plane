@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-62 local commits and 518 changed paths from the official release. It includes
+73 local commits and 568 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -38,6 +38,14 @@ The source paths are relative to the reconstructed OpenClaw checkout.
 | Plain channel responses | Shared progress rendering and Discord/Telegram adapters omit synthetic emoji markers. Disabled tool progress also hides failed-tool progress rows while preserving approvals and final errors. Group prompt guidance respects reaction preferences. |
 | Request evidence | The Responses transport records bounded model, reasoning-effort and service-tier metadata at outgoing requests. This separates configured preferences from request evidence and accepted responses without publishing hidden reasoning. |
 | Memory and prompt preparation | Optional project-memory preparation is bounded, and search tools advertise only available or runtime-authorized corpora. The agent receives fewer misleading options and avoids unbounded optional preparation. |
+| Shared memory-search ownership | `extensions/memory-core/src/memory/manager.ts`, the memory tool and the optional SDK `withSearchOperation` contract retain provider and database ownership through search result/status finalization. Closing drains already-admitted nested work, expires callback admission and lets later callers acquire a replacement. |
+| Registered-project source workers | `src/agents/tools/sessions-spawn-visible.ts` forwards a native `projectId` to Gateway admission, which resolves the authorized registered root and managed worktree. Project binding rejects conflicting placement inputs and preserves inherited permission limits. |
+| Discord host context through preflight | `extensions/discord/src/monitor/message-handler.preflight-context.ts` preserves the injected host `buildContext` function into ordinary message processing. This retains the exact Gateway ownership binding; raw builders and retired owners remain unbound. |
+| Run-bound delegated tool context | `src/auto-reply/reply/agent-runner-execution.ts` uses the admitted reply operation's Gateway context resolver for tools. An unbound operation cannot fall back to ambient authority. |
+| Authenticated owner access defaults | `agents.defaults.ownerPermissionMode` supplies the configured access mode only to an authenticated owner turn. Explicit session modes win; the default is not written into shared session rows or granted to unrelated senders and background work. Child authority follows the admitted parent and native revalidation. |
+| Accepted-profile steering authority | `src/agents/embedded-agent-runner/run/attempt-stream.ts` captures the selected authentication profile only after provider acceptance, invalidates capture on abort and preserves operation ownership. `src/auto-reply/reply/agent-runner-steer-adoption.ts` also requires current tool authority before live steering injection. |
+| Foreground checkpoint custody | `src/auto-reply/reply/agent-runner-memory.ts` and the execution owner extend existing ingress and deferred-lifecycle custody through the pre-compaction memory checkpoint. Native presentation can show the checkpoint; cleanup releases ownership on all settlement paths. |
+| Observed macOS permission denials | The native Mac input path checks Accessibility and Event Posting separately before input dispatch and reports the observed missing capability. Screen Recording remains a separate capture check; a denial is not attributed to an unverified stale app build or TCC record. |
 | State, approvals and backup compatibility | Native state-root migration, approval inspection/migration gates, read-only state access and backup resource inventory preserve the owners of persisted configuration and approval state. |
 
 The patch also carries regression tests, Plugin SDK compatibility documentation,
@@ -97,10 +105,10 @@ Never copy another operator's account database into a fresh installation.
 
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records deployed source
-`7fbb56e134a70c63d1404af547db71bd4870dc3c`. Its public derivative changes only two
+`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`. Its public derivative changes only two
 company-specific strings in one regression fixture. All production source bytes
-and file modes match that deployed source. The resulting tree is
-`d300952e487e0979151a201fc5ec7225b4a0b890`.
+and file modes match that pinned source. The resulting tree is
+`f17a5e36a59028eb8638e333d7e0864b546519e1`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
@@ -138,15 +146,35 @@ acceptance and renewed process binding. These checks retain their exact scope. T
 Discord `/goal` acknowledgement and delivery path was not repeated in that
 qualification; browser sign-in was pending at that time.
 
-The current `7fbb56e` source subsequently passed local native checks, production/test
+The predecessor `7fbb56e` source subsequently passed local native checks, production/test
 type checks, the full build and sealed-release activation. Four fresh Discord
 checks verified calendar read and verification, same-run document steering, and a
 controlled two-worker yield/resume with final delivery. See the
 [delivery evidence](13-delivery-and-control-surface.md#successor-live-retest) for
 the exact scopes, timings and remaining attachment-byte and resumed-typing limits.
 These ordinary-request checks do not establish fresh `/goal` or interaction-expiry
-acceptance. Fresh hosted reconstruction CI for the updated public pin remains
-pending; historical green runs above retain their original source identity.
+acceptance. Those results qualify the predecessor only; historical green runs above retain
+their original source identity.
+
+The current `b3ee068c6c6` source passed independent reconstruction from a clean
+official-tag checkout, with all 39,490 tracked paths and file modes compared against
+source. Every production blob matched; the two established fixture labels are the
+only changes. Focused regressions and scoped independent review accompany the new
+repairs. Required native checks now pass, including production/test types, all 17
+core-test type graphs, extension checks, lint and the remaining native guards. The
+full build, sealed-release activation and current-process health/readiness checks
+passed. A fresh Discord task then passed visible progress, same-run steering,
+registered-project delegation, verified reversible file effects and final delivery;
+see the [scoped live result](13-delivery-and-control-surface.md#activated-successor-check).
+A separate browser-credential check passed native opaque entry, configured-account
+verification, live application data and requested tab cleanup. Other missing
+credentials remain unprovisioned. Hosted qualification is established separately
+by the matching public commit’s workflow results. Predecessor `1f38d05` activated
+successfully but failed its
+ordinary Discord test before provider execution; the successor preserves the
+omitted host context builder, as recorded in the [delivery diagnosis](13-delivery-and-control-surface.md#discord-host-context-regression). The macOS diagnostic change
+has source-level regression evidence; no full Mac application installation or
+permission-dialog acceptance is claimed here.
 
 The repository's operating policies, service layout, scheduled maintenance,
 integrations and backup procedures remain necessary alongside this source package.

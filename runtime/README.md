@@ -4,9 +4,9 @@ This package reproduces the customized OpenClaw **2026.9.3** source used by this
 reference architecture. It contains the complete patch from the official release,
 including earlier retained capabilities, runtime fixes and their regression tests.
 Two company-specific labels in one test fixture are replaced with Company Alpha.
-Production source files are unchanged from the deployed source.
+Production source files are unchanged from the pinned source.
 
-The [manifest](manifest.json) pins the upstream tag and commit, original deployed
+The [manifest](manifest.json) pins the upstream tag and commit, original custom
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
@@ -17,12 +17,12 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed custom commit | `7fbb56e134a70c63d1404af547db71bd4870dc3c` |
-| Sanitized source tree | `d300952e487e0979151a201fc5ec7225b4a0b890` |
-| Patch SHA-256 | `bf70682c84cc0b84bdf653a9b6b1b4a9496591d61e3d5a5ea08dadc5f6465c5d` |
+| Custom source commit | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
+| Sanitized source tree | `f17a5e36a59028eb8638e333d7e0864b546519e1` |
+| Patch SHA-256 | `ec23fa3d6b71149c13a6d4f8ce7860ab640a45b7b6710dee57beb83a9e2f7c42` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,694,393 bytes and changes 518 paths across 62 local commits. The custom commit is a lineage
+The patch is 1,862,675 bytes and changes 568 paths across 73 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
@@ -59,7 +59,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `d300952e487e0979151a201fc5ec7225b4a0b890`.
+`git write-tree` must print `f17a5e36a59028eb8638e333d7e0864b546519e1`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -119,7 +119,48 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
-The public patch now includes deployed source `7fbb56e`, including five commits
+The package pins source `b3ee068c6c6`, including the retained Discord repairs and
+subsequent fixes for memory-search cleanup ownership, native project routing,
+authenticated owner permission defaults, steering authority and pre-compaction
+checkpoint ownership. It also includes macOS permission-denial diagnostics. The
+[source map](../docs/20-runtime-source-changes.md) identifies their implementations.
+
+An independent standalone checkout restored to the exact official tag passed the
+unchanged public reconstruction helper's preflight, apply and normalized-tree
+checks. Comparison of all 39,490 tracked entries with the pinned source confirmed
+identical production blobs and every file mode. Only the two established labels in
+the same regression fixture differ. The package contains no additional normalization.
+
+This source passed all required native checks, including production
+and test types, all 17 core-test type graphs, extension checks, lint and the
+remaining state, schema, media, sidecar, cycle and authorization guards. The new
+Discord preflight regression covers valid host ownership, an unbound builder and a
+retired owner. Scoped independent review passed.
+
+The complete build, including the UI, passed. On 15 September this source passed
+sealed-release activation, current-process health/readiness checks and protected
+configuration, authentication and approval-state verification. The private
+operator source was published and its exact remote revision verified. A fresh
+Journal capture and process-binding renewal passed on the activated release.
+
+A subsequent real Discord request passed visible progress, in-flight steering,
+a native registered-project helper, verified temporary file effects across two
+projects, requester continuation and final delivery. No timeout or compaction was
+observed. The [delivery chapter](../docs/13-delivery-and-control-surface.md#activated-successor-check)
+retains the scope and timings. A separate Discord-directed browser check used the
+native opaque credential alias, verified the configured account and two pages with
+live data, and closed its test tab after the requested follow-up. No timeout or
+compaction was observed. Other missing credentials remain unprovisioned; these
+checks do not establish every account or workflow. Hosted qualification is separate:
+inspect the matching public commit's reference and steering workflow results.
+
+Predecessor `1f38d05` passed checks, build and activation but failed its ordinary
+Discord test before the provider request. That failure remains recorded alongside
+the correction; earlier passing live results below retain their original revision.
+
+### September 14 predecessor qualification
+
+The predecessor public patch included deployed source `7fbb56e`, including five commits
 after the former `39d61ba` pin: retained cron configuration revisions, exact Discord
 message reads, continuation progress and typing, optional silent heartbeat results,
 and durable requester ownership through child completion. The normalization still
@@ -138,9 +179,8 @@ Discord checks verified the observed calendar, document-steering and controlled
 worker delivery paths. The [delivery qualification](../docs/13-delivery-and-control-surface.md#successor-live-retest)
 retains their timings and the limits on attachment-byte and resumed-typing evidence.
 
-Fresh hosted reconstruction, native checks and build qualification for this updated
-public pin remain pending. Earlier green workflow runs qualify their recorded
-predecessors; they do not qualify this new package.
+Hosted results for that predecessor qualify only its recorded source identity;
+they do not qualify the successor package.
 
 ### Historical qualification
 

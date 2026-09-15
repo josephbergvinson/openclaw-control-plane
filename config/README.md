@@ -122,13 +122,39 @@ by the settings. The operator contract contains identities and references, not s
 values. Configure only the integrations being adopted and leave other routes visibly
 unverified until their actual probes and effect checks pass.
 
+The worker profile sets `agents.defaults.subagents.runTimeoutSeconds: 0`, so an open-ended delegated task has no arbitrary worker deadline. A positive per-run limit is reserved for an explicit operator timebox. Individual I/O timeouts and stalled-work recovery remain separate controls.
+
 ## Permission and host choices
 
-Gateway authentication, remote exposure, execution approvals, filesystem grants,
-browser profile permissions and channel allowlists are deliberate adopter choices.
-They are not inherited from the source host. Review the native
+The profile carries the operator's full-access execution choices: `tools.profile`
+and `tools.exec.mode` are `full`; `tools.fs.workspaceOnly` and
+`tools.exec.applyPatch.workspaceOnly` are `false`; `agents.defaults.sandbox.mode`
+is `off`. Ordinary file access and patch access are distinct controls.
+
+`agents.defaults.ownerPermissionMode: "full"` applies at native authenticated owner
+admission and is inherited by delegated workers. It does not store an owner grant
+in a shared-channel session or overwrite an explicit session permission mode.
+`agents.defaults.elevatedDefault: "full"` is a separate execution preference; it does
+not identify an owner or replace native elevated-tool authorization.
+
+Keep owner identities in the adopter's native configuration. For example, replace
+the parameter below with the intended Discord user's stable ID before applying it:
+
+```json
+{
+  "commands": {
+    "ownerAllowFrom": ["discord:<owner-user-id>"]
+  }
+}
+```
+
+The preferences profile omits `commands.ownerAllowFrom` so merging it preserves
+onboarding's verified identity bindings. A display name, channel membership or
+channel/guild command allowlist does not establish owner identity. Bind other native
+authentication, remote exposure, browser permissions and channel access to the
+installation; none are copied from the source host. Review the native
 [authentication guide](https://docs.openclaw.ai/gateway/authentication) and the pinned
-source's configuration schema for those choices.
+source's configuration schema.
 
 For service changes, keep the interpreter, state root, configuration path and selected
 release consistent across the CLI, gateway, node and scheduler. Activation expects

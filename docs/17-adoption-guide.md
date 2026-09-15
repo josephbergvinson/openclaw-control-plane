@@ -13,7 +13,7 @@ The examples below use explicit paths; replace them with the intended local path
 
 Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.3`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `d300952e487e0979151a201fc5ec7225b4a0b890`.
+expected tree is `f17a5e36a59028eb8638e333d7e0864b546519e1`.
 
 Use Node.js 24.16.0 and pnpm 12.3.4. Run the documented frozen dependency installation,
 native changed-source checks and build from that checkout. The source package
@@ -84,6 +84,14 @@ Select the intended local gateway, workspace and provider accounts. The explicit
 option leaves gateway service installation for the reviewed sequence below. Targeted
 `configure` is also supported when continuing an already initialized installation.
 Do not use reset flags on an existing installation.
+
+Bind the authenticated operator in native `commands.ownerAllowFrom` using stable
+provider-prefixed user IDs, such as the parameterized example in
+[permission and host choices](../config/README.md#permission-and-host-choices).
+The full-access profile preserves those bindings. Its owner permission default is
+resolved at authenticated admission and inherited by workers; it must not become a
+persisted grant to other shared-channel participants. Explicit session restrictions
+still require their own reviewed native update or clearing.
 
 After onboarding, apply the rendered preferences through the native merge operation.
 This preserves unrelated gateway and channel configuration rather than replacing the
@@ -185,6 +193,26 @@ The workspace includes procedures for company collaboration tools, personal sour
 Apple applications, browser work and wallet/network-specific tooling. Company Alpha's
 mainnet staging site remains mainnet: a staging label never grants testnet treatment.
 Wallet mutations require the intended account, network and operation to be established.
+
+### Register projects for native delegated work
+
+The reference does not export the source installation's private native project IDs
+or absolute project paths. Once the Gateway is running, verify each intended
+canonical Git root, inspect `projects.list`, and register missing repositories:
+
+```bash
+"$node_executable" "$source_checkout/openclaw.mjs" gateway call projects.list --json
+"$node_executable" "$source_checkout/openclaw.mjs" gateway call projects.register --json --params '{"path":"/absolute/canonical-repository","name":"Repository name"}'
+```
+
+Save the actual returned ID as `native_openclaw_project_id` in the matching private
+`registry/project_topology.json` entry; verify it with a fresh `projects.list` read.
+For a visible source worker, pass that exact ID to `sessions_spawn` with
+`runtime:"subagent", visible:true, projectId:"<returned-native-project-id>", worktree:true`.
+Omit `cwd` and `execNode`: this route creates and binds the native managed worktree.
+Resume a correctly scoped existing worker when available. Registry completeness
+means the adopter's intended repositories are bound; another installation's count
+or folder-derived IDs are not an acceptance target.
 
 For native applications, grant the required macOS permissions to the actual executable
 or application used by the route. For phone/node access, pair the intended node and
