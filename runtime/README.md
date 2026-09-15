@@ -6,7 +6,7 @@ including earlier retained capabilities, runtime fixes and their regression test
 Two company-specific labels in one test fixture are replaced with Company Alpha.
 Production source files are unchanged from the pinned source.
 
-The [manifest](manifest.json) pins the upstream tag and commit, original custom
+The [manifest](manifest.json) pins the upstream tag and commit, deployed and reference
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
@@ -17,14 +17,21 @@ and the boundary between source reconstruction and installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Custom source commit | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
-| Sanitized source tree | `f17a5e36a59028eb8638e333d7e0864b546519e1` |
-| Patch SHA-256 | `ec23fa3d6b71149c13a6d4f8ce7860ab640a45b7b6710dee57beb83a9e2f7c42` |
+| Deployed production source | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
+| Reconstructed reference source | `a9aa626e7db64306efd3abb30ca93fdc5fefc9a3` |
+| Sanitized source tree | `74b9cb49179e10461aac1bb4700c76251f88ea5d` |
+| Patch SHA-256 | `9b0e5f3b1c85b02ef4d2efcbaf8a3e871810fe5e114fedba4d63b3a28ee5646a` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,862,675 bytes and changes 568 paths across 73 local commits. The custom commit is a lineage
+The patch is 1,870,302 bytes and changes 569 paths across 74 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
+
+The reference commit differs from deployed source in one question-recovery test.
+The manifest records that path and both Git blob hashes under `testOnlyDelta`.
+Every production blob and file mode is identical. The two privacy substitutions in
+the separate lane-contract fixture remain the only export normalization. The
+reference test commit is not claimed to be deployed.
 
 ## Check and apply
 
@@ -59,7 +66,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `f17a5e36a59028eb8638e333d7e0864b546519e1`.
+`git write-tree` must print `74b9cb49179e10461aac1bb4700c76251f88ea5d`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -119,7 +126,8 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
-The package pins source `b3ee068c6c6`, including the retained Discord repairs and
+The package reconstructs reference `a9aa626e7db`, with the production source of
+deployed `b3ee068c6c6`, including the retained Discord repairs and
 subsequent fixes for memory-search cleanup ownership, native project routing,
 authenticated owner permission defaults, steering authority and pre-compaction
 checkpoint ownership. It also includes macOS permission-denial diagnostics. The
@@ -131,13 +139,13 @@ checks. Comparison of all 39,490 tracked entries with the pinned source confirme
 identical production blobs and every file mode. Only the two established labels in
 the same regression fixture differ. The package contains no additional normalization.
 
-This source passed all required native checks, including production
+Deployed `b3ee068c6c6` passed all required native checks, including production
 and test types, all 17 core-test type graphs, extension checks, lint and the
 remaining state, schema, media, sidecar, cycle and authorization guards. The new
 Discord preflight regression covers valid host ownership, an unbound builder and a
 retired owner. Scoped independent review passed.
 
-The complete build, including the UI, passed. On 15 September this source passed
+The complete build, including the UI, passed. On 15 September `b3ee068c6c6` passed
 sealed-release activation, current-process health/readiness checks and protected
 configuration, authentication and approval-state verification. The private
 operator source was published and its exact remote revision verified. A fresh
@@ -157,6 +165,15 @@ inspect the matching public commit's reference and steering workflow results.
 Predecessor `1f38d05` passed checks, build and activation but failed its ordinary
 Discord test before the provider request. That failure remains recorded alongside
 the correction; earlier passing live results below retain their original revision.
+
+The first hosted ownership suite exposed an outdated test that changed only a
+shared session row instead of the incoming turn's admitted permission. Reference
+`a9aa626` corrects that fixture while retaining rejection for guarded admission and
+adds a case proving that a later shared-row value cannot replace admitted authority.
+The old failure was reproduced locally; all 20 cases in the corrected test file,
+its selected native checks and scoped independent review passed. No production
+change or second activation was needed. Hosted qualification of this reference
+belongs to its matching public commit, not an earlier green job.
 
 ### September 14 predecessor qualification
 

@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-73 local commits and 568 changed paths from the official release. It includes
+74 local commits and 569 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -104,11 +104,14 @@ Never copy another operator's account database into a fresh installation.
 ## Reproduction and verification boundaries
 
 The manifest starts at official tag `v2026.9.3`, commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records deployed source
-`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`. Its public derivative changes only two
-company-specific strings in one regression fixture. All production source bytes
-and file modes match that pinned source. The resulting tree is
-`f17a5e36a59028eb8638e333d7e0864b546519e1`.
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and records both deployed source
+`b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` and reconstructed reference
+`a9aa626e7db64306efd3abb30ca93fdc5fefc9a3`. The reference changes one test file,
+recorded with its deployed/reference blobs in `testOnlyDelta`; every production
+blob and file mode matches deployed source. The public derivative additionally
+changes only the two established company strings in the separate lane-contract
+fixture. No other export normalization is applied. The resulting tree is
+`74b9cb49179e10461aac1bb4700c76251f88ea5d`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
@@ -156,11 +159,12 @@ These ordinary-request checks do not establish fresh `/goal` or interaction-expi
 acceptance. Those results qualify the predecessor only; historical green runs above retain
 their original source identity.
 
-The current `b3ee068c6c6` source passed independent reconstruction from a clean
+The current `a9aa626e7db` reference passed independent reconstruction from a clean
 official-tag checkout, with all 39,490 tracked paths and file modes compared against
 source. Every production blob matched; the two established fixture labels are the
 only changes. Focused regressions and scoped independent review accompany the new
-repairs. Required native checks now pass, including production/test types, all 17
+repairs. Deployed `b3ee068` passed required native checks, including production/test
+types, all 17
 core-test type graphs, extension checks, lint and the remaining native guards. The
 full build, sealed-release activation and current-process health/readiness checks
 passed. A fresh Discord task then passed visible progress, same-run steering,
@@ -175,6 +179,15 @@ ordinary Discord test before provider execution; the successor preserves the
 omitted host context builder, as recorded in the [delivery diagnosis](13-delivery-and-control-surface.md#discord-host-context-regression). The macOS diagnostic change
 has source-level regression evidence; no full Mac application installation or
 permission-dialog acceptance is claimed here.
+
+Reference `a9aa626` corrects only the question-recovery fixture discovered in the
+first hosted ownership suite. The original failure reproduced locally; all 20
+cases in the corrected file, selected native checks and scoped review passed. The
+correction tests admitted permission and separately tests shared-row changes. Its
+[qualification explanation](13-delivery-and-control-surface.md#hosted-permission-fixture-correction)
+retains the failed hosted result and the distinction between deployed production
+source and the corrected test reference. Hosted checks for the matching public
+commit establish that reference's result without implying another activation.
 
 The repository's operating policies, service layout, scheduled maintenance,
 integrations and backup procedures remain necessary alongside this source package.
