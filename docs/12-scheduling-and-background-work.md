@@ -83,6 +83,29 @@ A wrapper propagates child errors and treats missing or malformed required outpu
 
 The command wrapper saves private process evidence and emits concise human-readable output. The maintenance wrapper checks its child receipts before claiming overall success, even when an earlier child already changed files. For data jobs, inspect the authoritative record or artifact; a summary saying the run succeeded is insufficient.
 
+## Source-change announcements
+
+The operator Workspace's changelog collector is a helper-backed integration with
+native scheduler delivery. The collector is not included among this repository's
+exported helpers. Its coverage contract illustrates how a scheduled announcement
+can avoid both dropped changes and duplicate messages.
+
+The helper retains one covered source frontier and at most one prepared summary.
+Preparation and staging do not advance coverage; confirmed native delivery does.
+Ambiguous delivery retains the pending summary for reconciliation. A confirmed
+silent run that never staged a summary can release its preparation while leaving
+the source changes uncovered. The native scheduler owns sending and retries.
+
+Forward source history is collected in bounded commit batches. A registered
+source may also be deliberately rewound or replaced with a different history.
+That transition needs an explicit comparison of the old and new endpoint trees,
+introduced and retired commit counts, and bounded commit samples with visible
+truncation. It must not silently reset coverage or mistake Git's valid
+non-ancestor result for a failed read. Even an unchanged tree with a replacement
+history retains transition evidence until delivery is confirmed. Missing source
+objects, changed repository mappings, and a newly enrolled source that does not
+descend from its pinned baseline remain unresolved conditions.
+
 ## Independent safety nets
 
 Put checks in a different failure domain where that improves coverage. A host timer can inspect whether an expected period's result exists even when the gateway scheduler did not dispatch it. An internal backup supervisor can still request a pause while external workspace storage is unavailable.
