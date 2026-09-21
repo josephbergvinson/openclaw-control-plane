@@ -11,38 +11,72 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 21 follow-up repair
+
+The deployed and reconstructed source is `daf5771a7d868903ada1a99cf595a587027f018c`.
+The manifest and complete patch reconstruct that source with the two established
+fixture-label substitutions. Local source checks, focused regressions, the complete
+build, fresh reconstruction, activation and the bounded live Discord handoff check
+passed. **Hosted qualification remains pending.** Earlier passing workflows do not
+qualify this source.
+
+The repair addresses a rejected wait after a parent sends more work to an
+existing child. Completion ownership must follow the parent's current turn,
+including when the child keeps the same logical task but starts another execution.
+The retained execution identifier and completion identifier have different roles.
+An active child receives a guarded follow-up; an idle completed child resumes
+through the existing session owner. An unrelated send or watch does not confer
+completion ownership.
+
+A failed wait remains an error. The repair replaces the ambiguous “Yield
+failed” presentation with an explanation that no handoff was confirmed and that
+background work may still be running. It does not report delivery or completion
+that has not been observed.
+
+The complete export retains the managed dreaming-effort repair in source
+`8ad9b4113ab316cd6f84fc4486ea2a7c9dff887f`, following the previous public reference
+`3498293635372bd128eb4d3cddd520ffb0cfb6ae`. Reconstruction starts at official commit
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`; this is not an incremental patch from 8ad9.
+
+The updated workflow adds focused follow-up, ownership, warning and harness
+receipt tests, followed by the requester-wake end-to-end suite using the runtime
+built in the same job. The embedded receipt check covers its two changed cases;
+it is not a passing result for that entire tool-handler suite. Results must identify
+the newly generated manifest and normalized tree. Runtime activation, the controlled
+live handoff and destination readback are recorded separately below; those results
+do not replace hosted qualification or acceptance on another installation.
+
 ## Source identities
 
 | Identity | Value |
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed gateway source | `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` |
-| Deployed Mac companion and bundled worker source | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
-| Reconstructed reference source | `3498293635372bd128eb4d3cddd520ffb0cfb6ae` |
-| Sanitized source tree | `4afd5efe52ae0ba136f738538477f4256500bc5a` |
-| Patch SHA-256 | `7af8cdaf648be9f3ae08e5729667b3426559551fbf1b68425b0372a4eeeb7538` |
+| Deployed gateway source | `daf5771a7d868903ada1a99cf595a587027f018c` |
+| Historical Mac companion and bundled worker acceptance; not revalidated | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
+| Reconstructed reference source | `daf5771a7d868903ada1a99cf595a587027f018c` |
+| Reference source tree before fixture normalization | `5ab5fa2727e07e87cc5649da439ec18074874753` |
+| Sanitized source tree | `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9` |
+| Patch SHA-256 | `3ea096fbc14d49a90e42a17753557d4d88969ef2ab21e614b846c70b7553acba` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 1,919,055 bytes and changes 582 paths across 76 local commits. The custom commit is a lineage
+The patch is 2,021,780 bytes and changes 602 paths across 78 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
-The gateway remains on `b3ee068c6c6`. The reference advances the native Mac
-app and its bundled private worker. The manifest explicitly scopes
+The gateway and reference now use the same source. The manifest explicitly scopes
 `deployedCommit` to the gateway and records exact paths, blobs and file modes
 under `productionDelta`, `testOnlyDelta`, `documentationDelta` and
-`toolingOnlyDelta`. The
-`components.macCompanion` identity records the separately accepted app and worker.
-These production differences are not labeled test-only.
-The reference is one tooling-only commit beyond the deployed companion:
-`config/knip.config.ts` models an intentional focused-test export in the production
-scan, while the full-tree scan still audits the test consumers. Every executable
-source blob and file mode is unchanged from the accepted app source.
+`toolingOnlyDelta`. These endpoint deltas are empty because deployed and reference
+commits match. The `components.macCompanion` identity retains the
+separately accepted September 15 app and worker as historical evidence; it is not
+a new companion installation or revalidation claim. Production differences are
+not labeled test-only.
 
 The two privacy substitutions in the lane-contract fixture remain the only
 export normalization; every other exported blob and file mode matches the
-new pinned reference source. The package does not claim a gateway rebuild.
+new pinned reference source. Deployment and scoped live verification are recorded
+below, separately from reproducible source export.
 
 ## Check and apply
 
@@ -77,7 +111,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `4afd5efe52ae0ba136f738538477f4256500bc5a`.
+`git write-tree` must print `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -137,11 +171,53 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
-The package reconstructs reference `34982936353`, retaining the
+Reference `daf5771a7d868903ada1a99cf595a587027f018c` passed the unchanged native
+changed-source checks for its 24 changed paths in 883.1 seconds. Focused verification
+passed 507 tests across the selected full suites, four separately filtered cases,
+and all 16 requester-wake end-to-end cases. The broad embedded tool-handler suite
+is not covered by a passing-suite claim. Two review findings were corrected with
+failing-then-passing regressions and independently inspected after correction.
+The complete pinned `pnpm build` also passed in 225.79 seconds on that clean source.
+
+A fresh standalone clone of the exact official tag passed the unchanged public
+helper's preflight, apply and normalized-tree checks. Comparison of all 39,499
+tracked entries confirmed matching production blobs and every file mode against
+the committed source. Only the two established fixture labels differ. The resulting
+tree and patch digest are pinned above.
+
+Hosted qualification remains pending. The workflow runs the focused lifecycle suites, the two
+changed embedded receipt cases and the requester-wake end-to-end suite against its
+own reconstructed build. A passing run must identify this manifest and normalized
+tree; the historical results below do not qualify the new reference.
+
+### September 21 deployment and live check
+
+The sealed release `openclaw-2026.9.3-daf5771a7d86-20260921T1821Z-selfcontained`
+was activated at 18:39:11 UTC. Readback confirmed the selected commit and process
+entrypoints, healthy endpoints, preserved configuration, scheduled-job definitions,
+authentication-profile ordering and native companion process identities. Discord
+and Telegram were connected. Current-process native screen capture was qualified;
+this was not a new companion installation or proof of scheduled capture.
+
+A bounded live diagnostic completed phase one in one native child, then sent a
+second request to that same child. The follow-up receipt retained a stable completion
+identity and explicitly promised completion delivery. Its `sessions_yield` returned
+`yielded`; phase-two completion resumed the parent and exactly one final message
+was read back from Discord at 18:41:39.824 UTC, 35.974 seconds after acceptance.
+The first attempted wait was skipped because phase-one completion was already
+queued; the check demonstrates one successful yield, not two.
+
+This establishes the exercised follow-up, continuation and delivery path. It does
+not establish every concurrent-child, transport-failure or long-running workload.
+The [delivery chapter](../docs/13-delivery-and-control-surface.md#september-21-follow-up-delivery-incident)
+connects the result to the incident and source repair.
+
+### Historical September 15 qualification
+
+The earlier package reconstructed reference `34982936353`, retaining the
 previously accepted gateway repairs and adding the local Mac SecretRef
 bootstrap described in the [source map](../docs/20-runtime-source-changes.md#mac-companion-authentication).
-Hosted qualification is bound to this source, independently of earlier green
-workflows and the subsequent acceptance record.
+The following qualification is bound to that earlier source.
 
 A fresh standalone clone of the exact official tag passed the unchanged public
 helper's preflight, apply and normalized-tree checks. Comparison of all 39,495
@@ -179,11 +255,11 @@ and [steering workflow](https://github.com/josephbergvinson/openclaw-control-pla
 at [candidate manifest `38b00d7`](https://github.com/josephbergvinson/openclaw-control-plane/blob/38b00d7dcc2226c28bcbb83a9edaf518befafea2/runtime/manifest.json).
 The preserved results contain all 34 native commands with zero exit codes, the
 complete runtime build, all ten steering cases and the focused ownership and cron regression suites.
-Both the build and native-plan artifacts identify the normalized tree above.
+Both the build and native-plan artifacts identify normalized tree
+`4afd5efe52ae0ba136f738538477f4256500bc5a`.
 The candidate manifest binds that tree to source `34982936353` and the exact patch
-digest. This qualification follow-up changes only prose; every manifest identity
-and patch byte remains unchanged. It does not represent a separate full CI run on
-the prose-only follow-up commit.
+digest. Its later qualification follow-up changed only prose; it did not represent
+a separate full CI run on the prose-only follow-up commit or the current reference.
 
 The companion acceptance covers local registered-project routing. Remote
 node-backed Codex placement requires its own verification.

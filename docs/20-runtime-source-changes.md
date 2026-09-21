@@ -7,9 +7,28 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-76 local commits and 582 changed paths from the official release. It includes
+78 local commits and 602 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## September 21 follow-up repair
+
+The [repair record](../runtime/README.md#september-21-follow-up-repair) pins
+committed source `daf5771a7d868903ada1a99cf595a587027f018c`. The complete patch
+includes the following additions, now deployed with a bounded live Discord check:
+
+| Change | Source boundary |
+|---|---|
+| Owned child follow-ups | `src/agents/tools/sessions-send-owned-child.ts` and the subagent registry bind an eligible follow-up to the parent's current turn, preserve logical task identity, and fence changes to the child session or execution owner. |
+| Completed-session reactivation | `src/gateway/session-subagent-reactivation.ts` rechecks the current owner after runtime loading and completes the existing replacement transition before a follow-up promises a completion handoff. |
+| Harness completion receipts | `src/agents/accepted-session-spawn.ts`, embedded tool completion and Codex dynamic tools preserve the stable completion identity separately from the accepted execution ID. |
+| Rejected-wait presentation | The sessions-yield tool and `src/agents/embedded-agent-runner/run/tool-error-warning.ts` explain an unconfirmed handoff while retaining the error and the existing visible-answer rules. |
+| Retained dreaming effort | The preceding `8ad9b4113ab` change carries managed reasoning effort through memory dreaming and the background completion bridge; the complete export retains it. |
+
+The package keeps the original official release as its reconstruction base.
+Focused regression results, reconstructed-source qualification, activation and
+actual channel delivery are recorded separately. Hosted qualification remains
+pending; the older companion acceptance retains its original scope.
 
 ## What is included
 
@@ -84,7 +103,7 @@ that the gateway was rebuilt or activated.
 
 The companion at `275f120c13b` passed signed installation, matching worker and local
 authentication checks, native screen/cursor/cleanup probes, and an ordinary
-registered-project agent read. The [acceptance record](../runtime/README.md#current-source-qualification)
+registered-project agent read. The [acceptance record](../runtime/README.md#historical-september-15-qualification)
 binds those checks to the app build and exact source-qualified package. It does not
 claim live token rotation, iOS acceptance or protected native password entry.
 
@@ -145,16 +164,17 @@ Never copy another operator's account database into a fresh installation.
 
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
-gateway source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47` and reconstructed
-reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae`. The reference includes production
-changes for the native Mac app and matching bundled worker; gateway deployment
-has not advanced. Exact endpoint differences are classified by path, blob and
-file mode in `productionDelta`, `testOnlyDelta`, `documentationDelta` and
-`toolingOnlyDelta`.
+gateway and reconstructed reference, both `daf5771a7d868903ada1a99cf595a587027f018c`.
+The reference includes the
+follow-up repair and retains the preceding dreaming-effort and native Mac changes.
+The endpoint difference arrays `productionDelta`, `testOnlyDelta`,
+`documentationDelta` and `toolingOnlyDelta` are empty because those commits match.
+Deployment and bounded live delivery evidence are recorded in the
+[runtime package](../runtime/README.md#september-21-deployment-and-live-check).
 
 The public derivative changes only the two established company strings in the
 lane-contract test fixture relative to that reference. No other export
-normalization is applied. The resulting tree is `4afd5efe52ae0ba136f738538477f4256500bc5a`.
+normalization is applied. The resulting tree is `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone

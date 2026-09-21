@@ -28,11 +28,54 @@ During substantial work, post meaningful milestones and explain real dependencie
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
+## September 21 follow-up delivery incident
+
+An observed “Yield failed” message was a runtime-generated tool-failure warning.
+It did not mean Discord had rejected a message. The parent had sent follow-up work
+to an existing child, but its current turn did not own a completion handoff. The
+wait tool rejected the request. With no visible final answer, the generic warning
+became the channel response while child work continued independently.
+
+The repair binds eligible follow-ups to the current parent turn and
+preserves the child's logical task across executions. Eligibility requires the
+same requester, controller and child-session identity. An active child is steered
+through its current execution owner; a completed child uses native reactivation.
+The accepted receipt keeps execution and completion identities separate so both
+supported harness paths can settle the correct obligation. A pending send or watch
+alone is insufficient.
+
+The handoff must also retain other results in the same completion batch. A delayed
+callback from an older wait must not settle a newly claimed obligation or reuse its
+delivery identity. These are lifecycle requirements, beyond changing the warning text.
+
+The repair also explains a rejected wait in ordinary prose while retaining the
+failure. It does not replace a useful final answer with a duplicate warning, claim
+that work stopped, or promise an unconfirmed later response.
+
+The [repair record](../runtime/README.md#september-21-follow-up-repair)
+pins source `daf5771a7d868903ada1a99cf595a587027f018c`. Local source checks, 507 focused
+suite tests, four filtered cases and 16 requester-wake end-to-end cases passed.
+Fresh reconstruction matched all 39,499 tracked entries, except the two established
+fixture-label substitutions. Two review findings were corrected and independently
+inspected after correction.
+
+The sealed release was activated on September 21. A bounded live diagnostic then
+completed phase one in a native child, followed up in that same child with a stable
+completion receipt, successfully yielded, and resumed the parent with phase two.
+Exactly one final message was read back from Discord at 18:41:39.824 UTC,
+35.974 seconds after acceptance. The first attempted wait had been skipped because
+phase-one completion was already queued; this was one successful yield, not two.
+
+That check establishes the exercised follow-up and delivery path. Hosted qualification
+remains pending, and broader long-running workloads retain their own acceptance
+requirements. The older results below retain their original source and deployment
+identities.
+
 ## Additional Discord repair qualification
 
 The additional repair has operator source commit [6e5890826b64df455be0c50756ef917aa6ee1211](https://github.com/josephbergvinson/openclaw-runtime-source/commit/6e5890826b64df455be0c50756ef917aa6ee1211). Local qualification passed 570 behavior tests and the native type, lint, import, state, security and dead-export checks. The aggregate build, release staging, candidate import, source seal and initial activation also passed. A private exact-message fetch passed after activation. The first live Discord retest nevertheless failed delivery acceptance; the deployed successor subsequently passed the bounded live checks described below.
 
-The public [runtime manifest](../runtime/manifest.json) reconstructs reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae`, retaining these repairs and adding the native Mac app/private-worker authentication change described in the [source map](20-runtime-source-changes.md). The gateway stays on deployed source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; the manifest separately identifies the companion production delta and its scoped installation and workflow acceptance. The normalized tree is `4afd5efe52ae0ba136f738538477f4256500bc5a`. Only the two existing company labels in one regression fixture differ from the pinned reference source. Private repository access is unnecessary for reconstruction. The Discord results below retain their original source revisions and do not establish companion activation. Hosted qualification must use the new reference, independently of historical green results. The compact resolver change remains a workspace helper with its own fixture tests.
+The historical September 15 reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae` retained these repairs and added the native Mac app/private-worker authentication change described in the [source map](20-runtime-source-changes.md). Its gateway remained on source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; its manifest separately identified the companion production delta and scoped acceptance. Its normalized tree was `4afd5efe52ae0ba136f738538477f4256500bc5a`. The current [runtime manifest](../runtime/manifest.json) pins the September 21 reference described above. The Discord results below retain their original revisions and do not qualify that newer source. The compact resolver change remains a workspace helper with its own fixture tests.
 
 The baseline calendar request took 598.812 seconds from submission to its final Discord reply. Its trace contained 42 successful tool calls, no tool errors or timeouts, and no compaction. Broad searches, a full resolver result and an exact-message read that incorrectly returned channel history added large outputs to the context. These observations identify unnecessary input volume; they do not establish how much of the delay each output caused. The repair preserves model and reasoning settings.
 
