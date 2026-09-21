@@ -11,14 +11,48 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## Active-child follow-up correction
+
+A later incident exposed two gaps in the earlier repair. The owned follow-up
+helper supplied a new agent-to-agent reply-delivery mode when steering an already
+active child. The real execution owner rejected the conflicting mode. The parent
+then successfully yielded to its remaining child work, but shared terminal
+preparation rendered the earlier mutating-tool error as a final warning.
+
+The correction lets the active child retain its admitted delivery mode; it does
+not change restrictions for generic agent-to-agent requests. Terminal preparation
+defers the final warning only when the attempt succeeded, yielded and has
+core-confirmed continuation custody. Original error, mutation and trace facts
+remain intact. Failed, cancelled and unowned turns retain their warning behavior.
+
+The send regression now uses real registered execution handles and the backend
+validator; the previous test mocked that boundary. Four send cases and three
+warning cases reproduced the defects before the production changes. Focused
+verification passed 111 session tests, 31 steering tests, 51 terminal-preparation
+tests, 50 terminal-resolution tests, two terminal-state tests and 34 payload-error
+tests. An unrelated capacity-warning assertion also failed on the untouched prior
+source; only its expected prefix changed to the existing plain-text `Warning:`.
+
+The correction is committed as `18b432ca2f83a107b1bc329cedf2221f20e61639` and included
+in the complete patch. The native changed-source checks passed in 739.9 seconds,
+including typechecks, lint and dead-code checks, and scoped independent review
+found no actionable findings. The pinned full build passed in 232.79 seconds, and
+sealed-release activation selected this exact source. A bounded live check of active
+and completed child follow-ups passed, followed by a separate live check retaining
+a real tool error through a successful yield without a stale final warning.
+**Hosted qualification of this source remains pending.** Earlier workflows do not qualify the
+correction. The workflow adds the full terminal-preparation suite in its own
+invocation against the reconstructed build.
+
 ## September 21 follow-up repair
 
-The deployed and reconstructed source is `daf5771a7d868903ada1a99cf595a587027f018c`.
-The manifest and complete patch reconstruct that source with the two established
-fixture-label substitutions. Local source checks, focused regressions, the complete
+The earlier repair used source `daf5771a7d868903ada1a99cf595a587027f018c`.
+It was the deployment baseline before the active-child correction above.
+For that earlier source, local source checks, focused regressions, the complete
 build, fresh reconstruction, activation and the bounded live Discord handoff check
-passed. **Hosted qualification remains pending.** Earlier passing workflows do not
-qualify this source.
+passed. Its [complete reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35641128711)
+and [steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35641129009)
+also passed at public commit `9a04c7fd5121c05c5b9cd9b13c579f9159746f24`.
 
 The repair addresses a rejected wait after a parent sends more work to an
 existing child. Completion ownership must follow the parent's current turn,
@@ -52,23 +86,22 @@ do not replace hosted qualification or acceptance on another installation.
 |---|---|
 | Official tag | `v2026.9.3` |
 | Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed gateway source | `daf5771a7d868903ada1a99cf595a587027f018c` |
+| Deployed gateway source | `18b432ca2f83a107b1bc329cedf2221f20e61639` |
 | Historical Mac companion and bundled worker acceptance; not revalidated | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
-| Reconstructed reference source | `daf5771a7d868903ada1a99cf595a587027f018c` |
-| Reference source tree before fixture normalization | `5ab5fa2727e07e87cc5649da439ec18074874753` |
-| Sanitized source tree | `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9` |
-| Patch SHA-256 | `3ea096fbc14d49a90e42a17753557d4d88969ef2ab21e614b846c70b7553acba` |
+| Reconstructed reference source | `18b432ca2f83a107b1bc329cedf2221f20e61639` |
+| Reference source tree before fixture normalization | `254f9e28f1ae74cc45559c6fd1abf1f434eb8d1a` |
+| Sanitized source tree | `b8e3bb2de500a88253b78747f13f0b7b0547a928` |
+| Patch SHA-256 | `ea8c1aa8956182c18daa4d0c6f6df334e0739d66afce85c895674017e3795d6c` |
 | Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
 
-The patch is 2,021,780 bytes and changes 602 paths across 78 local commits. The custom commit is a lineage
+The patch is 2,027,015 bytes and changes 603 paths across 79 local commits. The custom commit is a lineage
 identifier; it is not a promise that GitHub's upstream repository contains that
 commit. Reconstruction starts from the public official tag and uses this patch.
 
-The gateway and reference now use the same source. The manifest explicitly scopes
-`deployedCommit` to the gateway and records exact paths, blobs and file modes
-under `productionDelta`, `testOnlyDelta`, `documentationDelta` and
-`toolingOnlyDelta`. These endpoint deltas are empty because deployed and reference
-commits match. The `components.macCompanion` identity retains the
+The reference matches the deployed gateway source. The manifest explicitly scopes
+`deployedCommit` to the gateway; `productionDelta`, `testOnlyDelta`,
+`documentationDelta` and `toolingOnlyDelta` are empty because both source identities
+are `18b432ca2f83`. The `components.macCompanion` identity retains the
 separately accepted September 15 app and worker as historical evidence; it is not
 a new companion installation or revalidation claim. Production differences are
 not labeled test-only.
@@ -111,7 +144,7 @@ git switch -c reference/openclaw-2026.9.3
 git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
 ```
 
-`git write-tree` must print `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`.
+`git write-tree` must print `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
@@ -171,6 +204,53 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
+Reference `18b432ca2f83a107b1bc329cedf2221f20e61639` passed all 279 focused tests
+listed above and the native changed-source checks for its six changed paths.
+The unchanged public helper passed preflight and application in a fresh standalone
+clone of the exact official release. Comparison of all 39,499 tracked entries
+confirmed matching production blobs and every file mode; only the two established
+fixture labels differ. The pinned full build passed in 232.79 seconds on the clean
+source, with build-info SHA-256
+`f7f5c94110df6ea497843194c8fe7d3e6924ba7850a9a1feac76962a7617e4af`.
+Both bounded live checks passed as recorded below. Hosted qualification of this
+source remains pending.
+
+### Active-child correction deployment
+
+The sealed release `openclaw-2026.9.3-18b432ca2f83-20260921T2140Z-selfcontained`
+was activated at 21:52:46 UTC. The loaded gateway was verified on the exact
+reference source. The activation receipt has SHA-256
+`b3c8ef5b28b254606637e838ee4ccc3b155bfc118cde340a98c1b8b5f00c0f19`.
+Readback confirmed unchanged configuration, scheduled-job definitions,
+authentication-profile ordering and native companion process identities. Discord
+and Telegram were connected. A capture check qualified the current gateway process;
+it does not establish natural scheduled synchronization.
+
+The first controlled live check steered a running child through its original
+execution, then sent another follow-up to that completed child. The second follow-up
+started a new execution with the same completion-task identity. Its successful
+`yielded` result was followed by child completion and requester continuation.
+Exactly one final message was read back from Discord at 21:55:24.807 UTC,
+103.310 seconds after acceptance, with no intermediate failure warning.
+The first wait was skipped because completion was already queued; this was one
+successful yield.
+
+The deliberately nonzero shell exit in that first check was returned with
+`isError: false`; it did not establish warning deferral after a retained tool error.
+A separate focused check exercised that exact boundary. A follow-up steered the
+original child execution, then a send to an absent synthetic target returned
+`isError: true`. The trace retained that `sessions_send` failure with
+`mutatingAction: true` and `executionStarted: true` when the parent successfully
+yielded. The persisted yield and successful attempt emitted no final warning.
+The child completed through the original execution, the parent resumed automatically,
+and exactly one final Discord message was read back at 22:01:36.345 UTC,
+117.275 seconds after acceptance. Both the readback during the yield and the final
+readback contained no intermediate failure warning; the synthetic target remained
+absent. These controlled checks cover the exercised handoffs and warning boundary,
+not every concurrent or long-running workload.
+
+### Earlier September 21 qualification
+
 Reference `daf5771a7d868903ada1a99cf595a587027f018c` passed the unchanged native
 changed-source checks for its 24 changed paths in 883.1 seconds. Focused verification
 passed 507 tests across the selected full suites, four separately filtered cases,
@@ -183,12 +263,14 @@ A fresh standalone clone of the exact official tag passed the unchanged public
 helper's preflight, apply and normalized-tree checks. Comparison of all 39,499
 tracked entries confirmed matching production blobs and every file mode against
 the committed source. Only the two established fixture labels differ. The resulting
-tree and patch digest are pinned above.
+tree and patch digest are retained in the [manifest at public commit `9a04c7f`](https://github.com/josephbergvinson/openclaw-control-plane/blob/9a04c7fd5121c05c5b9cd9b13c579f9159746f24/runtime/manifest.json).
 
-Hosted qualification remains pending. The workflow runs the focused lifecycle suites, the two
-changed embedded receipt cases and the requester-wake end-to-end suite against its
-own reconstructed build. A passing run must identify this manifest and normalized
-tree; the historical results below do not qualify the new reference.
+The [complete reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35641128711)
+and [steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35641129009)
+passed at public commit `9a04c7fd5121c05c5b9cd9b13c579f9159746f24`, whose manifest
+pins source `daf5771a7d86` and normalized tree
+`5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`. These results qualify that earlier source,
+not the active-child correction above.
 
 ### September 21 deployment and live check
 

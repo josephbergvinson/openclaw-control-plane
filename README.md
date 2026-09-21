@@ -36,7 +36,7 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 
 ## What is included
 
-- **The complete runtime delta:** 602 changed paths from the official release,
+- **The complete runtime delta:** 603 changed paths from the official release,
   including regression tests. The reconstruction helper verifies the patch checksum
   and resulting Git tree. Production source is unchanged from the pinned source;
   two labels in one test fixture are normalized.
@@ -51,19 +51,27 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
   source layout, account setup, operational definitions and acceptance steps.
 
 The runtime [manifest](runtime/manifest.json) pins official commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`. Both the deployed gateway and reconstructed
-reference use source `daf5771a7d868903ada1a99cf595a587027f018c`. The reference includes the September 21
-follow-up delivery repair and retains the earlier runtime and Mac companion changes.
-The manifest separates gateway deployment from the historical companion acceptance.
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, deployed gateway source
+`18b432ca2f83a107b1bc329cedf2221f20e61639` and reconstructed reference
+`18b432ca2f83a107b1bc329cedf2221f20e61639`. The reference includes the active-child
+follow-up correction and retains the earlier runtime and Mac companion changes.
+Its gateway is activated; historical companion acceptance stays separate.
 The manifest also pins the public
 reconstruction tree and Node.js 24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
 
-The September 21 reference passed local source checks, focused regressions, a complete
+The earlier `daf5771a7d86` reference passed local source checks, focused regressions, a complete
 build and fresh reconstruction with full source parity. Activation and a bounded live
 check of a follow-up to the same child, requester continuation and Discord delivery
-also passed. **Hosted qualification remains pending.** The
+also passed, followed by hosted qualification at public commit `9a04c7f`. The
 [repair record](runtime/README.md#september-21-follow-up-repair)
 retains the scope of each result.
+
+The [active-child follow-up correction](runtime/README.md#active-child-follow-up-correction)
+is committed and included in the patch. Its 279 focused tests and native changed-source
+checks, full build and activation passed. A bounded live check of active and
+completed child follow-ups also passed. A second live check retained a real tool
+error through a successful yield and delivered one final response without a stale
+warning. Hosted qualification of this source remains pending.
 
 ## Start using the reference
 
