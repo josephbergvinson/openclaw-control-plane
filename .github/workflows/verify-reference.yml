@@ -113,6 +113,12 @@ jobs:
             src/gateway/session-subagent-reactivation.test.ts \
             extensions/codex/src/app-server/dynamic-tools.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
+      - name: Verify terminal warnings during confirmed continuations
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial src/agents/embedded-agent-runner/run/terminal-preparation.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
       - name: Verify embedded follow-up completion receipts
         id: receipts
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -140,6 +146,7 @@ jobs:
           path: |
             ${{ runner.temp }}/reference-build-source.txt
             ${{ runner.temp }}/reference-followup-unit.log
+            ${{ runner.temp }}/reference-followup-terminal.log
             ${{ runner.temp }}/reference-followup-receipts.log
             ${{ runner.temp }}/reference-followup-continuation.log
           if-no-files-found: error

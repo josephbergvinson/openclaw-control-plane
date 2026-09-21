@@ -1159,16 +1159,17 @@ index 12490b2586f4a29b4261cade6ad20a0bc6648c94..b7685f992945118f59d1be006fd5bdbf
  
  **I only see the final answer.**
 diff --git a/docs/concepts/session-tool.md b/docs/concepts/session-tool.md
-index 49dda282379f3cf92512b93988b711e4b1ec6587..2780fbffac3bdec8ab2c69a61f33f3c020be9cba 100644
+index 49dda282379f3cf92512b93988b711e4b1ec6587..65f01d0a17d2fb594f0a0fa52eb01092db42c73d 100644
 --- a/docs/concepts/session-tool.md
 +++ b/docs/concepts/session-tool.md
-@@ -145,6 +145,17 @@ An accepted result keeps target admission separate from announcement delivery.
+@@ -145,6 +145,18 @@ An accepted result keeps target admission separate from announcement delivery.
  `delivery.status` describes only the later announcement as `pending` or `skipped`.
  Neither field is a target-completion receipt.
  
 +For an announced native child owned by the current requester, a fire-and-forget
 +follow-up retains the existing delegated task. It steers an active execution or
-+starts another turn in that child session. Once completion ownership is durably
++starts another turn in that child session. Steering preserves the running child's
++reply-delivery mode and completion audience. Once completion ownership is durably
 +attached to the requester's current turn, the accepted result also includes
 +`childSessionKey`, `completionRunId`, and `expectsCompletionMessage: true`.
 +If that child belongs to a frozen multi-child completion batch, `completionSpawns` also carries the still-owned siblings' stable task/session tuples. The current parent owns that cohort until its next final response or yield.
@@ -16151,6 +16152,19 @@ index d704e581a6ef744d0fbbbe63f6e5a0c6b34fd94e..04b3b053095243f78381bc1a58ccbd9c
            )
          : undefined;
      try {
+diff --git a/src/agents/embedded-agent-runner/run/payloads.errors.test.ts b/src/agents/embedded-agent-runner/run/payloads.errors.test.ts
+index 89ab4e702b092cce228afb08c2d94cf40c120784..755e3d24ce2337e5cdb8b4c5e0287432aa01b920 100644
+--- a/src/agents/embedded-agent-runner/run/payloads.errors.test.ts
++++ b/src/agents/embedded-agent-runner/run/payloads.errors.test.ts
+@@ -445,7 +445,7 @@ describe("buildEmbeddedRunPayloads", () => {
+     });
+ 
+     expectSinglePayloadSummary(payloads, {
+-      text: "⚠️ Selected model is at capacity. Try a different model, or wait and retry.",
++      text: "Warning: Selected model is at capacity. Try a different model, or wait and retry.",
+       isError: true,
+     });
+   });
 diff --git a/src/agents/embedded-agent-runner/run/payloads.test.ts b/src/agents/embedded-agent-runner/run/payloads.test.ts
 index 91f48040f5ce5f44a46973b380ba44b4ba8fc70d..0cb6568d3812a694f72692154c6fa3340c18a956 100644
 --- a/src/agents/embedded-agent-runner/run/payloads.test.ts
@@ -16842,10 +16856,18 @@ index 73840c72d224016afcec4641cce351b76902f512..27ecdc4f4d6c862d05c9390d70d40e87
    runParams: RunEmbeddedAgentInternalParams;
    sessionAdmission?: Parameters<typeof resolveEmbeddedRunModelSetup>[0]["sessionAdmission"];
 diff --git a/src/agents/embedded-agent-runner/run/terminal-preparation.test.ts b/src/agents/embedded-agent-runner/run/terminal-preparation.test.ts
-index 5ba454722d47289132f733cb5c65eee3569330dc..5870396db620df029395a77db8789d400f95472d 100644
+index 5ba454722d47289132f733cb5c65eee3569330dc..e10e991abf91fd9471ad5e34af5effd5b1cfcc7f 100644
 --- a/src/agents/embedded-agent-runner/run/terminal-preparation.test.ts
 +++ b/src/agents/embedded-agent-runner/run/terminal-preparation.test.ts
-@@ -526,6 +526,112 @@ describe("prepareEmbeddedRunTerminal", () => {
+@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
+ import { createTestAdmittedRunContext } from "../../admitted-run-context.test-support.js";
+ import { createZeroUsageFixture } from "../../test-helpers/usage-fixtures.js";
++import { createToolTerminalObserver } from "../../tool-terminal-outcome.js";
+ import {
+   markCoreTtsAttemptResult,
+   markCoreTtsToolResult,
+@@ -526,6 +527,200 @@ describe("prepareEmbeddedRunTerminal", () => {
        expect.objectContaining({ runAborted: true, runStopReason: "restart" }),
      );
    });
@@ -16893,19 +16915,52 @@ index 5ba454722d47289132f733cb5c65eee3569330dc..5870396db620df029395a77db8789d40
 +      warns: true,
 +    },
 +    {
-+      name: "a mutating tool failure",
++      name: "an owned yield after a mutating tool failure",
 +      yielded: true,
++      owned: true,
++      mutating: true,
++      failed: false,
++      warns: false,
++    },
++    {
++      name: "an owned yield after a tool failure with unknown effect",
++      yielded: true,
++      owned: true,
++      mutating: undefined,
++      failed: false,
++      warns: false,
++    },
++    {
++      name: "a mutating failure without continuation custody",
++      yielded: true,
++      owned: false,
++      mutating: true,
++      failed: false,
++      warns: true,
++    },
++    {
++      name: "a completed mutating failure with stale custody",
++      yielded: false,
 +      owned: true,
 +      mutating: true,
 +      failed: false,
 +      warns: true,
 +    },
 +    {
-+      name: "a tool failure with unknown effect",
++      name: "a failed mutating attempt with custody",
 +      yielded: true,
 +      owned: true,
-+      mutating: undefined,
++      mutating: true,
++      failed: true,
++      warns: true,
++    },
++    {
++      name: "a cancelled mutating attempt with custody",
++      yielded: true,
++      owned: true,
++      mutating: true,
 +      failed: false,
++      cancelled: true,
 +      warns: true,
 +    },
 +  ])("retains failure visibility appropriately for $name", async (testCase) => {
@@ -16939,9 +16994,12 @@ index 5ba454722d47289132f733cb5c65eee3569330dc..5870396db620df029395a77db8789d40
 +    const prepared = await prepareAttempt({
 +      attempt,
 +      terminalState: {
-+        outcome: testCase.failed
-+          ? { reason: "failed", status: "error", stopReason: "error" }
-+          : { reason: "completed", status: "ok", stopReason: "stop" },
++        outcome:
++          "cancelled" in testCase && testCase.cancelled
++            ? { reason: "cancelled", status: "error", stopReason: "stop" }
++            : testCase.failed
++              ? { reason: "failed", status: "error", stopReason: "error" }
++              : { reason: "completed", status: "ok", stopReason: "stop" },
 +        signalOwnedInterruption: false,
 +      },
 +    });
@@ -16955,33 +17013,84 @@ index 5ba454722d47289132f733cb5c65eee3569330dc..5870396db620df029395a77db8789d40
 +      prepared.payloads.map((payload) => getReplyPayloadMetadata(payload)?.toolErrorWarning),
 +    ).toEqual(testCase.warns ? [{ toolName: "message" }] : []);
 +  });
++
++  it("defers a retained send failure after successful work and an owned yield", async () => {
++    const actualPayloads = await vi.importActual<typeof import("./payloads.js")>("./payloads.js");
++    payloadMocks.buildEmbeddedRunPayloads.mockImplementation(
++      actualPayloads.buildEmbeddedRunPayloads,
++    );
++    const observe = createToolTerminalObserver("run-followup-warning");
++    const failedSend = observe({
++      toolName: "sessions_send",
++      arguments: { sessionKey: "agent:main:child:worker", message: "Continue the review" },
++      outcome: "failure",
++      failure: { error: "Child follow-up was not sent: source_reply_delivery_mode_mismatch" },
++    });
++    expect(failedSend.lastToolError).toMatchObject({
++      toolName: "sessions_send",
++      mutatingAction: true,
++    });
++    observe({ toolName: "read", arguments: {}, outcome: "success" });
++    const afterYield = observe({
++      toolName: "sessions_yield",
++      arguments: {},
++      outcome: "success",
++      result: { content: [], details: { status: "yielded" } },
++    });
++    expect(afterYield.lastToolError).toBe(failedSend.lastToolError);
++
++    const attempt = attemptResult({
++      assistantTexts: [],
++      lastAssistant: {
++        ...assistantMessage("aborted"),
++        content: [
++          { type: "toolCall", id: "yield-followup", name: "sessions_yield", arguments: {} },
++        ],
++      },
++      currentAttemptAssistant: undefined,
++      currentAttemptCompletedAssistant: undefined,
++      yieldDetected: true,
++      requesterContinuationSettled: true,
++      lastToolError: afterYield.lastToolError,
++    });
++    const prepared = await prepareAttempt({
++      attempt,
++      terminalState: {
++        outcome: { reason: "completed", status: "ok", stopReason: "stop" },
++        signalOwnedInterruption: false,
++      },
++    });
++
++    expect(prepared.payloads).toEqual([]);
++    expect(prepared.payloadsWithToolMedia).toEqual([]);
++    expect(attempt.lastToolError).toBe(failedSend.lastToolError);
++  });
  });
  
  describe("prepareEmbeddedRunTerminal run stats", () => {
 diff --git a/src/agents/embedded-agent-runner/run/terminal-preparation.ts b/src/agents/embedded-agent-runner/run/terminal-preparation.ts
-index 89651542fd6d9d23dfdf8ed47cd27cdd274e0930..16a3403dc33b1892b2abec55f892039722a0e3e2 100644
+index 89651542fd6d9d23dfdf8ed47cd27cdd274e0930..c16e7c4684b10e65142a5fbefc7bc173c3ea3ff0 100644
 --- a/src/agents/embedded-agent-runner/run/terminal-preparation.ts
 +++ b/src/agents/embedded-agent-runner/run/terminal-preparation.ts
-@@ -192,6 +192,13 @@ export function prepareEmbeddedRunTerminal(input: {
+@@ -192,6 +192,12 @@ export function prepareEmbeddedRunTerminal(input: {
    const payloadAssistant = attempt.yieldDetected
      ? attempt.lastAssistant
      : input.currentAttemptCompletedAssistant;
-+  // An owned continuation still owes the answer. A handled read error must not
-+  // replace its progress with a terminal failure while that continuation waits.
-+  const deferReadFailureWarning =
-+    attempt.lastToolError?.mutatingAction === false &&
++  // An owned continuation still owes the answer, regardless of the failed tool's
++  // effects. Defer its terminal warning while retaining the attempt's error facts.
++  const deferToolFailureWarning =
 +    attempt.yieldDetected === true &&
 +    attempt.requesterContinuationSettled === true &&
 +    input.terminalState.outcome.status === "ok";
    const payloads = buildEmbeddedRunPayloads({
      assistantTexts: attempt.assistantTexts,
      assistantMessageIndex: attempt.lastAssistantTextMessageIndex,
-@@ -199,7 +206,7 @@ export function prepareEmbeddedRunTerminal(input: {
+@@ -199,7 +205,7 @@ export function prepareEmbeddedRunTerminal(input: {
      assistantTranscriptIdempotencyKey: attempt.assistantTranscriptIdempotencyKey,
      lastAssistant: payloadAssistant,
      currentAssistant: attempt.yieldDetected ? null : (payloadAssistant ?? null),
 -    lastToolError: attempt.lastToolError,
-+    lastToolError: deferReadFailureWarning ? undefined : attempt.lastToolError,
++    lastToolError: deferToolFailureWarning ? undefined : attempt.lastToolError,
      config: runParams.config,
      isCronTrigger: runParams.trigger === "cron",
      isHeartbeatTrigger: runParams.trigger === "heartbeat",
@@ -24619,10 +24728,10 @@ index 26a2dbc7664b0f48a6970164bb8815fb1c67f316..e3e3159a3ff264b924c4eb896636b0aa
          Math.min(retryIndex, MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS.length - 1)
 diff --git a/src/agents/tools/sessions-send-owned-child.ts b/src/agents/tools/sessions-send-owned-child.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..75950abae5a801a2352465819eff8ca4d01e9c07
+index 0000000000000000000000000000000000000000..7f9a41d69050aa07bccc0ab312c618e7b627ef40
 --- /dev/null
 +++ b/src/agents/tools/sessions-send-owned-child.ts
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,214 @@
 +import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 +import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
 +import type { SessionEntry } from "../../config/sessions/types.js";
@@ -24739,7 +24848,8 @@ index 0000000000000000000000000000000000000000..75950abae5a801a2352465819eff8ca4
 +            steeringMode: "all",
 +            debounceMs: 0,
 +            waitForTranscriptCommit: true,
-+            sourceReplyDeliveryMode: "message_tool_only",
++            // Steering retains this child's existing completion audience and
++            // delivery mode; it does not start a source-only A2A turn.
 +            userTurnTranscriptRecorder: createUserTurnTranscriptRecorder({
 +              input: {
 +                text: params.sendParams.message,
@@ -25357,10 +25467,10 @@ index 0ccdae30cb761785b95453c517f06a3d6f8ac959..bd2783143c9ce605599de8f86a3f1324
      execute: async (_toolCallId, args) => {
        const params = args as Record<string, unknown>;
 diff --git a/src/agents/tools/sessions.test.ts b/src/agents/tools/sessions.test.ts
-index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae3070a0fad13 100644
+index 9935ce85e634b0829c036e21264fc315967fba5f..0b6b2f2b03c0d21f9e99d1c9dcf585f216d43ed3 100644
 --- a/src/agents/tools/sessions.test.ts
 +++ b/src/agents/tools/sessions.test.ts
-@@ -1215,6 +1215,220 @@ describe("sessions_send gating", () => {
+@@ -1215,6 +1215,244 @@ describe("sessions_send gating", () => {
      });
    });
  
@@ -25368,10 +25478,17 @@ index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae307
 +    state: "idle" | "active";
 +    splitOwner: boolean;
 +    completesDuringSend: boolean;
++    sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
 +    failure?: "claim" | "active-owner" | "aborted" | "gateway-retired";
 +  }>([
 +    { state: "idle", splitOwner: false, completesDuringSend: false },
 +    { state: "active", splitOwner: false, completesDuringSend: false },
++    {
++      state: "active",
++      splitOwner: false,
++      completesDuringSend: false,
++      sourceReplyDeliveryMode: "message_tool_only",
++    },
 +    { state: "idle", splitOwner: true, completesDuringSend: false },
 +    { state: "active", splitOwner: false, completesDuringSend: true },
 +    { state: "active", splitOwner: false, completesDuringSend: false, failure: "claim" },
@@ -25381,7 +25498,13 @@ index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae307
 +    { state: "idle", splitOwner: false, completesDuringSend: false, failure: "gateway-retired" },
 +  ])(
 +    "preserves native child follow-up ownership or reports an undeliverable follow-up: %j",
-+    async ({ state, splitOwner, completesDuringSend, failure }) => {
++    async ({
++      state,
++      splitOwner,
++      completesDuringSend,
++      sourceReplyDeliveryMode = "automatic",
++      failure,
++    }) => {
 +      await withTestDir({ prefix: "openclaw-native-child-followup-" }, async (dir) => {
 +        const read = await import("../subagents/registry/subagent-registry-read.js");
 +        const registry = await import("../subagents/registry/subagent-registry.js");
@@ -25434,15 +25557,6 @@ index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae307
 +        const readSpy = vi
 +          .spyOn(read, "getLatestSubagentRunByChildSessionKey")
 +          .mockImplementation(() => [...runs.values()][0] ?? null);
-+        const ownerSpy = vi.spyOn(runtime, "resolveActiveEmbeddedRunOwner").mockReturnValue(
-+          state === "active"
-+            ? {
-+                runId: failure === "active-owner" ? "untracked-active-run" : entry.runId,
-+                sessionId: "native-child",
-+                abort: () => false,
-+              }
-+            : undefined,
-+        );
 +        let gatewayOpen = true;
 +        const gatewayContext =
 +          {} as import("../../gateway/server-methods/types.js").GatewayRequestContext;
@@ -25456,23 +25570,32 @@ index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae307
 +              }
 +            : undefined,
 +        );
-+        const queueSpy = vi
-+          .spyOn(runtime, "queueGuardedEmbeddedAgentMessageWithOutcomeAsync")
-+          .mockImplementation(async (_id, _text, _options, canInject) => {
-+            expect(canInject()).toBe(true);
-+            if (completesDuringSend) {
-+              runs.get(entry.runId)!.execution = { status: "terminal", endedAt: 3 };
-+            }
-+            if (failure === "gateway-retired") {
-+              gatewayOpen = false;
-+            }
-+            return {
-+              queued: true,
-+              sessionId: "native-child",
-+              target: "embedded_run",
-+              gatewayHealth: "live",
-+            };
-+          });
++        const inject = vi.fn<
++          NonNullable<
++            import("../embedded-agent-runner/runs.js").EmbeddedAgentQueueHandle["messageInjectionV2"]
++          >["queueMessage"]
++        >(async (_text, _options, assertCurrent) => {
++          assertCurrent();
++          if (completesDuringSend) {
++            runs.get(entry.runId)!.execution = { status: "terminal", endedAt: 3 };
++          }
++          if (failure === "gateway-retired") {
++            gatewayOpen = false;
++          }
++        });
++        const handle: import("../embedded-agent-runner/runs.js").EmbeddedAgentQueueHandle = {
++          runId: failure === "active-owner" ? "untracked-active-run" : entry.runId,
++          sourceReplyDeliveryMode,
++          supportsTranscriptCommitWait: true,
++          queueMessage: vi.fn(),
++          messageInjectionV2: { version: 2, isAvailable: () => true, queueMessage: inject },
++          isStreaming: () => true,
++          isCompacting: () => false,
++          abort: vi.fn(),
++        };
++        if (state === "active") {
++          runtime.setActiveEmbeddedRun("native-child", handle, childSessionKey, undefined, "main");
++        }
 +        const reactivateSpy = vi
 +          .spyOn(reactivation, "reactivateCompletedSubagentSession")
 +          .mockImplementation(async ({ runId }) => {
@@ -25560,16 +25683,27 @@ index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae307
 +          }
 +          expect(runs.size).toBe(1);
 +          expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
-+          expect(queueSpy).toHaveBeenCalledTimes(
++          expect(inject).toHaveBeenCalledTimes(
 +            state === "active" && failure !== "active-owner" && failure !== "aborted" ? 1 : 0,
 +          );
++          expect(handle.sourceReplyDeliveryMode).toBe(sourceReplyDeliveryMode);
++          expect(handle.queueMessage).not.toHaveBeenCalled();
++          if (state === "idle") {
++            expect(callGatewayMock).toHaveBeenCalledWith(
++              expect.objectContaining({
++                method: "agent",
++                params: expect.objectContaining({ sourceReplyDeliveryMode: "message_tool_only" }),
++              }),
++            );
++          }
 +          expect(
 +            callGatewayMock.mock.calls.filter(([request]) => request.method === "agent"),
 +          ).toHaveLength(state === "active" ? 0 : 1);
 +        } finally {
 +          readSpy.mockRestore();
-+          ownerSpy.mockRestore();
-+          queueSpy.mockRestore();
++          if (state === "active") {
++            runtime.clearActiveEmbeddedRun("native-child", handle);
++          }
 +          reactivateSpy.mockRestore();
 +          claimSpy.mockRestore();
 +          callerSpy.mockRestore();

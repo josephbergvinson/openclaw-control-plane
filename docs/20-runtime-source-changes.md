@@ -7,7 +7,7 @@ ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
 license notices, exact identities and an offline reconstruction helper. It covers
-78 local commits and 602 changed paths from the official release. It includes
+79 local commits and 603 changed paths from the official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
@@ -27,8 +27,15 @@ includes the following additions, now deployed with a bounded live Discord check
 
 The package keeps the original official release as its reconstruction base.
 Focused regression results, reconstructed-source qualification, activation and
-actual channel delivery are recorded separately. Hosted qualification remains
-pending; the older companion acceptance retains its original scope.
+actual channel delivery are recorded separately. Hosted qualification passed for
+`daf5771a7d86`; the older companion acceptance retains its original scope.
+
+The later [active-child correction](../runtime/README.md#active-child-follow-up-correction),
+source `18b432ca2f83a107b1bc329cedf2221f20e61639`, is included in the manifest and patch.
+It changes the existing owned-send
+producer to inherit the active execution's delivery mode and the shared terminal
+owner to defer stale failure warnings during confirmed continuation. Its tests
+exercise the real registered backend validator and actual payload rendering.
 
 ## What is included
 
@@ -164,17 +171,19 @@ Never copy another operator's account database into a fresh installation.
 
 The manifest starts at official tag `v2026.9.3`, commit
 `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
-gateway and reconstructed reference, both `daf5771a7d868903ada1a99cf595a587027f018c`.
-The reference includes the
+gateway source `18b432ca2f83a107b1bc329cedf2221f20e61639` and reconstructed reference
+`18b432ca2f83a107b1bc329cedf2221f20e61639`. The reference includes the active-child
 follow-up repair and retains the preceding dreaming-effort and native Mac changes.
 The endpoint difference arrays `productionDelta`, `testOnlyDelta`,
-`documentationDelta` and `toolingOnlyDelta` are empty because those commits match.
-Deployment and bounded live delivery evidence are recorded in the
-[runtime package](../runtime/README.md#september-21-deployment-and-live-check).
+`documentationDelta` and `toolingOnlyDelta` are empty because the deployed and
+reference source identities match. The new build, activation and bounded live
+follow-up and warning-deferral checks passed; hosted qualification remains pending.
+Activation and historical live
+evidence are recorded separately in the [runtime package](../runtime/README.md#active-child-correction-deployment).
 
 The public derivative changes only the two established company strings in the
 lane-contract test fixture relative to that reference. No other export
-normalization is applied. The resulting tree is `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`.
+normalization is applied. The resulting tree is `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone

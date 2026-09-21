@@ -66,10 +66,38 @@ Exactly one final message was read back from Discord at 18:41:39.824 UTC,
 35.974 seconds after acceptance. The first attempted wait had been skipped because
 phase-one completion was already queued; this was one successful yield, not two.
 
-That check establishes the exercised follow-up and delivery path. Hosted qualification
-remains pending, and broader long-running workloads retain their own acceptance
-requirements. The older results below retain their original source and deployment
-identities.
+That check establishes the exercised follow-up and delivery path. The
+[hosted qualification](../runtime/README.md#earlier-september-21-qualification) subsequently
+passed for `daf5771a7d86`. Broader workloads retain their own acceptance requirements.
+The older results below retain their original source and deployment identities.
+
+### Active-child follow-up and stale terminal warning
+
+A later task exposed a distinct path: a follow-up targeted a child that was still
+running. The owned follow-up helper forced a new agent-to-agent reply-delivery mode
+onto that existing execution. Its validator correctly rejected the mismatch. The
+parent continued useful work and successfully yielded to an owned continuation,
+but the earlier send error became a final “Session Send failed” channel warning.
+Child work was still running; the warning did not describe a terminal task failure.
+
+The correction preserves the active child's admitted delivery mode and leaves
+generic agent-to-agent restrictions unchanged. The shared terminal owner defers
+that fallback warning during a successful, core-confirmed pause, regardless of
+tool effect class. Error facts remain recorded; failed, cancelled or unowned turns
+still expose unresolved errors. This behavior applies to both supported harnesses.
+
+The [correction record](../runtime/README.md#active-child-follow-up-correction)
+describes failing-then-passing regressions through the real execution validator
+and payload renderer. The source is committed as `18b432ca2f83a107b1bc329cedf2221f20e61639`
+and included in the patch. Its full build, activation and a bounded live check of
+active and completed child follow-ups passed. That live check delivered one final
+Discord response in 103.310 seconds, with one skipped wait and one successful yield.
+A second live check retained a real failed `sessions_send` result through a
+successful yield. The same child completed, the parent resumed automatically, and
+Discord received exactly one final response in 117.275 seconds with no stale failure
+warning. The nonzero shell exit in the first check was not used as tool-error proof.
+Hosted qualification of the corrected source remains pending. The earlier completed-child
+check did not cover this active-child mode mismatch.
 
 ## Additional Discord repair qualification
 
