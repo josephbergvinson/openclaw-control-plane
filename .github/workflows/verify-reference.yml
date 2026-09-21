@@ -98,6 +98,52 @@ jobs:
           set -o pipefail
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/reference-build-source.txt"
           pnpm build 2>&1 | tee "$RUNNER_TEMP/reference-build.log"
+      - name: Run owned follow-up and yield regressions
+        id: followup
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial \
+            src/agents/tools/sessions.test.ts \
+            src/agents/tools/sessions-yield-tool.test.ts \
+            src/agents/subagents/registry/subagent-followup-owner.test.ts \
+            src/agents/subagents/registry/subagent-registry-lifecycle.test.ts \
+            src/agents/embedded-agent-runner/run/tool-error-warning.test.ts \
+            src/agents/openclaw-tools.registration.test.ts \
+            src/gateway/session-subagent-reactivation.test.ts \
+            extensions/codex/src/app-server/dynamic-tools.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
+      - name: Verify embedded follow-up completion receipts
+        id: receipts
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial src/agents/embedded-agent-subscribe.handlers.tools.test.ts \
+            --testNamePattern 'tracks only owned follow-up sends for requester settlement \(owned=(true|false)\)' \
+            2>&1 | tee "$RUNNER_TEMP/reference-followup-receipts.log"
+      - name: Verify requester continuation after follow-up
+        id: continuation
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        env:
+          OPENCLAW_E2E_USE_PREBUILT_DIST: "1"
+          OPENCLAW_E2E_WORKERS: "1"
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-followup-continuation.log"
+      - name: Preserve follow-up qualification evidence
+        if: always() && steps.followup.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-followup-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-followup-unit.log
+            ${{ runner.temp }}/reference-followup-receipts.log
+            ${{ runner.temp }}/reference-followup-continuation.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserve actual build output
         if: always() && steps.build.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

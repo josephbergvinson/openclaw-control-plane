@@ -13,7 +13,13 @@ The examples below use explicit paths; replace them with the intended local path
 
 Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.3`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `4afd5efe52ae0ba136f738538477f4256500bc5a`.
+expected tree is `5048932811a2d8acbdd4e52bc7ad0e7e7d056da9`.
+
+The [September 21 repair](../runtime/README.md#september-21-follow-up-repair)
+has passed local source checks, fresh reconstruction, activation and a bounded
+live Discord handoff check. Hosted qualification remains pending. Use the workflow
+result for this manifest; a passing workflow for an older source does not qualify
+this package, and the originating host's live result does not qualify your installation.
 
 Use Node.js 24.16.0 and pnpm 12.3.4. Run the documented frozen dependency installation,
 native changed-source checks and build from that checkout. The source package

@@ -1120,6 +1120,24 @@ index ef5e17b4f117dbcf1b795e90ea5f5c3d3cb17aa5..a7207af34615cd6524a239fe26f1f6db
  
  ```json5
  {
+diff --git a/docs/concepts/dreaming.md b/docs/concepts/dreaming.md
+index 7315eddd0184ec963b7e45b07b7095d494e2ddc4..6ee7aca7d7bdd130407271bfd9d27de0523488fb 100644
+--- a/docs/concepts/dreaming.md
++++ b/docs/concepts/dreaming.md
+@@ -161,6 +161,13 @@ When enabled, `memory-core` auto-manages one cron job for a full dreaming sweep,
+ 
+ Dreaming completions share the [background work budget](/concepts/queue#background-work) with Skill Workshop and other plugin completions: at most three runs in total, with up to three available to `memory-core`. The sweep coordinator does not consume a completion slot while it waits for phase work. System busyness shows these runs together in the `background` row.
+ 
++All completions in the managed sweep—light and REM narratives, deep consolidation,
++and the deep narrative—use `dreaming.phases.deep.execution.thinking` (default
++`high`). This sweep setting accepts `low`, `medium`, or `high` and takes precedence
++over the workspace owner's interactive effort. The workspace owner still supplies
++the model and credentials unless a phase has a configured model override.
++Changing the sweep effort does not change interactive agent defaults.
++
+ An explicit multi-agent fleet needs an [ambient system owner](/gateway/config-agents/heartbeat-compaction-and-streaming#agents.defaults.systemagent) for this job. If logs report `Agent-less cron job has no resolvable owner`, choose an existing agent to own the sweep. For example, if that agent is `ops`:
+ 
+ ```bash
 diff --git a/docs/concepts/progress-drafts.md b/docs/concepts/progress-drafts.md
 index 12490b2586f4a29b4261cade6ad20a0bc6648c94..b7685f992945118f59d1be006fd5bdbf7ae8ef5a 100644
 --- a/docs/concepts/progress-drafts.md
@@ -1140,6 +1158,28 @@ index 12490b2586f4a29b4261cade6ad20a0bc6648c94..b7685f992945118f59d1be006fd5bdbf
  ## Troubleshooting
  
  **I only see the final answer.**
+diff --git a/docs/concepts/session-tool.md b/docs/concepts/session-tool.md
+index 49dda282379f3cf92512b93988b711e4b1ec6587..2780fbffac3bdec8ab2c69a61f33f3c020be9cba 100644
+--- a/docs/concepts/session-tool.md
++++ b/docs/concepts/session-tool.md
+@@ -145,6 +145,17 @@ An accepted result keeps target admission separate from announcement delivery.
+ `delivery.status` describes only the later announcement as `pending` or `skipped`.
+ Neither field is a target-completion receipt.
+ 
++For an announced native child owned by the current requester, a fire-and-forget
++follow-up retains the existing delegated task. It steers an active execution or
++starts another turn in that child session. Once completion ownership is durably
++attached to the requester's current turn, the accepted result also includes
++`childSessionKey`, `completionRunId`, and `expectsCompletionMessage: true`.
++If that child belongs to a frozen multi-child completion batch, `completionSpawns` also carries the still-owned siblings' stable task/session tuples. The current parent owns that cohort until its next final response or yield.
++`runId` identifies the execution; `completionRunId` identifies the stable task
++used by requester settlement. The requester can then use `sessions_yield` to
++wait for that follow-up. Generic inter-session sends and `watch: true` alone do
++not establish this completion handoff.
++
+ Replies come from the completed run's terminal result. When a same-session
+ target has already delivered its final reply to the source conversation through
+ `message`, OpenClaw skips the duplicate channel announcement. Progress messages
 diff --git a/docs/concepts/streaming.md b/docs/concepts/streaming.md
 index d9be75ac82d89759a1f1ff98ce216d3300f23aea..f3abfc7938baf5db61042196a9768681553ca800 100644
 --- a/docs/concepts/streaming.md
@@ -1168,6 +1208,34 @@ index d9be75ac82d89759a1f1ff98ce216d3300f23aea..f3abfc7938baf5db61042196a9768681
    keep tool-progress lines visible while hiding command/exec text,
    set `streaming.preview.commandText` or `streaming.progress.commandText` to
    `"status"` (the default). Set either option to `"raw"` to opt into command
+diff --git a/docs/concepts/subagent-yield-handoff.md b/docs/concepts/subagent-yield-handoff.md
+index 68f58dc0b61b47efc00a38a10b974dc3d832f55d..18ca32d907f0aa2b1341b3ca2482692b2427ad78 100644
+--- a/docs/concepts/subagent-yield-handoff.md
++++ b/docs/concepts/subagent-yield-handoff.md
+@@ -34,6 +34,13 @@ The implementation owners are `subagent-registry-requester-yield.ts`,
+ `agent-task-tracking.ts`. `adoptPausedSubagentRunForFollowUp` uses the existing
+ registry replacement operation; it does not create a second delegated task.
+ 
++A parent's fire-and-forget `sessions_send` to its own announced native child
++also retains that task. Active work is steered; a completed child is reactivated
++in the same session. Before returning a yieldable acceptance, the send binds
++completion to the current requester turn. The accepted completion identity
++remains the canonical task ID across execution replacements, so the old batch
++cannot retire the new follow-up or start a duplicate continuation.
++
+ Settlement dispatch uses `subagent_settle` input provenance. Individual
+ announcements and the older descendant-wake path retain `subagent_announce`:
+ the latter already owns its run replacement after dispatch and must not trigger
+@@ -59,7 +66,8 @@ with its scheduler-owned continuation.
+   replacement retain their existing admission and cleanup gates.
+ - **Stable audience.** A nested wake uses internal delivery. A settlement
+   continuation targeting a live `sessions_yield`-paused row adopts that row;
+-  ordinary inter-session messages remain untracked. Explicit plugin follow-ups
++  parent-owned native follow-ups retain their existing completion audience.
++  Ordinary inter-session messages remain untracked. Explicit plugin follow-ups
+   naming a new requester continue to create their own delivery obligation.
+ - **Deterministic batches.** Frozen run IDs are sorted. Findings use creation
+   time, completion time, and child session identity as tie-breakers. Superseded
 diff --git a/docs/gateway/heartbeat.md b/docs/gateway/heartbeat.md
 index fd398c22c77976aab6231a6612da922063842593..f7832ab0c2cf5d42e5b9e953d974dbd650c3c5be 100644
 --- a/docs/gateway/heartbeat.md
@@ -1297,10 +1365,34 @@ index ad3766d75133c7fbb2582791c87ae47a942f8093..f9bec9f3177f5c268fbf733897dd0041
    for host-managed exports. Companion plugins that enumerate those declared
    artifacts still use `listActiveMemoryPublicArtifacts(...)` from the retained
 diff --git a/docs/plugins/sdk-runtime/background-work.md b/docs/plugins/sdk-runtime/background-work.md
-index b9a6d32305382fe1a7b68fec6ffc9da03af57be9..03b62de39e16e2f823341bfd8709d48114c08d0b 100644
+index b9a6d32305382fe1a7b68fec6ffc9da03af57be9..e612ace2e50ab628b99d53346dc7170774317296 100644
 --- a/docs/plugins/sdk-runtime/background-work.md
 +++ b/docs/plugins/sdk-runtime/background-work.md
-@@ -147,6 +147,7 @@ Start agent work in the background: hook-dispatched turns for external content,
+@@ -62,15 +62,22 @@ Start agent work in the background: hook-dispatched turns for external content,
+       agentId: "research", // required configured agent that owns this work
+       message: "Summarize these notes.",
+       extraSystemPrompt: "Return a concise summary.", // optional
++      thinking: "high", // optional; overrides this completion's effort only
+       timeoutMs: 30_000, // optional; defaults to 30 seconds
+       // model: "openai/gpt-5.6-luna", // optional authorized override
+       // signal: abortController.signal, // optional cancellation
+     });
+     ```
+ 
+-    `agentId` and `message` are required. `extraSystemPrompt`, `model`,
++    `agentId` and `message` are required. `extraSystemPrompt`, `model`, `thinking`,
+     `timeoutMs`, and `signal` are optional. The selected agent supplies its
+     configured default model and credential owner when `model` is omitted.
++    `thinking` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
++    `adaptive`, `max`, or `ultra`, with the usual thinking-level normalization.
++    An omitted value keeps the owning agent's configured effort, then the
++    selected model and global defaults. Explicit null, blank, non-string, or
++    unknown values reject before inference; they do not fall back silently.
++    Provider-specific effort normalization still applies.
+     The result is `{ text: string }`; no session creation, message polling,
+     deletion, or completion delivery is needed. The configured runtime must
+     support fresh, tool-free isolated inference; unsupported runtimes fail
+@@ -147,6 +154,7 @@ Start agent work in the background: hook-dispatched turns for external content,
  
      - `managedFlows` creates and mutates managed flow records. Bind with `fromToolContext(ctx)` or `bindSession({ sessionKey, requesterOrigin })` using host-resolved context, never raw user input.
      - `flows` and `runs` provide owner-scoped DTO lookups (`get`, `list`, `findLatest`, `resolve`). `flows` also exposes `getTaskSummary`; `runs.cancel` cancels an existing task.
@@ -1397,7 +1489,7 @@ index 748d4b926d24825777aee6df7cad5101a3880da8..44f3d8ed180a858113e54470bc75bb59
  ## Related
  
 diff --git a/docs/tools/subagents.md b/docs/tools/subagents.md
-index 566c090d149b6012adcc219372a577c696ddf7d8..4d3dd6241882566ff2657d7010cb18f21849fa44 100644
+index 566c090d149b6012adcc219372a577c696ddf7d8..3f5c04f5f3395815fbd1ff5bfc5951d6b8539447 100644
 --- a/docs/tools/subagents.md
 +++ b/docs/tools/subagents.md
 @@ -239,7 +239,10 @@ In `prefer` mode, hidden sub-agents are for internal legwork that the user does
@@ -1424,6 +1516,32 @@ index 566c090d149b6012adcc219372a577c696ddf7d8..4d3dd6241882566ff2657d7010cb18f2
  
  A visible spawn is attributed to the requesting agent: the new session's creator and initial owner is that agent, shown with its configured identity name and avatar in the sidebar. The accepted result doubles as a receipt with `childSessionKey`, `runId`, a Control UI `sessionUrl` (omitted when the Control UI is disabled), and an `owner` record. When acknowledging the spawn in a channel, put the session URL on the first line and `Owner: <label>` on the second so the user can open the session and see who is responsible. Owners can be reassigned later; see [Multi-user mode](/concepts/multi-user#agent-spawned-sessions).
  
+@@ -333,6 +336,11 @@ announcing children before answering. It does not collect Swarm results:
+ collectors require `agents_wait`, or an awaited `agents.run()` in OpenClaw
+ Code Mode, and do not send completion notifications.
+ 
++`sessions_yield` requires a completion handoff owned by the current turn. A
++pending cross-session announcement or state-change watch alone does not grant
++that ownership. If the tool rejects the wait, inspect the actual task status and
++continue or report it; the rejection does not mean the background task stopped.
++
+ `sessions_yield` is the waiting primitive for announced completions. Do not replace it with polling
+ loops over `subagents`, `sessions_list`, `sessions_history`, shell
+ `sleep`, or process polling just to detect child completion.
+@@ -372,6 +380,13 @@ continue the paused run nor announce its requester. See
+ [Subagent yield handoff](/concepts/subagent-yield-handoff) for lifecycle ownership
+ and the remaining boundary for channel progress after yield.
+ 
++For its own announced native child, a parent can send follow-up work with
++`sessions_send` and `timeoutSeconds: 0`. An accepted result containing
++`completionRunId` and `expectsCompletionMessage: true` confirms that the current
++parent turn owns the completion handoff. It may yield again for that work,
++including after receiving the child's earlier completion. The same delegated
++task and child session are retained.
++
+ Among plugin runtime follow-ups, continuation applies to those that use default
+ delivery. A follow-up that supplies its own requester or completion-delivery
+ context is asking for its own audience, so it runs as a separate sibling and
 diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
 index 58292eaf3d56d31e5d75dea47446f687ec909697..646990d6f86068efb2b0e6a6a05bd5beeabb5d36 100644
 --- a/extensions/browser/index.test.ts
@@ -4169,6 +4287,159 @@ index f566d8e0e2aac5cf9a1753ca466e82653b45f3d0..de7ba02de35a71c02545c8bf49bb8cad
    it("does not replace a prepared persisted store changed during refresh", async () => {
      const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-app-server-"));
      let resolveRefresh:
+diff --git a/extensions/codex/src/app-server/dynamic-tools.test.ts b/extensions/codex/src/app-server/dynamic-tools.test.ts
+index 340aee8f9b70ef3468caef7c82a04fbd60e5b56d..00ff43fb29ef06a93cb0fc382ce5fed1ff69be3e 100644
+--- a/extensions/codex/src/app-server/dynamic-tools.test.ts
++++ b/extensions/codex/src/app-server/dynamic-tools.test.ts
+@@ -972,6 +972,68 @@ describe("createCodexDynamicToolBridge", () => {
+     ]);
+   });
+ 
++  it.each([true, false])(
++    "tracks only owned follow-up sends for requester settlement (owned=%s)",
++    async (owned) => {
++      const bridge = createBridgeWithToolResult(
++        "sessions_send",
++        textToolResult("Follow-up accepted.", {
++          status: "accepted",
++          runId: "followup-execution",
++          ...(owned
++            ? {
++                childSessionKey: "agent:main:dashboard:retained-child",
++                completionRunId: "original-task",
++                expectsCompletionMessage: true,
++                completionSpawns: [
++                  {
++                    runId: "original-task",
++                    childSessionKey: "agent:main:dashboard:retained-child",
++                    expectsCompletionMessage: true,
++                  },
++                  {
++                    runId: "sibling-task",
++                    childSessionKey: "agent:main:dashboard:sibling",
++                    expectsCompletionMessage: true,
++                  },
++                  {
++                    runId: "unowned-task",
++                    childSessionKey: "agent:main:dashboard:unowned",
++                    expectsCompletionMessage: false,
++                  },
++                ],
++              }
++            : {}),
++        }),
++      );
++      const result = await bridge.handleToolCall({
++        threadId: "thread-1",
++        turnId: "turn-1",
++        callId: "followup",
++        namespace: null,
++        tool: "sessions_send",
++        arguments: { message: "finish the remaining fix" },
++      });
++      expect(result.success).toBe(true);
++      expect(bridge.telemetry.acceptedSessionSpawns).toEqual(
++        owned
++          ? [
++              {
++                runId: "original-task",
++                childSessionKey: "agent:main:dashboard:retained-child",
++                expectsCompletionMessage: true,
++              },
++              {
++                runId: "sibling-task",
++                childSessionKey: "agent:main:dashboard:sibling",
++                expectsCompletionMessage: true,
++              },
++            ]
++          : [],
++      );
++    },
++  );
++
+   it("preserves an accepted sessions_spawn after result middleware strips its details", async () => {
+     const registry = createEmptyPluginRegistry();
+     const handler = vi.fn(async (event: { result: AgentToolResult<unknown> }) => ({
+diff --git a/extensions/codex/src/app-server/dynamic-tools.ts b/extensions/codex/src/app-server/dynamic-tools.ts
+index e034d27a337aff9c21d57903ad69fe2d96d455de..a52103558591fdacfbd541de7420813b301835ac 100644
+--- a/extensions/codex/src/app-server/dynamic-tools.ts
++++ b/extensions/codex/src/app-server/dynamic-tools.ts
+@@ -440,7 +440,11 @@ export type CodexDynamicToolBridge = {
+     coreTtsToolResults: object[];
+     toolAudioAsVoice: boolean;
+     successfulCronAdds?: number;
+-    acceptedSessionSpawns: Array<{ runId: string; childSessionKey: string }>;
++    acceptedSessionSpawns: Array<{
++      runId: string;
++      childSessionKey: string;
++      expectsCompletionMessage?: boolean;
++    }>;
+     quarantinedTools: CodexDynamicToolSchemaQuarantine[];
+   };
+ };
+@@ -448,14 +452,43 @@ export type CodexDynamicToolBridge = {
+ function normalizeAcceptedSessionSpawn(result: unknown): {
+   runId: string;
+   childSessionKey: string;
++  expectsCompletionMessage?: boolean;
+ } | null {
+   const details = asOptionalRecord(asOptionalRecord(result)?.details);
+   if (!details || details.status !== "accepted") {
+     return null;
+   }
+-  const runId = normalizeOptionalString(details.runId);
++  const runId =
++    normalizeOptionalString(details.completionRunId) ?? normalizeOptionalString(details.runId);
+   const childSessionKey = normalizeOptionalString(details.childSessionKey);
+-  return runId && childSessionKey ? { runId, childSessionKey } : null;
++  return runId && childSessionKey
++    ? {
++        runId,
++        childSessionKey,
++        ...(details.expectsCompletionMessage === true ? { expectsCompletionMessage: true } : {}),
++      }
++    : null;
++}
++
++function normalizeAcceptedSessionSpawnResults(result: unknown, includeCompletionSpawns: boolean) {
++  const primary = normalizeAcceptedSessionSpawn(result);
++  if (!primary) {
++    return [];
++  }
++  if (!includeCompletionSpawns || primary.expectsCompletionMessage !== true) {
++    return [primary];
++  }
++  const details = asOptionalRecord(asOptionalRecord(result)?.details);
++  const completions = new Map([[primary.runId, primary]]);
++  for (const raw of Array.isArray(details?.completionSpawns) ? details.completionSpawns : []) {
++    const member = normalizeAcceptedSessionSpawn({
++      details: { ...asOptionalRecord(raw), status: "accepted" },
++    });
++    if (member?.expectsCompletionMessage === true && !completions.has(member.runId)) {
++      completions.set(member.runId, member);
++    }
++  }
++  return [...completions.values()];
+ }
+ 
+ const EXPLICIT_MESSAGE_PROVIDER_KEYS = ["channel", "provider"];
+@@ -774,11 +807,11 @@ export function createCodexDynamicToolBridge(params: {
+         const resultIsError = rawIsError || isToolResultError(result);
+         // A successful spawn is durable before presentation middleware can rewrite details.
+         const acceptedSessionSpawn =
+-          toolName === "sessions_spawn" && !rawIsError
+-            ? normalizeAcceptedSessionSpawn(telemetryRawResult)
+-            : null;
+-        if (acceptedSessionSpawn) {
+-          telemetry.acceptedSessionSpawns.push(acceptedSessionSpawn);
++          (toolName === "sessions_spawn" || toolName === "sessions_send") && !rawIsError
++            ? normalizeAcceptedSessionSpawnResults(telemetryRawResult, toolName === "sessions_send")
++            : [];
++        if (acceptedSessionSpawn.length > 0) {
++          telemetry.acceptedSessionSpawns.push(...acceptedSessionSpawn);
+         }
+         const finalResultFailureKind = resolveToolResultFailureKind(result);
+         const resultFailureKind = rawResultFailureKind ?? finalResultFailureKind;
 diff --git a/extensions/codex/src/app-server/native-subagent-monitor.test.ts b/extensions/codex/src/app-server/native-subagent-monitor.test.ts
 index 88cf9f0b83d1fd25bbc91a07badbfe2987e810c1..457e7cfbb34d87cbb652f4b98a2db75f1dcb648f 100644
 --- a/extensions/codex/src/app-server/native-subagent-monitor.test.ts
@@ -9167,6 +9438,233 @@ index 7330bec7bd8668ca040fcfc1361409958dcbf91c..05b101b1d4069a7a8f6a4d1b2ac8ff2a
      execute: async (toolCallId, toolParams, signal, onUpdate) => {
        const tool = await loadTool();
        if (!tool) {
+diff --git a/extensions/memory-core/src/dreaming-completion-effort.test.ts b/extensions/memory-core/src/dreaming-completion-effort.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca132e6c6419
+--- /dev/null
++++ b/extensions/memory-core/src/dreaming-completion-effort.test.ts
+@@ -0,0 +1,163 @@
++// Exercise the admitted managed hook through real phase selection and publication.
++import fs from "node:fs/promises";
++import path from "node:path";
++import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
++import { MEMORY_DREAMING_SYSTEM_EVENT_TEXT } from "openclaw/plugin-sdk/memory-core-host-status";
++import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
++import {
++  enqueueSystemEvent,
++  resetSystemEventsForTest,
++} from "openclaw/plugin-sdk/system-event-runtime";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { registerShortTermPromotionDreaming } from "./dreaming.js";
++import { recordShortTermRecalls } from "./short-term-promotion.js";
++import { createMemoryCoreTestHarness } from "./test-helpers.js";
++
++const { createTempWorkspace } = createMemoryCoreTestHarness();
++type Api = Parameters<typeof registerShortTermPromotionDreaming>[0];
++type Completion = Api["runtime"]["subagent"]["complete"];
++const NOW = new Date("2026-04-05T10:00:00.000Z");
++
++afterEach(() => {
++  vi.useRealTimers();
++  resetSystemEventsForTest();
++});
++
++describe("managed Dreaming completion effort", () => {
++  it.each([
++    { trigger: "cron", configured: undefined, expected: "high" },
++    { trigger: "heartbeat", configured: "medium", expected: "medium" },
++  ] as const)(
++    "uses sweep effort for every conditional completion ($trigger, $expected)",
++    async ({ trigger, configured, expected }) => {
++      vi.useFakeTimers({ toFake: ["Date"] });
++      vi.setSystemTime(NOW);
++      const workspaceDir = await createTempWorkspace("dreaming-effort-");
++      const snippet = "The owner prefers green tea during planning.";
++      await fs.mkdir(path.join(workspaceDir, "memory"));
++      await fs.writeFile(path.join(workspaceDir, "memory/2026-04-05.md"), `${snippet}\n`);
++      for (const query of ["tea", "planning", "preference"]) {
++        await recordShortTermRecalls({
++          workspaceDir,
++          query,
++          nowMs: NOW.getTime(),
++          results: [
++            {
++              path: "memory/2026-04-05.md",
++              startLine: 1,
++              endLine: 1,
++              score: 0.95,
++              snippet,
++              source: "memory",
++              provenance: {
++                originClass: "owner",
++                sessionKind: "interactive",
++                observedAt: NOW.getTime(),
++              },
++            },
++          ],
++        });
++      }
++      const config: OpenClawConfig = {
++        agents: {
++          entries: {
++            main: { workspace: workspaceDir, model: "openai/gpt-5.5", thinkingDefault: "ultra" },
++          },
++        },
++        plugins: {
++          entries: {
++            "memory-core": {
++              config: {
++                dreaming: {
++                  enabled: true,
++                  timezone: "UTC",
++                  phases: {
++                    light: { enabled: true },
++                    rem: { enabled: true },
++                    deep: {
++                      minScore: 0,
++                      minRecallCount: 1,
++                      minUniqueQueries: 1,
++                      ...(configured ? { execution: { thinking: configured } } : {}),
++                    },
++                  },
++                },
++              },
++            },
++          },
++        },
++      };
++      const on = vi.fn();
++      const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
++      const api = { ...createTestPluginApi({ config, logger }), on, logger };
++      let narrativeCount = 0;
++      const complete = vi.fn<Completion>(async (request) => {
++        if (request.extraSystemPrompt?.startsWith("Choose how to incorporate")) {
++          const body = JSON.parse(request.message) as { candidates: Array<{ key: string }> };
++          return {
++            text: JSON.stringify({
++              operations: body.candidates.map(({ key }) => ({
++                candidateKey: key,
++                action: "added",
++                priorEntries: [],
++              })),
++            }),
++          };
++        }
++        return {
++          text: `Diary reflection ${++narrativeCount}: a quiet green cup accompanied the day's plans.`,
++        };
++      });
++      const completionRuntime = { complete };
++      Object.assign(api.runtime, { subagent: completionRuntime });
++      registerShortTermPromotionDreaming(api);
++      const registered = on.mock.calls.find(([name]) => name === "before_agent_reply");
++      if (!registered) {
++        throw new Error("before_agent_reply hook was not registered");
++      }
++      const hook = registered[1] as (
++        event: { cleanedBody: string },
++        context: { agentId: string; trigger: string; workspaceDir: string; sessionKey: string },
++      ) => Promise<unknown>;
++      const context = { agentId: "main", trigger, workspaceDir, sessionKey: "agent:main:main" };
++      // Ordinary text and unowned heartbeat tokens never start a sweep.
++      await expect(hook({ cleanedBody: "hello" }, context)).resolves.toBeUndefined();
++      if (trigger === "heartbeat") {
++        await expect(
++          hook({ cleanedBody: MEMORY_DREAMING_SYSTEM_EVENT_TEXT }, context),
++        ).resolves.toBeUndefined();
++        enqueueSystemEvent(MEMORY_DREAMING_SYSTEM_EVENT_TEXT, {
++          sessionKey: context.sessionKey,
++          contextKey: "cron:test-dreaming",
++        });
++      }
++      expect(complete).not.toHaveBeenCalled();
++      await expect(
++        hook({ cleanedBody: MEMORY_DREAMING_SYSTEM_EVENT_TEXT }, context),
++      ).resolves.toMatchObject({ handled: true });
++      // Detached cron narratives settle through their actual publication path before cleanup.
++      await vi.waitFor(async () => {
++        const diary = await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf8");
++        for (const index of [1, 2, 3]) {
++          expect(diary).toContain(`Diary reflection ${index}:`);
++        }
++      });
++      const requests = complete.mock.calls.map(([request]) => request);
++      expect(requests.every((request) => request.model === undefined)).toBe(true);
++      expect(complete.mock.contexts.every((receiver) => receiver === completionRuntime)).toBe(true);
++      expect(requests.every((request) => request.timeoutMs === 60_000)).toBe(true);
++      expect(requests).toHaveLength(4); // light, REM, consolidation, deep
++      expect(
++        requests.filter((request) =>
++          request.extraSystemPrompt?.startsWith("Choose how to incorporate"),
++        ),
++      ).toHaveLength(1);
++      expect(
++        requests.map((request) => ({ agentId: request.agentId, thinking: request.thinking })),
++      ).toEqual(Array.from({ length: 4 }, () => ({ agentId: "main", thinking: expected })));
++      expect(await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf8")).toContain(snippet);
++      expect(config.agents?.entries?.main?.thinkingDefault).toBe("ultra");
++      expect(logger.error).not.toHaveBeenCalled();
++    },
++  );
++});
+diff --git a/extensions/memory-core/src/dreaming.ts b/extensions/memory-core/src/dreaming.ts
+index e40686a07d0b4c66abedfe2aa5c2fc2212926cfe..fc257ad2f9cd7a27d845d0b44401beda749e59f3 100644
+--- a/extensions/memory-core/src/dreaming.ts
++++ b/extensions/memory-core/src/dreaming.ts
+@@ -545,6 +545,17 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+     );
+   }
+ 
++  // One managed sweep owns its completion effort, independent of interactive agent defaults.
++  // Keep the original capability receiver and all model/credential authorization intact.
++  const completionRuntime = params.subagent;
++  const thinking = params.config.execution?.thinking;
++  const subagent: OpenClawPluginApi["runtime"]["subagent"] | undefined = completionRuntime
++    ? {
++        ...completionRuntime,
++        complete: (request) => completionRuntime.complete({ ...request, thinking }),
++      }
++    : undefined;
++
+   let totalCandidates = 0;
+   let totalApplied = 0;
+   let failedWorkspaces = 0;
+@@ -576,7 +587,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+         pluginConfig,
+         cfg: params.cfg,
+         logger: params.logger,
+-        subagent: params.subagent,
++        subagent,
+         detachNarratives,
+         nowMs: sweepNowMs,
+       });
+@@ -638,7 +649,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+         maxPromotedSnippetTokens: params.config.maxPromotedSnippetTokens,
+         maxPriorEntryLossFraction: params.config.maxPriorEntryLossFraction,
+         consolidation: {
+-          ...(params.subagent ? { subagent: params.subagent } : {}),
++          ...(subagent ? { subagent } : {}),
+           ...(params.config.execution?.model ? { model: params.config.execution.model } : {}),
+           logger: params.logger,
+         },
+@@ -678,7 +689,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+             ...new Set([...candidates, ...applied.appliedCandidates].map((c) => c.key)),
+           ],
+         };
+-        if (!params.subagent) {
++        if (!subagent) {
+           await appendFallbackNarrativeEntry({
+             workspaceDir,
+             data,
+@@ -690,7 +701,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+         } else {
+           const narrativeOutcome = await runDreamNarrative({
+             agentId,
+-            subagent: params.subagent,
++            subagent,
+             workspaceDir,
+             data,
+             nowMs: sweepNowMs,
 diff --git a/extensions/memory-core/src/memory-search-tool-query.test.ts b/extensions/memory-core/src/memory-search-tool-query.test.ts
 index a870eff5ccc9d30b17b60a503af07f55ffebdda0..c261755a84deca0986965f64f175e0c404f7bff2 100644
 --- a/extensions/memory-core/src/memory-search-tool-query.test.ts
@@ -11412,6 +11910,52 @@ index 411dddab5a4c083a7419c79e355a61a8675083df..0d2e8f644800d374128de5f2713fca1d
    extensions/line:
      dependencies:
        '@line/bot-sdk':
+diff --git a/src/agents/accepted-session-spawn.ts b/src/agents/accepted-session-spawn.ts
+index 2bf76c3e65c0e7cccd8b72838f794eb8e0fc39d2..30b66d03f21ee5273db2f2e24ceb6774fff31e5c 100644
+--- a/src/agents/accepted-session-spawn.ts
++++ b/src/agents/accepted-session-spawn.ts
+@@ -16,7 +16,8 @@ export function normalizeAcceptedSessionSpawnResult(result: unknown): AcceptedSe
+   if (!details || details.status !== "accepted") {
+     return null;
+   }
+-  const runId = normalizeOptionalString(details.runId);
++  const runId =
++    normalizeOptionalString(details.completionRunId) ?? normalizeOptionalString(details.runId);
+   const childSessionKey = normalizeOptionalString(details.childSessionKey);
+   if (!runId || !childSessionKey) {
+     return null;
+@@ -28,6 +29,31 @@ export function normalizeAcceptedSessionSpawnResult(result: unknown): AcceptedSe
+   };
+ }
+ 
++/** Includes siblings whose existing completion ownership moved with a follow-up. */
++export function normalizeAcceptedSessionSpawnResults(
++  result: unknown,
++  includeCompletionSpawns = false,
++): AcceptedSessionSpawn[] {
++  const primary = normalizeAcceptedSessionSpawnResult(result);
++  if (!primary) {
++    return [];
++  }
++  if (!includeCompletionSpawns || primary.expectsCompletionMessage !== true) {
++    return [primary];
++  }
++  const details = asOptionalRecord(asOptionalRecord(result)?.details);
++  const completions = new Map([[primary.runId, primary]]);
++  for (const raw of Array.isArray(details?.completionSpawns) ? details.completionSpawns : []) {
++    const member = normalizeAcceptedSessionSpawnResult({
++      details: { ...asOptionalRecord(raw), status: "accepted" },
++    });
++    if (member?.expectsCompletionMessage === true && !completions.has(member.runId)) {
++      completions.set(member.runId, member);
++    }
++  }
++  return [...completions.values()];
++}
++
+ /** Return true when a collection contains at least one accepted child spawn. */
+ export function hasAcceptedSessionSpawn(
+   acceptedSessionSpawns?: readonly AcceptedSessionSpawn[],
 diff --git a/src/agents/agent-command.maintenance-reservation.test.ts b/src/agents/agent-command.maintenance-reservation.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..d2e5e81c654ce3564e4a464ea0d2d3bcc17d67b3
@@ -16571,10 +17115,70 @@ index d017a8001faca211ad0ec2a4280f11c855412cad..b81ed247f0ea4eb50c66f49b6e49db9e
                },
                contextManagement:
 diff --git a/src/agents/embedded-agent-runner/run/tool-error-warning.test.ts b/src/agents/embedded-agent-runner/run/tool-error-warning.test.ts
-index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc9453c785891 100644
+index 28b5425184cb5978313bcf46c5b3a836938b0587..d1c36416a32e9a6158071023a0a5d4d645007ec4 100644
 --- a/src/agents/embedded-agent-runner/run/tool-error-warning.test.ts
 +++ b/src/agents/embedded-agent-runner/run/tool-error-warning.test.ts
-@@ -207,7 +207,7 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -2,6 +2,7 @@
+ // verbose execution details unless the operator explicitly requests them.
+ import type { AssistantMessage } from "openclaw/plugin-sdk/llm";
+ import { describe, expect, it } from "vitest";
++import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
+ import { makeAssistantMessageFixture } from "../../test-helpers/assistant-message-fixtures.js";
+ import {
+   buildPayloads,
+@@ -66,15 +67,43 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+     });
+   });
+ 
+-  it("does not add tool error fallback when assistant output exists", () => {
+-    const payloads = buildPayloads({
+-      assistantTexts: ["All good"],
+-      lastAssistant: makeStoppedAssistant(),
+-      lastToolError: { toolName: "browser", error: "tab not found" },
+-    });
++  it.each(["browser", "sessions_yield"])(
++    "does not add %s error fallback when assistant output exists",
++    (toolName) => {
++      const payloads = buildPayloads({
++        assistantTexts: ["I checked the task and recovered the final result."],
++        lastAssistant: makeStoppedAssistant(),
++        lastToolError: { toolName, error: "SYNTHETIC_PRIVATE_FAILURE" },
++      });
+ 
+-    expectSinglePayloadText(payloads, "All good");
+-  });
++      expectSinglePayloadText(payloads, "I checked the task and recovered the final result.");
++    },
++  );
++
++  it.each(["off", "on", "full"] as const)(
++    "explains an unconfirmed background handoff after a silent final at %s verbosity",
++    (verboseLevel) => {
++      const privateDiagnostic = "SYNTHETIC_PRIVATE_YIELD_FAILURE";
++      const payloads = buildPayloads({
++        sessionKey: "agent:main:discord:channel:fixture",
++        assistantTexts: [SILENT_REPLY_TOKEN],
++        lastAssistant: makeAssistant({
++          stopReason: "stop",
++          errorMessage: undefined,
++          content: [{ type: "text", text: SILENT_REPLY_TOKEN }],
++        }),
++        lastToolError: { toolName: "sessions_yield", error: privateDiagnostic },
++        verboseLevel,
++      });
++
++      const warning =
++        "The agent could not pause for a background result. This turn ended without a confirmed handoff; the background task may still be running.";
++      expectSinglePayloadSummary(payloads, {
++        text: verboseLevel === "full" ? `${warning}\nDetails: ${privateDiagnostic}` : warning,
++        isError: true,
++      });
++    },
++  );
+ 
+   it("does not add synthetic completion text for channel sessions", () => {
+     expectNoSyntheticCompletionForSession("agent:main:discord:channel:c123");
+@@ -207,7 +236,7 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
      });
  
      expectSinglePayloadSummary(payloads, {
@@ -16583,7 +17187,7 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
        isError: true,
      });
    });
-@@ -225,19 +225,19 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -225,19 +254,19 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
      });
  
      expectSinglePayloadSummary(payloads, {
@@ -16610,7 +17214,7 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
    ] as const)(
      "renders executionStarted=%s at %s verbosity from structured state",
      (executionStarted, verboseLevel, expected) => {
-@@ -262,50 +262,50 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -262,50 +291,50 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
        title: "prefers raw exec metadata when tool progress detail includes it",
        meta: "run python3 /tmp/audit.py · `python3 /tmp/audit.py`",
        toolResultFormat: "markdown",
@@ -16669,7 +17273,7 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
      },
    ] as const)("$title", ({ meta, toolResultFormat, expected }) => {
      const payloads = buildPayloads({
-@@ -358,15 +358,15 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -358,15 +387,15 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
      });
  
      expectSinglePayloadSummary(cwdPayloads, {
@@ -16688,7 +17292,7 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
        isError: true,
      });
    });
-@@ -376,52 +376,50 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -376,52 +405,50 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
        name: "strips a literal synthetic run prefix",
        meta: "run make build",
        error: "Command failed with exit code 2",
@@ -16749,7 +17353,7 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
      },
    ])("formats exec metadata: $name", ({ meta, error, expected }) => {
      const payloads = buildPayloads({
-@@ -451,7 +449,7 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
+@@ -451,7 +478,7 @@ describe("buildEmbeddedRunPayloads tool warnings", () => {
      });
  
      expectSinglePayloadSummary(payloads, {
@@ -16759,10 +17363,26 @@ index 28b5425184cb5978313bcf46c5b3a836938b0587..f4cc8aafb10c3c27da00f3278a5bc945
      });
    });
 diff --git a/src/agents/embedded-agent-runner/run/tool-error-warning.ts b/src/agents/embedded-agent-runner/run/tool-error-warning.ts
-index 62988885582158dd3791206a75e27e26e075792a..7fb8f799d05c2a4e61fc3d7c3de2f706402339cc 100644
+index 62988885582158dd3791206a75e27e26e075792a..5312848687fd664c5046a78841c640feca6cf3cb 100644
 --- a/src/agents/embedded-agent-runner/run/tool-error-warning.ts
 +++ b/src/agents/embedded-agent-runner/run/tool-error-warning.ts
-@@ -41,7 +41,7 @@ function formatToolErrorWarningText(params: {
+@@ -22,6 +22,15 @@ function formatToolErrorWarningText(params: {
+   includeDetails: boolean;
+   useMarkdown: boolean;
+ }): string {
++  if (params.lastToolError.toolName === "sessions_yield") {
++    // Yield controls a completion handoff; its failure says nothing about the
++    // background task's execution. Keep private continuation context out of chat.
++    const warning =
++      "The agent could not pause for a background result. This turn ended without a confirmed handoff; the background task may still be running.";
++    return params.includeDetails && params.lastToolError.error
++      ? `${warning}\nDetails: ${params.lastToolError.error}`
++      : warning;
++  }
+   const failureVerb = params.lastToolError.executionStarted === false ? "blocked" : "failed";
+   const terminalDiagnostic = params.lastToolError.terminalDiagnostic;
+   if (terminalDiagnostic?.kind === "process") {
+@@ -41,7 +50,7 @@ function formatToolErrorWarningText(params: {
      const errorSuffix =
        params.includeDetails && params.lastToolError.error ? `: ${params.lastToolError.error}` : "";
      const recoveryHint = params.includeDetails ? "" : ". Use /verbose full for complete output";
@@ -16771,7 +17391,7 @@ index 62988885582158dd3791206a75e27e26e075792a..7fb8f799d05c2a4e61fc3d7c3de2f706
    }
  
    const includeError =
-@@ -57,8 +57,8 @@ function formatToolErrorWarningText(params: {
+@@ -57,8 +66,8 @@ function formatToolErrorWarningText(params: {
      const errorSuffix =
        includeError && params.lastToolError.error ? `: ${params.lastToolError.error}` : "";
      return subject
@@ -16782,7 +17402,7 @@ index 62988885582158dd3791206a75e27e26e075792a..7fb8f799d05c2a4e61fc3d7c3de2f706
    }
  
    const toolSummary = formatWarningToolLabel(
-@@ -68,7 +68,7 @@ function formatToolErrorWarningText(params: {
+@@ -68,7 +77,7 @@ function formatToolErrorWarningText(params: {
    );
    const errorSuffix =
      includeError && params.lastToolError.error ? `: ${params.lastToolError.error}` : "";
@@ -16937,9 +17557,18 @@ index 3fde6690e350a7b4583b6fc30caade4415a63638..c0191b861a51cff76bd48aec5b079c58
        { type: "text_start", partial: startPartial },
        { type: "text_delta", delta: "Work", partial: startPartial },
 diff --git a/src/agents/embedded-agent-subscribe.handlers.tools.completion.ts b/src/agents/embedded-agent-subscribe.handlers.tools.completion.ts
-index 45b9b7ca03f4fe70c73395c1304f900f47b5eba0..ed95b0a0ce1eb4bafdb5d218f29af2382be5c7f9 100644
+index 45b9b7ca03f4fe70c73395c1304f900f47b5eba0..3a353b67a4342751754c19eea8af73f6efef9fc6 100644
 --- a/src/agents/embedded-agent-subscribe.handlers.tools.completion.ts
 +++ b/src/agents/embedded-agent-subscribe.handlers.tools.completion.ts
+@@ -13,7 +13,7 @@ import {
+ import { emitAgentEvent, type AgentApprovalEventData } from "../infra/agent-events.js";
+ import type { PluginHookAfterToolCallEvent } from "../plugins/types.js";
+ import { projectProgressCardChannelUpdate } from "../session-cards/progress-card-channel-summary.js";
+-import { normalizeAcceptedSessionSpawnResult } from "./accepted-session-spawn.js";
++import { normalizeAcceptedSessionSpawnResults } from "./accepted-session-spawn.js";
+ import {
+   consumeAdjustedParamsForToolCall,
+   consumePreExecutionBlockedToolCall,
 @@ -105,23 +105,20 @@ import { normalizeToolPolicyName } from "./tool-policy.js";
  import { isToolResultError, readToolResultDetails } from "./tool-result-error.js";
  import { cancelAskUserPromptDelivery } from "./tools/ask-user-tool.js";
@@ -16986,6 +17615,32 @@ index 45b9b7ca03f4fe70c73395c1304f900f47b5eba0..ed95b0a0ce1eb4bafdb5d218f29af238
    const callSummary = buildToolCallSummary(
      toolName,
      startArgs,
+@@ -201,11 +203,11 @@ export async function handleToolExecutionEnd(
+     ...(codeModeSuspended ? { codeModeSuspended: true } : {}),
+   });
+   const acceptedSessionSpawn =
+-    toolName === "sessions_spawn" && !isToolError
+-      ? normalizeAcceptedSessionSpawnResult(sanitizedResult)
+-      : null;
+-  if (acceptedSessionSpawn) {
+-    ctx.state.acceptedSessionSpawns.push(acceptedSessionSpawn);
++    (toolName === "sessions_spawn" || toolName === "sessions_send") && !isToolError
++      ? normalizeAcceptedSessionSpawnResults(sanitizedResult, toolName === "sessions_send")
++      : [];
++  if (acceptedSessionSpawn.length > 0) {
++    ctx.state.acceptedSessionSpawns.push(...acceptedSessionSpawn);
+   }
+   ctx.state.toolMetaById.delete(toolCallId);
+   ctx.state.toolSummaryById.delete(toolCallId);
+@@ -257,7 +259,7 @@ export async function handleToolExecutionEnd(
+   if (asyncStarted) {
+     ctx.state.hadDeterministicSideEffect = true;
+   }
+-  if (terminal.sideEffectEvidence || acceptedSessionSpawn || asyncStarted) {
++  if (terminal.sideEffectEvidence || acceptedSessionSpawn.length > 0 || asyncStarted) {
+     ctx.state.replayState = mergeEmbeddedRunReplayState(ctx.state.replayState, {
+       replayInvalid: true,
+       hadPotentialSideEffects: true,
 diff --git a/src/agents/embedded-agent-subscribe.handlers.tools.progress.ts b/src/agents/embedded-agent-subscribe.handlers.tools.progress.ts
 index 9199a1e08eac29b8986476cab0c830ee6439da22..d48dd2df96377ddc84fd256db68b51928158ce7f 100644
 --- a/src/agents/embedded-agent-subscribe.handlers.tools.progress.ts
@@ -17081,7 +17736,7 @@ index 61802272e6e59f50a8a9df09b98ffd077e0b5aaf..4fd7589c365c2babff3356fd041e7977
          ? { hasRepliedRef: { value: ctx.params.hasRepliedRef.value } }
          : {}),
 diff --git a/src/agents/embedded-agent-subscribe.handlers.tools.test.ts b/src/agents/embedded-agent-subscribe.handlers.tools.test.ts
-index 2ec51ddce46f0430ed1534d02aadcdc87bf6564a..12eded0bbc8019c60329979b6291097b6e3e2ecc 100644
+index 2ec51ddce46f0430ed1534d02aadcdc87bf6564a..60248fc2497e77cc8bb71b9c9a4eefb979c01d57 100644
 --- a/src/agents/embedded-agent-subscribe.handlers.tools.test.ts
 +++ b/src/agents/embedded-agent-subscribe.handlers.tools.test.ts
 @@ -37,6 +37,7 @@ import type {
@@ -17182,6 +17837,71 @@ index 2ec51ddce46f0430ed1534d02aadcdc87bf6564a..12eded0bbc8019c60329979b6291097b
  });
  
  describe("handleToolExecutionEnd cron mutation tracking", () => {
+@@ -1651,6 +1735,64 @@ describe("handleToolExecutionEnd sessions_spawn terminal success tracking", () =
+     });
+   });
+ 
++  it.each([true, false])(
++    "tracks only owned follow-up sends for requester settlement (owned=%s)",
++    async (owned) => {
++      const { ctx } = createTestContext();
++      await endTool(ctx, {
++        toolName: "sessions_send",
++        toolCallId: "followup",
++        isError: false,
++        result: {
++          details: {
++            status: "accepted",
++            runId: "followup-execution",
++            ...(owned
++              ? {
++                  childSessionKey: "agent:main:dashboard:retained-child",
++                  completionRunId: " original-task ",
++                  expectsCompletionMessage: true,
++                  completionSpawns: [
++                    {
++                      runId: "original-task",
++                      childSessionKey: "agent:main:dashboard:retained-child",
++                      expectsCompletionMessage: true,
++                    },
++                    {
++                      runId: "sibling-task",
++                      childSessionKey: "agent:main:dashboard:sibling",
++                      expectsCompletionMessage: true,
++                    },
++                    {
++                      runId: "unowned-task",
++                      childSessionKey: "agent:main:dashboard:unowned",
++                      expectsCompletionMessage: false,
++                    },
++                  ],
++                }
++              : {}),
++          },
++        },
++      });
++      expect(ctx.state.acceptedSessionSpawns).toEqual(
++        owned
++          ? [
++              {
++                runId: "original-task",
++                childSessionKey: "agent:main:dashboard:retained-child",
++                expectsCompletionMessage: true,
++              },
++              {
++                runId: "sibling-task",
++                childSessionKey: "agent:main:dashboard:sibling",
++                expectsCompletionMessage: true,
++              },
++            ]
++          : [],
++      );
++    },
++  );
++
+   it("does not record failed or malformed sessions_spawn results", async () => {
+     const { ctx } = createTestContext();
+ 
 diff --git a/src/agents/embedded-agent-subscribe.ts b/src/agents/embedded-agent-subscribe.ts
 index a7ebbcbc899cfb0a4f41f636a2c24af2febcfee1..ee4b4feaef7d5ea2e349fc17ac2494da20cf11f8 100644
 --- a/src/agents/embedded-agent-subscribe.ts
@@ -18444,8 +19164,21 @@ index bd260f976053937e67f44695f600709c9b8b3019..84ba1367515b56d3c16946d53ff51afd
    it("keeps a pinned model on its rate-limit surface instead of escalating to fallback", async () => {
      await withModelFallbackWorkspace(async ({ agentDir, workspaceDir }) => {
        await writeFallbackMultiProfileAuthStore(agentDir);
+diff --git a/src/agents/openclaw-tools.registration.test.ts b/src/agents/openclaw-tools.registration.test.ts
+index fed8a03de5efcdfcc3819746ac340a1ccf2d21f0..13ac2296fcec8c5bcb7d69b09ff204e834f6d881 100644
+--- a/src/agents/openclaw-tools.registration.test.ts
++++ b/src/agents/openclaw-tools.registration.test.ts
+@@ -551,7 +551,7 @@ describe("sessions_yield completion ownership", () => {
+       expect(result.details).toMatchObject({
+         status: "error",
+         error:
+-          "No pending child completion is owned by this turn. Continue working because independent background operations complete separately.",
++          "No pending child completion is owned by this turn. No wait was registered. Continue working or report the actual task status; a pending send or watch alone does not establish a completion handoff.",
+       });
+       expect(markRequesterTurnYielded).toHaveBeenCalledOnce();
+       expect(onYield).not.toHaveBeenCalled();
 diff --git a/src/agents/openclaw-tools.ts b/src/agents/openclaw-tools.ts
-index 1162e89f33f1ff7bfb09746f14bd7f963d0de71c..7fa689a14fe207de1a8e6cc314954ba6aff4f5e6 100644
+index 1162e89f33f1ff7bfb09746f14bd7f963d0de71c..0cd50470081bcd30abb158f49ba20406e2a5bd56 100644
 --- a/src/agents/openclaw-tools.ts
 +++ b/src/agents/openclaw-tools.ts
 @@ -463,18 +463,21 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
@@ -18470,6 +19203,15 @@ index 1162e89f33f1ff7bfb09746f14bd7f963d0de71c..7fa689a14fe207de1a8e6cc314954ba6
        agentSessionKey: options?.agentSessionKey,
        runSessionKey: options?.runSessionKey,
        sessionAgentId,
+@@ -562,6 +565,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+           createSessionsSendTool({
+             agentId: sessionAgentId,
+             agentSessionKey: options?.agentSessionKey,
++            completionOwnerKey: trimmedRunSessionKey || options?.agentSessionKey,
++            requesterTurnRunId: options?.runId,
+             agentChannel: options?.agentChannel,
+             sandboxed: options?.sandboxed,
+             config: sessionConfig,
 diff --git a/src/agents/owner-permission-default.test.ts b/src/agents/owner-permission-default.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..a9549cb03c6ecfa0e79decea012e390f74c39390
@@ -20256,6 +20998,380 @@ index b43efcaeb3cc353ab84064a2b4adcfa9f6e6f292..18416ba708e83139415cbf31897fe896
    cfg: OpenClawConfig;
    controller: ResolvedSubagentController;
    runs: SubagentRunRecord[];
+diff --git a/src/agents/subagents/registry/subagent-followup-owner.test.ts b/src/agents/subagents/registry/subagent-followup-owner.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0992d28a635eb50f36ed8a2a9f3e485fa5b96404
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-followup-owner.test.ts
+@@ -0,0 +1,245 @@
++import { describe, expect, it, vi } from "vitest";
++import { claimSubagentFollowupOwner } from "./subagent-followup-owner.js";
++import {
++  markRequesterTurnYieldedInRuns,
++  settleRequesterTurnAfterSessionSpawns,
++} from "./subagent-registry-requester-yield.js";
++import type { SubagentRunRecord } from "./subagent-registry.types.js";
++
++function fixture() {
++  const entry: SubagentRunRecord = {
++    runId: "followup-execution",
++    taskRunId: "original-task",
++    childSessionKey: "agent:main:dashboard:child",
++    requesterSessionKey: "agent:main:discord:channel:parent",
++    requesterAgentId: "main",
++    requesterDisplayKey: "parent",
++    task: "finish the remaining fix",
++    cleanup: "keep",
++    expectsCompletionMessage: true,
++    createdAt: 2,
++    execution: { status: "running", startedAt: 2 },
++    completion: { required: true },
++    delivery: { status: "pending" },
++  };
++  const runs = new Map([[entry.runId, entry]]);
++  const persistOrThrow = vi.fn();
++  return {
++    entry,
++    runs,
++    persistOrThrow,
++    claim: {
++      runs,
++      persistOrThrow,
++      runId: entry.runId,
++      taskRunId: "original-task",
++      childSessionKey: entry.childSessionKey,
++      requesterSessionKey: entry.requesterSessionKey,
++      requesterAgentId: "main",
++      requesterTurnRunId: "resumed-parent",
++    },
++  };
++}
++
++describe("native child follow-up completion ownership", () => {
++  it("lets the resumed parent yield and receives the same task's later completion", () => {
++    const { entry, claim, runs, persistOrThrow } = fixture();
++    // The initial spawn already completed and woke the parent. Reactivation
++    // has changed execution identity, retaining that original task identity.
++    const completion = claimSubagentFollowupOwner(claim);
++    expect(completion).toEqual({
++      runId: "original-task",
++      childSessionKey: entry.childSessionKey,
++      expectsCompletionMessage: true,
++    });
++    expect(markRequesterTurnYieldedInRuns(claim)).toBe(1);
++    const schedule = vi.fn();
++    expect(
++      settleRequesterTurnAfterSessionSpawns({
++        ...claim,
++        requesterYielded: true,
++        acceptedSessionSpawns: [completion!],
++        schedule,
++      }),
++    ).toBe(true);
++    expect(entry.requesterSettleWake).toMatchObject({
++      requesterYieldBatch: true,
++      batchRunIds: [entry.runId],
++      status: "pending",
++    });
++    expect(entry.requesterTurnRunId).toBeUndefined();
++    expect(schedule).not.toHaveBeenCalled();
++    expect(runs.size).toBe(1);
++    expect(persistOrThrow).toHaveBeenCalledTimes(3);
++  });
++
++  it("releases the current turn on a normal final without stranding child delivery", () => {
++    const { entry, claim } = fixture();
++    entry.requesterSettleWake = {
++      status: "dispatching",
++      attemptCount: 1,
++      rearmGeneration: 1,
++      requesterYieldBatch: true,
++      batchRunIds: [entry.runId],
++    };
++    const completion = claimSubagentFollowupOwner(claim)!;
++    expect(entry.requesterSettleWake).toEqual({
++      status: "pending",
++      attemptCount: 0,
++      rearmGeneration: 2,
++    });
++    entry.execution = { status: "terminal", endedAt: 3 };
++    const schedule = vi.fn();
++    expect(
++      settleRequesterTurnAfterSessionSpawns({
++        ...claim,
++        requesterYielded: false,
++        acceptedSessionSpawns: [completion],
++        schedule,
++      }),
++    ).toBe(true);
++    expect(entry.requesterTurnRunId).toBeUndefined();
++    expect(schedule).toHaveBeenCalledWith(entry.runId, entry);
++  });
++
++  it.each([
++    { requesterSessionKey: "agent:other:main" },
++    { requesterAgentId: "other" },
++    { taskRunId: "unrelated-task" },
++    { runId: "superseded-run" },
++  ])("does not transfer a completion to an unrelated owner: %j", (overrides) => {
++    const { entry, claim, persistOrThrow } = fixture();
++    expect(claimSubagentFollowupOwner({ ...claim, ...overrides })).toBeUndefined();
++    expect(entry.requesterTurnRunId).toBeUndefined();
++    expect(persistOrThrow).not.toHaveBeenCalled();
++  });
++
++  it.each([true, false])(
++    "transfers a frozen sibling cohort and settles a resumed parent (yield=%s)",
++    (requesterYielded) => {
++      const { entry, claim, runs, persistOrThrow } = fixture();
++      const previousWake = {
++        status: "dispatching" as const,
++        attemptCount: 1,
++        rearmGeneration: 4,
++        requesterYieldBatch: true as const,
++        batchRunIds: ["old-execution", "sibling-execution", "other-execution"],
++      };
++      const sibling: SubagentRunRecord = {
++        ...entry,
++        runId: "sibling-execution",
++        taskRunId: "sibling-task",
++        childSessionKey: "agent:main:dashboard:sibling",
++        execution: { status: "terminal", endedAt: 3 },
++        requesterSettleWake: structuredClone(previousWake),
++      };
++      const other: SubagentRunRecord = {
++        ...sibling,
++        runId: "other-execution",
++        taskRunId: "other-task",
++        childSessionKey: "agent:main:dashboard:other",
++        requesterAgentId: "other",
++        requesterSettleWake: structuredClone(previousWake),
++      };
++      runs.set(sibling.runId, sibling);
++      runs.set(other.runId, other);
++      const otherBefore = structuredClone(other);
++      const completion = claimSubagentFollowupOwner({
++        ...claim,
++        previousRunId: "old-execution",
++        previousRequesterSettleWake: previousWake,
++      })!;
++      expect(sibling.requesterTurnRunId).toBe(claim.requesterTurnRunId);
++      expect(sibling.requesterSettleWake?.batchRunIds).toEqual(
++        [entry.runId, sibling.runId].toSorted(),
++      );
++      expect(entry.requesterSettleWake?.rearmGeneration).toBeGreaterThan(
++        previousWake.rearmGeneration,
++      );
++      expect(sibling.requesterSettleWake?.rearmGeneration).toBe(
++        entry.requesterSettleWake?.rearmGeneration,
++      );
++      expect(completion.completionSpawns).toEqual([
++        {
++          runId: "original-task",
++          childSessionKey: entry.childSessionKey,
++          expectsCompletionMessage: true,
++        },
++        {
++          runId: "sibling-task",
++          childSessionKey: sibling.childSessionKey,
++          expectsCompletionMessage: true,
++        },
++      ]);
++      if (requesterYielded) {
++        expect(markRequesterTurnYieldedInRuns(claim)).toBe(2);
++      } else {
++        entry.execution = { status: "terminal", endedAt: 4 };
++      }
++      const schedule = vi.fn();
++      expect(
++        settleRequesterTurnAfterSessionSpawns({
++          ...claim,
++          requesterYielded,
++          acceptedSessionSpawns: completion.completionSpawns!,
++          schedule,
++        }),
++      ).toBe(true);
++      expect(entry.requesterTurnRunId).toBeUndefined();
++      expect(sibling.requesterTurnRunId).toBeUndefined();
++      expect(other).toEqual(otherBefore);
++      expect(persistOrThrow.mock.calls[0]).toEqual([entry.runId, sibling.runId]);
++      if (requesterYielded) {
++        expect(schedule).not.toHaveBeenCalled();
++        expect(entry.requesterSettleWake?.batchRunIds).toEqual(
++          [entry.runId, sibling.runId].toSorted(),
++        );
++      } else {
++        expect(schedule).toHaveBeenCalledTimes(2);
++      }
++    },
++  );
++
++  it("rolls back every reclaimed frozen sibling when persistence fails", () => {
++    const { entry, claim, runs, persistOrThrow } = fixture();
++    entry.requesterSettleWake = {
++      status: "dispatching",
++      attemptCount: 1,
++      rearmGeneration: 4,
++      requesterYieldBatch: true,
++      batchRunIds: [entry.runId, "sibling-execution"],
++    };
++    const sibling: SubagentRunRecord = {
++      ...entry,
++      runId: "sibling-execution",
++      taskRunId: "sibling-task",
++      childSessionKey: "agent:main:dashboard:sibling",
++      requesterSettleWake: structuredClone(entry.requesterSettleWake),
++    };
++    runs.set(sibling.runId, sibling);
++    const before = structuredClone([...runs]);
++    persistOrThrow.mockImplementation(() => {
++      throw new Error("disk unavailable");
++    });
++    expect(() => claimSubagentFollowupOwner(claim)).toThrow("disk unavailable");
++    expect(persistOrThrow).toHaveBeenCalledWith(entry.runId, sibling.runId);
++    expect([...runs]).toEqual(before);
++  });
++
++  it("restores the prior pending wake when the owner transfer cannot persist", () => {
++    const { entry, claim, persistOrThrow } = fixture();
++    entry.requesterSettleWake = {
++      status: "pending",
++      attemptCount: 0,
++      requesterYieldBatch: true,
++      batchRunIds: [entry.runId],
++      rearmGeneration: 2,
++    };
++    const before = structuredClone(entry);
++    persistOrThrow.mockImplementation(() => {
++      throw new Error("disk unavailable");
++    });
++    expect(() => claimSubagentFollowupOwner(claim)).toThrow("disk unavailable");
++    expect(entry).toEqual(before);
++  });
++});
+diff --git a/src/agents/subagents/registry/subagent-followup-owner.ts b/src/agents/subagents/registry/subagent-followup-owner.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..00bb3d9922128545d24d0e560338ef12d66001df
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-followup-owner.ts
+@@ -0,0 +1,117 @@
++import type { AcceptedSessionSpawn } from "../../accepted-session-spawn.js";
++import type { RequesterSettleWakeState, SubagentRunRecord } from "./subagent-registry.types.js";
++
++/** Transfer an existing native completion obligation to its parent's current turn. */
++export function claimSubagentFollowupOwner(params: {
++  runs: Map<string, SubagentRunRecord>;
++  persistOrThrow: (...runIds: string[]) => void;
++  runId: string;
++  taskRunId: string;
++  childSessionKey: string;
++  requesterSessionKey: string;
++  requesterAgentId: string;
++  requesterTurnRunId: string;
++  previousRunId?: string;
++  previousRequesterSettleWake?: RequesterSettleWakeState;
++}): (AcceptedSessionSpawn & { completionSpawns?: AcceptedSessionSpawn[] }) | undefined {
++  const entry = params.runs.get(params.runId);
++  if (
++    !params.requesterTurnRunId.trim() ||
++    !entry ||
++    entry.childSessionKey !== params.childSessionKey ||
++    (entry.taskRunId ?? entry.runId) !== params.taskRunId ||
++    entry.requesterSessionKey !== params.requesterSessionKey ||
++    entry.requesterAgentId !== params.requesterAgentId ||
++    (entry.controllerSessionKey ?? entry.requesterSessionKey) !== params.requesterSessionKey ||
++    entry.expectsCompletionMessage !== true ||
++    entry.collect === true ||
++    entry.killIntent ||
++    entry.killReconciliation ||
++    entry.execution.suppressSessionEffects
++  ) {
++    return undefined;
++  }
++  // A completed execution may have been replaced before this claim. Its
++  // original frozen cohort remains authoritative only for matching siblings.
++  const previousWake = entry.requesterSettleWake ?? params.previousRequesterSettleWake;
++  const previousRunId = entry.requesterSettleWake
++    ? entry.runId
++    : (params.previousRunId ?? entry.runId);
++  const batchRunIds = previousWake?.batchRunIds;
++  const cohort = [entry];
++  if (batchRunIds?.includes(previousRunId)) {
++    for (const runId of batchRunIds) {
++      const sibling = params.runs.get(runId);
++      const wake = sibling?.requesterSettleWake;
++      if (
++        !sibling ||
++        sibling === entry ||
++        sibling.requesterSessionKey !== params.requesterSessionKey ||
++        sibling.requesterAgentId !== params.requesterAgentId ||
++        (sibling.controllerSessionKey ?? sibling.requesterSessionKey) !==
++          params.requesterSessionKey ||
++        sibling.expectsCompletionMessage !== true ||
++        sibling.collect === true ||
++        sibling.killIntent ||
++        sibling.killReconciliation ||
++        sibling.execution.suppressSessionEffects ||
++        !wake ||
++        wake.rearmGeneration !== previousWake?.rearmGeneration ||
++        wake.batchRunIds?.length !== batchRunIds.length ||
++        !batchRunIds.every((id) => wake.batchRunIds?.includes(id))
++      ) {
++        continue;
++      }
++      cohort.push(sibling);
++    }
++  }
++  const previous = cohort.map((member) => ({
++    requesterTurnRunId: member.requesterTurnRunId,
++    requesterTurnYielded: member.requesterTurnYielded,
++    requesterSettleWake: member.requesterSettleWake,
++    retireAfterRequesterTurn: member.retireAfterRequesterTurn,
++  }));
++  const nextGeneration =
++    Math.max(
++      previousWake?.rearmGeneration ?? 0,
++      ...cohort.map((member) => member.requesterSettleWake?.rearmGeneration ?? 0),
++    ) + 1;
++  const nextBatchRunIds = cohort.map((member) => member.runId).toSorted();
++  // Transfer the complete still-owned cohort atomically. Otherwise an old
++  // callback rejects the replaced row and leaves its frozen siblings stranded.
++  for (const member of cohort) {
++    member.requesterTurnRunId = params.requesterTurnRunId;
++    member.requesterTurnYielded = undefined;
++    const retireAfterRequesterTurn =
++      member !== entry &&
++      (member.retireAfterRequesterTurn === true ||
++        member.requesterSettleWake?.retireAfterSettle === true);
++    // The bound parent suppresses dispatch; advancing this marker prevents a
++    // later yield from reusing an earlier callback or Gateway idempotency key.
++    member.requesterSettleWake =
++      previousWake || member.requesterSettleWake
++        ? {
++            status: "pending",
++            attemptCount: 0,
++            rearmGeneration: nextGeneration,
++            ...(cohort.length > 1 ? { batchRunIds: nextBatchRunIds } : {}),
++          }
++        : undefined;
++    member.retireAfterRequesterTurn = retireAfterRequesterTurn ? true : undefined;
++  }
++  try {
++    params.persistOrThrow(...cohort.map((member) => member.runId));
++  } catch (error) {
++    cohort.forEach((member, index) => Object.assign(member, previous[index]));
++    throw error;
++  }
++  const completionSpawns = cohort.map((member) => ({
++    runId: member.taskRunId ?? member.runId,
++    childSessionKey: member.childSessionKey,
++    expectsCompletionMessage: true,
++  }));
++  return {
++    ...completionSpawns[0]!,
++    ...(completionSpawns.length > 1 ? { completionSpawns } : {}),
++  };
++}
 diff --git a/src/agents/subagents/registry/subagent-registry-cron-yield-failure.ts b/src/agents/subagents/registry/subagent-registry-cron-yield-failure.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..d128ae6a3eee859318454f7c851d653f58a81c76
@@ -21099,10 +22215,26 @@ index 088bd25fac7983c5695bcb4de938cc996c2689f9..6e434e7319bf4b9a8f889a82e860bcfa
          if (!admittedWake || current !== entry || current.requesterSettleWake !== admittedWake) {
            return;
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
-index 0a3d05ed91345ebbf353b8bb486e4930316f9435..1299d685e040e683a92fc361569e830eab89f75a 100644
+index 0a3d05ed91345ebbf353b8bb486e4930316f9435..5c8ddb36c694678d3b1d5ccdb2ef0b4c2b7be5a7 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
-@@ -4746,6 +4746,7 @@ describe("subagent registry lifecycle hardening", () => {
+@@ -29,6 +29,7 @@ import {
+   runSubagentAnnounceDispatch,
+   type SubagentAnnounceDeliveryResult,
+ } from "../announce/subagent-announce-dispatch.js";
++import { claimSubagentFollowupOwner } from "./subagent-followup-owner.js";
+ import {
+   SUBAGENT_ENDED_REASON_COMPLETE,
+   SUBAGENT_ENDED_REASON_ERROR,
+@@ -40,6 +41,7 @@ import {
+   SubagentLifecycleController,
+   type SubagentLifecycleOptions,
+ } from "./subagent-registry-lifecycle.js";
++import { markRequesterTurnYieldedInRuns } from "./subagent-registry-requester-yield.js";
+ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-manager.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ 
+@@ -4746,6 +4748,7 @@ describe("subagent registry lifecycle hardening", () => {
  
  describe("requester settle wake trigger", () => {
    beforeEach(() => {
@@ -21110,7 +22242,7 @@ index 0a3d05ed91345ebbf353b8bb486e4930316f9435..1299d685e040e683a92fc361569e830e
      mockBlockedCompletionDeliveryOwner();
      helperMocks.safeRemoveAttachmentsDir.mockClear();
      helperMocks.logAnnounceGiveUp.mockClear();
-@@ -5069,6 +5070,298 @@ describe("requester settle wake trigger", () => {
+@@ -5069,6 +5072,298 @@ describe("requester settle wake trigger", () => {
      await waitForLifecycleState(() => expect(settleWake).toHaveBeenCalledOnce());
    });
  
@@ -21409,6 +22541,84 @@ index 0a3d05ed91345ebbf353b8bb486e4930316f9435..1299d685e040e683a92fc361569e830e
    it("keeps a yielded completion parked until its requester turn settles", async () => {
      const entry = createRunEntry({
        requesterTurnRunId: "run-requester",
+@@ -5119,6 +5414,7 @@ describe("requester settle wake trigger", () => {
+     "closed-in-flight",
+     "throwing-in-flight",
+     "closed-rearmed",
++    "followup-reclaimed",
+   ] as const)(
+     "credits a yielded handoff only from settled delivery evidence: %s",
+     async (ownership) => {
+@@ -5132,6 +5428,10 @@ describe("requester settle wake trigger", () => {
+           rearmGeneration: 1,
+         },
+       });
++      const runs = new Map([[entry.runId, entry]]);
++      if (ownership === "followup-reclaimed") {
++        entry.requesterAgentId = "main";
++      }
+       let gatewayOpen = true;
+       const gatewayContext = {};
+       if (ownership !== "unbound") {
+@@ -5163,6 +5463,7 @@ describe("requester settle wake trigger", () => {
+       );
+       const controller = createLifecycleController({
+         entry,
++        runs,
+         maybeWakeRequesterAfterAllChildrenSettled,
+         runSubagentAnnounceFlow,
+       });
+@@ -5188,18 +5489,48 @@ describe("requester settle wake trigger", () => {
+       if (ownership === "closed-rearmed") {
+         entry.requesterSettleWake!.rearmGeneration = 2;
+       }
++      if (ownership === "followup-reclaimed") {
++        const claim = {
++          runs,
++          persistOrThrow: vi.fn(),
++          runId: entry.runId,
++          taskRunId: entry.taskRunId ?? entry.runId,
++          childSessionKey: entry.childSessionKey,
++          requesterSessionKey: entry.requesterSessionKey,
++          requesterAgentId: "main",
++          requesterTurnRunId: "parent-followup",
++        };
++        const accepted = claimSubagentFollowupOwner(claim)!;
++        expect(markRequesterTurnYieldedInRuns(claim)).toBe(1);
++        expect(
++          controller.settleRequesterTurnAfterSessionSpawns({
++            ...claim,
++            requesterYielded: true,
++            acceptedSessionSpawns: [accepted],
++          }),
++        ).toBe(true);
++      }
+       const pendingWake = structuredClone(entry.requesterSettleWake);
+       settleParams?.completeBatch([entry], 1, {
+         delivered: true,
+         path: "direct",
+         deliveredAt: 8_000,
+-        ...(ownership === "closed-receipt" || ownership === "closed-rearmed"
++        ...(ownership === "closed-receipt" ||
++        ownership === "closed-rearmed" ||
++        ownership === "followup-reclaimed"
+           ? { requesterVisibleFinalDelivered: true as const }
+           : {}),
+       });
+-      if (ownership.endsWith("in-flight") || ownership === "closed-rearmed") {
++      if (
++        ownership.endsWith("in-flight") ||
++        ownership === "closed-rearmed" ||
++        ownership === "followup-reclaimed"
++      ) {
+         expect(entry.delivery?.status).toBe("pending");
+         expect(entry.requesterSettleWake).toEqual(pendingWake);
++        if (ownership === "followup-reclaimed") {
++          expect(entry.requesterSettleWake!.rearmGeneration).toBeGreaterThan(1);
++        }
+         return;
+       }
+ 
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.ts
 index 1fbaf80924d37588cf8a9b9b1c84e42ce1c49d54..a94f80edb65e92a1e14eb135d2033702934d01a9 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle.ts
@@ -22241,6 +23451,221 @@ index 9f88d08b2dd9bf17c595bf80b42ed460fd5b5290..1b3d3a132896a4148d5ca37a137a357c
            entry.execution.status !== "running" &&
            hasSubagentRunEnded(entry) &&
            !entry.execution.restartRecovery
+diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
+index 52a0bb281be80364edbc323ec4d70252cb4f7370..c402b85a7734e9b04a5cb6c4a56932b61c17441c 100644
+--- a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
++++ b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
+@@ -241,6 +241,20 @@ describe("requester settle wake product flow", () => {
+     }
+   });
+ 
++  const yieldRequesterTurn = async (requesterTurnRunId: string, expectedStatus = "yielded") => {
++    const result = await createSessionsYieldTool({
++      sessionId: "sess-main",
++      claimYield: () =>
++        registry.markRequesterTurnYielded({
++          requesterSessionKey: MAIN_REQUESTER_SESSION_KEY,
++          requesterAgentId: "main",
++          requesterTurnRunId,
++        }) > 0,
++      onYield: () => {},
++    }).execute(`yield-${requesterTurnRunId}`, {});
++    expect(result).toMatchObject({ details: { status: expectedStatus } });
++  };
++
+   const flushAsync = async () => {
+     await Promise.resolve();
+     await Promise.resolve();
+@@ -271,19 +285,17 @@ describe("requester settle wake product flow", () => {
+     runId: string,
+     options?: { allowPendingRequesterSettleWake?: boolean },
+   ) => {
+-    for (let attempt = 0; attempt < 80; attempt += 1) {
++    // Yield to real lazy imports as well as fake timers before asserting convergence.
++    await vi.waitFor(() => {
+       const run = registry.getSubagentRunByRunId(runId);
+-      if (
+-        run?.delivery?.status === "delivered" &&
+-        typeof run.cleanupCompletedAt === "number" &&
+-        (options?.allowPendingRequesterSettleWake === true || run.requesterSettleWake === undefined)
+-      ) {
+-        return;
++      expect(run).toMatchObject({
++        delivery: { status: "delivered" },
++        cleanupCompletedAt: expect.any(Number),
++      });
++      if (options?.allowPendingRequesterSettleWake !== true) {
++        expect(run?.requesterSettleWake).toBeUndefined();
+       }
+-      await vi.advanceTimersByTimeAsync(1);
+-      await flushAsync();
+-    }
+-    throw new Error(`run ${runId} did not finish delivered cleanup`);
++    });
+   };
+ 
+   const spawnVisibleChild = async (params: {
+@@ -532,19 +544,7 @@ describe("requester settle wake product flow", () => {
+         }
+       : { ...betaBeforeYield.delivery, status: "in_progress" };
+ 
+-    const yieldTool = createSessionsYieldTool({
+-      sessionId: "sess-main",
+-      claimYield: () =>
+-        registry.markRequesterTurnYielded({
+-          requesterSessionKey: MAIN_REQUESTER_SESSION_KEY,
+-          requesterAgentId: "main",
+-          requesterTurnRunId,
+-        }) > 0,
+-      onYield: () => {},
+-    });
+-    await expect(
+-      yieldTool.execute("yield-requester-wake", { message: "Wait for visible children" }),
+-    ).resolves.toMatchObject({ details: { status: "yielded" } });
++    await yieldRequesterTurn(requesterTurnRunId);
+ 
+     rejectNextRequesterWake = rejectRequesterWake;
+     const { withLocalSessionPlacementTurnSettlement } =
+@@ -623,19 +623,7 @@ describe("requester settle wake product flow", () => {
+       const { withLocalSessionPlacementTurnSettlement } =
+         await import("../../session-placement-admission.js");
+       const yieldTurn = async (requesterTurnRunId: string, accepted: (typeof alpha)[]) => {
+-        const result = await createSessionsYieldTool({
+-          sessionId: "sess-main",
+-          claimYield: () =>
+-            registry.markRequesterTurnYielded({
+-              requesterSessionKey: MAIN_REQUESTER_SESSION_KEY,
+-              requesterAgentId: "main",
+-              requesterTurnRunId,
+-            }) > 0,
+-          onYield: () => {},
+-        }).execute(`yield-${requesterTurnRunId}`, {});
+-        expect(result).toMatchObject({
+-          details: { status: accepted.length > 0 ? "yielded" : "error" },
+-        });
++        await yieldRequesterTurn(requesterTurnRunId, accepted.length > 0 ? "yielded" : "error");
+         if (runtime === "native") {
+           const harnessSelection = await import("../../harness/selection.js");
+           const { runEmbeddedAttemptWithBackend } =
+@@ -833,6 +821,118 @@ describe("requester settle wake product flow", () => {
+     },
+   );
+ 
++  it("delivers a same-child follow-up after the resumed parent yields without replaying the old completion", async ({
++    onTestFinished,
++  }) => {
++    vi.setSystemTime(100_000);
++    const context = {} as GatewayRequestContext;
++    context.resolveGatewayContext = () => context;
++    registry.initSubagentRegistry();
++    registry.activateSubagentRegistry(() => context);
++    const childSessionKey = "agent:main:dashboard:persistent-followup";
++    const taskRunId = "run-persistent-original";
++    const followupRunId = "run-persistent-followup";
++    const { persistSubagentRunsToDiskOrThrow } = await import("./subagent-registry-state.js");
++    onTestFinished(() => persistSubagentRunsToDiskOrThrow(new Map(), [taskRunId, followupRunId]));
++    const accepted = [{ runId: taskRunId, childSessionKey, expectsCompletionMessage: true }];
++    const yieldAndSettle = async (requesterTurnRunId: string) => {
++      await yieldRequesterTurn(requesterTurnRunId);
++      registry.settleRequesterAfterSessionSpawns({
++        requesterSessionKey: MAIN_REQUESTER_SESSION_KEY,
++        requesterAgentId: "main",
++        requesterTurnRunId,
++        acceptedSessionSpawns: accepted,
++        requesterYielded: true,
++      });
++    };
++    const ordinaryGatewayCall = callGatewayMock.getMockImplementation()!;
++    let resumed = false;
++    let wakeError: Error | undefined;
++    let visibleFinals = 0;
++    await callGatewayMock.withImplementation(
++      async (request) => {
++        if (
++          request.method !== "agent" ||
++          !request.params?.idempotencyKey?.startsWith("announce:requester-settle:")
++        ) {
++          return await ordinaryGatewayCall(request);
++        }
++        if (!resumed) {
++          try {
++            const previous = registry.getLatestLiveSubagentRunByChildSessionKey(childSessionKey)!;
++            expect(previous.execution.endedAt).toEqual(expect.any(Number));
++            // The suite substitutes persistence; this replacement needs the exact stored owner.
++            persistSubagentRunsToDiskOrThrow(new Map([[taskRunId, previous]]), [taskRunId]);
++            expect(
++              registry.replaceSubagentRunAfterSteerCore({
++                previousRunId: taskRunId,
++                nextRunId: followupRunId,
++                expected: previous,
++                allowEndedSource: true,
++                persistenceFailure: "throw",
++                task: "Finish the missing second part in the same worktree.",
++              }),
++            ).toBe(true);
++            const requesterTurnRunId = request.params.idempotencyKey;
++            expect(
++              registry.claimSubagentFollowup({
++                runId: followupRunId,
++                taskRunId,
++                childSessionKey,
++                requesterSessionKey: MAIN_REQUESTER_SESSION_KEY,
++                requesterAgentId: "main",
++                requesterTurnRunId,
++              }),
++            ).toEqual(accepted[0]);
++            await yieldAndSettle(requesterTurnRunId);
++            resumed = true;
++            return {
++              runId: requesterTurnRunId,
++              status: "ok",
++              result: {
++                payloads: [],
++                acceptedSessionSpawns: accepted,
++                meta: { durationMs: 1, yielded: true },
++                requesterContinuationSettled: true,
++              },
++            };
++          } catch (error) {
++            wakeError = error instanceof Error ? error : new Error(String(error));
++            throw wakeError;
++          }
++        }
++        visibleFinals += 1;
++        return await ordinaryGatewayCall(request);
++      },
++      async () => {
++        const requesterTurnRunId = "requester-persistent-initial";
++        await spawnVisibleChild({ runId: taskRunId, childSessionKey, requesterTurnRunId });
++        await yieldAndSettle(requesterTurnRunId);
++        emitCompleted(taskRunId, childSessionKey, "First part complete; second part remains.");
++        await vi.waitFor(() => {
++          if (wakeError) {
++            throw wakeError;
++          }
++          expect(resumed).toBe(true);
++        });
++        expect(getRequesterWakeCalls()).toHaveLength(1);
++        expect(visibleFinals).toBe(0);
++        expect(registry.getSubagentRunByRunId(followupRunId)).toMatchObject({
++          taskRunId,
++          requesterSettleWake: { status: "pending", requesterYieldBatch: true },
++        });
++        emitCompleted(followupRunId, childSessionKey, "Both parts complete and verified.");
++        await vi.advanceTimersByTimeAsync(151_000);
++        await registry.testing.sweepOnceForTests();
++        await waitForDeliveredCleanup(followupRunId);
++        expect(getRequesterWakeCalls()).toHaveLength(2);
++        expect(visibleFinals).toBe(1);
++        expect(sendMessageMock).not.toHaveBeenCalled();
++        expect(registry.countActiveDescendantRuns(MAIN_REQUESTER_SESSION_KEY, "main")).toBe(0);
++      },
++    );
++  });
++
+   it("caps a stale requester batch despite foreign active work in a global session", async () => {
+     vi.setSystemTime(100_000);
+     loadConfigMock.mockReturnValue({
 diff --git a/src/agents/subagents/registry/subagent-registry.store.sqlite.test.ts b/src/agents/subagents/registry/subagent-registry.store.sqlite.test.ts
 index 98efa5c845acbc48529be94deff0fd4f91969988..8dd5a505b813045e33ad1c06a2f2ba7779f3190b 100644
 --- a/src/agents/subagents/registry/subagent-registry.store.sqlite.test.ts
@@ -22310,10 +23735,14 @@ index c02eee2a2c57b50af3b8fcaf227acd86e2029d78..2162fcf7a045aff835d6fc2c49d58820
  export function loadSubagentRegistryFromSqlite(): Map<string, SubagentRunRecord> {
    // Retired file-era runs are intentionally not recovered here: after SQLite
 diff --git a/src/agents/subagents/registry/subagent-registry.ts b/src/agents/subagents/registry/subagent-registry.ts
-index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6dea2772334 100644
+index 3a8010ad9292479c2095905cb039eaf08adc6cfc..abc0dbef8b08c07c08f2b4442040771eddf98868 100644
 --- a/src/agents/subagents/registry/subagent-registry.ts
 +++ b/src/agents/subagents/registry/subagent-registry.ts
-@@ -18,6 +18,7 @@ import { isDeliverySuspended } from "./subagent-delivery-state.js";
+@@ -15,9 +15,11 @@ import {
+ import { prependAgentSteeringPrompt } from "../../agent-steering-queue.js";
+ import { terminateAcceptedCollectorRun } from "../spawn/subagent-spawn-cleanup.js";
+ import { isDeliverySuspended } from "./subagent-delivery-state.js";
++import { claimSubagentFollowupOwner } from "./subagent-followup-owner.js";
  import { createSubagentRegistryCompletionRuntime } from "./subagent-registry-completion-runtime.js";
  import { emitSubagentProgressEndedHook } from "./subagent-registry-completion.js";
  import { createSubagentRegistryContextCleanup } from "./subagent-registry-context-cleanup.js";
@@ -22321,7 +23750,7 @@ index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6de
  import {
    resetSubagentRegistryRuntimeLoadersForTests,
    setSubagentRegistryDepsForTest,
-@@ -235,7 +236,8 @@ export function resumeSubagentRun(runId: string, source: "live" | "restore" = "l
+@@ -235,7 +237,8 @@ export function resumeSubagentRun(runId: string, source: "live" | "restore" = "l
    if (!entry) {
      return;
    }
@@ -22331,7 +23760,7 @@ index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6de
      // Startup orphan recovery replays this durable exact-run winner before it
      // reads session/config state. Do not prune or resume it through announce.
      resumedRuns.add(runId);
-@@ -251,6 +253,10 @@ export function resumeSubagentRun(runId: string, source: "live" | "restore" = "l
+@@ -251,6 +254,10 @@ export function resumeSubagentRun(runId: string, source: "live" | "restore" = "l
        outcome: entry.execution.outcome,
      });
    }
@@ -22342,7 +23771,7 @@ index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6de
    const yieldedWakeWaitingForDelivery =
      entry.requesterSettleWake?.requesterYieldBatch === true &&
      (entry.delivery?.status === "pending" ||
-@@ -517,6 +523,9 @@ export function registerSubagentRun(params: RegisterSubagentRunParams): void {
+@@ -517,6 +524,9 @@ export function registerSubagentRun(params: RegisterSubagentRunParams): void {
      gatewayContextResolver: params.gatewayContextResolver ?? activeGatewayContextResolver,
    });
  }
@@ -22352,6 +23781,22 @@ index 3a8010ad9292479c2095905cb039eaf08adc6cfc..21a77d46fcadd9a4318a217015aff6de
  export const startQueuedSubagentRun = subagentRunManager.startQueuedSubagentRun;
  export const settleFailedQueuedSubagentLaunch = subagentRunManager.settleFailedQueuedSubagentLaunch;
  
+@@ -654,6 +664,15 @@ export function activateSubagentRegistry(resolveGatewayContext: GatewayContextRe
+ }
+ export const settleRequesterAfterSessionSpawns = publicApi.settleRequesterAfterSessionSpawns;
+ export const markRequesterTurnYielded = publicApi.markRequesterTurnYielded;
++export function claimSubagentFollowup(
++  params: Omit<Parameters<typeof claimSubagentFollowupOwner>[0], "runs" | "persistOrThrow">,
++) {
++  return claimSubagentFollowupOwner({
++    ...params,
++    runs: subagentRuns,
++    persistOrThrow: persistSubagentRunsOrThrow,
++  });
++}
+ 
+ const bootstrapState = subagentRegistryBootstrapState;
+ bootstrapState.restorer = subagentRestorer;
 diff --git a/src/agents/subagents/registry/subagent-registry.types.ts b/src/agents/subagents/registry/subagent-registry.types.ts
 index 27b73b1f8cc0339afff48fab74589338a19c65f7..27aecf67b7c9dc806c3c4b95041ab55f33d58e60 100644
 --- a/src/agents/subagents/registry/subagent-registry.types.ts
@@ -23172,6 +24617,225 @@ index 26a2dbc7664b0f48a6970164bb8815fb1c67f316..e3e3159a3ff264b924c4eb896636b0aa
      const delayMs =
        MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS[
          Math.min(retryIndex, MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS.length - 1)
+diff --git a/src/agents/tools/sessions-send-owned-child.ts b/src/agents/tools/sessions-send-owned-child.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..75950abae5a801a2352465819eff8ca4d01e9c07
+--- /dev/null
++++ b/src/agents/tools/sessions-send-owned-child.ts
+@@ -0,0 +1,213 @@
++import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
++import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
++import type { SessionEntry } from "../../config/sessions/types.js";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import { reactivateCompletedSubagentSession } from "../../gateway/session-subagent-reactivation.js";
++import { formatErrorMessage } from "../../infra/errors.js";
++import type { InputProvenance } from "../../sessions/input-provenance.js";
++import {
++  buildRunUserTurnIdempotencyKey,
++  createUserTurnTranscriptRecorder,
++} from "../../sessions/user-turn-transcript.js";
++import { captureAgentToolSourceExecutionGuard } from "../agent-tool-source-execution-guard.js";
++import {
++  queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
++  resolveActiveEmbeddedRunOwner,
++  type EmbeddedAgentQueueMessageOptions,
++} from "../embedded-agent-runner/runs.js";
++import { getLatestSubagentRunByChildSessionKey } from "../subagents/registry/subagent-registry-read.js";
++import { getGatewayToolCallerIdentity } from "./gateway-caller-context.js";
++import type { AgentToolGatewayRequestCaller } from "./in-process-gateway.js";
++import { runWithScopedSessionAccess } from "./scoped-session-access.js";
++
++/** Native parent follow-ups retain the existing task's durable completion owner. */
++export async function sendOwnedChildFollowup(params: {
++  cfg: OpenClawConfig;
++  targetEntry: SessionEntry;
++  targetAgentId: string;
++  targetSessionKey: string;
++  requesterSessionKey: string;
++  requesterAgentId: string;
++  requesterTurnRunId: string;
++  runId: string;
++  sendParams: Record<string, unknown> & { message: string; inputProvenance: InputProvenance };
++  callGateway: AgentToolGatewayRequestCaller;
++  signal?: AbortSignal;
++}) {
++  const source = getLatestSubagentRunByChildSessionKey(params.targetSessionKey);
++  if (
++    !source ||
++    source.requesterSessionKey !== params.requesterSessionKey ||
++    source.requesterAgentId !== params.requesterAgentId ||
++    (source.controllerSessionKey ?? source.requesterSessionKey) !== params.requesterSessionKey ||
++    source.expectsCompletionMessage !== true ||
++    source.collect === true
++  ) {
++    return undefined;
++  }
++  const assertSourceActive = captureAgentToolSourceExecutionGuard(params.signal);
++  const gatewayContextResolver = getGatewayToolCallerIdentity()?.gatewayContextResolver;
++  const taskRunId = source.taskRunId ?? source.runId;
++  const previousRequesterSettleWake = source.requesterSettleWake
++    ? structuredClone(source.requesterSettleWake)
++    : undefined;
++  let runId = params.runId;
++  let sent = false;
++  try {
++    const { claimSubagentFollowup } = await import("../subagents/registry/subagent-registry.js");
++    return await runWithScopedSessionAccess({
++      cfg: params.cfg,
++      agentId: params.targetAgentId,
++      targetSessionKey: params.targetSessionKey,
++      expectedSessionId: params.targetEntry.sessionId,
++      signal: params.signal,
++      run: async () => {
++        const assertCurrent = () => {
++          assertSourceActive();
++          if (gatewayContextResolver && !gatewayContextResolver()) {
++            throw new Error("The Gateway owner ended before follow-up completion was attached");
++          }
++          const entry = loadSessionEntryReadOnly({
++            agentId: params.targetAgentId,
++            sessionKey: params.targetSessionKey,
++            storePath: resolveSessionStorePathCore(params.cfg.session?.store, {
++              agentId: params.targetAgentId,
++            }),
++          });
++          if (
++            entry?.sessionId !== params.targetEntry.sessionId ||
++            entry?.lifecycleRevision !== params.targetEntry.lifecycleRevision ||
++            entry?.archivedAt !== undefined
++          ) {
++            throw new Error("Child session changed before follow-up delivery");
++          }
++          const current = getLatestSubagentRunByChildSessionKey(params.targetSessionKey);
++          if (
++            !current ||
++            (current.taskRunId ?? current.runId) !== taskRunId ||
++            current.requesterSessionKey !== params.requesterSessionKey ||
++            current.killIntent ||
++            current.killReconciliation
++          ) {
++            throw new Error("Child completion owner changed before follow-up delivery");
++          }
++          return current;
++        };
++        const current = assertCurrent();
++        const active = resolveActiveEmbeddedRunOwner(params.targetEntry.sessionId);
++        let targetDisposition: "queued" | "steered";
++        if (active) {
++          if (active.runId !== current.runId) {
++            throw new Error(
++              "The active child run does not own its registered completion; follow-up was not sent",
++            );
++          }
++          runId = active.runId;
++          const canInject = () => {
++            const owner = assertCurrent();
++            return (
++              owner.runId === runId &&
++              resolveActiveEmbeddedRunOwner(active.sessionId)?.runId === runId
++            );
++          };
++          const queueOptions: EmbeddedAgentQueueMessageOptions = {
++            steeringMode: "all",
++            debounceMs: 0,
++            waitForTranscriptCommit: true,
++            sourceReplyDeliveryMode: "message_tool_only",
++            userTurnTranscriptRecorder: createUserTurnTranscriptRecorder({
++              input: {
++                text: params.sendParams.message,
++                provenance: params.sendParams.inputProvenance,
++                idempotencyKey: buildRunUserTurnIdempotencyKey(params.runId),
++              },
++              target: {
++                sessionId: active.sessionId,
++                expectedSessionId: active.sessionId,
++                sessionKey: params.targetSessionKey,
++                sessionEntry: params.targetEntry,
++                agentId: params.targetAgentId,
++                storePath: resolveSessionStorePathCore(params.cfg.session?.store, {
++                  agentId: params.targetAgentId,
++                }),
++                config: params.cfg,
++              },
++            }),
++          };
++          let queued = await queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
++            active.sessionId,
++            params.sendParams.message,
++            queueOptions,
++            canInject,
++          );
++          if (!queued.queued && queued.reason === "transcript_commit_wait_unsupported") {
++            delete queueOptions.waitForTranscriptCommit;
++            queued = await queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
++              active.sessionId,
++              params.sendParams.message,
++              queueOptions,
++              canInject,
++            );
++          }
++          if (!queued.queued) {
++            throw new Error(`Child follow-up was not sent: ${queued.reason}`);
++          }
++          sent = true;
++          targetDisposition = "steered";
++        } else {
++          if (current.execution.endedAt === undefined) {
++            throw new Error("The child run is still starting or settling; follow-up was not sent");
++          }
++          const response = await params.callGateway<{ runId?: string }>({
++            method: "agent",
++            params: params.sendParams,
++            timeoutMs: 10_000,
++          });
++          sent = true;
++          runId = response.runId?.trim() || runId;
++          assertCurrent();
++          // Gateway acceptance precedes execution-phase reactivation. Complete
++          // that same transition here before promising a yieldable follow-up.
++          await reactivateCompletedSubagentSession({
++            sessionKey: params.targetSessionKey,
++            runId,
++            task: params.sendParams.message,
++            gatewayContextResolver,
++          });
++          targetDisposition = "queued";
++        }
++        assertCurrent();
++        const completion = claimSubagentFollowup({
++          runId,
++          taskRunId,
++          childSessionKey: params.targetSessionKey,
++          requesterSessionKey: params.requesterSessionKey,
++          requesterAgentId: params.requesterAgentId,
++          requesterTurnRunId: params.requesterTurnRunId,
++          previousRunId: source.runId,
++          previousRequesterSettleWake,
++        });
++        if (!completion) {
++          throw new Error("Child completion ownership could not be attached to this turn");
++        }
++        return {
++          status: "accepted" as const,
++          runId,
++          targetDisposition,
++          childSessionKey: completion.childSessionKey,
++          completionRunId: completion.runId,
++          expectsCompletionMessage: true as const,
++          ...(completion.completionSpawns ? { completionSpawns: completion.completionSpawns } : {}),
++          delivery: { status: "pending" as const, mode: "announce" as const },
++        };
++      },
++    });
++  } catch (error) {
++    return {
++      status: "error" as const,
++      runId,
++      error: `${formatErrorMessage(error)}${sent ? ". The follow-up was already accepted; do not resend it." : ""}`,
++      ...(sent ? { sentBeforeError: true as const } : {}),
++    };
++  }
++}
 diff --git a/src/agents/tools/sessions-send-progress.ts b/src/agents/tools/sessions-send-progress.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..37303a9e14c1cf251ba443dd0c163c08a7db556a
@@ -23204,6 +24868,142 @@ index 0000000000000000000000000000000000000000..37303a9e14c1cf251ba443dd0c163c08
 +  const child = getLatestSubagentRunByChildSessionKey(target);
 +  return child?.requesterSessionKey === params.requesterSessionKey ? target : undefined;
 +}
+diff --git a/src/agents/tools/sessions-send-tool.ts b/src/agents/tools/sessions-send-tool.ts
+index 68d0d6b4e515adf713c1aecb387324debfbcab11..7bb812e0fc9577f0085f42321470e14db2751f36 100644
+--- a/src/agents/tools/sessions-send-tool.ts
++++ b/src/agents/tools/sessions-send-tool.ts
+@@ -94,6 +94,7 @@ import {
+   resolveVisibleSessionReference,
+ } from "./sessions-helpers.js";
+ import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./sessions-send-helpers.js";
++import { sendOwnedChildFollowup } from "./sessions-send-owned-child.js";
+ import { runSessionsSendA2AFlow } from "./sessions-send-tool.a2a.js";
+ 
+ const SessionsSendToolSchema = Type.Object({
+@@ -133,6 +134,21 @@ const SessionsSendOutputSchema = Type.Union([
+       status: Type.Literal("accepted"),
+       sessionKey: Type.String(),
+       targetDisposition: Type.Union([Type.Literal("queued"), Type.Literal("steered")]),
++      childSessionKey: Type.Optional(Type.String()),
++      completionRunId: Type.Optional(Type.String()),
++      expectsCompletionMessage: Type.Optional(Type.Literal(true)),
++      completionSpawns: Type.Optional(
++        Type.Array(
++          Type.Object(
++            {
++              runId: Type.String(),
++              childSessionKey: Type.String(),
++              expectsCompletionMessage: Type.Literal(true),
++            },
++            { additionalProperties: false },
++          ),
++        ),
++      ),
+       delivery: SessionsSendDeliverySchema,
+       watched: Type.Optional(Type.Boolean()),
+     },
+@@ -495,6 +511,9 @@ async function startAgentRun(params: {
+ export function createSessionsSendTool(opts?: {
+   agentId?: string;
+   agentSessionKey?: string;
++  requesterTurnRunId?: string;
++  /** Backend-owned durable parent identity, separate from access-policy identity. */
++  completionOwnerKey?: string;
+   agentChannel?: string;
+   sandboxed?: boolean;
+   config?: OpenClawConfig;
+@@ -513,7 +532,7 @@ export function createSessionsSendTool(opts?: {
+     parameters: SessionsSendToolSchema,
+     outputSchema: SessionsSendOutputSchema,
+     prepareArguments: normalizeSessionsSendArguments,
+-    execute: async (_toolCallId, args) => {
++    execute: async (_toolCallId, args, signal) => {
+       const promptedAt = Date.now();
+       const params = normalizeSessionsSendArguments(args);
+       const gatewayCall = opts?.callGateway ?? callAgentToolGatewayRequest;
+@@ -866,6 +885,8 @@ export function createSessionsSendTool(opts?: {
+       // Normalize legacy DM reply addresses only after exact-key visibility
+       // checks; global/binding-isolated DMs and non-DM owners stay private.
+       const requesterSessionKey = rawRequesterSessionKey;
++      const completionOwnerKey =
++        normalizeOptionalString(opts?.completionOwnerKey) ?? requesterSessionKey;
+       const replyRequesterSessionKey =
+         rawRequesterSessionKey &&
+         parsedRequesterSessionKey &&
+@@ -976,14 +997,17 @@ export function createSessionsSendTool(opts?: {
+           // a hidden watch, and cron run-scoped sends can fall back to the durable parent
+           // session, which is the key that receives future state changes.
+           const watchRequested = params.watch === true;
+-          const registerWatchIfRequested = (targetSessionKey: string) => {
++          const registerWatchIfRequested = (
++            targetSessionKey: string,
++            watcherSessionKey = replyRequesterSessionKey,
++          ) => {
+             const watched =
+               watchRequested &&
+               !expectedSessionId &&
+-              replyRequesterSessionKey &&
+-              replyRequesterSessionKey !== targetSessionKey
++              watcherSessionKey &&
++              watcherSessionKey !== targetSessionKey
+                 ? registerSessionStateWatch({
+-                    watcherSessionKey: replyRequesterSessionKey,
++                    watcherSessionKey,
+                     targetSessionKey,
+                     targetAgentId,
+                   })
+@@ -1041,6 +1065,51 @@ export function createSessionsSendTool(opts?: {
+             targetAcpMeta && targetSessionEntry
+               ? { ...targetSessionEntry, acp: targetAcpMeta }
+               : targetSessionEntry;
++          if (
++            timeoutSeconds === 0 &&
++            !expectedSessionId &&
++            !targetAcpMeta &&
++            !targetSessionEntry?.acp &&
++            targetSessionEntry &&
++            opts?.requesterTurnRunId &&
++            completionOwnerKey &&
++            (targetSessionEntry.spawnedBy === completionOwnerKey ||
++              targetSessionEntry.parentSessionKey === completionOwnerKey)
++          ) {
++            const followup = await sendOwnedChildFollowup({
++              cfg,
++              targetEntry: targetSessionEntry,
++              targetAgentId,
++              targetSessionKey: resolvedKey,
++              requesterSessionKey: completionOwnerKey,
++              requesterAgentId,
++              requesterTurnRunId: opts.requesterTurnRunId,
++              runId,
++              sendParams,
++              callGateway: gatewayCall,
++              signal:
++                signal && opts.signal
++                  ? AbortSignal.any([signal, opts.signal])
++                  : (signal ?? opts.signal),
++            });
++            if (followup) {
++              if (followup.status === "accepted") {
++                recordSessionToolActionFact({
++                  operation: "send",
++                  fact: "committed",
++                  targetAgentId,
++                  targetSessionKey: resolvedKey,
++                });
++              }
++              return jsonResult({
++                ...followup,
++                sessionKey: displayKey,
++                ...(followup.status === "accepted"
++                  ? registerWatchIfRequested(resolvedKey, completionOwnerKey)
++                  : {}),
++              });
++            }
++          }
+           const skipAcpA2AFlow = isRequesterParentOfBackgroundAcpSession(
+             targetSessionEntryWithAcp,
+             effectiveRequesterKey,
 diff --git a/src/agents/tools/sessions-spawn-project.test.ts b/src/agents/tools/sessions-spawn-project.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..2e10d55871254d977d29c44a282633a9eb303139
@@ -23521,6 +25321,266 @@ index a32471f9e94a4cc67811e0fea4b5d811c7c84640..0fc31055435c6633cc0cc401a5df2b87
          ...(spawnedCwd ? { cwd: spawnedCwd } : {}),
          ...(worktree ? { worktree: true } : {}),
          ...(worktreeName ? { worktreeName } : {}),
+diff --git a/src/agents/tools/sessions-yield-tool.test.ts b/src/agents/tools/sessions-yield-tool.test.ts
+index d421cf9d9472adedd841ff9aabcb12a446584899..fe11e9a54f6d378ee53859e4e5a525806bd58955 100644
+--- a/src/agents/tools/sessions-yield-tool.test.ts
++++ b/src/agents/tools/sessions-yield-tool.test.ts
+@@ -106,7 +106,7 @@ describe("sessions_yield tool", () => {
+     expect(result.details).toMatchObject({
+       status: "error",
+       error:
+-        "No pending child completion is owned by this turn. Continue working because independent background operations complete separately.",
++        "No pending child completion is owned by this turn. No wait was registered. Continue working or report the actual task status; a pending send or watch alone does not establish a completion handoff.",
+     });
+     expect(onYield).not.toHaveBeenCalled();
+   });
+diff --git a/src/agents/tools/sessions-yield-tool.ts b/src/agents/tools/sessions-yield-tool.ts
+index 0ccdae30cb761785b95453c517f06a3d6f8ac959..bd2783143c9ce605599de8f86a3f1324db2f4ae3 100644
+--- a/src/agents/tools/sessions-yield-tool.ts
++++ b/src/agents/tools/sessions-yield-tool.ts
+@@ -8,7 +8,7 @@ import type { AnyAgentTool } from "./common.js";
+ import { jsonResult, readToolStringParam } from "./common.js";
+ 
+ const NO_PENDING_CHILD_COMPLETION_ERROR =
+-  "No pending child completion is owned by this turn. Continue working because independent background operations complete separately.";
++  "No pending child completion is owned by this turn. No wait was registered. Continue working or report the actual task status; a pending send or watch alone does not establish a completion handoff.";
+ 
+ const SessionsYieldToolSchema = Type.Object({
+   message: Type.Optional(
+@@ -34,7 +34,7 @@ export function createSessionsYieldTool(opts?: {
+     // tool must stay visible even when tool search compacts the catalog.
+     catalogMode: "direct-only",
+     description:
+-      "End turn for announced child completion events. Collector runs require explicit collection instead. For an otherwise-silent interactive parent turn, acknowledgment can send a waiting reply.",
++      "End turn for announced child completion events owned by this turn. A pending send or watch alone is not a completion handoff. Collector runs require explicit collection instead. For an otherwise-silent interactive parent turn, acknowledgment can send a waiting reply.",
+     parameters: SessionsYieldToolSchema,
+     execute: async (_toolCallId, args) => {
+       const params = args as Record<string, unknown>;
+diff --git a/src/agents/tools/sessions.test.ts b/src/agents/tools/sessions.test.ts
+index 9935ce85e634b0829c036e21264fc315967fba5f..112a5bc6d21b17577fcbc2e5c20ae3070a0fad13 100644
+--- a/src/agents/tools/sessions.test.ts
++++ b/src/agents/tools/sessions.test.ts
+@@ -1215,6 +1215,220 @@ describe("sessions_send gating", () => {
+     });
+   });
+ 
++  it.each<{
++    state: "idle" | "active";
++    splitOwner: boolean;
++    completesDuringSend: boolean;
++    failure?: "claim" | "active-owner" | "aborted" | "gateway-retired";
++  }>([
++    { state: "idle", splitOwner: false, completesDuringSend: false },
++    { state: "active", splitOwner: false, completesDuringSend: false },
++    { state: "idle", splitOwner: true, completesDuringSend: false },
++    { state: "active", splitOwner: false, completesDuringSend: true },
++    { state: "active", splitOwner: false, completesDuringSend: false, failure: "claim" },
++    { state: "active", splitOwner: false, completesDuringSend: false, failure: "active-owner" },
++    { state: "active", splitOwner: false, completesDuringSend: false, failure: "aborted" },
++    { state: "active", splitOwner: false, completesDuringSend: false, failure: "gateway-retired" },
++    { state: "idle", splitOwner: false, completesDuringSend: false, failure: "gateway-retired" },
++  ])(
++    "preserves native child follow-up ownership or reports an undeliverable follow-up: %j",
++    async ({ state, splitOwner, completesDuringSend, failure }) => {
++      await withTestDir({ prefix: "openclaw-native-child-followup-" }, async (dir) => {
++        const read = await import("../subagents/registry/subagent-registry-read.js");
++        const registry = await import("../subagents/registry/subagent-registry.js");
++        const reactivation = await import("../../gateway/session-subagent-reactivation.js");
++        const runtime = await import("../embedded-agent-runner/runs.js");
++        const callerContext = await import("./gateway-caller-context.js");
++        const { claimSubagentFollowupOwner } =
++          await import("../subagents/registry/subagent-followup-owner.js");
++        const { markRequesterTurnYieldedInRuns } =
++          await import("../subagents/registry/subagent-registry-requester-yield.js");
++        const { runSessionsSendA2AFlow } = await import("./sessions-send-tool.a2a.js");
++        const storePath = path.join(dir, "sessions.json");
++        const childSessionKey = "agent:main:dashboard:retained-child";
++        const entry = {
++          runId: "first-execution",
++          taskRunId: "original-task",
++          childSessionKey,
++          requesterSessionKey: MAIN_AGENT_SESSION_KEY,
++          requesterAgentId: "main",
++          requesterDisplayKey: "main",
++          task: "initial work",
++          cleanup: "keep" as const,
++          createdAt: 1,
++          expectsCompletionMessage: true,
++          execution:
++            state === "idle"
++              ? { status: "terminal" as const, endedAt: 2 }
++              : { status: "running" as const, startedAt: 1 },
++        };
++        const runs = new Map<
++          string,
++          import("../subagents/registry/subagent-registry.types.js").SubagentRunRecord
++        >([[entry.runId, entry]]);
++        const config = {
++          session: { scope: "per-sender", mainKey: "main", store: storePath },
++          tools: { agentToAgent: { enabled: true }, sessions: { visibility: "all" } },
++        } as OpenClawConfig;
++        setRuntimeConfigSnapshot(config);
++        loadConfigMock.mockReturnValue(config as SessionsToolTestConfig);
++        await upsertSessionEntryCore(
++          { agentId: "main", sessionKey: childSessionKey, storePath },
++          {
++            sessionId: "native-child",
++            updatedAt: 1,
++            parentSessionKey: MAIN_AGENT_SESSION_KEY,
++            spawnedBy: MAIN_AGENT_SESSION_KEY,
++            createdVia: "spawn",
++          },
++        );
++        const readSpy = vi
++          .spyOn(read, "getLatestSubagentRunByChildSessionKey")
++          .mockImplementation(() => [...runs.values()][0] ?? null);
++        const ownerSpy = vi.spyOn(runtime, "resolveActiveEmbeddedRunOwner").mockReturnValue(
++          state === "active"
++            ? {
++                runId: failure === "active-owner" ? "untracked-active-run" : entry.runId,
++                sessionId: "native-child",
++                abort: () => false,
++              }
++            : undefined,
++        );
++        let gatewayOpen = true;
++        const gatewayContext =
++          {} as import("../../gateway/server-methods/types.js").GatewayRequestContext;
++        const callerSpy = vi.spyOn(callerContext, "getGatewayToolCallerIdentity").mockReturnValue(
++          failure === "gateway-retired"
++            ? {
++                agentId: "main",
++                sessionKey: MAIN_AGENT_SESSION_KEY,
++                receiptAuthority: () => true,
++                gatewayContextResolver: () => (gatewayOpen ? gatewayContext : undefined),
++              }
++            : undefined,
++        );
++        const queueSpy = vi
++          .spyOn(runtime, "queueGuardedEmbeddedAgentMessageWithOutcomeAsync")
++          .mockImplementation(async (_id, _text, _options, canInject) => {
++            expect(canInject()).toBe(true);
++            if (completesDuringSend) {
++              runs.get(entry.runId)!.execution = { status: "terminal", endedAt: 3 };
++            }
++            if (failure === "gateway-retired") {
++              gatewayOpen = false;
++            }
++            return {
++              queued: true,
++              sessionId: "native-child",
++              target: "embedded_run",
++              gatewayHealth: "live",
++            };
++          });
++        const reactivateSpy = vi
++          .spyOn(reactivation, "reactivateCompletedSubagentSession")
++          .mockImplementation(async ({ runId }) => {
++            runs.delete(entry.runId);
++            runs.set(runId!, { ...entry, runId: runId!, execution: { status: "running" } });
++            return true;
++          });
++        const persistOrThrow = vi.fn();
++        const claimSpy = vi
++          .spyOn(registry, "claimSubagentFollowup")
++          .mockImplementation((params) =>
++            failure === "claim"
++              ? undefined
++              : claimSubagentFollowupOwner({ ...params, runs, persistOrThrow }),
++          );
++        callGatewayMock.mockImplementation(async (request: { method?: string }) => {
++          if (request.method === "agent") {
++            if (failure === "gateway-retired") {
++              gatewayOpen = false;
++            }
++            return { runId: "followup-execution" };
++          }
++          return request.method === "sessions.list"
++            ? { path: storePath, sessions: [{ key: childSessionKey, kind: "direct" }] }
++            : {};
++        });
++        vi.mocked(runSessionsSendA2AFlow).mockClear();
++        try {
++          const result = await createSessionsSendTool({
++            agentId: "main",
++            agentSessionKey: splitOwner
++              ? "agent:main:telegram:direct:123456"
++              : MAIN_AGENT_SESSION_KEY,
++            completionOwnerKey: MAIN_AGENT_SESSION_KEY,
++            requesterTurnRunId: "resumed-parent",
++            config,
++            callGateway: callGatewayMock,
++          }).execute(
++            "followup",
++            {
++              sessionKey: childSessionKey,
++              message: "finish the remaining fix",
++              timeoutSeconds: 0,
++              watch: true,
++            },
++            failure === "aborted" ? AbortSignal.abort(new Error("follow-up cancelled")) : undefined,
++          );
++          if (failure) {
++            expect(requireDetails(result)).toMatchObject({ status: "error" });
++            expect(requireDetails(result).sentBeforeError).toBe(
++              failure === "claim" || failure === "gateway-retired" ? true : undefined,
++            );
++            expect(requireDetails(result).error).toContain(
++              failure === "claim" || failure === "gateway-retired"
++                ? "do not resend"
++                : failure === "aborted"
++                  ? "follow-up cancelled"
++                  : "follow-up was not sent",
++            );
++            expect(runs.get(entry.runId)!.requesterTurnRunId).toBeUndefined();
++            if (failure === "gateway-retired") {
++              expect(requireDetails(result).error).toContain("Gateway owner ended");
++              expect(claimSpy).not.toHaveBeenCalled();
++              expect(reactivateSpy).not.toHaveBeenCalled();
++            }
++          } else {
++            expect(requireDetails(result)).toMatchObject({
++              status: "accepted",
++              runId: state === "active" ? "first-execution" : "followup-execution",
++              completionRunId: "original-task",
++              childSessionKey,
++              expectsCompletionMessage: true,
++              targetDisposition: state === "active" ? "steered" : "queued",
++              delivery: { status: "pending", mode: "announce" },
++            });
++            expect(
++              markRequesterTurnYieldedInRuns({
++                requesterSessionKey: MAIN_AGENT_SESSION_KEY,
++                requesterAgentId: "main",
++                requesterTurnRunId: "resumed-parent",
++                runs,
++                persistOrThrow,
++              }),
++            ).toBe(1);
++          }
++          expect(runs.size).toBe(1);
++          expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
++          expect(queueSpy).toHaveBeenCalledTimes(
++            state === "active" && failure !== "active-owner" && failure !== "aborted" ? 1 : 0,
++          );
++          expect(
++            callGatewayMock.mock.calls.filter(([request]) => request.method === "agent"),
++          ).toHaveLength(state === "active" ? 0 : 1);
++        } finally {
++          readSpy.mockRestore();
++          ownerSpy.mockRestore();
++          queueSpy.mockRestore();
++          reactivateSpy.mockRestore();
++          claimSpy.mockRestore();
++          callerSpy.mockRestore();
++        }
++      });
++    },
++  );
++
+   it("does not disclose a resolved session key when sessionId access is denied", async () => {
+     const tool = createSessionsSendTool({
+       agentSessionKey: MAIN_AGENT_SESSION_KEY,
 diff --git a/src/auto-reply/command-auth.ts b/src/auto-reply/command-auth.ts
 index b1ee2a8e4962895c3f646077b6b9a8ec2d363d5c..247a06d7460197463a7e7774dcecb75fea259c72 100644
 --- a/src/auto-reply/command-auth.ts
@@ -36078,7 +38138,7 @@ index 28a72f790d225ceb3431d2b276e61886986df9f9..d47e9b8be7459f8e90e787796226babf
              ...(initialAttachments ? { attachments: initialAttachments } : {}),
            },
 diff --git a/src/gateway/server-plugin-subagent-runtime.test.ts b/src/gateway/server-plugin-subagent-runtime.test.ts
-index 861b17cf5d532fb4b3b47dacc68203711543bd6d..b809eaa718ab12146303aea35f5060e3736997ff 100644
+index 861b17cf5d532fb4b3b47dacc68203711543bd6d..4d4441c8a9a69c2b48a3c773036fe2d1efcc7048 100644
 --- a/src/gateway/server-plugin-subagent-runtime.test.ts
 +++ b/src/gateway/server-plugin-subagent-runtime.test.ts
 @@ -1,6 +1,11 @@
@@ -36102,36 +38162,64 @@ index 861b17cf5d532fb4b3b47dacc68203711543bd6d..b809eaa718ab12146303aea35f5060e3
  import {
    withPluginRuntimeGatewayRequestScope,
    withPluginRuntimePluginIdScope,
-@@ -124,6 +131,112 @@ afterEach(() => {
+@@ -124,6 +131,146 @@ afterEach(() => {
  });
  
  describe("plugin background completions", () => {
 +  it.each<{
 +    name: string;
 +    agent?: ThinkLevel;
++    requested?: ThinkLevel;
 +    global?: ThinkLevel;
 +    model?: ThinkLevel | false;
 +    expected?: ThinkLevel;
 +  }>([
++    {
++      name: "explicit high overrides owner ultra",
++      requested: "high",
++      agent: "ultra",
++      expected: "high",
++    },
++    { name: "explicit off overrides owner high", requested: "off", agent: "high", expected: "off" },
 +    { name: "agent overrides global", agent: "high", global: "low", expected: "high" },
 +    { name: "global inheritance", global: "max", expected: "max" },
 +    { name: "model overrides global", model: "high", global: "low", expected: "high" },
 +    { name: "agent off overrides model", agent: "off", model: "high", expected: "off" },
 +    { name: "model disabled overrides global", model: false, global: "max", expected: "off" },
 +    { name: "ordinary unset remains unset" },
-+  ])("resolves configured thinking: $name", async ({ agent, global, model, expected }) => {
-+    config.agents = {
-+      defaults: {
-+        thinkingDefault: global,
-+        models: { "test-provider/research-model": { params: { thinking: model } } },
-+      },
-+      entries: {
-+        research: { model: "test-provider/research-model", thinkingDefault: agent },
-+      },
-+    };
-+    await complete(createRuntime());
-+    expect(isolated.mock.calls[0]?.[0].thinkLevel).toBe(expected);
-+  });
++  ])(
++    "resolves configured thinking: $name",
++    async ({ agent, requested, global, model, expected }) => {
++      config.agents = {
++        defaults: {
++          thinkingDefault: global,
++          models: { "test-provider/research-model": { params: { thinking: model } } },
++        },
++        entries: {
++          research: { model: "test-provider/research-model", thinkingDefault: agent },
++        },
++      };
++      await complete(createRuntime(), { thinking: requested });
++      expect(isolated.mock.calls[0]?.[0].thinkLevel).toBe(expected);
++    },
++  );
++
++  it.each([null, "", "  ", "unknown-effort", 7, {}, false])(
++    "rejects invalid explicit thinking %j before inference",
++    async (thinking) => {
++      const runtime = createRuntime();
++      // JavaScript plugins can supply values outside the SDK's static type.
++      await expect(
++        withPluginRuntimePluginIdScope(PLUGIN_ID, () =>
++          Reflect.apply(runtime.complete, runtime, [
++            { agentId: "research", message: "Summarize", thinking },
++          ]),
++        ),
++      ).rejects.toThrow("Invalid plugin completion thinking level");
++      expect(isolated).not.toHaveBeenCalled();
++      expect(getBackgroundWorkSnapshot().queuedCount).toBe(0);
++    },
++  );
 +
 +  it("resolves thinking for the authorized model override, not the owner's primary model", async () => {
 +    config.agents = {
@@ -36160,63 +38248,106 @@ index 861b17cf5d532fb4b3b47dacc68203711543bd6d..b809eaa718ab12146303aea35f5060e3
 +  it.each([
 +    { modelId: "gpt-6-astra", expected: "max" },
 +    { modelId: "gpt-5.6-sol", expected: "max" },
-+    { modelId: "gpt-5.5", expected: "xhigh" },
-+  ])("uses existing Ultra normalization for $modelId", async ({ modelId, expected }) => {
-+    const model = makeProviderModelFixture({
-+      id: modelId,
-+      api: "openai-responses",
-+      provider: "openai",
-+      baseUrl: "https://api.openai.com/v1",
-+      reasoning: true,
-+    });
-+    config.agents = {
-+      entries: { research: { model: `openai/${modelId}`, thinkingDefault: "ultra" } },
-+    };
-+    const completion = vi.spyOn(llmStream, "completeSimple").mockResolvedValue(
-+      makeAssistantMessageFixture({
-+        model: modelId,
-+        stopReason: "stop",
-+        errorMessage: undefined,
-+        content: [{ type: "text", text: "summary" }],
-+      }),
-+    );
-+    isolated.mockImplementationOnce(async (params) => {
-+      const result = await runHostPreparedIsolatedCompletion({
-+        ...params,
-+        config,
-+        agentId: "research",
-+        modelId: params.model,
-+        agentDir: "/test/agents/research",
-+        workspaceDir: "/test/workspace",
-+        authorization: {
-+          owner: "host",
-+          model: bindModelLlmRuntime(model, defaultLlmRuntime, model),
-+          auth: { mode: "api-key", source: "test" },
-+        },
++    { modelId: "gpt-5.5", expected: "xhigh", requested: undefined },
++    { modelId: "gpt-5.5", expected: "high", requested: "high" as const },
++  ])(
++    "normalizes owner/default or requested thinking for $modelId to $expected",
++    async ({ modelId, expected, requested }) => {
++      const model = makeProviderModelFixture({
++        id: modelId,
++        api: "openai-responses",
++        provider: "openai",
++        baseUrl: "https://api.openai.com/v1",
++        reasoning: true,
 +      });
-+      expect(result.assistant.content).toEqual([{ type: "text", text: "summary" }]);
-+      return {
-+        text: "summary",
-+        provider: params.provider,
-+        model: params.model,
-+        owner: { kind: "harness", id: "builtin-openclaw" },
++      config.agents = {
++        entries: { research: { model: `openai/${modelId}`, thinkingDefault: "ultra" } },
 +      };
-+    });
-+    await expect(complete(createRuntime())).resolves.toEqual({ text: "summary" });
-+    expect(isolated.mock.calls[0]?.[0].thinkLevel).toBe("ultra");
-+    expect(completion).toHaveBeenCalledWith(
-+      expect.objectContaining({ id: modelId }),
-+      expect.anything(),
-+      expect.objectContaining({ reasoning: expected }),
-+      expect.any(Function),
-+    );
-+  });
++      const completion = vi.spyOn(llmStream, "completeSimple").mockResolvedValue(
++        makeAssistantMessageFixture({
++          model: modelId,
++          stopReason: "stop",
++          errorMessage: undefined,
++          content: [{ type: "text", text: "summary" }],
++        }),
++      );
++      isolated.mockImplementationOnce(async (params) => {
++        const result = await runHostPreparedIsolatedCompletion({
++          ...params,
++          config,
++          agentId: "research",
++          modelId: params.model,
++          agentDir: "/test/agents/research",
++          workspaceDir: "/test/workspace",
++          authorization: {
++            owner: "host",
++            model: bindModelLlmRuntime(model, defaultLlmRuntime, model),
++            auth: { mode: "api-key", source: "test" },
++          },
++        });
++        expect(result.assistant.content).toEqual([{ type: "text", text: "summary" }]);
++        return {
++          text: "summary",
++          provider: params.provider,
++          model: params.model,
++          owner: { kind: "harness", id: "builtin-openclaw" },
++        };
++      });
++      await expect(complete(createRuntime(), { thinking: requested })).resolves.toEqual({
++        text: "summary",
++      });
++      expect(isolated.mock.calls[0]?.[0].thinkLevel).toBe(requested ?? "ultra");
++      expect(completion).toHaveBeenCalledWith(
++        expect.objectContaining({ id: modelId }),
++        expect.anything(),
++        expect.objectContaining({ reasoning: expected }),
++        expect.any(Function),
++      );
++    },
++  );
 +
    it("uses the selected agent's model and credential owner without creating a session", async () => {
      const dispatch = vi.spyOn(inProcessDispatch, "dispatchGatewayMethodInProcess");
      await expect(
+@@ -313,14 +460,18 @@ describe("plugin background completions", () => {
+     });
+   });
+ 
+-  it("snapshots the authorized agent and credentials before queued request mutation", async () => {
++  it("snapshots authorized agent, credentials, and thinking before queued request mutation", async () => {
+     await withOpenClawTestState({ scenario: "minimal" }, async () => {
+       restrictOperatorAgents();
+       const profile = ensureProfileForEmail("completion-mutation@example.com");
+       config.agents!.entries!.main!.model = "test-provider/main-model@main-profile";
+       const blockers = blockBackgroundSlots(3);
+       const runtime = createRuntime();
+-      const request = { agentId: "main", message: "Review these notes" };
++      const request: CompleteParams = {
++        agentId: "main",
++        message: "Review these notes",
++        thinking: "high",
++      };
+       const result = withPluginRuntimeGatewayRequestScope(
+         {
+           pluginId: PLUGIN_ID,
+@@ -338,6 +489,7 @@ describe("plugin background completions", () => {
+       await vi.dynamicImportSettled();
+       await vi.waitFor(() => expect(getBackgroundWorkSnapshot().queuedCount).toBe(1));
+       request.agentId = "research";
++      request.thinking = "off";
+       blockers.release();
+       await blockers.settled();
+       await expect(result).resolves.toEqual({ value: { text: "main:test-provider/main-model" } });
+@@ -346,6 +498,7 @@ describe("plugin background completions", () => {
+           agentId: "main",
+           model: "main-model",
+           authProfileId: "main-profile",
++          thinkLevel: "high",
+         }),
+       );
+     });
 diff --git a/src/gateway/server-plugin-subagent-runtime.ts b/src/gateway/server-plugin-subagent-runtime.ts
-index b34cfbffdb8352f5c710f7de6901406acf5f919f..0205d23381f737bc1c7529e3d5396c848132e6bd 100644
+index b34cfbffdb8352f5c710f7de6901406acf5f919f..e4cfe04898e6d3f44cb4421e3a4203212f97c26e 100644
 --- a/src/gateway/server-plugin-subagent-runtime.ts
 +++ b/src/gateway/server-plugin-subagent-runtime.ts
 @@ -4,6 +4,7 @@ import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coerc
@@ -36227,7 +38358,19 @@ index b34cfbffdb8352f5c710f7de6901406acf5f919f..0205d23381f737bc1c7529e3d5396c84
  import type { OpenClawConfig } from "../config/types.openclaw.js";
  import { normalizePluginsConfig } from "../plugins/config-state.js";
  import { compileModelAllowlist, type CompiledModelAllowlist } from "../plugins/model-allowlist.js";
-@@ -236,13 +237,15 @@ export function createGatewaySubagentRuntime(
+@@ -204,6 +205,11 @@ export function createGatewaySubagentRuntime(
+     async complete(request) {
+       // Authorization and credential selection must use the same request across queue waits.
+       const params = { ...request };
++      const requestedThinking =
++        typeof params.thinking === "string" ? normalizeThinkLevel(params.thinking) : undefined;
++      if (params.thinking !== undefined && requestedThinking === undefined) {
++        throw new Error("Invalid plugin completion thinking level.");
++      }
+       const scope = getPluginRuntimeGatewayRequestScope();
+       const pluginId = scope?.pluginId?.trim();
+       if (!pluginId) {
+@@ -236,13 +242,15 @@ export function createGatewaySubagentRuntime(
          async (signal) => {
            assertCurrent();
            const [
@@ -36244,11 +38387,12 @@ index b34cfbffdb8352f5c710f7de6901406acf5f919f..0205d23381f737bc1c7529e3d5396c84
              import("../agents/isolated-completion.js"),
              import("../plugins/runtime/runtime-llm.runtime.js"),
            ]);
-@@ -266,6 +269,13 @@ export function createGatewaySubagentRuntime(
+@@ -266,6 +274,14 @@ export function createGatewaySubagentRuntime(
              pluginId,
              selection.profileId,
            );
 +          const thinkLevel =
++            requestedThinking ??
 +            normalizeThinkLevel(resolveAgentConfig(cfg, agentId)?.thinkingDefault) ??
 +            resolveConfiguredThinkingDefault({
 +              cfg,
@@ -36258,7 +38402,7 @@ index b34cfbffdb8352f5c710f7de6901406acf5f919f..0205d23381f737bc1c7529e3d5396c84
            const timeoutMs = resolveTimerTimeoutMs(params.timeoutMs, 30_000);
            const runSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
            // Hold capacity through runtime cleanup; a response-only abort race would
-@@ -277,6 +287,7 @@ export function createGatewaySubagentRuntime(
+@@ -277,6 +293,7 @@ export function createGatewaySubagentRuntime(
                provider: selection.provider,
                model: selection.modelId,
                authProfileId: selection.profileId,
@@ -36351,6 +38495,134 @@ index 6c559a841a420cfcd6014c73be9ed6bbc526f656..79702a6d640a327c7ad3e9ba076aa8f9
  test("sessions.create can start the first agent turn from an initial task", async () => {
    const { storePath } = await createSessionStoreDir();
    // Register "ops" so the deleted-agent guard added in #65986 does not
+diff --git a/src/gateway/session-subagent-reactivation.test.ts b/src/gateway/session-subagent-reactivation.test.ts
+index 17b2df69f270a3e80d0d4d1fa4e3862308510cee..538dcfc23ab441f4567817607e6f1d4a93210ca9 100644
+--- a/src/gateway/session-subagent-reactivation.test.ts
++++ b/src/gateway/session-subagent-reactivation.test.ts
+@@ -74,25 +74,48 @@ describe("reactivateCompletedSubagentSession", () => {
+     });
+   });
+ 
+-  it("does not replace an ended row after its Gateway owner retires", async () => {
+-    getLatestSubagentRunByChildSessionKeyMock.mockReturnValue({
+-      runId: "run-ended",
+-      runTimeoutSeconds: 0,
+-      execution: { endedAt: 1 },
+-    });
+-    const resolveGatewayContext = vi.fn(() => undefined);
++  it.each(["running", "terminal"] as const)(
++    "does not resurrect a completed row replaced by a %s successor while loading the runtime",
++    async (status) => {
++      getLatestSubagentRunByChildSessionKeyMock
++        .mockReturnValueOnce({ runId: "completed-run", execution: { endedAt: 1 } })
++        .mockReturnValueOnce({
++          runId: "newer-successor",
++          execution: { status, ...(status === "terminal" ? { endedAt: 2 } : {}) },
++        });
++      replaceSubagentRunAfterSteerMock.mockReturnValue(true);
++      await expect(
++        reactivateCompletedSubagentSession({
++          sessionKey: "agent:main:dashboard:child",
++          runId: "losing-followup",
++        }),
++      ).resolves.toBe(false);
++      expect(replaceSubagentRunAfterSteerMock).not.toHaveBeenCalled();
++    },
++  );
+ 
+-    await expect(
+-      reactivateCompletedSubagentSession({
+-        sessionKey: "agent:main:subagent:retired-owner",
+-        runId: "run-next",
+-        gatewayContextResolver: resolveGatewayContext,
+-      }),
+-    ).resolves.toBe(false);
++  it.each(["run-ended", "run-next"])(
++    "does not accept or replace %s after its Gateway owner retires",
++    async (previousRunId) => {
++      getLatestSubagentRunByChildSessionKeyMock.mockReturnValue({
++        runId: previousRunId,
++        runTimeoutSeconds: 0,
++        execution: { endedAt: 1 },
++      });
++      const resolveGatewayContext = vi.fn(() => undefined);
+ 
+-    expect(resolveGatewayContext).toHaveBeenCalledOnce();
+-    expect(replaceSubagentRunAfterSteerMock).not.toHaveBeenCalled();
+-  });
++      await expect(
++        reactivateCompletedSubagentSession({
++          sessionKey: "agent:main:subagent:retired-owner",
++          runId: "run-next",
++          gatewayContextResolver: resolveGatewayContext,
++        }),
++      ).resolves.toBe(false);
++
++      expect(resolveGatewayContext).toHaveBeenCalledOnce();
++      expect(replaceSubagentRunAfterSteerMock).not.toHaveBeenCalled();
++    },
++  );
+ 
+   it("threads the exact follow-up task into the replacement so restart redispatch rewraps the new prompt instead of the stale original", async () => {
+     // Regression for the ClawSweeper P2 finding on #77539: the helper-level
+diff --git a/src/gateway/session-subagent-reactivation.ts b/src/gateway/session-subagent-reactivation.ts
+index fe29b0ec54474c169e0d00dac457db47419fb39d..edc31b87a3667e4076e16d79239f8a6405d7bea2 100644
+--- a/src/gateway/session-subagent-reactivation.ts
++++ b/src/gateway/session-subagent-reactivation.ts
+@@ -33,22 +33,52 @@ export async function reactivateCompletedSubagentSession(params: {
+   if (!runId) {
+     return false;
+   }
+-  const existing = getLatestSubagentRunByChildSessionKey(params.sessionKey);
++  if (params.gatewayContextResolver && !params.gatewayContextResolver()) {
++    return false;
++  }
++  let existing = getLatestSubagentRunByChildSessionKey(params.sessionKey);
++  if (existing?.runId === runId) {
++    return true;
++  }
+   if (!existing || typeof existing.execution.endedAt !== "number") {
+     return false;
+   }
++  const previousRunId = existing.runId;
++  const previousTaskRunId = existing.taskRunId ?? existing.runId;
+   const { replaceSubagentRunAfterSteer } = await loadSessionSubagentReactivationRuntime();
+   // The lazy import can outlive its Gateway. Check the exact owner immediately
+   // before the synchronous replacement write.
+   if (params.gatewayContextResolver && !params.gatewayContextResolver()) {
+     return false;
+   }
++  // Re-read after loading runtime: another accepted follow-up may have already
++  // replaced the completed row. Never resurrect its stale persisted fallback.
++  existing = getLatestSubagentRunByChildSessionKey(params.sessionKey);
++  if (existing?.runId === runId) {
++    return true;
++  }
++  if (
++    !existing ||
++    existing.runId !== previousRunId ||
++    (existing.taskRunId ?? existing.runId) !== previousTaskRunId ||
++    typeof existing.execution.endedAt !== "number"
++  ) {
++    return false;
++  }
++  const liveOwner = getLatestLiveSubagentRunByChildSessionKey(params.sessionKey);
++  if (liveOwner && liveOwner.runId !== existing.runId) {
++    if (liveOwner.runId === runId) {
++      return true;
++    }
++    throw new Error("subagent follow-up owner replacement was rejected");
++  }
+   const task = params.task;
+   const hasTask = typeof task === "string" && task.trim().length > 0;
+   const replaced = await replaceSubagentRunAfterSteer({
+     previousRunId: existing.runId,
+     nextRunId: runId,
+     fallback: existing,
++    ...(liveOwner ? { expected: liveOwner, allowEndedSource: true } : {}),
+     runTimeoutSeconds: existing.runTimeoutSeconds ?? 0,
+     persistenceFailure: "throw",
+     ...(hasTask ? { task } : {}),
 diff --git a/src/infra/backup-create.test.ts b/src/infra/backup-create.test.ts
 index 2b46ef03973828e9ef08e94d68597aed8b27045f..045997ee8ecbc63d3f09116595d465c88ac0c024 100644
 --- a/src/infra/backup-create.test.ts
@@ -40879,6 +43151,27 @@ index 9753c546e1563ae7b39068dadc8a8ea121dbb02d..54fdcef39cf0171618aa3d0f62a98e96
  };
  
  export type PluginRuntimeTaskRuns = {
+diff --git a/src/plugins/runtime/types.ts b/src/plugins/runtime/types.ts
+index 2ca9dbecba23e3c6e46422f110406f7d7387a222..16902774bd8d2bf7a01b861e9e8dc89cca4de2b9 100644
+--- a/src/plugins/runtime/types.ts
++++ b/src/plugins/runtime/types.ts
+@@ -3,6 +3,7 @@
+ // public plugin-sdk dts graph (check-plugin-sdk-exports guards this).
+ import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/schema/nodes.js";
+ import type { AgentWaitResult } from "../../agents/run-wait.types.js";
++import type { ThinkLevel } from "../../auto-reply/thinking.shared.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import type { OperatorScope } from "../../gateway/operator-scopes.js";
+ import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
+@@ -39,6 +40,8 @@ type SubagentCompleteParams = {
+   message: string;
+   extraSystemPrompt?: string;
+   model?: string;
++  /** Explicit effort for this completion; omitted uses the owning agent defaults. */
++  thinking?: ThinkLevel;
+   timeoutMs?: number;
+   signal?: AbortSignal;
+ };
 diff --git a/src/plugins/session-entry-slot-keys.ts b/src/plugins/session-entry-slot-keys.ts
 index 86e0e6f3c7effa176ac34d774a59bba05ac7bc1f..2869bd3f4ed75cf5d927f7b562ca2318d463ea75 100644
 --- a/src/plugins/session-entry-slot-keys.ts
