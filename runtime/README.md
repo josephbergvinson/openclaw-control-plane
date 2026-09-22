@@ -52,7 +52,7 @@ child creation, so actual live settlement acceptance remains pending. The signed
 matching private worker remain at qualified source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `53e2a1d095115a643cf3c21c090ee7a902d25584`.
+The reconstructible candidate is now `20799eb9bc55fd34adc153939fdbacf029006b09`.
 It corrects quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
@@ -66,8 +66,9 @@ history and without the previous connection's response ID or account-bound
 encrypted reasoning. The identity digest stays private in memory. Focused tests
 include five production-runner cases with exactly one physical write each and
 59 owning transport cases. Full hosted qualification and live acceptance of this
-candidate remain pending. Two additional corrections remove a stale size-ratchet
-entry and align a follow-up test with the existing explicit settle-wake contract.
+candidate remain pending. CI corrections remove stale size and assertion counts, distinguish test fixture
+wrappers from production functions, and align the existing settle-wake expectation.
+The fixture rename preserves all call sites and passed its 135 owning tests.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that

@@ -2861,9 +2861,18 @@ index 953ffd73adfa9f1383262d0cab0093afb0e7d046..60bfb7ee25690fa08b0221f9a4f0f91f
          case status
          case completionstatus = "completionStatus"
 diff --git a/config/assertion-safety-baseline.txt b/config/assertion-safety-baseline.txt
-index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..5849d4550d54a40c20d5a8f353adbcbf1c444df3 100644
+index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..7560f64bef866ac04ce670422f7607212cfaaa8b 100644
 --- a/config/assertion-safety-baseline.txt
 +++ b/config/assertion-safety-baseline.txt
+@@ -1408,7 +1408,7 @@ packages/ai/src/providers/clean-for-gemini.ts	12
+ packages/ai/src/providers/google-shared.ts	3
+ packages/ai/src/providers/mistral.ts	5
+ packages/ai/src/providers/openai-chatgpt-responses-protocol.ts	1
+-packages/ai/src/providers/openai-chatgpt-responses.ts	26
++packages/ai/src/providers/openai-chatgpt-responses.ts	25
+ packages/ai/src/providers/openai-completions-tool-calls.ts	5
+ packages/ai/src/providers/openai-completions.ts	6
+ packages/ai/src/providers/openai-reasoning-effort.ts	6
 @@ -1550,8 +1550,7 @@ src/agents/agent-bundle-mcp-materialize.ts	3
  src/agents/agent-bundle-mcp-runtime-shared.ts	2
  src/agents/agent-bundle-mcp-runtime.ts	7
@@ -16492,10 +16501,10 @@ index 531816dbf78dd78fa6c645bc4d9959b0bf8a2bf7..9965b2eb38ea5f4b880e2a89fc80f873
  
 diff --git a/packages/ai/src/providers/openai-chatgpt-responses-headers.ts b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..3b6e31528ee84cf67fe49d5449d44191313710a4
+index 0000000000000000000000000000000000000000..de3b532acf2a7041b69bd108b354d15810ee027f
 --- /dev/null
 +++ b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,93 @@
 +// Construct normalized authenticated headers shared by ChatGPT transports.
 +import type * as NodeOs from "node:os";
 +
@@ -16507,6 +16516,7 @@ index 0000000000000000000000000000000000000000..3b6e31528ee84cf67fe49d5449d44191
 +  if (typeof process === "undefined" || !(process.versions?.node || process.versions?.bun)) {
 +    return null;
 +  }
++  // SAFETY: Node/Bun is established above; the optional loader requests only Node's fixed os module.
 +  return (process as ProcessWithOsBuiltinModule).getBuiltinModule?.("node:os") ?? null;
 +}
 +
@@ -40632,7 +40642,7 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
  }
 diff --git a/src/auto-reply/reply/agent-runner-memory.test-fixtures.ts b/src/auto-reply/reply/agent-runner-memory.test-fixtures.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..300fcbde5c443fd3cb33da9714b916e4885c9772
+index 0000000000000000000000000000000000000000..e3c4c261192688f4d6006421e9a17fd6213dcc71
 --- /dev/null
 +++ b/src/auto-reply/reply/agent-runner-memory.test-fixtures.ts
 @@ -0,0 +1,271 @@
@@ -40669,7 +40679,7 @@ index 0000000000000000000000000000000000000000..300fcbde5c443fd3cb33da9714b916e4
 +  modelContextTokens?: number;
 +};
 +
-+export async function runMemoryFlushIfNeeded(params: MemoryFlushTestParams) {
++export async function runMemoryFlushIfNeededForTest(params: MemoryFlushTestParams) {
 +  const { modelContextTokens, ...runParams } = params;
 +  return await runMemoryFlushIfNeededRaw({
 +    ...runParams,
@@ -40688,7 +40698,7 @@ index 0000000000000000000000000000000000000000..300fcbde5c443fd3cb33da9714b916e4
 +  modelContextTokens?: number;
 +};
 +
-+export async function runSessionCompactionIfNeeded(params: PreflightCompactionTestParams) {
++export async function runSessionCompactionIfNeededForTest(params: PreflightCompactionTestParams) {
 +  const { modelContextTokens, ...runParams } = params;
 +  return await runSessionCompactionIfNeededRaw({
 +    ...runParams,
@@ -40908,7 +40918,7 @@ index 0000000000000000000000000000000000000000..300fcbde5c443fd3cb33da9714b916e4
 +  trigger?: string;
 +};
 diff --git a/src/auto-reply/reply/agent-runner-memory.test.ts b/src/auto-reply/reply/agent-runner-memory.test.ts
-index 7b89bbc8dad39886702d5889ff93facdfa3f7cf5..b81856b1041fe6c332737a0a3784640b0b1427d1 100644
+index 7b89bbc8dad39886702d5889ff93facdfa3f7cf5..8a43454f5e080a42d9174c54fb030836b6e9cce0 100644
 --- a/src/auto-reply/reply/agent-runner-memory.test.ts
 +++ b/src/auto-reply/reply/agent-runner-memory.test.ts
 @@ -17,43 +17,60 @@ import { resetContextWindowCacheForTest } from "../../agents/context.js";
@@ -40975,8 +40985,8 @@ index 7b89bbc8dad39886702d5889ff93facdfa3f7cf5..b81856b1041fe6c332737a0a3784640b
 +  modelRoutingProvenance,
 +  registerClaudeCliBackend,
 +  registerMemoryFlushPlanResolverForTest,
-+  runMemoryFlushIfNeeded,
-+  runSessionCompactionIfNeeded,
++  runMemoryFlushIfNeededForTest as runMemoryFlushIfNeeded,
++  runSessionCompactionIfNeededForTest as runSessionCompactionIfNeeded,
 +  writeTestSessionTranscript,
 +  type MemoryFlushTestParams,
 +  type PreflightCompactionTestParams,
