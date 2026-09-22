@@ -20,9 +20,12 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Check documentation and examples
         run: python3 -B scripts/validate_repo.py
       - name: Test reconstruction and workspace installers
@@ -38,16 +41,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Install the pinned package manager
-        run: npm install --global pnpm@12.3.4
+        run: npm install --global "pnpm@${{ steps.runtime.outputs.pnpm }}"
       - name: Reconstruct the pinned source in a separate checkout
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
         run: |
-          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
       - name: Install frozen runtime dependencies
@@ -76,16 +82,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Install the pinned package manager
-        run: npm install --global pnpm@12.3.4
+        run: npm install --global "pnpm@${{ steps.runtime.outputs.pnpm }}"
       - name: Reconstruct the pinned source in a separate checkout
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
         run: |
-          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
       - name: Install frozen runtime dependencies

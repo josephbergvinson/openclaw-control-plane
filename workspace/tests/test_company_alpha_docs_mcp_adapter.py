@@ -582,6 +582,46 @@ class CompanyAlphaDocsMcpAdapterTests(unittest.TestCase):
         self.assertIsNone(receipt["remote_tool_invoked"])
         self.assertEqual(receipt["mutation_attempt_count"], 0)
 
+    def test_blocked_feedback_schema_prose_drift_does_not_disable_reads(self) -> None:
+        with fake_server() as (_server, state, url):
+            state.tools[2]["inputSchema"]["properties"]["path"]["description"] = "New feedback wording"
+            result = self.make_adapter(url).call_local_tool("docs_search", {"query": "pool fees"})
+        self.assertFalse(result["isError"])
+        self.assertEqual(state.tool_call_count, 1)
+        self.assertEqual(
+            [row["params"]["name"] for row in state.requests if row["method"] == "tools/call"],
+            ["search_company_alpha"],
+        )
+        self.assertEqual(self.last_receipt()["mutation_attempt_count"], 0)
+
+    def test_dispatchable_annotation_and_execution_drift_still_fail_closed(self) -> None:
+        for field, value in [("annotations", {"readOnlyHint": False}),
+                             ("execution", {"taskSupport": "required"})]:
+            with self.subTest(field=field), fake_server() as (_server, state, url):
+                state.tools[1][field] = value
+                result = self.make_adapter(url).call_local_tool("docs_read", {"paths": ["/guides/pools.mdx"]})
+            self.assertTrue(result["isError"])
+            self.assertEqual(result["structuredContent"]["error"], "remote_tool_schema_drift")
+            self.assertEqual(state.tool_call_count, 0)
+            self.assertEqual(self.last_receipt()["fallback_mode"], "none")
+
+    def test_full_remote_inventory_remains_exact_before_digest(self) -> None:
+        for change in ("added", "missing", "duplicate", "reordered"):
+            with self.subTest(change=change), fake_server() as (_server, state, url):
+                if change == "added":
+                    state.tools.append({"name": "unreviewed_read"})
+                elif change == "missing":
+                    state.tools.pop()
+                elif change == "duplicate":
+                    state.tools.append(copy.deepcopy(state.tools[0]))
+                else:
+                    state.tools.reverse()
+                result = self.make_adapter(url).call_local_tool("docs_search", {"query": "pool fees"})
+            self.assertTrue(result["isError"])
+            self.assertEqual(result["structuredContent"]["error"], "remote_tool_inventory_drift")
+            self.assertEqual(state.tool_call_count, 0)
+            self.assertEqual(self.last_receipt()["fallback_mode"], "none")
+
     def test_429_and_5xx_retry_once_but_4xx_does_not_retry(self) -> None:
         for mode, expected_calls, expected_error in (
             ("429_once", 2, False),
@@ -697,7 +737,11 @@ class CompanyAlphaDocsMcpAdapterTests(unittest.TestCase):
     def test_fixture_schema_digest_matches_manifest_and_mutation_is_not_dispatchable(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         tools = json.loads((FIXTURES / "remote_tools.json").read_text(encoding="utf-8"))["tools"]
-        digest = adapter.projected_tool_digest(tools, manifest["remote_tool_schema"]["canonical_projection"])
+        digest = adapter.projected_tool_digest(
+            tools, manifest["remote_tool_schema"]["canonical_projection"],
+            [manifest["remote_tools"][key] for key in ("search", "read")],
+        )
+        self.assertEqual(manifest["remote_tool_schema"]["scope"], "dispatchable_read_tools")
         self.assertEqual(digest, manifest["remote_tool_schema"]["digest"])
         self.assertEqual([row["name"] for row in tools], manifest["remote_tools"]["expected_inventory"])
         source = (ROOT / "scripts" / 'company_alpha_docs_mcp_adapter.py').read_text(encoding="utf-8")

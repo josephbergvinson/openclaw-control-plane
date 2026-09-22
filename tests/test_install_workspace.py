@@ -56,7 +56,10 @@ class WorkspaceInstallTests(unittest.TestCase):
         files = INSTALLER.make_plan(self.destination)
         names = set(files)
         self.assertIn(Path("REFERENCE.md"), names)
-        self.assertIn(Path("runtime/openclaw-2026.9.3-reference.patch"), names)
+        manifest_path = Path("runtime/manifest.json")
+        self.assertIn(manifest_path, names)
+        manifest = json.loads(files[manifest_path][0])
+        self.assertIn(manifest_path.parent / manifest["patch"]["file"], names)
         self.assertIn(Path("scripts/reconstruct_runtime.py"), names)
         self.assertIn(Path("scripts/materialize_host.py"), names)
         for name, (payload, _mode) in files.items():

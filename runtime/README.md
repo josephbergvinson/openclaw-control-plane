@@ -1,6 +1,6 @@
 # Reconstruct the reference runtime
 
-This package reproduces the customized OpenClaw **2026.9.3** source used by this
+This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
 including earlier retained capabilities, runtime fixes and their regression tests.
 Two company-specific labels in one test fixture are replaced with Company Alpha.
@@ -10,6 +10,79 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## September 22 upgrade
+
+The upgrade targets official `v2026.9.5`, commit
+`ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`, with the retained custom changes
+ported to the target's task, database and provider owners. The complete export is
+rebuilt from that official base, rather than stacking the old patch on a stock
+installation. See the [source map](../docs/20-runtime-source-changes.md#september-22-upgrade).
+
+The originating gateway first activated custom source
+`287be510c328262a8b093fd2aea1f07d51c8508e` on September 22 at
+`05:57:49.051232Z`. That upgrade completed native migration to state schema 17
+and agent schema 21. Its dated activation and capture evidence remain historical.
+
+The preceding repair source `1fb1f66cfe29267902a768417b35e4a8c5c4e439` activated at
+`11:22:01.365523Z` through the same-version release owner. Successor
+`085711060c8477df71066402330eb5a2902d6824` activated at `12:37:05.013053Z`.
+The manifest records this exact release and activation-receipt hash. Fresh postflight
+verified the selected process, health/readiness and preserved configuration, account
+ordering and scheduled-job definitions. Journal capture was visually accepted and
+enrolled for the new process; new-process scheduled synchronization remains unproven.
+
+The signed app from source `1fb1f66cfe29`, build `2609000592`, was separately installed,
+launched and observed connected on the originating Mac Mini. Signature and contents
+were verified. One macOS-added app-root metadata attribute was explicitly reconciled;
+unchanged metadata throughout is not claimed. MacBook installation, native
+credential/account acceptance and hosted checks for this public revision remain
+pending. A bounded native-goal final passed with exact Discord readback on `1fb`;
+longer-workflow delivery and backend settlement remain separate acceptance scopes.
+
+The current reconstructible and activated Gateway source is `085711060c8477df71066402330eb5a2902d6824`.
+It retains the native credential correction, native-goal progress and final-delivery
+repair, registered-project delegation guidance, source CLI guidance and packaging
+pin repair. It additionally fixes existing Discord thread-channel send receipts:
+the provider records the actual thread identity for every chunk and the final
+aggregate, allowing strict source-delivery custody to recognize the visible final.
+Fourteen focused producer and composed settlement cases pass. The successor is
+activated; its fresh Discord diagnostic stopped on a provider rate limit before
+child creation, so actual live settlement acceptance remains pending. The signed companion and its
+matching private worker remain at qualified source `1fb`; this Gateway channel
+producer change does not require another native build.
+
+Credential resolution runs in a bounded private child of the signed Mac app.
+Direct Keychain access disables interaction inside that child. Existing items that
+trust Apple's reader can use the fixed signed `/usr/bin/security` path after exact
+item, metadata, host, unlocked-store and stored-ACL checks. A metadata-only class
+read materializes a legacy persistent reference before ACL inspection. The app
+validates its helper before launch and rechecks prompt and execution authority
+after resolution; secret values remain in the private native pipe and secure field.
+The compatibility reader has no no-UI switch: a lock or ACL race can briefly prompt.
+Its process group has a deadline and is joined on cancellation or timeout.
+
+The final native product/test-target build, 28 focused native cases and four
+bounded-process cases passed. The disposable Keychain checks preserved six exact
+byte variants, rejected locked or untrusted items, revalidated metadata and removed
+their private store without changing canonical settings. The lock-after-admission
+case refused without a value and joined at its deadline. Visible OS-dialog
+disappearance was not inspected and is not claimed. Eighteen runtime cases passed
+for native-goal progress, final custody and dispatch. These source and process
+results are distinct from the now-verified signed package and Mini installation;
+actual account entry and complete workflow delivery remain separate acceptance
+steps. The bounded native-goal readback above proves only its stated scope.
+Earlier native source `c4bee4279fdf` retains its original 18-test and four-case
+synthetic qualification; those results alone did not qualify the subsequent
+compatibility reader.
+
+In the manifest, `source.referenceCommit` and `source.normalizedTree` identify what
+CI reconstructs, while `source.deployed*` retains the verified `1fb` gateway
+activation. `candidateOnly` is true and `source.referenceDeploymentStatus` is
+`candidate-not-activated` until this successor has its own activation receipt.
+The existing `components.macCompanion.candidate` record now distinguishes the
+verified originating Mini installation from pending other-host and account checks.
+Prior gateway and companion acceptance records retain their dates and scopes.
 
 ## Active-child follow-up correction
 
@@ -82,34 +155,26 @@ do not replace hosted qualification or acceptance on another installation.
 
 ## Source identities
 
-| Identity | Value |
+The [manifest](manifest.json) carries the exact identities without requiring a
+second manually synchronized version table:
+
+| Identity | Manifest field |
 |---|---|
-| Official tag | `v2026.9.3` |
-| Official commit | `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7` |
-| Deployed gateway source | `18b432ca2f83a107b1bc329cedf2221f20e61639` |
-| Historical Mac companion and bundled worker acceptance; not revalidated | `275f120c13b84f150a1bd2c1f9129183e535f2a3` |
-| Reconstructed reference source | `18b432ca2f83a107b1bc329cedf2221f20e61639` |
-| Reference source tree before fixture normalization | `254f9e28f1ae74cc45559c6fd1abf1f434eb8d1a` |
-| Sanitized source tree | `b8e3bb2de500a88253b78747f13f0b7b0547a928` |
-| Patch SHA-256 | `ea8c1aa8956182c18daa4d0c6f6df334e0739d66afce85c895674017e3795d6c` |
-| Build tools | Node.js `24.16.0`, pnpm `12.3.4` |
+| Official repository, tag and annotated tag object | `upstream.repository`, `upstream.tag`, `upstream.tagObject` |
+| Official source commit and tree | `upstream.commit`, `upstream.tree` |
+| Custom reference commit and tree | `source.referenceCommit`, `source.referenceTree` |
+| Public reconstructed tree | `source.normalizedTree` |
+| Patch filename, bytes and SHA-256 | `patch.file`, `patch.bytes`, `patch.sha256` |
+| Exact build tools | `toolchain.node`, `toolchain.pnpm` |
+| Candidate/deployment status | `candidateOnly`, `source.referenceDeploymentStatus` |
+| Separately scoped companion evidence | `components` |
 
-The patch is 2,027,015 bytes and changes 603 paths across 79 local commits. The custom commit is a lineage
-identifier; it is not a promise that GitHub's upstream repository contains that
-commit. Reconstruction starts from the public official tag and uses this patch.
-
-The reference matches the deployed gateway source. The manifest explicitly scopes
-`deployedCommit` to the gateway; `productionDelta`, `testOnlyDelta`,
-`documentationDelta` and `toolingOnlyDelta` are empty because both source identities
-are `18b432ca2f83`. The `components.macCompanion` identity retains the
-separately accepted September 15 app and worker as historical evidence; it is not
-a new companion installation or revalidation claim. Production differences are
-not labeled test-only.
-
-The two privacy substitutions in the lane-contract fixture remain the only
-export normalization; every other exported blob and file mode matches the
-new pinned reference source. Deployment and scoped live verification are recorded
-below, separately from reproducible source export.
+The custom commit identifies source lineage; it need not exist in the public
+upstream repository. Reconstruction uses the official tag plus the complete patch.
+The only export normalization replaces two labels in one lane-contract test
+fixture. Every other blob and every file mode must match the committed custom
+source. Previous deployment evidence remains separately dated; an export never
+advances a runtime selector or changes a live service.
 
 ## Check and apply
 
@@ -123,7 +188,10 @@ operation and disables Git's lazy fetching. Obtain this reference repository and
 review its manifest, patch and helper before running them.
 
 ```bash
-git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git openclaw-reference
+# Run in the reference repository; the manifest selects the official source.
+reference_root="$PWD"
+reference_tag=$(python3 -c 'import json; print(json.load(open("runtime/manifest.json"))["upstream"]["tag"])')
+git clone --depth 1 --branch "$reference_tag" https://github.com/openclaw/openclaw.git /path/to/openclaw-reference
 python3 /path/to/openclaw-control-plane/scripts/reconstruct_runtime.py /path/to/openclaw-reference
 python3 /path/to/openclaw-control-plane/scripts/reconstruct_runtime.py /path/to/openclaw-reference --apply
 ```
@@ -140,25 +208,26 @@ After a successful application, record the source under your own Git identity:
 ```bash
 cd /path/to/openclaw-reference
 git write-tree
-git switch -c reference/openclaw-2026.9.3
-git commit -m "Apply the OpenClaw 2026.9.3 reference runtime"
+git switch -c reference/openclaw-custom
+git commit -m "Apply the pinned OpenClaw reference runtime"
 ```
 
-`git write-tree` must print `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
+`git write-tree` must match `source.normalizedTree` in the manifest.
 Your commit ID will differ because commit author, timestamp and history are local.
 The pinned source tree is the reproducibility check.
 
 ## Validate and build
 
-Use Node.js 24.16.0 and pnpm 12.3.4. The following commands run inside the reconstructed
-checkout. Dependency installation accesses package registries and runs the upstream
+Use the exact Node.js and pnpm versions in the manifest. The following commands
+run inside the reconstructed checkout. Dependency installation accesses package registries and runs the upstream
 installation process; it is separate from the offline reconstruction helper.
 
 ```bash
 node --version
 pnpm --version
 pnpm install --frozen-lockfile
-node scripts/check-changed.mjs --base 1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7 --head HEAD
+reference_base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["upstream"]["commit"])' "$reference_root/runtime/manifest.json")
+node scripts/check-changed.mjs --base "$reference_base" --head HEAD
 pnpm build
 ```
 

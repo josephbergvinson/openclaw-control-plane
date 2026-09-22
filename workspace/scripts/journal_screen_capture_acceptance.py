@@ -146,9 +146,7 @@ def capture(root: Path) -> dict:
     root.mkdir(mode=0o700)  # A new directory and new disabled job for each explicit invocation.
     private_directory(root)
     paths = activation.live_paths()
-    active, active_bytes, _ = activation.read_json(paths.result, "current activation")
-    if active.get("outcome") != "activated":
-        raise activation.ActivationError("runtime activation is not established")
+    runtime_evidence = activation.screen_capture_runtime_evidence(paths.result, paths.node)
     if subprocess.run(("/usr/bin/pgrep", "-x", "Journal"), stdout=subprocess.DEVNULL).returncode:
         raise activation.ActivationError("open the existing Journal app before explicit capture")
     files = [activation.screen_capture_code_identity(path) for path in (paths.node, peekaboo_binary())]
@@ -206,11 +204,13 @@ def capture(root: Path) -> dict:
         raise activation.ActivationError("Journal capture did not create a PNG")
     if files != [activation.screen_capture_code_identity(path) for path in (paths.node, peekaboo_binary())]:
         raise activation.ActivationError("capture executable changed during probe")
+    activation.screen_capture_runtime_evidence(
+        paths.result, paths.node, expected=runtime_evidence, responsible_pid=pid)
     proof = {"status": "awaiting_visual_acceptance", "verifiedAt": activation.utc_now(),
              "route": activation.SCREEN_CAPTURE_ROUTE, "responsiblePid": pid,
              "responsibleProcessIdentity": current,
              "files": [{**row, "codesignVerified": True} for row in files],
-             "activationReceiptSha256": activation.sha256_bytes(active_bytes),
+             **runtime_evidence,
              "tccdAttributionAndEffectivePermission": messages,
              "imageSha256": activation.sha256_bytes(image), "imagePath": str(root / "journal.png"),
              "manualProbe": True, "temporaryJobRemoved": True,
@@ -230,9 +230,8 @@ def accept(root: Path, reviewed_image_sha256: str) -> dict:
     if identity(proof["responsiblePid"]) != proof["responsibleProcessIdentity"]:
         raise activation.ActivationError("process changed; perform a fresh capture")
     paths = activation.live_paths()
-    active, raw, _ = activation.read_json(paths.result, "current activation")
-    if active.get("outcome") != "activated" or activation.sha256_bytes(raw) != proof["activationReceiptSha256"]:
-        raise activation.ActivationError("activation changed; perform a fresh capture")
+    activation.screen_capture_runtime_evidence(
+        paths.result, paths.node, expected=proof, responsible_pid=proof["responsiblePid"])
     proof.update(status="current_scheduler_route_capture_and_responsibility_verified",
                  imageVisuallyVerifiedAsJournal=True)
     output = root / "acceptance.json"

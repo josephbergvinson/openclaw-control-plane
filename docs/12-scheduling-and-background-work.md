@@ -106,6 +106,10 @@ history retains transition evidence until delivery is confirmed. Missing source
 objects, changed repository mappings, and a newly enrolled source that does not
 descend from its pinned baseline remain unresolved conditions.
 
+Preparation output also needs a byte limit: an upgrade can touch thousands of paths even when commit samples are bounded. Retain the complete evidence in a private, immutable file with its hash, and provide a bounded JSON projection with source refs, category counts and explicit omitted-detail indicators. Do not increase the command retention cap or parse a truncated JSON tail as complete evidence. Prepared coverage remains pending until delivery is confirmed.
+
+A failed trigger can prepare evidence before its output is rejected, leaving an unstaged checkpoint. Releasing it requires explicit reconciliation bound to the exact checkpoint hash, a unique native pre-payload failure, and the same idle trigger/configuration and run identity. Preserve the failed receipt and old pending snapshot; do not advance source coverage, reset delivery records or send a replacement message. The existing natural schedule can then prepare the still-uncovered changes again.
+
 ## Independent safety nets
 
 Put checks in a different failure domain where that improves coverage. A host timer can inspect whether an expected period's result exists even when the gateway scheduler did not dispatch it. An internal backup supervisor can still request a pause while external workspace storage is unavailable.
