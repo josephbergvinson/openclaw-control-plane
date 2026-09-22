@@ -37,7 +37,9 @@ def fixture_root():
         values["paths"]["node_binary"] = node
     tools = json.loads((source / "tests/fixtures/company_alpha_docs_mcp/remote_tools.json").read_text())["tools"]
     projection = ["name", "inputSchema", "annotations", "execution"]
-    projected = [{key: tool.get(key) for key in projection} for tool in tools]
+    dispatchable_names = ["search_company_alpha", "query_docs_filesystem_company_alpha"]
+    projected = [{key: tool.get(key) for key in projection} for tool in tools
+                 if tool.get("name") in dispatchable_names]
     digest = hashlib.sha256(json.dumps(projected, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     values["services"]["company_alpha_docs"] = {
         "endpoint": "https://docs.company-alpha.example.invalid/mcp",

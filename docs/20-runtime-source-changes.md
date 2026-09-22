@@ -1,15 +1,54 @@
 # Runtime source changes
 
-This architecture uses a customized OpenClaw **2026.9.3** build. Reproducing its
-behavior requires both the runtime source changes and the surrounding configuration
+This architecture uses the customized OpenClaw build pinned in the runtime
+manifest. Reproducing its behavior requires both the runtime source changes and
+the surrounding configuration
 and operating instructions. Copying workspace Markdown alone cannot add the native
 ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
-license notices, exact identities and an offline reconstruction helper. It covers
-79 local commits and 603 changed paths from the official release. It includes
+license notices, exact identities and an offline reconstruction helper. Its
+manifest records the complete changed-path and commit counts from the pinned
+official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## September 22 upgrade
+
+The 2026.9.5 port starts from official commit
+`ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`. It retains the target's current owners
+and data contracts while carrying forward the differentiated behavior. The final
+source identity and gateway deployment status belong to the manifest. The
+[September 22 record](../runtime/README.md#september-22-upgrade) distinguishes verified
+gateway activation and the Mini installation from subsequent component and
+credential acceptance. Source `1fb1f66cfe29`, including the native credential
+compatibility reader and native-goal repair, remains installed as signed build
+`2609000592` on the originating Mini. A bounded native-goal final has exact Discord
+readback. The newer exported and activated Gateway source
+`085711060c84` corrects existing Discord thread receipts so visible finals can
+settle their backend delivery obligation. It activated at `12:37:05.013053Z`;
+fresh live settlement acceptance remains pending after a provider rate limit
+interrupted the diagnostic before child creation. The qualified companion retains its matching `1fb`
+private worker. MacBook installation and actual account entry remain separate
+gates. The behavior and acceptance boundaries below retain their dated scopes.
+
+| Change family | Source behavior and acceptance boundary |
+|---|---|
+| Task ownership and steering | Native Codex completion tracking preserves the target's per-assignment run identity, session incarnation and requester custody. Owned child follow-ups retain a stable logical completion identity; an accepted send is not proof that the parent received its result. |
+| OAuth settlement | Durable refresh claims and settlement retain the admitted owner beyond a caller's observation deadline. A stale authentication failure cannot poison a renewed credential generation. Configuration and unit checks do not prove a particular provider sign-in. |
+| Provider recovery after tool progress | A fully settled successful tool batch can begin a fresh transient-outage window without resetting the run's total retry budget. Existing continuation reuses the committed transcript; commentary, duplicate receipts, failed tools and active work do not renew that window. |
+| Native credential entry | The Mac companion resolves a host-local enrolled alias into the observed native secure field through a bounded private signed-app child. Direct reads disable legacy Keychain UI. Existing creator-trusted items can use the fixed Apple-signed reader after exact metadata, item, host, unlocked-store and stored-ACL checks; a class-only read materializes a legacy reference without requesting password data. That compatibility reader can briefly prompt on a lock/ACL race, while the parent deadline bounds its process group. The app validates the helper before launch and the child validates its direct app parent. `credential_prompts` returns an opaque execution-bound reference; `type_secret` rechecks account, host, Apple-signed prompt owner, field and execution authority after awaiting resolution. Browser credentials retain their separate origin-bound route. Entry and successful authentication are separate receipts. |
+| Native goal delivery | Continuing-goal finals select the existing durable channel owner once and retain the actual command-target session. Completed progress drains before the final; ordinary private slash replies retain their interaction hooks. Physical sends, cancellation and multipart receipts are tested independently of goal completion. A bounded native-goal final passed on `1fb`; the later existing-thread receipt correction is activated but still needs live backend-settlement acceptance. |
+| Project and source-reading guidance | Existing registered project/worktree delegation may create the visible native task required by that owner. Read-only source CLI routes remain available when selected by the registered capability; outbound messaging and coordination retain their own tool rules. |
+| Native packaging pins | Swift snapshot preparation restores committed dependency pins after temporary dependency editing and uses the existing forced-resolution contract for native compilation. The verified package remains a separate artifact from the live gateway. |
+| Recovery reporting | Existing versioned effect predicates may carry one closed failure cause. The runtime keeps structured/private values out of public notification text, including truncated and split-line output. A producer's current-status projection must correlate a later same-target verified effect; successful no-op execution alone cannot erase a historical failed invocation. |
+| Diagnostic attribution | The local deep probe uses existing identity-bound pinned platform metadata, without widening device admission. An unresolved non-environment SecretRef is reported as an unresolved comparison rather than a proved token mismatch. Read-only metadata inspection preserves source database artifacts. |
+
+Native app signing, host-specific credential enrollment and actual secure entry
+remain separate from gateway source/build checks. Recovery report fixtures do not
+rerun authentication or prove newly delivered scheduler notifications. Historical
+completion reconciliation preserves failures and intentional silence instead of
+bulk-resending old work or converting every terminal task to delivery success.
 
 ## September 21 follow-up repair
 
@@ -169,21 +208,16 @@ Never copy another operator's account database into a fresh installation.
 
 ## Reproduction and verification boundaries
 
-The manifest starts at official tag `v2026.9.3`, commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
-gateway source `18b432ca2f83a107b1bc329cedf2221f20e61639` and reconstructed reference
-`18b432ca2f83a107b1bc329cedf2221f20e61639`. The reference includes the active-child
-follow-up repair and retains the preceding dreaming-effort and native Mac changes.
-The endpoint difference arrays `productionDelta`, `testOnlyDelta`,
-`documentationDelta` and `toolingOnlyDelta` are empty because the deployed and
-reference source identities match. The new build, activation and bounded live
-follow-up and warning-deferral checks passed; hosted qualification remains pending.
-Activation and historical live
-evidence are recorded separately in the [runtime package](../runtime/README.md#active-child-correction-deployment).
+The manifest identifies the exact official base, custom commit, normalized tree,
+patch checksum and export/deployment status. CI consumes its tag and toolchain
+values, then independently checks the annotated tag object and resulting source
+tree. Prior gateway and companion acceptance keeps its original identity; it is
+never transferred to a new candidate by changing the reference manifest.
 
 The public derivative changes only the two established company strings in the
-lane-contract test fixture relative to that reference. No other export
-normalization is applied. The resulting tree is `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
+lane-contract fixture. All other source blobs and file modes are identical to the
+committed custom reference. Production differences are never described as
+fixture-only normalization.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone

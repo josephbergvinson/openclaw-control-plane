@@ -226,8 +226,14 @@ def parse_sse_or_json(raw: bytes, content_type: str) -> dict[str, Any]:
     return value
 
 
-def projected_tool_digest(tools: list[dict[str, Any]], projection: list[str]) -> str:
-    projected = [{key: tool.get(key) for key in projection} for tool in tools]
+def projected_tool_digest(
+    tools: list[dict[str, Any]], projection: list[str], dispatchable_names: list[str]
+) -> str:
+    # The exact full inventory is checked separately before this digest. Only
+    # the two fixed read mappings can dispatch; blocked feedback prose is not
+    # an execution contract and must not disable those independent reads.
+    projected = [{key: tool.get(key) for key in projection} for tool in tools
+                 if tool.get("name") in dispatchable_names]
     return sha256_bytes(canonical_json(projected))
 
 
@@ -361,13 +367,15 @@ class RemoteMcpClient:
         tools = listed_result.get("tools") if isinstance(listed_result, dict) else None
         if not isinstance(tools, list) or not all(isinstance(tool, dict) for tool in tools):
             raise AdapterError("remote_tool_schema_invalid", "remote tools/list result invalid")
-        projection = self.manifest["remote_tool_schema"]["canonical_projection"]
-        digest = projected_tool_digest(tools, projection)
-        if digest != self.manifest["remote_tool_schema"]["digest"]:
-            raise AdapterError("remote_tool_schema_drift", "remote tool schema digest changed")
         names = [str(tool.get("name", "")) for tool in tools]
         if names != self.manifest["remote_tools"]["expected_inventory"]:
             raise AdapterError("remote_tool_inventory_drift", "remote tool inventory changed")
+        projection = self.manifest["remote_tool_schema"]["canonical_projection"]
+        dispatchable_names = [self.manifest["remote_tools"][key]
+                              for key in (REMOTE_SEARCH_KEY, REMOTE_READ_KEY)]
+        digest = projected_tool_digest(tools, projection, dispatchable_names)
+        if digest != self.manifest["remote_tool_schema"]["digest"]:
+            raise AdapterError("remote_tool_schema_drift", "remote read-tool contract digest changed")
         by_name = {str(tool.get("name")): tool for tool in tools}
         for key in (REMOTE_SEARCH_KEY, REMOTE_READ_KEY):
             tool = by_name.get(self.manifest["remote_tools"][key])

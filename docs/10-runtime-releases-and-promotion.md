@@ -139,6 +139,13 @@ the earlier behavioral evidence. The [manual acceptance procedure](../workspace/
 provides that refresh without exporting, ingesting or replaying Journal data.
 Scheduled synchronization remains a separate acceptance claim.
 
+After a checked rollback, fresh capture acceptance can use the existing successful
+`restored` receipt. The shared resolver binds it to the exact failed activation,
+start fence, selected predecessor and current gateway process; a stopped or
+incomplete restore cannot qualify. The failed activation remains intact. Native
+terminal-receipt retirement preserves an established binding only through the
+latest matching immutable receipt set, without extending it to a later process.
+
 A successful activation receipt proves the checks represented in that receipt. It
 does not establish every user workflow. After changes to delivery, run a real channel
 request and inspect the visible message. After account changes, check the intended
