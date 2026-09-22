@@ -32,7 +32,7 @@ interrupted the diagnostic before child creation. The qualified companion retain
 private worker. MacBook installation and actual account entry remain separate
 gates. The behavior and acceptance boundaries below retain their dated scopes.
 
-Candidate `20799eb9bc55` adds safe quota continuation after settled tool work and
+Candidate `189ec1fad1e` adds safe quota continuation after settled tool work and
 binds connection reuse to the actual provider account and credential. It keeps
 completed tool results, avoids repeating the original task, respects pinned
 accounts and stops safely when eligible accounts are exhausted. An account switch
@@ -41,12 +41,20 @@ reasoning. The manifest distinguishes this reconstructible candidate from the
 currently activated Gateway. Focused source tests pass; hosted qualification and
 live acceptance remain pending.
 
+The same candidate restores configured typing, progress drafts and activity
+narration when a completed worker resumes the original requester. Presentation
+authority is bound to the current run, session and destination; it does not grant
+final-delivery authority. Delayed progress writes recheck that authority and stop
+on cancellation or replacement. Seven owning test files pass 90 focused cases;
+hosted qualification and live acceptance remain separate.
+
 | Change family | Source behavior and acceptance boundary |
 |---|---|
 | Task ownership and steering | Native Codex completion tracking preserves the target's per-assignment run identity, session incarnation and requester custody. Owned child follow-ups retain a stable logical completion identity; an accepted send is not proof that the parent received its result. |
 | OAuth settlement | Durable refresh claims and settlement retain the admitted owner beyond a caller's observation deadline. A stale authentication failure cannot poison a renewed credential generation. Configuration and unit checks do not prove a particular provider sign-in. |
 | Provider recovery after tool progress | A fully settled successful tool batch can begin a fresh transient-outage window without resetting the run's total retry budget. Existing continuation reuses the committed transcript; commentary, duplicate receipts, failed tools and active work do not renew that window. |
 | Quota continuation and account-bound transport | The existing auth controller advances through eligible profiles while the runner retains the admitted task and committed tool history. Aggregate effects prevent original-task fallback after exhaustion. The WebSocket cache binds reuse to endpoint and effective handshake headers; a changed identity receives a new connection and full permitted history. Five production-runner cases verify one physical write per task; owning transport regressions cover identity changes and concurrent leases. Candidate activation remains pending. |
+| Resumed requester progress | Internal completion dispatch carries presentation authority for the original requester independently of final delivery. The channel's continuation adapter reuses configured progress and narration, excludes private completion prompts, and rechecks ownership before immediate or delayed sends. Cancellation, completed generations and replacement fence stale updates. Source and focused transport tests pass; actual channel acceptance remains pending. |
 | Native credential entry | The Mac companion resolves a host-local enrolled alias into the observed native secure field through a bounded private signed-app child. Direct reads disable legacy Keychain UI. Existing creator-trusted items can use the fixed Apple-signed reader after exact metadata, item, host, unlocked-store and stored-ACL checks; a class-only read materializes a legacy reference without requesting password data. That compatibility reader can briefly prompt on a lock/ACL race, while the parent deadline bounds its process group. The app validates the helper before launch and the child validates its direct app parent. `credential_prompts` returns an opaque execution-bound reference; `type_secret` rechecks account, host, Apple-signed prompt owner, field and execution authority after awaiting resolution. Browser credentials retain their separate origin-bound route. Entry and successful authentication are separate receipts. |
 | Native goal delivery | Continuing-goal finals select the existing durable channel owner once and retain the actual command-target session. Completed progress drains before the final; ordinary private slash replies retain their interaction hooks. Physical sends, cancellation and multipart receipts are tested independently of goal completion. A bounded native-goal final passed on `1fb`; the later existing-thread receipt correction is activated but still needs live backend-settlement acceptance. |
 | Project and source-reading guidance | Existing registered project/worktree delegation may create the visible native task required by that owner. Read-only source CLI routes remain available when selected by the registered capability; outbound messaging and coordination retain their own tool rules. |

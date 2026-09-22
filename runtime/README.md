@@ -52,7 +52,7 @@ child creation, so actual live settlement acceptance remains pending. The signed
 matching private worker remain at qualified source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `20799eb9bc55fd34adc153939fdbacf029006b09`.
+The reconstructible candidate is now `189ec1fad1e017b8b14b54b2ce364cefcaf9f7f1`.
 It corrects quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
@@ -69,6 +69,18 @@ include five production-runner cases with exactly one physical write each and
 candidate remain pending. CI corrections remove stale size and assertion counts, distinguish test fixture
 wrappers from production functions, and align the existing settle-wake expectation.
 The fixture rename preserves all call sites and passed its 135 owning tests.
+
+The candidate also restores visible activity when a completed worker resumes its
+original requester. That continuation retained final-delivery custody but could
+bypass typing, progress drafts and narration while the model continued working.
+The repair carries a run- and session-bound presentation capability through the
+existing internal dispatch. Discord reuses its configured progress card and
+activity narrator; private worker completion prompts are excluded from narration.
+Every send or edit, including delayed writes, rechecks current ownership. Abort,
+replacement and completion stop pending updates without changing the final owner.
+The seven owning test files passed 90 focused cases. CI now runs those exact
+agent and Discord suites and preserves their logs separately. These source tests
+do not establish a fresh live progress or final-delivery result for the candidate.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that
