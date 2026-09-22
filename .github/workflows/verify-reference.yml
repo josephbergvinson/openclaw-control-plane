@@ -122,6 +122,40 @@ jobs:
             src/gateway/session-subagent-reactivation.test.ts \
             extensions/codex/src/app-server/dynamic-tools.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
+      - name: Verify account transport and quota recovery
+        id: quota
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial \
+            packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts \
+            packages/ai/src/providers/openai-chatgpt-responses.cache.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-recovery.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts \
+            src/agents/embedded-agent-runner/run/assistant-failure.test.ts \
+            src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-quota-unit.log"
+      - name: Verify quota continuation after a committed effect
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        env:
+          OPENCLAW_E2E_USE_PREBUILT_DIST: "1"
+          OPENCLAW_E2E_WORKERS: "1"
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            src/agents/model-fallback.quota-continuation.e2e.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-quota-continuation.log"
+      - name: Preserve quota recovery qualification evidence
+        if: always() && steps.quota.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-quota-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-quota-unit.log
+            ${{ runner.temp }}/reference-quota-continuation.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify terminal warnings during confirmed continuations
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |

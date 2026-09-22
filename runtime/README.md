@@ -40,7 +40,7 @@ credential/account acceptance and hosted checks for this public revision remain
 pending. A bounded native-goal final passed with exact Discord readback on `1fb`;
 longer-workflow delivery and backend settlement remain separate acceptance scopes.
 
-The current reconstructible and activated Gateway source is `085711060c8477df71066402330eb5a2902d6824`.
+The currently activated Gateway source is `085711060c8477df71066402330eb5a2902d6824`.
 It retains the native credential correction, native-goal progress and final-delivery
 repair, registered-project delegation guidance, source CLI guidance and packaging
 pin repair. It additionally fixes existing Discord thread-channel send receipts:
@@ -51,6 +51,23 @@ activated; its fresh Discord diagnostic stopped on a provider rate limit before
 child creation, so actual live settlement acceptance remains pending. The signed companion and its
 matching private worker remain at qualified source `1fb`; this Gateway channel
 producer change does not require another native build.
+
+The reconstructible candidate is now `53e2a1d095115a643cf3c21c090ee7a902d25584`.
+It corrects quota recovery after completed tool work and account-bound WebSocket
+reuse. Eligible recovery advances through the existing authorized account order,
+keeps the same model and committed transcript, and does not replay the original
+task. User-pinned accounts, cancellation, active tool work and exhausted candidates
+retain their existing boundaries. Both prompt-level and assistant-level failures
+preserve the aggregate side-effect guard after continuation.
+
+The transport now binds reuse to the effective endpoint and handshake headers.
+An account or credential change opens a fresh connection with the completed tool
+history and without the previous connection's response ID or account-bound
+encrypted reasoning. The identity digest stays private in memory. Focused tests
+include five production-runner cases with exactly one physical write each and
+59 owning transport cases. Full hosted qualification and live acceptance of this
+candidate remain pending. Two additional corrections remove a stale size-ratchet
+entry and align a follow-up test with the existing explicit settle-wake contract.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that
@@ -77,7 +94,7 @@ synthetic qualification; those results alone did not qualify the subsequent
 compatibility reader.
 
 In the manifest, `source.referenceCommit` and `source.normalizedTree` identify what
-CI reconstructs, while `source.deployed*` retains the verified `1fb` gateway
+CI reconstructs, while `source.deployed*` retains the verified `085711` gateway
 activation. `candidateOnly` is true and `source.referenceDeploymentStatus` is
 `candidate-not-activated` until this successor has its own activation receipt.
 The existing `components.macCompanion.candidate` record now distinguishes the

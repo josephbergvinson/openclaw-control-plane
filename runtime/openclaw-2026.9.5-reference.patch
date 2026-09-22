@@ -2897,12 +2897,14 @@ index ed16c1a5bc157a63b8c7d71dbd9daf5001d8c21a..0501911983542c5962b6dd64ca382433
      // tests; the full-tree scan still audits every named export against those consumers.
      "src/agents/harness/registry.ts": ["exports"],
 diff --git a/config/max-lines-baseline.txt b/config/max-lines-baseline.txt
-index 12f8459a9729f1aa2c139b02ac9ef92b89c2f655..46a0e837f55acbec262f408766b09c226196c5b6 100644
+index 12f8459a9729f1aa2c139b02ac9ef92b89c2f655..f8bb20470025cc3668733f58393fab57cc4cd531 100644
 --- a/config/max-lines-baseline.txt
 +++ b/config/max-lines-baseline.txt
-@@ -536,7 +536,6 @@ src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
+@@ -534,9 +534,7 @@ src/config/zod-schema.core.ts
+ src/context-engine/context-engine.test.ts
+ src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
  src/cron/isolated-agent/delivery-target.test.ts
- src/cron/isolated-agent/run-executor.ts
+-src/cron/isolated-agent/run-executor.ts
  src/cron/isolated-agent/run.message-tool-policy.test.ts
 -src/cron/isolated-agent/run.test-harness.ts
  src/cron/service.jobs.test.ts
@@ -16488,6 +16490,448 @@ index 531816dbf78dd78fa6c645bc4d9959b0bf8a2bf7..9965b2eb38ea5f4b880e2a89fc80f873
    };
  }
  
+diff --git a/packages/ai/src/providers/openai-chatgpt-responses-headers.ts b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3b6e31528ee84cf67fe49d5449d44191313710a4
+--- /dev/null
++++ b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
+@@ -0,0 +1,92 @@
++// Construct normalized authenticated headers shared by ChatGPT transports.
++import type * as NodeOs from "node:os";
++
++type ProcessWithOsBuiltinModule = typeof process & {
++  getBuiltinModule?: (id: "node:os") => typeof NodeOs;
++};
++
++function loadNodeOs(): typeof NodeOs | null {
++  if (typeof process === "undefined" || !(process.versions?.node || process.versions?.bun)) {
++    return null;
++  }
++  return (process as ProcessWithOsBuiltinModule).getBuiltinModule?.("node:os") ?? null;
++}
++
++// NEVER convert to top-level runtime imports - breaks browser/Vite builds
++const os = loadNodeOs();
++
++const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
++
++function buildBaseCodexHeaders(
++  initHeaders: Record<string, string> | undefined,
++  additionalHeaders: Record<string, string> | undefined,
++  accountId: string,
++  token: string,
++): Headers {
++  const headers = new Headers(initHeaders);
++  for (const [key, value] of Object.entries(additionalHeaders || {})) {
++    headers.set(key, value);
++  }
++  headers.set("Authorization", `Bearer ${token}`);
++  headers.set("chatgpt-account-id", accountId);
++  headers.set("originator", "openclaw");
++  const userAgent = os
++    ? `openclaw (${os.platform()} ${os.release()}; ${os.arch()})`
++    : "openclaw (browser)";
++  headers.set("User-Agent", userAgent);
++  return headers;
++}
++
++export function buildSSEHeaders(
++  initHeaders: Record<string, string> | undefined,
++  additionalHeaders: Record<string, string> | undefined,
++  accountId: string,
++  token: string,
++  sessionId?: string,
++): Headers {
++  const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
++  headers.set("OpenAI-Beta", "responses=experimental");
++  headers.set("accept", "text/event-stream");
++  headers.set("content-type", "application/json");
++
++  if (sessionId) {
++    headers.set("session_id", sessionId);
++    headers.set("x-client-request-id", sessionId);
++  }
++
++  return headers;
++}
++
++export function buildWebSocketHeaders(
++  initHeaders: Record<string, string> | undefined,
++  additionalHeaders: Record<string, string> | undefined,
++  accountId: string,
++  token: string,
++  requestId: string,
++): Headers {
++  const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
++  headers.delete("accept");
++  headers.delete("content-type");
++  headers.delete("OpenAI-Beta");
++  headers.delete("openai-beta");
++  headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
++  headers.set("x-client-request-id", requestId);
++  headers.set("session_id", requestId);
++  return headers;
++}
++
++// Keep only a private fingerprint in the connection cache, never raw credentials.
++export async function resolveWebSocketTransportIdentity(
++  url: string,
++  headers: Headers,
++): Promise<string | undefined> {
++  // Browsers without secure-context Web Crypto can still use transient sockets.
++  if (!globalThis.crypto?.subtle) {
++    return undefined;
++  }
++  const bytes = new TextEncoder().encode(JSON.stringify([url, Array.from(headers.entries())]));
++  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
++  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join(
++    "",
++  );
++}
+diff --git a/packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts b/packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b41070c3a7879c940156571aef271a1b8cb017b1
+--- /dev/null
++++ b/packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts
+@@ -0,0 +1,338 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { configureAiTransportHost } from "../host.js";
++import { buildOpenAIResponsesReasoningReplayMetadata } from "../transports/openai-responses-compaction-replay.js";
++import { OPENAI_RESPONSES_REASONING_REPLAY_META_KEY } from "../transports/openai-responses-contracts.js";
++import type { Context, Model } from "../types.js";
++import { createZeroUsage } from "../usage.test-support.js";
++import {
++  closeOpenAICodexWebSocketSessions,
++  resetOpenAICodexWebSocketStateForTest,
++  streamOpenAICodexResponses,
++} from "./openai-chatgpt-responses.js";
++
++const model = {
++  id: "gpt-5.5",
++  name: "GPT-5.5",
++  api: "openai-chatgpt-responses",
++  provider: "openai",
++  baseUrl: "https://chatgpt.test/backend-api",
++  reasoning: true,
++  input: ["text"],
++  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++  contextWindow: 128_000,
++  maxTokens: 16_000,
++} satisfies Model<"openai-chatgpt-responses">;
++
++function createJwt(account = "account-a", generation = 1): string {
++  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
++  return `${encode({ alg: "none", typ: "JWT" })}.${encode({
++    "https://api.openai.com/auth": { chatgpt_account_id: account },
++    generation,
++  })}.synthetic-signature`;
++}
++
++function context(turns: number): Context {
++  return {
++    messages: Array.from({ length: turns }, (_, index) => ({
++      role: "user",
++      content: `turn ${index + 1}`,
++      timestamp: index + 1,
++    })),
++  };
++}
++
++function installWebSockets(holdFirstRequest = false) {
++  const sockets: IdentityWebSocket[] = [];
++  class IdentityWebSocket extends EventTarget {
++    readyState = 1;
++    readonly requests: Array<Record<string, unknown>> = [];
++    hold = holdFirstRequest && sockets.length === 0;
++    constructor(
++      readonly url: string,
++      readonly options: { headers: Record<string, string> },
++    ) {
++      super();
++      sockets.push(this);
++      queueMicrotask(() => this.dispatchEvent(new Event("open")));
++    }
++    send(raw: string): void {
++      this.requests.push(JSON.parse(raw) as Record<string, unknown>);
++      if (!this.hold) {
++        this.complete();
++      }
++    }
++    complete(): void {
++      queueMicrotask(() => {
++        this.dispatchEvent(
++          Object.assign(new Event("message"), {
++            data: JSON.stringify({
++              type: "response.completed",
++              response: {
++                id: `response-${sockets.indexOf(this) + 1}-${this.requests.length}`,
++                status: "completed",
++                output: [],
++                usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
++              },
++            }),
++          }),
++        );
++      });
++    }
++    close(): void {
++      this.readyState = 3;
++    }
++  }
++  vi.stubGlobal("WebSocket", IdentityWebSocket);
++  return sockets;
++}
++
++describe("ChatGPT WebSocket transport identity", () => {
++  afterEach(() => {
++    closeOpenAICodexWebSocketSessions();
++    vi.restoreAllMocks();
++    vi.unstubAllGlobals();
++    resetOpenAICodexWebSocketStateForTest();
++    configureAiTransportHost({});
++  });
++
++  it.each(["account", "refreshed credential", "URL", "model header", "option header"])(
++    "reconnects and sends full history after changing %s, then reuses only that identity",
++    async (change) => {
++      const sockets = installWebSockets();
++      const options = {
++        apiKey: createJwt(),
++        sessionId: "rotating-session",
++        transport: "websocket-cached" as const,
++      };
++      const nextOptions = {
++        ...options,
++        ...(change === "account" ? { apiKey: createJwt("account-b") } : {}),
++        ...(change === "refreshed credential" ? { apiKey: createJwt("account-a", 2) } : {}),
++        ...(change === "option header" ? { headers: { "x-route": "route-b" } } : {}),
++      };
++      const nextModel = {
++        ...model,
++        ...(change === "URL" ? { baseUrl: "https://other.test/backend-api" } : {}),
++        ...(change === "model header" ? { headers: { "x-route": "route-b" } } : {}),
++      };
++      expect(
++        (await streamOpenAICodexResponses(model, context(1), options).result()).stopReason,
++      ).toBe("stop");
++      expect(
++        (await streamOpenAICodexResponses(model, context(2), options).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(1);
++      expect(sockets[0]?.requests[1]?.previous_response_id).toBe("response-1-1");
++
++      expect(
++        (await streamOpenAICodexResponses(nextModel, context(3), nextOptions).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(2);
++      expect(sockets[0]?.readyState).toBe(3);
++      expect(sockets[1]?.requests[0]?.previous_response_id).toBeUndefined();
++      expect(sockets[1]?.requests[0]?.input).toHaveLength(3);
++      expect(sockets[1]?.options.headers.authorization).toBe(`Bearer ${nextOptions.apiKey}`);
++      expect(sockets[1]?.options.headers["chatgpt-account-id"]).toBe(
++        change === "account" ? "account-b" : "account-a",
++      );
++
++      expect(
++        (await streamOpenAICodexResponses(nextModel, context(4), nextOptions).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(2);
++      expect(sockets[1]?.requests[1]?.previous_response_id).toBe("response-2-1");
++
++      expect(
++        (await streamOpenAICodexResponses(model, context(5), options).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(3);
++      expect(sockets[2]?.requests[0]?.previous_response_id).toBeUndefined();
++      expect(sockets[2]?.requests[0]?.input).toHaveLength(5);
++    },
++  );
++
++  it("reuses identical effective headers despite input casing and order", async () => {
++    const sockets = installWebSockets();
++    const options = {
++      apiKey: createJwt(),
++      sessionId: "normalized-headers",
++      transport: "websocket-cached" as const,
++    };
++    expect(
++      (
++        await streamOpenAICodexResponses(model, context(1), {
++          ...options,
++          headers: { "X-Route": "route-a", "X-Feature": "feature-a" },
++        }).result()
++      ).stopReason,
++    ).toBe("stop");
++    expect(
++      (
++        await streamOpenAICodexResponses(model, context(2), {
++          ...options,
++          headers: { "x-feature": "feature-a", "x-route": "route-a" },
++        }).result()
++      ).stopReason,
++    ).toBe("stop");
++    expect(sockets).toHaveLength(1);
++    expect(sockets[0]?.requests[1]?.previous_response_id).toBe("response-1-1");
++  });
++
++  it("carries executed tool history to the next account without account-bound reasoning", async () => {
++    const sockets = installWebSockets();
++    const options = {
++      apiKey: createJwt(),
++      authProfileId: "profile-a",
++      sessionId: "committed-tool-rotation",
++      transport: "websocket-cached" as const,
++    };
++    const history: Context = {
++      messages: [
++        ...context(1).messages,
++        {
++          role: "assistant",
++          api: model.api,
++          provider: model.provider,
++          model: model.id,
++          usage: createZeroUsage(),
++          stopReason: "toolUse",
++          timestamp: 2,
++          content: [
++            {
++              type: "thinking",
++              thinking: "Perform the write once.",
++              thinkingSignature: JSON.stringify({
++                type: "reasoning",
++                id: "rs_account_a",
++                encrypted_content: "synthetic-account-a-ciphertext",
++                summary: [],
++                [OPENAI_RESPONSES_REASONING_REPLAY_META_KEY]:
++                  buildOpenAIResponsesReasoningReplayMetadata(model, options),
++              }),
++            },
++            {
++              type: "toolCall",
++              id: "call_write|fc_write",
++              name: "save_record",
++              arguments: { id: "record-1" },
++            },
++          ],
++        },
++        {
++          role: "toolResult",
++          toolCallId: "call_write|fc_write",
++          toolName: "save_record",
++          content: [{ type: "text", text: "Committed record-1; receipt-1" }],
++          isError: false,
++          timestamp: 3,
++        },
++      ],
++    };
++    expect((await streamOpenAICodexResponses(model, history, options).result()).stopReason).toBe(
++      "stop",
++    );
++    const continuation: Context = {
++      messages: [
++        ...history.messages,
++        { role: "user", content: "Continue from the saved receipt.", timestamp: 4 },
++      ],
++    };
++    expect(
++      (
++        await streamOpenAICodexResponses(model, continuation, {
++          ...options,
++          apiKey: createJwt("account-b"),
++          authProfileId: "profile-b",
++        }).result()
++      ).stopReason,
++    ).toBe("stop");
++    expect(sockets).toHaveLength(2);
++    const replay = sockets[1]?.requests[0];
++    expect(replay?.previous_response_id).toBeUndefined();
++    expect(replay?.input).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          type: "function_call",
++          call_id: "call_write",
++          name: "save_record",
++          arguments: JSON.stringify({ id: "record-1" }),
++        }),
++        expect.objectContaining({
++          type: "function_call_output",
++          call_id: "call_write",
++          output: "Committed record-1; receipt-1",
++        }),
++      ]),
++    );
++    expect(JSON.stringify(sockets[0]?.requests[0])).toContain("synthetic-account-a-ciphertext");
++    expect(JSON.stringify(replay)).not.toContain("synthetic-account-a-ciphertext");
++    expect(JSON.stringify(replay)).not.toContain("rs_account_a");
++  });
++
++  it("uses transient full-history sockets when Web Crypto is unavailable", async () => {
++    const sockets = installWebSockets();
++    vi.stubGlobal("crypto", undefined);
++    const options = {
++      apiKey: createJwt(),
++      sessionId: "no-web-crypto",
++      transport: "websocket-cached" as const,
++    };
++    expect((await streamOpenAICodexResponses(model, context(1), options).result()).stopReason).toBe(
++      "stop",
++    );
++    expect((await streamOpenAICodexResponses(model, context(2), options).result()).stopReason).toBe(
++      "stop",
++    );
++    expect(sockets).toHaveLength(2);
++    expect(sockets.map((socket) => socket.readyState)).toEqual([3, 3]);
++    expect(sockets[1]?.requests[0]?.previous_response_id).toBeUndefined();
++    expect(sockets[1]?.requests[0]?.input).toHaveLength(2);
++  });
++
++  it.each(["fresh", "reused"])(
++    "lets a %s old-account lease finish without evicting its replacement",
++    async (lease) => {
++      const sockets = installWebSockets(lease === "fresh");
++      const options = {
++        apiKey: createJwt(),
++        sessionId: "busy-account-rotation",
++        transport: "websocket-cached" as const,
++      };
++      if (lease === "reused") {
++        expect(
++          (await streamOpenAICodexResponses(model, context(1), options).result()).stopReason,
++        ).toBe("stop");
++        const seededSocket = sockets[0];
++        if (!seededSocket) {
++          throw new Error("Seed connection is missing");
++        }
++        seededSocket.hold = true;
++      }
++      const oldTurn = streamOpenAICodexResponses(model, context(2), options).result();
++      await vi.waitFor(() => expect(sockets[0]?.requests).toHaveLength(lease === "fresh" ? 1 : 2));
++      const oldSocket = sockets[0];
++      if (!oldSocket) {
++        throw new Error("Old account connection is missing");
++      }
++
++      const nextOptions = { ...options, apiKey: createJwt("account-b") };
++      expect(
++        (await streamOpenAICodexResponses(model, context(3), nextOptions).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(2);
++      expect(oldSocket.readyState).toBe(1);
++      expect(sockets[1]?.readyState).toBe(1);
++      expect(sockets[1]?.requests[0]?.previous_response_id).toBeUndefined();
++
++      oldSocket.complete();
++      expect((await oldTurn).stopReason).toBe("stop");
++      expect(oldSocket.readyState).toBe(3);
++      expect(sockets[1]?.readyState).toBe(1);
++      expect(
++        (await streamOpenAICodexResponses(model, context(4), nextOptions).result()).stopReason,
++      ).toBe("stop");
++      expect(sockets).toHaveLength(2);
++      expect(sockets[1]?.requests[1]?.previous_response_id).toBe("response-2-1");
++    },
++  );
++});
 diff --git a/packages/ai/src/providers/openai-chatgpt-responses.tools.test.ts b/packages/ai/src/providers/openai-chatgpt-responses.tools.test.ts
 index 55f8df0a93aaa1cba21e6e9d0581e09a5cd9bc7b..263ee90f32313aa9684b0d920b9252362bdaf5df 100644
 --- a/packages/ai/src/providers/openai-chatgpt-responses.tools.test.ts
@@ -16552,6 +16996,202 @@ index 55f8df0a93aaa1cba21e6e9d0581e09a5cd9bc7b..263ee90f32313aa9684b0d920b925236
      expect(payload).toMatchObject({
        tools: [
          {
+diff --git a/packages/ai/src/providers/openai-chatgpt-responses.ts b/packages/ai/src/providers/openai-chatgpt-responses.ts
+index 0e234df5320e6f4a2e3bd7b05ec3bb0d37a8bad9..7915212ad03ba35b5a9d3e09bd1817eaf80c3ebb 100644
+--- a/packages/ai/src/providers/openai-chatgpt-responses.ts
++++ b/packages/ai/src/providers/openai-chatgpt-responses.ts
+@@ -1,5 +1,4 @@
+ // OpenAI ChatGPT Responses provider handles ChatGPT-authenticated response streams.
+-import type * as NodeOs from "node:os";
+ import type * as NodeZlib from "node:zlib";
+ import {
+   extractErrorCodeOrErrno,
+@@ -72,6 +71,11 @@ import {
+   withFirstStreamEventTimeout,
+ } from "../utils/stream-first-event-timeout.js";
+ import { stripSystemPromptCacheBoundary } from "../utils/system-prompt-cache-boundary.js";
++import {
++  buildSSEHeaders,
++  buildWebSocketHeaders,
++  resolveWebSocketTransportIdentity,
++} from "./openai-chatgpt-responses-headers.js";
+ import {
+   CodexProtocolError,
+   parseOpenAIChatGptResponsesSse,
+@@ -95,20 +99,6 @@ type DynamicImport = (specifier: string) => Promise<unknown>;
+ 
+ const dynamicImport: DynamicImport = (specifier) => import(specifier);
+ 
+-type ProcessWithOsBuiltinModule = typeof process & {
+-  getBuiltinModule?: (id: "node:os") => typeof NodeOs;
+-};
+-
+-function loadNodeOs(): typeof NodeOs | null {
+-  if (typeof process === "undefined" || !(process.versions?.node || process.versions?.bun)) {
+-    return null;
+-  }
+-  return (process as ProcessWithOsBuiltinModule).getBuiltinModule?.("node:os") ?? null;
+-}
+-
+-// NEVER convert to top-level runtime imports - breaks browser/Vite builds
+-const os = loadNodeOs();
+-
+ // ============================================================================
+ // Configuration
+ // ============================================================================
+@@ -940,7 +930,6 @@ function normalizeCodexStatus(status: unknown): CodexResponseStatus | undefined
+ // WebSocket Parsing
+ // ============================================================================
+ 
+-const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
+ const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
+ const SESSION_WEBSOCKET_MAX_AGE_MS = 55 * 60 * 1000;
+ 
+@@ -961,6 +950,7 @@ interface CachedWebSocketContinuationState {
+ }
+ 
+ interface CachedWebSocketConnection {
++  transportIdentity: string;
+   socket: WebSocketLike;
+   busy: boolean;
+   createdAt: number;
+@@ -1212,7 +1202,10 @@ async function acquireWebSocket(
+   entry?: CachedWebSocketConnection;
+   release: (options?: { keep?: boolean }) => void;
+ }> {
+-  if (!sessionId) {
++  const transportIdentity = sessionId
++    ? await resolveWebSocketTransportIdentity(url, headers)
++    : undefined;
++  if (!sessionId || !transportIdentity) {
+     const socket = await connectWebSocket(url, headers, signal);
+     return {
+       socket,
+@@ -1222,7 +1215,19 @@ async function acquireWebSocket(
+     };
+   }
+ 
+-  const cached = websocketSessionCache.get(sessionId);
++  const previous = websocketSessionCache.get(sessionId);
++  const cached = previous?.transportIdentity === transportIdentity ? previous : undefined;
++  if (previous && !cached) {
++    // Authentication and response history belong to this handshake. Retire an
++    // idle old identity now; a busy lease finishes and closes on its own release.
++    if (previous.idleTimer) {
++      clearTimeout(previous.idleTimer);
++    }
++    deleteOwnedWebSocketSession(sessionId, previous);
++    if (!previous.busy) {
++      closeWebSocketSilently(previous.socket, 1000, "transport_identity_changed");
++    }
++  }
+   // Track what the cache is expected to hold after this acquire's own cleanup,
+   // so the post-await install only proceeds when no concurrent request installed
+   // a newer entry. Starts as the observed entry; reset to undefined once this
+@@ -1244,7 +1249,11 @@ async function acquireWebSocket(
+         socket: cached.socket,
+         entry: cached,
+         release: ({ keep } = {}) => {
+-          if (!keep || !isWebSocketReusable(cached.socket)) {
++          if (
++            websocketSessionCache.get(sessionId) !== cached ||
++            !keep ||
++            !isWebSocketReusable(cached.socket)
++          ) {
+             closeWebSocketSilently(cached.socket);
+             deleteOwnedWebSocketSession(sessionId, cached);
+             return;
+@@ -1271,7 +1280,12 @@ async function acquireWebSocket(
+   }
+ 
+   const socket = await connectWebSocket(url, headers, signal);
+-  const entry: CachedWebSocketConnection = { socket, busy: true, createdAt: Date.now() };
++  const entry: CachedWebSocketConnection = {
++    socket,
++    transportIdentity,
++    busy: true,
++    createdAt: Date.now(),
++  };
+   // Install only if the cache still matches what this acquire left behind (the
+   // stale entry it removed, or empty for a first connect). A different cached
+   // entry means a concurrent request already won this session during the await;
+@@ -1281,7 +1295,12 @@ async function acquireWebSocket(
+     socket,
+     entry: ownsCache ? entry : undefined,
+     release: ({ keep } = {}) => {
+-      if (!ownsCache || !keep || !isWebSocketReusable(entry.socket)) {
++      if (
++        !ownsCache ||
++        websocketSessionCache.get(sessionId) !== entry ||
++        !keep ||
++        !isWebSocketReusable(entry.socket)
++      ) {
+         closeWebSocketSilently(entry.socket);
+         if (entry.idleTimer) {
+           clearTimeout(entry.idleTimer);
+@@ -1797,62 +1816,4 @@ function createCodexRequestId(): string {
+   throw new Error("Secure random request id generation is unavailable");
+ }
+ 
+-function buildBaseCodexHeaders(
+-  initHeaders: Record<string, string> | undefined,
+-  additionalHeaders: Record<string, string> | undefined,
+-  accountId: string,
+-  token: string,
+-): Headers {
+-  const headers = new Headers(initHeaders);
+-  for (const [key, value] of Object.entries(additionalHeaders || {})) {
+-    headers.set(key, value);
+-  }
+-  headers.set("Authorization", `Bearer ${token}`);
+-  headers.set("chatgpt-account-id", accountId);
+-  headers.set("originator", "openclaw");
+-  const userAgent = os
+-    ? `openclaw (${os.platform()} ${os.release()}; ${os.arch()})`
+-    : "openclaw (browser)";
+-  headers.set("User-Agent", userAgent);
+-  return headers;
+-}
+-
+-function buildSSEHeaders(
+-  initHeaders: Record<string, string> | undefined,
+-  additionalHeaders: Record<string, string> | undefined,
+-  accountId: string,
+-  token: string,
+-  sessionId?: string,
+-): Headers {
+-  const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
+-  headers.set("OpenAI-Beta", "responses=experimental");
+-  headers.set("accept", "text/event-stream");
+-  headers.set("content-type", "application/json");
+-
+-  if (sessionId) {
+-    headers.set("session_id", sessionId);
+-    headers.set("x-client-request-id", sessionId);
+-  }
+-
+-  return headers;
+-}
+-
+-function buildWebSocketHeaders(
+-  initHeaders: Record<string, string> | undefined,
+-  additionalHeaders: Record<string, string> | undefined,
+-  accountId: string,
+-  token: string,
+-  requestId: string,
+-): Headers {
+-  const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
+-  headers.delete("accept");
+-  headers.delete("content-type");
+-  headers.delete("OpenAI-Beta");
+-  headers.delete("openai-beta");
+-  headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
+-  headers.set("x-client-request-id", requestId);
+-  headers.set("session_id", requestId);
+-  return headers;
+-}
+-
+ /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 diff --git a/packages/ai/src/transports/openai-responses-contracts.ts b/packages/ai/src/transports/openai-responses-contracts.ts
 index 2cbd556cd6c0e6a773e123aea228258a8c9371eb..fc4d5af924ab18491eb13f84aef7055ac70ec1d8 100644
 --- a/packages/ai/src/transports/openai-responses-contracts.ts
@@ -23127,7 +23767,7 @@ index eab68e3556420bc6851129430fc5f2d08a2a1741..bd00bb29faec46778faacd237dfbdd7f
      let superseded: Promise<boolean> | undefined;
      let latest: Promise<boolean> | undefined;
 diff --git a/src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts b/src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts
-index ec0b806bf2889dc47770e074286e7ff5f6ba726b..85971e05b729d5063a56d0e458c6fc4fc22441c4 100644
+index ec0b806bf2889dc47770e074286e7ff5f6ba726b..1e1eaae437486e68b811ab9ed173777567255427 100644
 --- a/src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts
 +++ b/src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts
 @@ -71,6 +71,7 @@ function makeInput(
@@ -23171,8 +23811,17 @@ index ec0b806bf2889dc47770e074286e7ff5f6ba726b..85971e05b729d5063a56d0e458c6fc4f
          reason: "rate_limit",
          modelId: "test-model",
        });
+@@ -276,7 +289,7 @@ describe("assistant failure recovery", () => {
+         if (reason === "auth") {
+           expect(failure.message).toBe(AUTH_INVALID_TOKEN_USER_TEXT);
+         } else if (reason === "rate_limit") {
+-          expect(failure.message).toBe("⚠️ API rate limit reached. Please try again later.");
++          expect(failure.message).toBe("Warning: API rate limit reached. Please try again later.");
+         }
+         expect(input.traceAttempts[0]?.status).toBe(status);
+       }
 diff --git a/src/agents/embedded-agent-runner/run/assistant-failure.test.ts b/src/agents/embedded-agent-runner/run/assistant-failure.test.ts
-index 3411b5ed43c32134d52d07eae91b71bbaa621f69..61b2d9609c1f97667479512612aa2b2ae862a51c 100644
+index 3411b5ed43c32134d52d07eae91b71bbaa621f69..9dc907fd7a04ae8ceb4d044a234f05939f6471be 100644
 --- a/src/agents/embedded-agent-runner/run/assistant-failure.test.ts
 +++ b/src/agents/embedded-agent-runner/run/assistant-failure.test.ts
 @@ -98,6 +98,7 @@ function makeExhaustedCredentialFailureInput(options?: { replaySafe?: boolean })
@@ -23183,8 +23832,32 @@ index 3411b5ed43c32134d52d07eae91b71bbaa621f69..61b2d9609c1f97667479512612aa2b2a
        maybeMarkAuthProfileFailure,
        transientRetryCount: 0,
        advanceAuthProfile,
+@@ -387,6 +388,23 @@ describe("handleEmbeddedAssistantFailure", () => {
+     });
+   });
+ 
++  it("keeps prior committed work terminal after a later quota-only attempt exhausts recovery", async () => {
++    const fixture = makeExhaustedCredentialFailureInput();
++    fixture.input.attempt.replayMetadata = { replaySafe: false, hadPotentialSideEffects: true };
++    fixture.input.attempt.currentAttemptReplayMetadata = {
++      replaySafe: true,
++      hadPotentialSideEffects: false,
++    };
++    if (!fixture.input.attemptAssistant) {
++      throw new Error("expected assistant fixture");
++    }
++    fixture.input.attemptAssistant.errorMessage = "Codex error: The usage limit has been reached";
++    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
++    expect(outcome.action).toBe("proceed");
++    expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
++    expect(fixture.traceAttempts).toEqual([]);
++  });
++
+   it.each([PROVIDER_FAILURE_WITH_OUTPUT_ERROR_CODE, PROVIDER_POST_DISPATCH_AMBIGUITY_ERROR_CODE])(
+     "does not rotate profiles or models after replay-unsafe failure %s",
+     async (errorCode) => {
 diff --git a/src/agents/embedded-agent-runner/run/assistant-failure.ts b/src/agents/embedded-agent-runner/run/assistant-failure.ts
-index 579b70b66268c895fc1113aa57dfc731bb0ce915..0a986a5f3bd611ce0a99a45874beba6aedd2ab01 100644
+index 579b70b66268c895fc1113aa57dfc731bb0ce915..f95e0780d0afdf4932f9527a7dd822420fdba016 100644
 --- a/src/agents/embedded-agent-runner/run/assistant-failure.ts
 +++ b/src/agents/embedded-agent-runner/run/assistant-failure.ts
 @@ -78,6 +78,7 @@ export async function handleEmbeddedAssistantFailure(input: {
@@ -23195,7 +23868,23 @@ index 579b70b66268c895fc1113aa57dfc731bb0ce915..0a986a5f3bd611ce0a99a45874beba6a
      | "advanceAuthProfile"
      | "advanceRateLimitAuthProfile"
      | "transientRetryCount"
-@@ -319,14 +320,17 @@ export async function handleEmbeddedAssistantFailure(input: {
+@@ -135,7 +136,14 @@ export async function handleEmbeddedAssistantFailure(input: {
+     },
+   );
+   const terminalAssistantError = isTerminalAssistantError(input.attemptAssistant);
+-  if (terminalAssistantError || !isCurrentAttemptReplaySafe(input.attempt)) {
++  // Same-model transcript continuation is owned by attempt recovery. An empty
++  // later attempt cannot make earlier committed work safe to replay through
++  // the original-prompt/model-fallback path.
++  if (
++    terminalAssistantError ||
++    !isCurrentAttemptReplaySafe(input.attempt) ||
++    input.attempt.replayMetadata.hadPotentialSideEffects
++  ) {
+     return buildOutcome(input, {
+       action: "proceed",
+       assistantProfileFailureReason: terminalAssistantError ? null : assistantProfileFailureReason,
+@@ -319,14 +327,17 @@ export async function handleEmbeddedAssistantFailure(input: {
  
    if (decision.action === "rotate_profile") {
      const failedProfileId = input.authProfileId;
@@ -23756,11 +24445,236 @@ index 0000000000000000000000000000000000000000..4436e5c7cd535bade600a33789a013bd
 +    }
 +  });
 +});
+diff --git a/src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts b/src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6e8036a25f414204d309db344d78d618a6913a6
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts
+@@ -0,0 +1,200 @@
++import { describe, expect, it, vi } from "vitest";
++import {
++  recoverAfterTransportDrop,
++  type TransportDropScenario,
++} from "./attempt-recovery.test-support.js";
++import { createEmbeddedRunFailoverRetryController } from "./failover-retry-controller.js";
++
++function quotaProfiles(profileIds = ["openai:primary", "openai:backup"], pinned = false) {
++  let index = 0;
++  const advanceAuthProfile = vi.fn(async () => {
++    if (pinned || index + 1 >= profileIds.length) {
++      return false;
++    }
++    index += 1;
++    return true;
++  });
++  const controller = createEmbeddedRunFailoverRetryController({
++    runParams: {
++      runId: "quota-after-write",
++      authProfileId: profileIds[0],
++      authProfileIdSource: pinned ? "user" : "auto",
++    } as never,
++    provider: "openai",
++    modelId: "gpt-6-astra",
++    globalLane: "test",
++    agentDir: "/tmp/quota-continuation-test",
++    fallbackConfigured: true,
++    profileFailureStore: { version: 1, profiles: {} },
++    getLastProfileId: () => profileIds[index],
++    getSessionId: () => "quota-session",
++    harnessOwnsTransport: () => false,
++    getRuntimeAuthOwnerId: () => "embedded",
++    getApiKeyInfo: () => null,
++    advanceAuthProfile,
++  });
++  const markFailure = vi.spyOn(controller, "maybeMarkAuthProfileFailure").mockResolvedValue();
++  return { controller, advanceAuthProfile, markFailure, selected: () => profileIds[index] };
++}
++
++const quotaError = "Codex error: The usage limit has been reached";
++
++describe("quota recovery preserves committed work", () => {
++  it("rotates an automatic profile and continues the settled transcript without replaying the write", async () => {
++    const profiles = quotaProfiles();
++    const fixture = await recoverAfterTransportDrop({
++      toolCallIds: ["persisted_mutation"],
++      modelId: "gpt-6-astra",
++      thinkLevel: "ultra",
++      errorMessage: quotaError,
++      diagnostics: [],
++      content: [],
++      authProfileId: profiles.selected,
++      authProfileIdSource: "auto",
++      failoverRetryController: profiles.controller,
++    });
++    expect(fixture.recovery).toMatchObject({
++      action: "retry",
++      lastRetryFailoverReason: "rate_limit",
++      thinkLevel: "ultra",
++    });
++    expect(profiles.selected()).toBe("openai:backup");
++    expect(profiles.advanceAuthProfile).toHaveBeenCalledOnce();
++    expect(profiles.markFailure).toHaveBeenCalledWith(
++      expect.objectContaining({ profileId: "openai:primary", reason: "rate_limit" }),
++    );
++    expect(fixture.markOwnedTranscriptRetry).toHaveBeenCalledOnce();
++    expect(fixture.continueFromCurrentTranscript).toHaveBeenCalledExactlyOnceWith({
++      includeToolFailureInstruction: false,
++    });
++    expect(
++      fixture.attempt.messagesSnapshot.filter((message) => message.role === "toolResult"),
++    ).toHaveLength(1);
++    expect(fixture.traceAttempts).toEqual([
++      expect.objectContaining({
++        result: "rotate_profile",
++        reason: "rate_limit",
++        provider: "openai",
++        model: "gpt-6-astra",
++      }),
++    ]);
++    expect(profiles.controller.transientRetryCount).toBe(0);
++  });
++
++  it("continues through more than one authorized account without a model fallback", async () => {
++    const profiles = quotaProfiles(["openai:primary", "openai:backup", "openai:third"]);
++    await recoverAfterTransportDrop({
++      errorMessage: quotaError,
++      diagnostics: [],
++      content: [],
++      authProfileId: profiles.selected,
++      failoverRetryController: profiles.controller,
++    });
++    const second = await recoverAfterTransportDrop({
++      noTools: true,
++      replaySafe: true,
++      continuingTranscript: true,
++      errorMessage: quotaError,
++      diagnostics: [],
++      content: [],
++      authProfileId: profiles.selected,
++      failoverRetryController: profiles.controller,
++    });
++    expect(second.recovery.action).toBe("retry");
++    expect(profiles.selected()).toBe("openai:third");
++    expect(profiles.advanceAuthProfile).toHaveBeenCalledTimes(2);
++  });
++
++  it.each<[string, TransportDropScenario]>([
++    ["a missing persisted result", { missingToolResult: true }],
++    ["an active lifecycle item", { activeCount: 1 }],
++    ["asynchronous work", { asyncStarted: true }],
++    ["an intentional termination", { terminate: true }],
++    ["pending approval", { didSendDeterministicApprovalPrompt: true }],
++    ["an owning plugin harness", { pluginHarnessOwnsTransport: true }],
++    ["a yielded attempt", { yieldDetected: true }],
++    ["external cancellation", { terminal: { kind: "aborted", source: "external" } }],
++    ["an owned interruption", { signalOwnedInterruption: true }],
++    [
++      "a compaction timeout",
++      { terminal: { kind: "timeout", phase: "compaction", source: "observation" } },
++    ],
++    [
++      "a tool execution timeout",
++      { terminal: { kind: "timeout", phase: "tool_execution", source: "observation" } },
++    ],
++    [
++      "an expired run deadline",
++      { terminal: { kind: "timeout", phase: "prompt", source: "run_budget" } },
++    ],
++  ])("does not rotate after %s", async (_name, scenario) => {
++    const profiles = quotaProfiles();
++    const fixture = await recoverAfterTransportDrop({
++      ...scenario,
++      errorMessage: quotaError,
++      diagnostics: [],
++      content: [],
++      authProfileId: profiles.selected,
++      failoverRetryController: profiles.controller,
++    });
++    expect(fixture.recovery.action).toBe("proceed");
++    expect(profiles.advanceAuthProfile).not.toHaveBeenCalled();
++    expect(fixture.continueFromCurrentTranscript).not.toHaveBeenCalled();
++  });
++
++  it("does not continue when credential advancement fails", async () => {
++    const profiles = quotaProfiles();
++    profiles.advanceAuthProfile.mockRejectedValueOnce(new Error("credential source unavailable"));
++    await expect(
++      recoverAfterTransportDrop({
++        errorMessage: quotaError,
++        diagnostics: [],
++        content: [],
++        authProfileId: profiles.selected,
++        failoverRetryController: profiles.controller,
++      }),
++    ).rejects.toThrow("credential source unavailable");
++    expect(profiles.advanceAuthProfile).toHaveBeenCalledOnce();
++    expect(profiles.selected()).toBe("openai:primary");
++  });
++
++  it("keeps the advanced profile when failure bookkeeping is unavailable", async () => {
++    const profiles = quotaProfiles();
++    profiles.markFailure.mockRejectedValueOnce(new Error("metadata write unavailable"));
++    const fixture = await recoverAfterTransportDrop({
++      errorMessage: quotaError,
++      diagnostics: [],
++      content: [],
++      authProfileId: profiles.selected,
++      failoverRetryController: profiles.controller,
++    });
++    expect(fixture.recovery.action).toBe("retry");
++    expect(profiles.selected()).toBe("openai:backup");
++    expect(profiles.advanceAuthProfile).toHaveBeenCalledOnce();
++    expect(fixture.continueFromCurrentTranscript).toHaveBeenCalledOnce();
++  });
++
++  it.each([false, true])(
++    "leaves exhausted/pinned profiles terminal (pinned=%s)",
++    async (pinned) => {
++      const profiles = quotaProfiles(
++        pinned ? ["openai:primary", "openai:backup"] : ["openai:primary"],
++        pinned,
++      );
++      const fixture = await recoverAfterTransportDrop({
++        errorMessage: quotaError,
++        diagnostics: [],
++        content: [],
++        authProfileId: profiles.selected,
++        authProfileIdSource: pinned ? "user" : "auto",
++        failoverRetryController: profiles.controller,
++      });
++      expect(fixture.recovery.action).toBe("proceed");
++      expect(profiles.selected()).toBe("openai:primary");
++      expect(fixture.continueFromCurrentTranscript).not.toHaveBeenCalled();
++      if (pinned) {
++        expect(profiles.advanceAuthProfile).not.toHaveBeenCalled();
++      }
++    },
++  );
++});
 diff --git a/src/agents/embedded-agent-runner/run/attempt-recovery.test-support.ts b/src/agents/embedded-agent-runner/run/attempt-recovery.test-support.ts
-index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a2238344f0ca 100644
+index 72489a904ac852dabfd49699e94f8190c8ce7d2c..c7844ee7e8a5b6a83a7bf8bf0d9d371e26b01315 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-recovery.test-support.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-recovery.test-support.ts
-@@ -28,6 +28,8 @@ export type TransportDropScenario = {
+@@ -1,4 +1,5 @@
+ import { vi } from "vitest";
++import type { ThinkLevel } from "../../../auto-reply/thinking.js";
+ import type { AssistantMessage } from "../../../llm/types.js";
+ import {
+   buildEmbeddedRunnerAssistant,
+@@ -13,6 +14,12 @@ import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
+ 
+ export type TransportDropScenario = {
+   assistantTexts?: string[];
++  authProfileId?: () => string | undefined;
++  authProfileIdSource?: "auto" | "user";
++  continuingTranscript?: boolean;
++  modelId?: string;
++  thinkLevel?: ThinkLevel;
++  signalOwnedInterruption?: boolean;
+   errorMessage?: string;
+   errorBody?: string;
+   errorCode?: string;
+@@ -28,6 +35,8 @@ export type TransportDropScenario = {
    failedToolCallId?: string;
    missingToolResult?: boolean;
    noTools?: boolean;
@@ -23769,16 +24683,17 @@ index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a223
    lastToolError?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["lastToolError"];
    pluginHarnessOwnsTransport?: boolean;
    retryAvailable?: boolean;
-@@ -47,7 +49,7 @@ export const disabledCompactionRuntime = {
+@@ -47,7 +56,8 @@ export const disabledCompactionRuntime = {
  // Live shape: a code-mode exec batch settled, then the ChatGPT Responses stream
  // died while the model was still reasoning, so the errored turn is thinking-only.
  export async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
 -  const toolCalls = scenario.noTools ? [] : ["call_1", "call_2"];
++  const modelId = scenario.modelId ?? "gpt-5.6-luna";
 +  const toolCalls = scenario.noTools ? [] : (scenario.toolCallIds ?? ["call_1", "call_2"]);
    const toolAssistant = buildEmbeddedRunnerAssistant({
      stopReason: "toolUse",
      content: toolCalls.map((id) => ({ type: "toolCall", id, name: "exec", arguments: {} })),
-@@ -92,6 +94,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+@@ -92,6 +102,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
        toolCallId,
        toolName: "exec",
        replaySafe: false,
@@ -23786,10 +24701,12 @@ index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a223
        ...(scenario.asyncStarted ? { asyncStarted: true } : {}),
        ...(scenario.terminate ? { terminate: true } : {}),
        ...(scenario.codeModeSuspended ? { codeModeSuspended: true } : {}),
-@@ -121,23 +124,25 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+@@ -119,25 +130,31 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+     assistant: erroredAssistant,
+   });
    const markOwnedTranscriptRetry = vi.fn();
-   const continueFromCurrentTranscript = vi.fn();
-   const contextRecoveryState = createEmbeddedRunContextRecoveryState();
+-  const continueFromCurrentTranscript = vi.fn();
+-  const contextRecoveryState = createEmbeddedRunContextRecoveryState();
 -  const failoverRetryController = createEmbeddedRunFailoverRetryController({
 -    runParams: { runId: "run:transport-drop" } as Parameters<
 -      typeof createEmbeddedRunFailoverRetryController
@@ -23806,7 +24723,12 @@ index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a223
 -    getRuntimeAuthOwnerId: () => "embedded",
 -    getApiKeyInfo: () => null,
 -    advanceAuthProfile: vi.fn(async () => false),
--  });
++  const activePrompt = { internal: scenario.continuingTranscript ?? false };
++  const continueFromCurrentTranscript = vi.fn(() => {
++    activePrompt.internal = true;
+   });
++  const traceAttempts: Parameters<typeof recoverEmbeddedRunAttempt>[0]["traceAttempts"] = [];
++  const contextRecoveryState = createEmbeddedRunContextRecoveryState();
 +  const failoverRetryController =
 +    scenario.failoverRetryController ??
 +    createEmbeddedRunFailoverRetryController({
@@ -23814,7 +24736,7 @@ index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a223
 +        typeof createEmbeddedRunFailoverRetryController
 +      >[0]["runParams"],
 +      provider: "openai",
-+      modelId: "gpt-5.6-luna",
++      modelId,
 +      globalLane: "test",
 +      agentDir: "/tmp/provider-recovery-test",
 +      fallbackConfigured: false,
@@ -23829,10 +24751,98 @@ index 72489a904ac852dabfd49699e94f8190c8ce7d2c..a41e7bd4f9462c77e8c272cffed6a223
    if (scenario.retryAvailable === false) {
      failoverRetryController.setTransientRetryBudget(0);
    }
+@@ -152,6 +169,8 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+           sessionId: "session:transport-drop",
+           runId: "run:transport-drop",
+           onAgentEvent,
++          authProfileId: scenario.authProfileId?.(),
++          authProfileIdSource: scenario.authProfileIdSource,
+         },
+         resolvedSessionKey: "agent:main:transport-drop",
+         startedAtMs: Date.now(),
+@@ -159,11 +178,14 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+       },
+       preparedRuntime: {
+         provider: "openai",
+-        modelId: "gpt-5.6-luna",
+-        model: { id: "gpt-5.6-luna" },
++        modelId,
++        model: { id: modelId },
+         genericCompactionRecoveryAllowed: scenario.compactionEnabled ?? false,
++        lockedProfileId:
++          scenario.authProfileIdSource === "user" ? scenario.authProfileId?.() : undefined,
+         snapshot: () => ({
+-          thinkLevel: "off",
++          thinkLevel: scenario.thinkLevel ?? "off",
++          lastProfileId: scenario.authProfileId?.(),
+           agentHarness: { id: "openclaw" },
+           outerContextTokenMeta: {},
+           contextTokenBudget: scenario.compactionEnabled ? 200_000 : undefined,
+@@ -177,16 +199,21 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+         currentAttemptAssistant: erroredAssistant,
+         currentAttemptCompletedAssistant: scenario.completedAssistant,
+         assistantErrorText: erroredAssistant.errorMessage,
+-        terminalState,
++        terminalState: {
++          ...terminalState,
++          signalOwnedInterruption:
++            scenario.signalOwnedInterruption ?? terminalState.signalOwnedInterruption,
++        },
+         setTerminalLifecycleMeta: vi.fn(),
+         attemptCompactionCount: 0,
+-        activeErrorContext: { provider: "openai", model: "gpt-5.6-luna" },
++        activeErrorContext: { provider: "openai", model: modelId },
+         resolveReplayInvalidForAttempt: () => true,
+         canRestartForLiveSwitch: false,
+       },
+       runtimePlan: { auth: {} },
+       sessionPromptState: {
+         sessionFile: "/tmp/session.jsonl",
++        activePrompt,
+         markOwnedTranscriptRetry,
+         continueFromCurrentTranscript,
+       },
+@@ -204,7 +231,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+       codexAppServerRecoveryRetryAvailable: false,
+       codexAppServerRecoveryRetries: 0,
+       lastRetryFailoverReason: null,
+-      traceAttempts: [],
++      traceAttempts,
+       sessionAgentId: "main",
+     } as never);
+   const recovery = await recover();
+@@ -218,5 +245,6 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario
+     contextRecoveryState,
+     failoverRetryController,
+     onAgentEvent,
++    traceAttempts,
+   };
+ }
+diff --git a/src/agents/embedded-agent-runner/run/attempt-recovery.test.ts b/src/agents/embedded-agent-runner/run/attempt-recovery.test.ts
+index b0f22bff4f5e52297d2550065c952e1155f85238..8dfc2215a65caa8eba16d6ce6e28c1b44554006e 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-recovery.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-recovery.test.ts
+@@ -395,6 +395,7 @@ describe("recoverEmbeddedRunAttempt", () => {
+       errorMessage: "429 provider rate limit",
+       diagnostics: [],
+       content: [],
++      noTools: true,
+       replaySafe: true,
+     });
+     const { failoverRetryController: failover } = fixture;
 diff --git a/src/agents/embedded-agent-runner/run/attempt-recovery.ts b/src/agents/embedded-agent-runner/run/attempt-recovery.ts
-index 1b2e509462c8db45d942f8f129f9cafb1ab26fd4..a1f7655bce4a37a9fe2dff82cd305f4f76ced893 100644
+index 1b2e509462c8db45d942f8f129f9cafb1ab26fd4..f073049698fedf28f6e7315dbefafda0ad04a6c4 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-recovery.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-recovery.ts
+@@ -2,7 +2,7 @@ import { isResponsesOutputLimitToolCallError } from "@openclaw/ai/diagnostics";
+ import { isProviderRefusalAssistantError } from "@openclaw/llm-core/diagnostics";
+ import { emitAgentEvent } from "../../../infra/agent-events.js";
+ import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
+-import { isRetryableAssistantError } from "../../../llm/utils/retry.js";
++import { isRetryableAssistantError, isTerminalAssistantError } from "../../../llm/utils/retry.js";
+ import { projectAgentRunAttemptTerminal } from "../../agent-run-terminal-outcome.js";
+ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../defaults.js";
+ import type { FailoverReason } from "../../embedded-agent-helpers.js";
 @@ -355,6 +355,10 @@ export async function recoverEmbeddedRunAttempt(input: {
      recoveryReason &&
      (await failoverRetryController.maybeRetryTransient({
@@ -23844,6 +24854,80 @@ index 1b2e509462c8db45d942f8f129f9cafb1ab26fd4..a1f7655bce4a37a9fe2dff82cd305f4f
        message: promptError ? formatErrorMessage(promptError) : assistantSignal?.message,
        retryAfterMs: promptError
          ? resolveRetryAfterMs(formatErrorMessage(promptError), Date.now(), promptError)
+@@ -434,8 +438,71 @@ export async function recoverEmbeddedRunAttempt(input: {
+       }),
+     };
+   }
+-  // Profile rotation and original-prompt replay still require replay-safe evidence.
+-  if (!currentAttemptReplaySafe) {
++  // A quota rejection after settled work needs another authorized account, not
++  // a replay of the original task. Keep the same model and transcript owner;
++  // the auth controller advances monotonically and enforces the configured
++  // candidate set. Subsequent quota failures may have no new tools, but must
++  // remain on this continuation path until the candidates are exhausted.
++  if (
++    failureReason === "rate_limit" &&
++    !externalAbort &&
++    !signalOwnedInterruption &&
++    !timedOutByRunBudget &&
++    !timedOutDuringCompaction &&
++    !timedOutDuringToolExecution &&
++    !findCliTerminalStopError(promptError) &&
++    !runtime.pluginHarnessOwnsTransport &&
++    !terminalInterrupted &&
++    !isTerminalAssistantError(attemptAssistant) &&
++    !attempt.codexAppServerFailure &&
++    !attempt.yieldDetected &&
++    !attempt.clientToolCalls &&
++    !attempt.didSendDeterministicApprovalPrompt &&
++    !hasAsyncActivity(attempt.toolMetas) &&
++    attempt.itemLifecycle.activeCount === 0 &&
++    !preparedRuntime.lockedProfileId &&
++    runtime.lastProfileId &&
++    (canRecoverSettledToolResults ||
++      (currentAttemptReplaySafe && sessionPromptState.activePrompt.internal))
++  ) {
++    runInput.laneController.throwIfAborted();
++    const failedProfileId = runtime.lastProfileId;
++    const failedCredential =
++      failoverRetryController.captureProfileFailureCredential(failedProfileId);
++    const rotated = await failoverRetryController.advanceAuthProfile();
++    try {
++      await failoverRetryController.maybeMarkAuthProfileFailure({
++        profileId: failedProfileId,
++        credential: failedCredential,
++        reason: failoverRetryController.resolveAuthProfileFailureReason("rate_limit"),
++        modelId: preparedRuntime.modelId,
++      });
++    } catch (error) {
++      log.warn(`profile failure mark failed: ${String(error)}`);
++    }
++    runInput.laneController.throwIfAborted();
++    if (rotated) {
++      sessionPromptState.markOwnedTranscriptRetry();
++      sessionPromptState.continueFromCurrentTranscript({
++        includeToolFailureInstruction: Boolean(attempt.lastToolError),
++      });
++      input.traceAttempts.push({
++        provider: preparedRuntime.provider,
++        model: preparedRuntime.modelId,
++        result: "rotate_profile",
++        reason: "rate_limit",
++        stage: promptError ? "prompt" : "assistant",
++      });
++      return retry({
++        lastRetryFailoverReason: "rate_limit",
++        thinkLevel: preparedRuntime.snapshot().thinkLevel,
++      });
++    }
++  }
++  // Original-prompt replay still requires replay-safe evidence for the whole
++  // task. A later prompt rejection may execute no new tools while earlier
++  // transcript continuations have already committed effects.
++  if (!currentAttemptReplaySafe || attempt.replayMetadata.hadPotentialSideEffects) {
+     return { action: "proceed" };
+   }
+   const hasCodexAppServerTimeoutOutcome = Boolean(
 diff --git a/src/agents/embedded-agent-runner/run/attempt-settle.ts b/src/agents/embedded-agent-runner/run/attempt-settle.ts
 index 26031dae0c372e3aa64eea6b3e6382b5ddc3aba6..b4ac8cae4a814faa4744c46bf9d4cd533c913cbb 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-settle.ts
@@ -28968,6 +30052,198 @@ index 3c2c704eb60856fa143e94f97323e2f176e320c8..c3ee2b1e27973ec4fbd5510a7e822c43
    it("does not allow a locked OAuth profile to resolve as another profile", async () => {
      const profileId = "openai:default";
      authProfileMocks.resolveApiKeyForProfile.mockResolvedValueOnce({
+diff --git a/src/agents/model-fallback.quota-continuation.e2e.test.ts b/src/agents/model-fallback.quota-continuation.e2e.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e78613bc863e37b279090b13c17faa28e5b91f5
+--- /dev/null
++++ b/src/agents/model-fallback.quota-continuation.e2e.test.ts
+@@ -0,0 +1,186 @@
++// Keeps committed work on the same transcript while rotating authorized quota-limited accounts.
++import fs from "node:fs/promises";
++import path from "node:path";
++import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++import { wrapRunWithTestPreparedAdmission } from "./admitted-run-context.test-support.js";
++import { ensureAuthProfileStore, saveAuthProfileStore } from "./auth-profiles/store-runtime.js";
++import type {
++  EmbeddedRunAttemptParams,
++  EmbeddedRunAttemptResult,
++} from "./embedded-agent-runner/run/types.js";
++import { resetFallbackSkipCacheForTest } from "./fallback-skip-cache.test-support.js";
++import { installRunEmbeddedMocks } from "./model-fallback.run-embedded.e2e.test-fixtures.js";
++import {
++  makeModelFallbackConfig,
++  withModelFallbackWorkspace,
++  writeFallbackMultiProfileAuthStore,
++} from "./model-fallback.run-embedded.e2e.test-support.js";
++import {
++  buildEmbeddedRunnerAssistant,
++  makeEmbeddedRunnerAttempt,
++} from "./test-helpers/embedded-agent-runner-e2e-fixtures.js";
++
++const runEmbeddedAttemptMock = vi.fn<(params: unknown) => Promise<EmbeddedRunAttemptResult>>();
++const suspendSessionMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
++const { computeBackoffMock, sleepWithAbortMock } = vi.hoisted(() => ({
++  computeBackoffMock: vi.fn(() => 321),
++  sleepWithAbortMock: vi.fn(async (_ms: number, _abortSignal?: AbortSignal) => undefined),
++}));
++vi.mock("./models-config.js", () => ({
++  ensureOpenClawModelsJson: vi.fn(async () => ({ wrote: false })),
++}));
++
++type ProductionRunEmbeddedAgent = typeof import("./embedded-agent-runner/run.js").runEmbeddedAgent;
++let runEmbeddedAgent: (
++  params: Omit<Parameters<ProductionRunEmbeddedAgent>[0], "admittedRunContext">,
++) => ReturnType<ProductionRunEmbeddedAgent>;
++type EmbeddedAttemptParams = EmbeddedRunAttemptParams;
++
++beforeAll(async () => {
++  installRunEmbeddedMocks({
++    runEmbeddedAttemptMock,
++    suspendSessionMock,
++    computeBackoffMock,
++    sleepWithAbortMock,
++  });
++  runEmbeddedAgent = wrapRunWithTestPreparedAdmission(
++    (await import("./embedded-agent-runner/run.js")).runEmbeddedAgent,
++  );
++});
++
++beforeEach(() => {
++  resetFallbackSkipCacheForTest();
++  runEmbeddedAttemptMock.mockReset();
++  suspendSessionMock.mockClear();
++  computeBackoffMock.mockClear();
++  sleepWithAbortMock.mockClear();
++});
++
++describe("quota continuation through the embedded runner", () => {
++  it.each([
++    "backup succeeds",
++    "profiles exhausted",
++    "user pinned",
++    "remaining profiles cooling down",
++    "prompt failures exhaust",
++  ])("continues quota-limited work after one committed mutation: %s", async (outcome) => {
++    await withModelFallbackWorkspace(async ({ agentDir, workspaceDir }) => {
++      await writeFallbackMultiProfileAuthStore(agentDir, { openAiProfileCount: 3 });
++      if (outcome === "remaining profiles cooling down") {
++        const store = ensureAuthProfileStore(agentDir, { syncExternalCli: false });
++        for (const profileId of ["openai:p2", "openai:p3"]) {
++          store.usageStats ??= {};
++          store.usageStats[profileId] = {
++            disabledUntil: Date.now() + 60_000,
++            disabledReason: "rate_limit",
++          };
++        }
++        saveAuthProfileStore(store, agentDir);
++      }
++      const artifact = path.join(workspaceDir, "committed-operation.txt");
++      let writes = 0;
++      const toolCall = buildEmbeddedRunnerAssistant({
++        stopReason: "toolUse",
++        content: [{ type: "toolCall", id: "one-write", name: "write", arguments: {} }],
++      });
++      runEmbeddedAttemptMock.mockImplementation(async (params) => {
++        const attempt = params as EmbeddedAttemptParams;
++        const first = runEmbeddedAttemptMock.mock.calls.length === 1;
++        if (first) {
++          expect(attempt.prompt).toBe("Apply exactly one mutation, then report.");
++          await fs.appendFile(artifact, "committed once\n");
++          writes += 1;
++        } else {
++          expect(attempt.prompt).toContain(
++            "Continue the current task from the existing transcript",
++          );
++          expect(attempt.suppressNextUserMessagePersistence).toBe(true);
++          expect(await fs.readFile(artifact, "utf8")).toBe("committed once\n");
++        }
++        expect(attempt.provider).toBe("openai");
++        expect(attempt.modelId).toBe("mock-1");
++        const success = outcome === "backup succeeds" && attempt.authProfileId === "openai:p3";
++        const promptFailure = outcome === "prompt failures exhaust" && !first;
++        const assistant = buildEmbeddedRunnerAssistant({
++          stopReason: success ? "stop" : "error",
++          content: success ? [{ type: "text", text: "Verified one committed mutation." }] : [],
++          errorMessage: success ? undefined : "Codex error: The usage limit has been reached",
++        });
++        return makeEmbeddedRunnerAttempt({
++          sessionIdUsed: attempt.sessionId,
++          assistantTexts: success ? ["Verified one committed mutation."] : [],
++          lastAssistant: assistant,
++          currentAttemptAssistant: promptFailure ? undefined : assistant,
++          ...(promptFailure
++            ? {
++                terminal: {
++                  kind: "failed" as const,
++                  source: "prompt" as const,
++                  error: new Error("Codex error: The usage limit has been reached"),
++                },
++              }
++            : {}),
++          messagesSnapshot: [
++            { role: "user", content: "Apply exactly one mutation, then report.", timestamp: 1 },
++            toolCall,
++            {
++              role: "toolResult",
++              toolCallId: "one-write",
++              toolName: "write",
++              isError: false,
++              content: [{ type: "text", text: "committed once" }],
++              timestamp: 2,
++            },
++            assistant,
++          ],
++          toolMetas: first
++            ? [{ toolCallId: "one-write", toolName: "write", replaySafe: false, isError: false }]
++            : [],
++          itemLifecycle: first
++            ? { startedCount: 1, completedCount: 1, activeCount: 0 }
++            : { startedCount: 0, completedCount: 0, activeCount: 0 },
++          replayMetadata: { hadPotentialSideEffects: true, replaySafe: false },
++          currentAttemptReplayMetadata: { hadPotentialSideEffects: first, replaySafe: !first },
++        });
++      });
++      const result = await runEmbeddedAgent({
++        sessionId: `quota-${outcome}`,
++        sessionKey: `agent:test:quota-${outcome}`,
++        workspaceDir,
++        agentDir,
++        config: makeModelFallbackConfig(),
++        prompt: "Apply exactly one mutation, then report.",
++        provider: "openai",
++        model: "mock-1",
++        authProfileId: "openai:p1",
++        authProfileIdSource: outcome === "user pinned" ? "user" : "auto",
++        timeoutMs: 5000,
++        runId: `run:quota-${outcome}`,
++        enqueue: async (task) => task(),
++      });
++      expect(writes).toBe(1);
++      expect(await fs.readFile(artifact, "utf8")).toBe("committed once\n");
++      expect(
++        runEmbeddedAttemptMock.mock.calls.map(
++          ([params]) => (params as EmbeddedAttemptParams).authProfileId,
++        ),
++      ).toEqual(
++        outcome === "user pinned" || outcome === "remaining profiles cooling down"
++          ? ["openai:p1"]
++          : ["openai:p1", "openai:p2", "openai:p3"],
++      );
++      expect(result.meta.replayInvalid).toBe(true);
++      if (outcome === "backup succeeds") {
++        expect(result.payloads?.[0]?.text).toBe("Verified one committed mutation.");
++        expect(result.meta.error).toBeUndefined();
++      } else {
++        expect(result.payloads).toContainEqual(
++          expect.objectContaining({
++            isError: true,
++            text: "Agent couldn't generate a response. Note: some tool actions may have already been executed — please verify before retrying.",
++          }),
++        );
++      }
++    });
++  });
++});
 diff --git a/src/agents/model-fallback.run-embedded.e2e.test-fixtures.ts b/src/agents/model-fallback.run-embedded.e2e.test-fixtures.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..b4c37eb7003bc933c1fcfd3b33bfd1ba8c4d4652
@@ -31035,7 +32311,7 @@ index 040363bbfdcb7f11af9124a493af01dbd926abfe..467517481cae15b6c7e80b7b4fdda21a
    runs: SubagentRunRecord[];
 diff --git a/src/agents/subagents/registry/subagent-followup-owner.test.ts b/src/agents/subagents/registry/subagent-followup-owner.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0992d28a635eb50f36ed8a2a9f3e485fa5b96404
+index 0000000000000000000000000000000000000000..0b39dd6e65a98a931d348989e59bb76317de77d8
 --- /dev/null
 +++ b/src/agents/subagents/registry/subagent-followup-owner.test.ts
 @@ -0,0 +1,245 @@
@@ -31140,7 +32416,7 @@ index 0000000000000000000000000000000000000000..0992d28a635eb50f36ed8a2a9f3e485f
 +      }),
 +    ).toBe(true);
 +    expect(entry.requesterTurnRunId).toBeUndefined();
-+    expect(schedule).toHaveBeenCalledWith(entry.runId, entry);
++    expect(schedule).toHaveBeenCalledExactlyOnceWith(entry.runId, entry, "settle");
 +  });
 +
 +  it.each([
