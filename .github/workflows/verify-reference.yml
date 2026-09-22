@@ -162,6 +162,37 @@ jobs:
           set -o pipefail
           pnpm test:serial src/agents/embedded-agent-runner/run/terminal-preparation.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
+      - name: Verify resumed requester progress ownership
+        id: cadence
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.agents.config.ts \
+            src/agents/command/continuation-presentation.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-cadence-agents.log"
+      - name: Verify resumed Discord progress transport
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.extension-discord.config.ts \
+            extensions/discord/src/continuation-progress.test.ts \
+            extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts \
+            extensions/discord/src/monitor/message-handler.draft-preview.visibility.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-cadence-discord.log"
+      - name: Preserve resumed requester progress evidence
+        if: always() && steps.cadence.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-cadence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-cadence-agents.log
+            ${{ runner.temp }}/reference-cadence-discord.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify embedded follow-up completion receipts
         id: receipts
         working-directory: ${{ runner.temp }}/openclaw-reference

@@ -28,6 +28,16 @@ During substantial work, post meaningful milestones and explain real dependencie
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
+Candidate `189ec1fad1e` addresses a later gap in that lifecycle: a worker could
+resume its original requester without the presentation route used for ordinary
+incoming messages. The model kept working while typing, progress and narration
+were absent. The repair carries current run/session/destination authority through
+the internal resume and reuses the channel's configured progress card. Private
+worker completion prompts are excluded from narration. Progress does not acquire
+final-delivery custody; stale, replaced or cancelled owners cannot send delayed
+updates. Ninety focused cases pass across the agent and Discord owners. The
+candidate still requires hosted qualification and fresh live channel acceptance.
+
 ## September 22 native goal delivery repair
 
 A native goal could acknowledge the command and retain a completed model answer without sending the final result to Discord. The direct channel owner claimed the pending final before the native command adapter invoked a second durable sender. That sender rejected the already-claimed record and suppressed delivery before any transport call. A completed goal or clean transcript therefore did not establish publication.

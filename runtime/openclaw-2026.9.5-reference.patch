@@ -3434,6 +3434,32 @@ index a4ebb90d5493cd4e630e3041ee23bcdb45c31429..30db4d2203d339f62b081b825145f9da
  
  ## Desktop availability and keeping awake
  
+diff --git a/docs/plugins/sdk-channel-plugins/message-adapter.md b/docs/plugins/sdk-channel-plugins/message-adapter.md
+index ae13cac267948b6cdff02f7a40e2924757b0c891..21cb44173488d61d2ce6e0e6f663af400adc1771 100644
+--- a/docs/plugins/sdk-channel-plugins/message-adapter.md
++++ b/docs/plugins/sdk-channel-plugins/message-adapter.md
+@@ -107,6 +107,21 @@ during a send in the next throttle window. Explicit `flush()` still bypasses
+ the delay for attention and finalization. Cancel pending updates and await
+ in-flight work before closing or rotating a stream.
+ 
++### Resumed requester progress
++
++The optional `streaming.createContinuationProgress` adapter reuses a channel's
++progress draft when a completed worker resumes the original requester. Its
++inputs contain the validated destination, abort signal, and `assertCurrent`
++callback. Call `assertCurrent` immediately before each send or edit, including
++delayed coalesced writes, and stop pending updates during cleanup.
++
++Return the existing tool, item, command-output, and narration callbacks through
++`replyOptions`, plus `finish` and `cleanup`. Core retains the configured activity
++narrator; private worker completion prompts are not narration input. `finish`
++seals progress only. It must not publish a final answer or change final-delivery
++custody. Return `undefined` when the channel or selected streaming mode does not
++support this adapter; the existing continuation presentation remains available.
++
+ ### Commentary delivery ownership
+ 
+ Set `commentaryPayloadsEnabled: true` when the channel supports durable commentary messages.
 diff --git a/docs/plugins/sdk-overview/memory-and-context.md b/docs/plugins/sdk-overview/memory-and-context.md
 index ff8b0411f559e7a81a6f8fb3faa96be5b5160d8b..c0d725d899a967b5baceea1a0d8f9a49dd0045a8 100644
 --- a/docs/plugins/sdk-overview/memory-and-context.md
@@ -8462,6 +8488,224 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..4b733cc1b2bcfb26b6861a0fb6682f20
      expect(readMessagesDiscord).not.toHaveBeenCalled();
    });
  
+diff --git a/extensions/discord/src/continuation-progress.test.ts b/extensions/discord/src/continuation-progress.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fc127c5f5641e29f692fa53a1c959f354903fa2
+--- /dev/null
++++ b/extensions/discord/src/continuation-progress.test.ts
+@@ -0,0 +1,103 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { RequestClient } from "./internal/discord.js";
++const client = vi.hoisted(() => ({ create: vi.fn() }));
++vi.mock("./client.js", () => ({ createDiscordRestClient: client.create }));
++import { createDiscordContinuationProgress } from "./continuation-progress.js";
++
++function setup() {
++  const writes: Array<{ method: string; text: string; at: number }> = [];
++  let current = true;
++  const rest = new RequestClient("test-token", {
++    queueRequests: false,
++    fetch: async (_input, init) => {
++      if (init?.method === "DELETE") {
++        return new Response(null, { status: 204 });
++      }
++      const body = JSON.parse(String(init?.body)) as { content: string };
++      writes.push({ method: init!.method!, text: body.content, at: Date.now() });
++      return Response.json({ id: "123456789012345678" });
++    },
++  });
++  const config = {
++    streaming: {
++      mode: "progress" as const,
++      progress: {
++        label: false,
++        maxLines: 3,
++        maxLineChars: 560,
++        toolProgress: false,
++        commandText: "status" as const,
++        commentary: true,
++        narration: true,
++      },
++    },
++  };
++  client.create.mockReturnValue({ rest, account: { accountId: "default", config } });
++  return {
++    writes,
++    invalidate: () => {
++      current = false;
++    },
++    params: {
++      cfg: { channels: { discord: config } },
++      to: "channel:123",
++      signal: new AbortController().signal,
++      assertCurrent: () => {
++        if (!current) {
++          throw new Error("stale requester");
++        }
++      },
++    },
++  };
++}
++
++describe("Discord requester continuation progress", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++    vi.setSystemTime(100_000);
++    vi.clearAllMocks();
++  });
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("coalesces narration into one ordinary progress card and seals without a duplicate final", async () => {
++    const h = setup();
++    const p = (await createDiscordContinuationProgress(h.params))!;
++    await p.replyOptions.onItemEvent?.({
++      kind: "preamble",
++      phase: "end",
++      progressText: "Checking the calendar invitation.",
++    });
++    await p.replyOptions.onToolStart?.({ phase: "start", name: "read", toolCallId: "calendar" });
++    await vi.advanceTimersByTimeAsync(2_000);
++    expect(p.replyOptions.isProgressDraftVisible?.()).toBe(true);
++    // Existing narrator policy makes utility updates, which must edit this card.
++    for (const text of [
++      "Checking the confirmed time.",
++      "Reading the meeting details.",
++      "Verifying the calendar entry.",
++    ]) {
++      await vi.advanceTimersByTimeAsync(21_000);
++      await p.replyOptions.onNarrationUpdate?.({ text });
++      await vi.advanceTimersByTimeAsync(2_000);
++    }
++    await p.finish();
++    await p.cleanup();
++    expect(h.writes.filter((w) => w.method === "POST")).toHaveLength(1);
++    expect(h.writes.filter((w) => w.method === "PATCH").length).toBeGreaterThan(0);
++    expect(h.writes.at(-1)?.text).toContain("Verifying the calendar entry.");
++    expect(h.writes.some((w) => /complete|finished|final|PRIVATE/u.test(w.text))).toBe(false);
++  });
++
++  it("checks requester authority again before a delayed coalesced provider write", async () => {
++    const h = setup();
++    const p = (await createDiscordContinuationProgress(h.params))!;
++    await p.replyOptions.onToolStart?.({ phase: "start", name: "read", toolCallId: "calendar" });
++    await p.replyOptions.onNarrationUpdate?.({ text: "Must not appear after replacement." });
++    h.invalidate();
++    await vi.advanceTimersByTimeAsync(10_000);
++    expect(h.writes).toEqual([]);
++    await p.cleanup();
++  });
++});
+diff --git a/extensions/discord/src/continuation-progress.ts b/extensions/discord/src/continuation-progress.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..32c05196c402aefd0d2c1f23c4688deea1e89db0
+--- /dev/null
++++ b/extensions/discord/src/continuation-progress.ts
+@@ -0,0 +1,82 @@
++import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
++import { resolveChunkMode, resolveTextChunkLimit } from "openclaw/plugin-sdk/reply-chunking";
++import { resolveDiscordMaxLinesPerMessage } from "./accounts.js";
++import type { ChannelPlugin } from "./channel-api.js";
++import { createDiscordRestClient } from "./client.js";
++import { createDiscordDraftPreviewController } from "./monitor/message-handler.draft-preview.js";
++import { resolveDiscordPreviewStreamMode } from "./preview-streaming.js";
++import { parseDiscordTarget } from "./targets.js";
++
++type CreateProgress = NonNullable<
++  NonNullable<ChannelPlugin["streaming"]>["createContinuationProgress"]
++>;
++
++/** Source progress uses the ordinary Discord card, never the private completion payload. */
++export const createDiscordContinuationProgress: CreateProgress = async (params) => {
++  const target = parseDiscordTarget(params.to, { defaultKind: "channel" });
++  // A user target needs the ordinary DM resolution owner; retain that fallback.
++  if (target?.kind !== "channel") {
++    return undefined;
++  }
++  params.assertCurrent();
++  const { rest, account } = createDiscordRestClient(params);
++  if (resolveDiscordPreviewStreamMode(account.config) !== "progress") {
++    return undefined;
++  }
++  const draft = createDiscordDraftPreviewController({
++    cfg: params.cfg,
++    discordConfig: account.config,
++    accountId: account.accountId,
++    sourceRepliesAreToolOnly: false,
++    textLimit: resolveTextChunkLimit(params.cfg, "discord", account.accountId),
++    deliveryRest: rest,
++    deliverChannelId: params.threadId != null ? String(params.threadId) : target.id,
++    replyReference: { peek: () => undefined },
++    tableMode: resolveMarkdownTableMode({
++      cfg: params.cfg,
++      channel: "discord",
++      accountId: account.accountId,
++    }),
++    maxLinesPerMessage: resolveDiscordMaxLinesPerMessage({
++      cfg: params.cfg,
++      discordConfig: account.config,
++      accountId: account.accountId,
++    }),
++    chunkMode: resolveChunkMode(params.cfg, "discord", account.accountId),
++    assertCurrent: params.assertCurrent,
++    // Caller owns error reporting; never publish diagnostics into the progress card.
++    log: () => undefined,
++  });
++  if (!draft.draftStream) {
++    return undefined;
++  }
++  return {
++    replyOptions: {
++      onToolStart: (payload) => draft.pushToolEvent(payload),
++      onItemEvent: (payload) =>
++        payload.kind === "preamble"
++          ? draft.pushPreambleItemEvent(payload)
++          : draft.pushItemEvent(payload),
++      onCommandOutput: (payload) => draft.pushCommandOutputEvent(payload),
++      onNarrationUpdate: draft.narrationProgressEnabled
++        ? async ({ text }) => {
++            params.assertCurrent();
++            await draft.pushNarrationProgress(text);
++          }
++        : undefined,
++      onProgressNarratorLifecycle: (lifecycle) => draft.setProgressNarratorLifecycle(lifecycle),
++      isProgressDraftVisible: () => draft.isProgressDraftVisible,
++      narrationHideCommandText: draft.narrationHideCommandText,
++    },
++    async finish() {
++      // Seal the last factual update; the command's separate final owner remains authoritative.
++      draft.markFinalReplyStarted();
++      params.assertCurrent();
++      await draft.finalizeProgressDraft();
++    },
++    async cleanup() {
++      draft.markFinalReplyStarted();
++      await draft.cleanup();
++    },
++  };
++};
+diff --git a/extensions/discord/src/draft-stream.ts b/extensions/discord/src/draft-stream.ts
+index 2d574e7a70b4f7136fc58e4edc1f79fa4a25e519..383d30097ebe2d0be4d9960bbf9b07da29f94ca1 100644
+--- a/extensions/discord/src/draft-stream.ts
++++ b/extensions/discord/src/draft-stream.ts
+@@ -36,6 +36,8 @@ type DiscordDraftUpdate = { text: string; complete: boolean };
+ 
+ export function createDiscordDraftStream(params: {
+   rest: RequestClient;
++  /** Fence delayed coalesced writes against the owning requester generation. */
++  assertCurrent?: () => void;
+   channelId: string;
+   maxChars?: number;
+   replyToMessageId?: string | (() => string | undefined);
+@@ -103,6 +105,7 @@ export function createDiscordDraftStream(params: {
+ 
+     lastSentText = trimmed;
+     try {
++      params.assertCurrent?.();
+       if (streamMessageId !== undefined) {
+         // Edit existing message
+         await editChannelMessage(rest, channelId, streamMessageId, {
 diff --git a/extensions/discord/src/monitor/agent-components-context.ts b/extensions/discord/src/monitor/agent-components-context.ts
 index 6f79e2325696eaf09a597f0128e9f8aebb715f78..7ea16506100e27ff97fd753b8b43eda428aaae84 100644
 --- a/extensions/discord/src/monitor/agent-components-context.ts
@@ -8514,11 +8758,58 @@ index 5aeb5a03418aebb9354331e4ead389b4e1397343..26b3bafe398cbef9d4ae6af5fa6f7c5f
            ephemeral: true,
          });
        } catch {}
+diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts b/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts
+index dc8076bc7eabd2c00919a8b89f2e1efa13f66318..dd7b2c67f83b639b5c2e90cde3044b5d26ae4a05 100644
+--- a/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts
++++ b/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts
+@@ -53,7 +53,7 @@ describe("Discord draft preview REST lifecycle", () => {
+       expect(visible.size).toBe(0);
+       await controller.pushPlanProgress([{ step: "Check", status: "in_progress" }]);
+       await controller.flush();
+-      expect([...visible.values()]).toEqual(["▸ Check"]);
++      expect([...visible.values()]).toEqual(["In progress: Check"]);
+       await controller.pushPlanProgress([], { explanation: "Progress updated" });
+       await controller.flush();
+       expect([...visible.values()]).toEqual(["Progress updated"]);
+@@ -61,7 +61,7 @@ describe("Discord draft preview REST lifecycle", () => {
+       expect(visible.size).toBe(0);
+       await controller.pushPlanProgress([{ step: "Retry", status: "pending" }]);
+       await controller.flush();
+-      expect([...visible.values()]).toEqual(["▢ Retry"]);
++      expect([...visible.values()]).toEqual(["Pending: Retry"]);
+       controller.handleAssistantMessageBoundary();
+       await controller.pushItemEvent({
+         itemId: "card-rejected",
+@@ -76,7 +76,7 @@ describe("Discord draft preview REST lifecycle", () => {
+       await controller.flush();
+       expect(visible.size).toBe(1);
+       const withActivity = [...visible.values()][0];
+-      expect(withActivity).toContain("▢ Retry");
++      expect(withActivity).toContain("Pending: Retry");
+       expect(withActivity).toContain("blocked");
+       expect(withActivity).toContain("Exec");
+       expect(withActivity).not.toContain("private detail");
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.ts b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..a612ac09eb8e9b1e5d7105a6d629d6c156988189 100644
+index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..ef7a8b98592768163245b35e7bc50aa7ab4eb37c 100644
 --- a/extensions/discord/src/monitor/message-handler.draft-preview.ts
 +++ b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-@@ -108,8 +108,6 @@ export function createDiscordDraftPreviewController(params: {
+@@ -40,6 +40,7 @@ export function createDiscordDraftPreviewController(params: {
+   maxLinesPerMessage: number | undefined;
+   chunkMode: Parameters<typeof chunkDiscordTextWithMode>[1]["chunkMode"];
+   log: (message: string) => void;
++  assertCurrent?: () => void;
+ }) {
+   const discordStreamMode = resolveDiscordPreviewStreamMode(params.discordConfig);
+   // Provider drafts are visible before outbound modifiers run. Keep them off whenever a hook
+@@ -66,6 +67,7 @@ export function createDiscordDraftPreviewController(params: {
+   const draftStream = canStreamDraft
+     ? createDiscordDraftStream({
+         rest: params.deliveryRest,
++        assertCurrent: params.assertCurrent,
+         channelId: params.deliverChannelId,
+         maxChars: draftMaxChars,
+         replyToMessageId: () => params.replyReference.peek(),
+@@ -108,8 +110,6 @@ export function createDiscordDraftPreviewController(params: {
      mode: discordStreamMode,
      active: Boolean(draftStream),
      seed: progressSeed,
@@ -11101,6 +11392,30 @@ index 0000000000000000000000000000000000000000..9862172a5f3b048dd6fb506dee7f06d2
 +export { sendMessageDiscord } from "./send.outbound.js";
 +export { makeDiscordRest } from "./send.test-harness.js";
 +export const loadDiscordPlugin = () => import("./channel.js");
+diff --git a/extensions/discord/src/shared.ts b/extensions/discord/src/shared.ts
+index 67a0762251138ecbe18b76949f853fbd3604fd3e..cd2022c96b3265e426d914dc227e04b9803e8c15 100644
+--- a/extensions/discord/src/shared.ts
++++ b/extensions/discord/src/shared.ts
+@@ -49,6 +49,10 @@ type DiscordConfigAccessorAccount = {
+   defaultTo: string | undefined;
+ };
+ 
++const loadContinuationProgress = createLazyRuntimeModule(
++  () => import("./continuation-progress.js"),
++);
++
+ const loadDiscordDoctorModule = createLazyRuntimeModule(() => import("./doctor.js"));
+ 
+ const discordDoctor: ChannelDoctorAdapter = {
+@@ -149,6 +153,8 @@ export function createDiscordPluginBase(params: {
+     doctor: discordDoctor,
+     streaming: {
+       blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
++      createContinuationProgress: async (progressParams) =>
++        (await loadContinuationProgress()).createDiscordContinuationProgress(progressParams),
+     },
+     reload: {
+       configPrefixes: ["channels.discord"],
 diff --git a/extensions/discord/test-api.ts b/extensions/discord/test-api.ts
 index 3b8ed2371538216188c130684865dee5c303472d..999aaf664f2fe1ffa9bddc47ffc59a8a79739694 100644
 --- a/extensions/discord/test-api.ts
@@ -22013,14 +22328,247 @@ index ab3cd36b20f3c3be508332de77fd2e1cc6f0af9a..2ebcbbc016e443f5ce12863772b03150
      onExecutionPhase: onRuntimeActivity,
      deferTerminalLifecycle: params.deferTerminalLifecycle,
      onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
+diff --git a/src/agents/command/continuation-presentation.test.ts b/src/agents/command/continuation-presentation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e3a1ec045ae0c882a9854ff01cd2b0b751568ed0
+--- /dev/null
++++ b/src/agents/command/continuation-presentation.test.ts
+@@ -0,0 +1,226 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import type { GetReplyOptions } from "../../auto-reply/get-reply-options.types.js";
++import type { CliDeps } from "../../cli/deps.types.js";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import type { AgentCommandOpts } from "./types.js";
++
++const mocks = vi.hoisted(() => ({
++  plugin: vi.fn(),
++  preflight: vi.fn(),
++  typing: vi.fn(),
++  prepare: vi.fn(),
++  narrate: vi.fn(),
++}));
++vi.mock("../../channels/plugins/index.js", () => ({ getChannelPlugin: mocks.plugin }));
++vi.mock("./session-helpers.js", () => ({ prepareCurrentRunDelivery: mocks.preflight }));
++vi.mock("./run-embedded-attempt.js", () => ({ runEmbeddedAgentAttempt: vi.fn() }));
++vi.mock("../../auto-reply/reply/progress-narrator-model.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../../auto-reply/reply/progress-narrator-model.js")>()),
++  prepareNarrationModel: mocks.prepare,
++  generateNarrationWithUtilityModel: mocks.narrate,
++}));
++import { createAgentCommandContinuationPresentation } from "./continuation-presentation.js";
++
++const source = { channel: "discord", to: "channel:123", accountId: "default" };
++function setup() {
++  let current = true;
++  const assertCurrent = () => {
++    if (!current) {
++      throw new Error("replaced");
++    }
++  };
++  const opts: AgentCommandOpts = {
++    message: "PRIVATE CHILD RESULT",
++    deliver: false,
++    inputProvenance: {
++      kind: "inter_session",
++      sourceSessionKey: "agent:main:subagent:child",
++      sourceTool: "subagent_settle",
++    },
++    requesterPresentation: {
++      runId: "resume",
++      sessionKey: "agent:main:discord:channel:123",
++      sessionId: "session",
++      source,
++      assertCurrent,
++    },
++  };
++  const updates: Array<{ at: number; text: string }> = [];
++  let stopNarrator: (() => void) | undefined;
++  const replyOptions: GetReplyOptions = {
++    onToolStart: () => false,
++    onItemEvent: ({ kind, progressText }) => {
++      if (kind === "preamble" && progressText) {
++        updates.push({ at: Date.now(), text: progressText });
++      }
++      return true;
++    },
++    onCommandOutput: () => false,
++    onNarrationUpdate: ({ text }) => {
++      assertCurrent();
++      updates.push({ at: Date.now(), text });
++    },
++    onProgressNarratorLifecycle: ({ stopTurn }) => {
++      stopNarrator = stopTurn;
++    },
++    isProgressDraftVisible: () => updates.length > 0,
++    narrationHideCommandText: true,
++  };
++  const finish = vi.fn(async () => {
++    stopNarrator?.();
++  });
++  const cleanup = vi.fn(async () => {
++    stopNarrator?.();
++  });
++  const factory = vi.fn(async () => ({ replyOptions, finish, cleanup }));
++  const cfg: OpenClawConfig = {
++    agents: { defaults: { utilityModel: "openai/gpt-5.5-mini" } },
++    channels: {
++      discord: {
++        streaming: {
++          mode: "progress",
++          progress: {
++            label: false,
++            toolProgress: false,
++            commandText: "status",
++            commentary: true,
++            narration: true,
++          },
++        },
++      },
++    },
++  };
++  mocks.plugin.mockReturnValue({
++    config: { resolveAccount: () => ({ config: cfg.channels?.discord }) },
++    streaming: { createContinuationProgress: factory },
++    heartbeat: { sendTyping: mocks.typing },
++  });
++  mocks.preflight.mockResolvedValue({ context: source, targetMode: "explicit" });
++  return {
++    opts,
++    updates,
++    factory,
++    finish,
++    cleanup,
++    invalidate: () => {
++      current = false;
++    },
++    params: {
++      cfg,
++      opts,
++      sessionKey: "agent:main:discord:channel:123",
++      sessionId: "session",
++      agentId: "main",
++      runId: "resume",
++      deps: {} as CliDeps,
++      timeoutMs: 600_000,
++      assertCurrent,
++    },
++  };
++}
++function event(stream: string, data: Record<string, unknown>) {
++  return { stream, data, runId: "resume", seq: 1, ts: Date.now() };
++}
++
++describe("requester continuation presentation", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++    vi.setSystemTime(100_000);
++    vi.clearAllMocks();
++    mocks.prepare.mockResolvedValue({ provider: "openai", model: "gpt-5.5-mini" });
++    let narration = 0;
++    mocks.narrate.mockImplementation(async () => ({
++      text: `Checking the calendar details, step ${++narration}.`,
++    }));
++  });
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("keeps private final routing while presenting the parent's 249-second tool-only continuation", async () => {
++    const h = setup();
++    const presentation = await createAgentCommandContinuationPresentation(h.params);
++    expect(presentation).toBeDefined();
++    await presentation!.onAgentEvent(event("lifecycle", { phase: "start" }));
++    await presentation!.onAgentEvent(
++      event("item", {
++        kind: "preamble",
++        phase: "end",
++        itemId: "p1",
++        progressText: "I’m checking the calendar invitation.",
++      }),
++    );
++    for (let i = 0; i < 17; i++) {
++      await vi.advanceTimersByTimeAsync(14_650);
++      await presentation!.onAgentEvent(
++        event("tool", {
++          phase: "start",
++          name: "read",
++          toolCallId: `tool-${i}`,
++          args: { path: "calendar-evidence.json" },
++        }),
++      );
++      await vi.advanceTimersByTimeAsync(1);
++    }
++    expect(h.updates.length).toBeGreaterThan(1);
++    expect(Math.max(...h.updates.slice(1).map((u, i) => u.at - h.updates[i].at))).toBeLessThan(
++      180_000,
++    );
++    expect(mocks.typing).toHaveBeenCalled();
++    expect(h.opts.deliver).toBe(false);
++    expect(JSON.stringify(h.updates)).not.toContain("PRIVATE CHILD RESULT");
++    expect(JSON.stringify(mocks.narrate.mock.calls)).not.toContain("PRIVATE CHILD RESULT");
++    await presentation!.finish();
++    const count = h.updates.length;
++    await presentation!.onAgentEvent(
++      event("item", { kind: "preamble", phase: "end", progressText: "late final" }),
++    );
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(h.updates).toHaveLength(count);
++    expect(h.finish).toHaveBeenCalledOnce();
++    presentation!.cleanup();
++  });
++
++  it.each(["run", "session", "missing"])(
++    "does not expose a private continuation with %s authority mismatch",
++    async (kind) => {
++      const h = setup();
++      if (kind === "missing") {
++        delete h.opts.requesterPresentation;
++      } else if (kind === "run") {
++        h.opts.requesterPresentation!.runId = "another-run";
++      } else {
++        h.opts.requesterPresentation!.sessionId = "new-session";
++      }
++      expect(await createAgentCommandContinuationPresentation(h.params)).toBeUndefined();
++      expect(h.factory).not.toHaveBeenCalled();
++    },
++  );
++
++  it.each(["cancel", "replace", "cleanup"])(
++    "fences delayed presentation after %s",
++    async (kind) => {
++      const h = setup();
++      const abort = new AbortController();
++      h.opts.abortSignal = abort.signal;
++      const p = (await createAgentCommandContinuationPresentation(h.params))!;
++      await p.onAgentEvent(
++        event("item", { kind: "preamble", phase: "end", progressText: "Checking evidence." }),
++      );
++      if (kind === "cancel") {
++        abort.abort();
++      } else if (kind === "replace") {
++        h.invalidate();
++      } else {
++        p.cleanup();
++      }
++      const count = h.updates.length;
++      await p.onAgentEvent(
++        event("item", { kind: "preamble", phase: "end", progressText: "must not leak" }),
++      );
++      await vi.advanceTimersByTimeAsync(60_000);
++      expect(h.updates).toHaveLength(count);
++      p.cleanup();
++    },
++  );
++});
 diff --git a/src/agents/command/continuation-presentation.ts b/src/agents/command/continuation-presentation.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7beafc2aeddf
+index 0000000000000000000000000000000000000000..a69df6286a55c3bc0267c51793a59f3a150cccf5
 --- /dev/null
 +++ b/src/agents/command/continuation-presentation.ts
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,495 @@
 +import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 +import { normalizeReplyPayloadOutcome } from "../../auto-reply/reply/normalize-reply.js";
++import { attachProgressNarratorToReplyOptions } from "../../auto-reply/reply/progress-narrator.js";
 +import { createTypingSignaler, resolveTypingMode } from "../../auto-reply/reply/typing-mode.js";
 +import { createTypingController } from "../../auto-reply/reply/typing.js";
 +import { createChannelReplyTransform } from "../../channels/message/reply-transform.js";
@@ -22034,6 +22582,7 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +import type { CliDeps } from "../../cli/deps.types.js";
 +import { createOutboundSendDeps } from "../../cli/outbound-send-deps.js";
 +import { mergeAccountConfig } from "../../config/channel-account-config.js";
++import type { SessionEntry } from "../../config/sessions/types.js";
 +import type { TypingMode } from "../../config/types.base.js";
 +import type { OpenClawConfig } from "../../config/types.openclaw.js";
 +import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
@@ -22043,6 +22592,8 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +import { resolveAccountEntry } from "../../routing/account-lookup.js";
 +import { isSubagentSessionKey, normalizeAccountId } from "../../routing/session-key.js";
 +import { isCompletionReportInputProvenance } from "../../sessions/input-provenance.js";
++import { isModelSelectionLocked } from "../../sessions/model-overrides.js";
++import { resolveSendPolicy } from "../../sessions/send-policy.js";
 +import { isCronSessionKey } from "../../sessions/session-key-utils.js";
 +import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
 +import { isDeliverableMessageChannel } from "../../utils/message-channel.js";
@@ -22050,6 +22601,7 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +import type { RunEmbeddedAgentInternalParams } from "../embedded-agent-runner/run/internal-params.js";
 +import type { createAgentAttemptLifecycleCallbacks } from "./attempt-callbacks.js";
 +import { runEmbeddedAgentAttempt } from "./run-embedded-attempt.js";
++import { prepareCurrentRunDelivery } from "./session-helpers.js";
 +import type { AgentCommandOpts } from "./types.js";
 +
 +const log = createSubsystemLogger("agents/continuation-presentation");
@@ -22066,11 +22618,13 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +};
 +
 +/** The command owner retains source presentation when a child resumes its requester. */
-+function createAgentCommandContinuationPresentation(params: {
++export async function createAgentCommandContinuationPresentation(params: {
 +  cfg: OpenClawConfig;
 +  opts: AgentCommandOpts;
 +  source?: DeliveryContext;
 +  sessionKey?: string;
++  sessionId: string;
++  sessionEntry?: SessionEntry;
 +  agentId: string;
 +  runId: string;
 +  outboundSession?: OutboundSessionContext;
@@ -22078,10 +22632,17 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +  timeoutMs: number;
 +  typingMode?: TypingMode;
 +  assertCurrent: () => void;
-+}): AgentCommandContinuationPresentation | undefined {
-+  const { opts, source, sessionKey } = params;
++}): Promise<AgentCommandContinuationPresentation | undefined> {
++  const { opts, sessionKey } = params;
++  const requester = opts.requesterPresentation;
++  const presentsRequester =
++    requester != null &&
++    requester.runId === params.runId &&
++    requester.sessionKey === sessionKey &&
++    requester.sessionId === params.sessionId;
++  let source = params.source;
 +  if (
-+    opts.deliver !== true ||
++    (opts.deliver !== true && !presentsRequester) ||
 +    opts.sessionEffects === "internal" ||
 +    opts.modelRun === true ||
 +    opts.promptMode === "none" ||
@@ -22090,11 +22651,43 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +    opts.bootstrapContextRunKind === "cron" ||
 +    isCronSessionKey(sessionKey) ||
 +    isSubagentSessionKey(sessionKey) ||
-+    !isCompletionReportInputProvenance(opts.inputProvenance) ||
-+    !source?.channel ||
-+    !source.to ||
-+    !isDeliverableMessageChannel(source.channel)
++    !isCompletionReportInputProvenance(opts.inputProvenance)
 +  ) {
++    return undefined;
++  }
++  if (presentsRequester && opts.deliver !== true) {
++    requester.assertCurrent();
++    params.assertCurrent();
++    if (
++      resolveSendPolicy({
++        cfg: params.cfg,
++        entry: params.sessionEntry,
++        sessionKey,
++        channel: requester.source.channel,
++        chatType: params.sessionEntry?.chatType,
++      }) === "deny"
++    ) {
++      return undefined;
++    }
++    // Presentation gets its own validated route. Do not set deliver or pending-final state.
++    source = (
++      await prepareCurrentRunDelivery({
++        cfg: params.cfg,
++        agentId: params.agentId,
++        currentSessionKey: sessionKey,
++        sessionEntry: params.sessionEntry,
++        opts: {
++          ...opts,
++          deliver: true,
++          replyChannel: requester.source.channel,
++          replyTo: requester.source.to,
++          replyAccountId: requester.source.accountId,
++          threadId: requester.source.threadId,
++        },
++      })
++    )?.context;
++  }
++  if (!source?.channel || !source.to || !isDeliverableMessageChannel(source.channel)) {
 +    return undefined;
 +  }
 +  // Command delivery preflight already resolved the source route and account.
@@ -22149,7 +22742,15 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +    if (closed) {
 +      throw new Error("requester continuation presentation is closed");
 +    }
-+    params.assertCurrent();
++    try {
++      params.assertCurrent();
++      if (presentsRequester) {
++        requester.assertCurrent();
++      }
++    } catch (error) {
++      lifetime.abort(error);
++      throw error;
++    }
 +  };
 +  const typingTarget = { cfg: params.cfg, to, accountId, threadId };
 +  const typingMode = resolveTypingMode({
@@ -22200,6 +22801,68 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +    messaging: plugin?.messaging,
 +  });
 +
++  const progress = await plugin?.streaming?.createContinuationProgress?.({
++    cfg: params.cfg,
++    to,
++    accountId,
++    threadId,
++    signal,
++    assertCurrent,
++  });
++  const progressOptions = progress
++    ? attachProgressNarratorToReplyOptions({
++        cfg: params.cfg,
++        agentId: params.agentId,
++        // Never feed the private child settlement prompt into source narration.
++        opts: { ...progress.replyOptions, abortSignal: signal },
++        disabled: isModelSelectionLocked(params.sessionEntry),
++      })
++    : undefined;
++  const noteProgress = async (event: AgentEvent) => {
++    assertCurrent();
++    const data = event.data;
++    if (!data || data.hideFromChannelProgress === true || data.suppressChannelProgress === true) {
++      return;
++    }
++    const str = (key: string) => {
++      const value = data[key];
++      return typeof value === "string" ? value : undefined;
++    };
++    if (event.stream === "tool") {
++      await progressOptions?.onToolStart?.({
++        itemId: str("itemId"),
++        toolCallId: str("toolCallId"),
++        name: str("name"),
++        phase: str("phase"),
++        args: asOptionalRecord(data.args),
++      });
++    } else if (event.stream === "item") {
++      await progressOptions?.onItemEvent?.({
++        itemId: str("itemId"),
++        toolCallId: str("toolCallId"),
++        kind: str("kind"),
++        name: str("name"),
++        title: str("title"),
++        phase: str("phase"),
++        status: str("status"),
++        progressText:
++          typeof data.progressText === "string"
++            ? sanitizeUserFacingText(data.progressText, { streaming: true })
++            : undefined,
++        commandBearing: data.commandBearing === true,
++      });
++    } else if (event.stream === "command_output") {
++      await progressOptions?.onCommandOutput?.({
++        itemId: str("itemId"),
++        toolCallId: str("toolCallId"),
++        name: str("name"),
++        phase: str("phase"),
++        status: str("status"),
++        exitCode: typeof data.exitCode === "number" ? data.exitCode : undefined,
++      });
++    }
++  };
++
 +  return {
 +    onReasoningStream(payload) {
 +      return payload.text?.trim()
@@ -22244,6 +22907,16 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +      ) {
 +        const text = sanitizeUserFacingText(event.data.progressText, { streaming: true });
 +        typingUpdate = signalTyping(() => typingSignals.signalTextDelta(text));
++      }
++      if (progress) {
++        pending = pending
++          .then(() => noteProgress(event))
++          .catch((error: unknown) => {
++            if (!signal.aborted) {
++              log.debug(`continuation progress stopped: ${String(error)}`);
++            }
++          });
++        return Promise.all([typingUpdate, pending]).then(() => undefined);
 +      }
 +      if (
 +        !commentaryEnabled ||
@@ -22326,12 +22999,20 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +      accepting = false;
 +      // Progress is not a final receipt. Drain it before the normal final sender.
 +      await pending;
++      await progress?.finish().catch((error: unknown) => {
++        if (!signal.aborted) {
++          log.debug(`continuation progress finish: ${String(error)}`);
++        }
++      });
 +    },
 +    cleanup() {
 +      accepting = false;
 +      closed = true;
 +      lifetime.abort(new Error("requester continuation presentation closed"));
 +      typing.cleanup();
++      void progress
++        ?.cleanup()
++        .catch((error: unknown) => log.debug(`continuation cleanup: ${String(error)}`));
 +    },
 +  };
 +}
@@ -22346,11 +23027,13 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +) {
 +  const { prepared, opts } = params;
 +  let lifecycleGeneration = params.lifecycleGeneration;
-+  const presentation = createAgentCommandContinuationPresentation({
++  const presentation = await createAgentCommandContinuationPresentation({
 +    cfg: prepared.cfg,
 +    opts,
 +    source: params.source,
 +    sessionKey: prepared.sessionKey,
++    sessionId: prepared.sessionId,
++    sessionEntry: prepared.sessionEntry,
 +    agentId: prepared.sessionAgentId,
 +    runId: prepared.runId,
 +    outboundSession: prepared.outboundSession,
@@ -22362,6 +23045,9 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +      assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
 +      params.preparedRunAdmission.assertSourceCurrent();
 +    },
++  }).catch((error: unknown) => {
++    log.debug(`continuation presentation unavailable: ${String(error)}`);
++    return undefined;
 +  });
 +  params.onPresentation(presentation);
 +  const attempt = await runEmbeddedAgentAttempt({
@@ -22375,6 +23061,22 @@ index 0000000000000000000000000000000000000000..508ae06f05b47b0a8fdec60e1eeb7bea
 +  await presentation?.finish();
 +  return attempt;
 +}
+diff --git a/src/agents/command/requester-presentation.ts b/src/agents/command/requester-presentation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c04569eea18e2118e6e82eb757e341f5fc76466d
+--- /dev/null
++++ b/src/agents/command/requester-presentation.ts
+@@ -0,0 +1,10 @@
++import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
++
++/** In-process authority retained by an explicitly yielded original requester. */
++export type RequesterPresentation = {
++  runId: string;
++  sessionKey: string;
++  sessionId: string;
++  source: DeliveryContext;
++  assertCurrent: () => void;
++};
 diff --git a/src/agents/command/run-embedded-attempt.ts b/src/agents/command/run-embedded-attempt.ts
 index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..f50f363854762ee6bea9578617b8eb3286ace9e6 100644
 --- a/src/agents/command/run-embedded-attempt.ts
@@ -22440,6 +23142,27 @@ index 068c84e1d2dfd3cfced11fb76f1090837a506b80..72a80990ab7d01d38fb2e8501609d072
    trackInternalModelRunTarget: (target: AgentRunSessionTarget | undefined) => void;
 +  presentation?: AgentAttemptPresentationCallbacks;
  };
+diff --git a/src/agents/command/types.ts b/src/agents/command/types.ts
+index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113a12a9b32 100644
+--- a/src/agents/command/types.ts
++++ b/src/agents/command/types.ts
+@@ -25,6 +25,7 @@ import type { RuntimeContextFragment } from "../internal-runtime-context.js";
+ import type { MainSessionRecoveryOwnerLease } from "../main-session-recovery/main-session-recovery-store.js";
+ import type { ScheduledToolPolicyContext } from "../scheduled-tool-policy.js";
+ import type { TrustedSubagentCompletionHandoff } from "../subagents/announce/subagent-announce-handoff.js";
++import type { RequesterPresentation } from "./requester-presentation.js";
+ import type { AgentStreamParams, ClientToolDefinition } from "./shared-types.js";
+ 
+ /** Image content block for Claude API multimodal messages. */
+@@ -88,6 +89,8 @@ export type AgentCommandOpts = {
+   json?: boolean;
+   timeout?: string;
+   deliver?: boolean;
++  /** Private in-process source presentation; never changes final delivery. */
++  requesterPresentation?: RequesterPresentation;
+   /** Override delivery target (separate from session routing). */
+   replyTo?: string;
+   /** Override delivery channel (separate from session routing). */
 diff --git a/src/agents/delegation-guidance.test.ts b/src/agents/delegation-guidance.test.ts
 index d5b16aa19627ade30d53e94ced2691d35cb1994a..265dadce60fff992f45c65b7db30fe1f50a05fd1 100644
 --- a/src/agents/delegation-guidance.test.ts
@@ -32073,6 +32796,90 @@ index 250e73f229eaf44cc88b027c305a65fa2661b845..ea6699e513e934a66098fef339a4c6c5
    const persistedRuntime =
      params.entry?.modelSelectionLocked === true
        ? resolvePersistedSessionRuntimeId(params.entry)
+diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+index 2622e13cea56220c7a92c80164c484f4e5d1a624..37d7f08b6a5f91fe3a6e5520ab5b42c50f7af168 100644
+--- a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+@@ -10,6 +10,7 @@ import { deriveSessionChatTypeFromKey } from "../../../sessions/session-chat-typ
+ import { isNonTerminalAgentRunStatus } from "../../../shared/agent-run-status.js";
+ import { buildAgentRunTerminalOutcomeFromWaitResult } from "../../agent-run-terminal-outcome.js";
+ import { sanitizeAgentRunTerminalReplyText } from "../../agent-run-terminal-reply.js";
++import type { RequesterPresentation } from "../../command/requester-presentation.js";
+ import {
+   hasCommittedSourceReplyDeliveryEvidence,
+   hasMessagingToolDeliveryEvidence,
+@@ -36,6 +37,7 @@ import { inferDeliveryTargetChatType } from "./subagent-announce-origin.js";
+ export async function runAnnounceAgentCall(params: {
+   agentParams: Record<string, unknown>;
+   privateCompletion?: true;
++  requesterPresentation?: RequesterPresentation;
+   delegatedToolPolicyHandoff?: SubagentCompletionToolHandoffRegistration;
+   expectFinal?: boolean;
+   signal?: AbortSignal;
+@@ -67,6 +69,7 @@ export async function runAnnounceAgentCall(params: {
+     const dispatch = dispatchSubagentAnnounceAgent(params.agentParams, {
+       cancelOnDeadline: true,
+       privateCompletion: params.privateCompletion,
++      requesterPresentation: params.requesterPresentation,
+       expectFinal: params.expectFinal,
+       forceSyntheticClient: shouldPreserveUserFacingSessionStateForInputProvenance(
+         params.agentParams.inputProvenance,
+diff --git a/src/agents/subagents/announce/subagent-announce-delivery.ts b/src/agents/subagents/announce/subagent-announce-delivery.ts
+index 4a5dbf48c927551db50dd067bb68b6af47e31df6..a68b04318e83e7e057958793fe965a05dc1127f8 100644
+--- a/src/agents/subagents/announce/subagent-announce-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-delivery.ts
+@@ -21,6 +21,7 @@ import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-tra
+ import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
+ import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
+ import { INTERNAL_MESSAGE_CHANNEL } from "../../../utils/message-channel.js";
++import type { RequesterPresentation } from "../../command/requester-presentation.js";
+ import { hasGeneratedMediaCompletionEvent } from "../../internal-event-contract.js";
+ import {
+   collectAgentInternalEventMedia,
+@@ -137,6 +138,7 @@ function createCompletionUserTurnTranscriptRecorderFactory(params: {
+ 
+ export async function deliverSubagentAnnouncement(params: {
+   requesterSessionKey: string;
++  requesterPresentation?: RequesterPresentation;
+   requesterAgentId?: string;
+   requesterRunTimeoutSeconds?: number;
+   triggerMessage: string;
+@@ -321,6 +323,7 @@ export async function deliverSubagentAnnouncement(params: {
+         return sourceOwnerChangedResult();
+       }
+       return await sendSubagentAnnounceDirectly({
++        requesterPresentation: params.requesterPresentation,
+         requesterSessionKey: params.requesterSessionKey,
+         requesterAgentId: params.requesterAgentId,
+         requesterRunTimeoutSeconds: params.requesterRunTimeoutSeconds,
+diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
+index 258678ab6829ade42e090701c643889459777fe1..13675b3c9e88154accfe8b56a37f7ef9d8aa907d 100644
+--- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
+@@ -20,6 +20,7 @@ import {
+   normalizeMessageChannel,
+ } from "../../../utils/message-channel.js";
+ import { normalizeAgentRunTerminalDeliverySnapshot } from "../../agent-run-terminal-delivery.js";
++import type { RequesterPresentation } from "../../command/requester-presentation.js";
+ import {
+   getAgentCommandDeliveryFailure,
+   getGatewayAgentResult,
+@@ -79,6 +80,7 @@ const REQUESTER_FINAL_VISIBLE_TEXT_MAX_CHARS = 12_000;
+ 
+ export async function sendSubagentAnnounceDirectly(params: {
+   requesterSessionKey: string;
++  requesterPresentation?: RequesterPresentation;
+   requesterAgentId?: string;
+   requesterRunTimeoutSeconds?: number;
+   targetRequesterSessionKey: string;
+@@ -394,6 +396,7 @@ export async function sendSubagentAnnounceDirectly(params: {
+           }
+           return await runAnnounceAgentCall({
+             agentParams: directAgentParams,
++            requesterPresentation: params.requesterPresentation,
+             ...(parentOnly ? { privateCompletion: true as const } : {}),
+             delegatedToolPolicyHandoff:
+               isSubagentCompletion &&
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts b/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7990491a3
@@ -32164,6 +32971,221 @@ index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7
 +    );
 +  });
 +}
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
+index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330abe432117e 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
+@@ -9,6 +9,8 @@ import {
+   getTaskById,
+   maybeDeliverTaskTerminalUpdate,
+ } from "../../../tasks/task-registry.js";
++import { normalizeSessionDeliveryState } from "../../../utils/delivery-context.shared.js";
++import type { RequesterPresentation } from "../../command/requester-presentation.js";
+ import { killSessionSubagentRuns } from "../registry/subagent-control-kill.js";
+ import { useSubagentControlFixture } from "../registry/subagent-control.test-support.js";
+ import { subagentRuns } from "../registry/subagent-registry-memory.js";
+@@ -260,3 +262,92 @@ it.each(["batch", "ordinary"] as const)(
+     }
+   },
+ );
++
++it("keeps private source presentation current through real paused requester adoption", async () => {
++  const requesterKey = "agent:main:discord:channel:123";
++  const childKey = "agent:main:subagent:private-presentation";
++  for (const [runId, key, parent] of [
++    ["presentation-parent", requesterKey, "agent:main:main"],
++    ["presentation-child", childKey, requesterKey],
++  ] as const) {
++    const storePath = await writeSubagentSessionEntry({
++      stateDir: fixture.stateDir,
++      agentId: "main",
++      sessionKey: key,
++      defaultSessionId: `${runId}-session`,
++    });
++    if (key === requesterKey) {
++      await patchSessionEntryCore({ storePath, sessionKey: key }, () => ({
++        delivery: normalizeSessionDeliveryState({
++          context: { channel: "discord", to: "channel:123" },
++        }),
++      }));
++    }
++    registerSubagentRun({
++      runId,
++      childSessionKey: key,
++      requesterSessionKey: parent,
++      requesterAgentId: "main",
++      requesterTurnRunId: runId === "presentation-child" ? "presentation-parent" : undefined,
++      requesterDisplayKey: parent,
++      task: runId,
++      cleanup: "keep",
++      expectsCompletionMessage: runId === "presentation-child",
++      ...(runId === "presentation-child"
++        ? {
++            completionTarget: "parent" as const,
++            completionRequesterSessionId: "presentation-parent-session",
++          }
++        : {}),
++    });
++  }
++  expect(
++    markRequesterTurnYielded({
++      requesterSessionKey: requesterKey,
++      requesterAgentId: "main",
++      requesterTurnRunId: "presentation-parent",
++    }),
++  ).toBe(1);
++  expect(markSubagentRunPausedAfterYield({ entry: subagentRuns.get("presentation-parent")! })).toBe(
++    true,
++  );
++  persistSubagentRunsToDiskOrThrow(subagentRuns, ["presentation-parent"]);
++  expect(
++    settleRequesterAfterSessionSpawns({
++      requesterSessionKey: requesterKey,
++      requesterAgentId: "main",
++      requesterTurnRunId: "presentation-parent",
++      requesterYielded: true,
++      acceptedSessionSpawns: [
++        { runId: "presentation-child", childSessionKey: childKey, expectsCompletionMessage: true },
++      ],
++    }),
++  ).toBe(true);
++  let presentation: RequesterPresentation | undefined;
++  let adopted = false;
++  type Dispatch = SubagentAnnounceDeliveryDeps["dispatchGatewayMethodInProcess"];
++  const dispatch: Dispatch = async <T>(...args: Parameters<Dispatch>): Promise<T> => {
++    const [, params, options] = args;
++    presentation = options?.requesterPresentation;
++    expect(presentation).toBeDefined();
++    expect(params?.deliver).toBe(false);
++    presentation!.assertCurrent();
++    adopted = adoptPausedSubagentRunForFollowUp({
++      childSessionKey: String(params?.sessionKey),
++      runId: String(params?.idempotencyKey),
++      task: String(params?.message),
++    });
++    expect(adopted).toBe(true);
++    presentation!.assertCurrent();
++    options?.onAccepted?.([true, { status: "accepted", runId: params?.idempotencyKey }]);
++    options?.onExecutionStarted?.();
++    presentation!.assertCurrent();
++    return { status: "ok", inputProcessingCompleted: true, result: { payloads: [] } } as T;
++  };
++  setSubagentAnnounceDeliveryDepsForTest({ dispatchGatewayMethodInProcess: dispatch });
++  expect(markSubagentRunTerminated({ runId: "presentation-child", reason: "killed" })).toBe(1);
++  await registryTesting.sweepOnceForTests();
++  await settleSubagentRegistryPersistenceWork();
++  expect(adopted).toBe(true);
++  expect(() => presentation!.assertCurrent()).toThrow("owner changed");
++});
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
+index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa850a8981 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
+@@ -25,6 +25,7 @@ import { trackAsyncWork } from "../../../shared/async-work-scope.js";
+ import { createDeferredCore } from "../../../shared/deferred.js";
+ import { closeOpenClawAgentDatabasesAsync } from "../../../state/openclaw-agent-db.js";
+ import { runWithAgentCommandRecoveryOwner } from "../../agent-command-recovery-owner.js";
++import type { RequesterPresentation } from "../../command/requester-presentation.js";
+ import type { AgentCommandOpts } from "../../command/types.js";
+ import { prepareEmbeddedAttemptTimeout } from "../../embedded-agent-runner/run/attempt-timeout-prepare.js";
+ import { createEmbeddedRunLaneController } from "../../embedded-agent-runner/run/lane-controller.js";
+@@ -308,6 +309,96 @@ describe("requester settle dispatch deadline", () => {
+     },
+   );
+ 
++  it("retains original-request presentation through private admission and adoption, then revokes it", async () => {
++    const context = createContext();
++    const child = settledChild();
++    child.completionTarget = "parent";
++    child.completionRequesterSessionId = "requester-session";
++    registryRead.listSubagentRunsForRequester.mockReturnValue([child]);
++    const pausedRequester = {
++      ...settledChild(),
++      runId: "requester-run",
++      taskRunId: "task-owner",
++      childSessionKey: REQUESTER_KEY,
++      pauseReason: "sessions_yield" as const,
++    };
++    registryRead.getLatestLiveSubagentRunByChildSessionKey.mockReturnValue(pausedRequester);
++    let presentation: RequesterPresentation | undefined;
++    const active = createDeferredCore();
++    const finish = createDeferredCore();
++    startTurn.mockImplementation(async ({ preflight, io, requesterPresentation }) => {
++      presentation = requesterPresentation;
++      const request = preflight.request;
++      expect(request.deliver).toBe(false);
++      expect(request.requesterPresentation).toBeUndefined(); // never a wire field
++      expect(presentation?.source).toMatchObject({ channel: "discord", to: "channel:123" });
++      presentation?.assertCurrent();
++      io.emitAcceptance([true, { runId: request.idempotencyKey, status: "accepted" }], {
++        runId: request.idempotencyKey,
++      });
++      // The admitted continuation adopts the paused requester task before model execution.
++      registryRead.getLatestLiveSubagentRunByChildSessionKey.mockReturnValue({
++        ...pausedRequester,
++        runId: request.idempotencyKey,
++        generation: 2,
++        createdAt: 4_000,
++        pauseReason: undefined,
++      });
++      io.emitExecutionStarted?.();
++      presentation?.assertCurrent();
++      active.resolve();
++      await finish.promise;
++      presentation?.assertCurrent();
++      io.emitFinal([
++        true,
++        { status: "ok", inputProcessingCompleted: true, result: { payloads: [] } },
++      ]);
++    });
++    setSubagentAnnounceDeliveryDepsForTest({
++      getRuntimeConfig: () => ({}),
++      loadRequesterSessionEntry: () => ({
++        cfg: {},
++        canonicalKey: REQUESTER_KEY,
++        agentId: "main",
++        entry: { sessionId: "requester-session", updatedAt: 1 },
++      }),
++      getRequesterSessionActivity: () => ({ sessionId: "requester-session", isActive: false }),
++    });
++    deliver.mockImplementation(sendSubagentAnnounceDirectly);
++    const completeBatch = vi.fn(() => {
++      child.requesterSettleWake = undefined;
++    });
++    const wake = withPluginRuntimeGatewayRequestScope(
++      { context, client: createSyntheticPluginRuntimeClient(), isWebchatConnect: () => false },
++      () =>
++        maybeWakeRequesterAfterAllChildrenSettled({
++          requesterSessionKey: REQUESTER_KEY,
++          requesterOrigin: { channel: "discord", to: "channel:123" },
++          settledEntry: child,
++          transitionBatch: (_batch, state) => {
++            child.requesterSettleWake = state;
++          },
++          completeBatch,
++        }),
++    );
++    try {
++      await active.promise;
++      expect(presentation).toBeDefined();
++      expect(() => presentation!.assertCurrent()).not.toThrow();
++      child.suppressCompletionDelivery = true;
++      expect(() => presentation!.assertCurrent()).toThrow("owner changed");
++      child.suppressCompletionDelivery = undefined;
++      expect(() => presentation!.assertCurrent()).not.toThrow();
++      finish.resolve();
++      await expect(wake).resolves.toBe(true);
++      expect(completeBatch).toHaveBeenCalledOnce();
++      expect(() => presentation!.assertCurrent()).toThrow("owner changed");
++    } finally {
++      finish.resolve();
++      await wake;
++    }
++  });
++
+   it("preserves the final attempt when its Gateway closes during runtime loading", async () => {
+     const retired = settledChild();
+     retired.requesterSettleWake!.attemptCount = 2;
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts
 index 6f39d2dba0008c9b86805ce2b1d67a8fe382cdb6..fcaaa7c18253542dce8dc9322a4275d24ee4bb30 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts
@@ -32288,7 +33310,7 @@ index 6f39d2dba0008c9b86805ce2b1d67a8fe382cdb6..fcaaa7c18253542dce8dc9322a4275d2
      const woke = await maybeWakeRequesterAfterAllChildrenSettled(
        wakeParams({ requesterSessionKey: "agent:main:cron:daily-report" }),
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
-index 63f576a01723851c80a08d35c4d9b506cc04961c..a7993982e49cd41e66463ad428397fad890e2d20 100644
+index 63f576a01723851c80a08d35c4d9b506cc04961c..71a6438a2698b110ecb8a67df0efaf47cc714d9b 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 @@ -212,8 +212,12 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
@@ -32306,6 +33328,28 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..a7993982e49cd41e66463ad428397fad
      return false;
    }
  
+@@ -598,6 +602,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+           deliverSubagentAnnouncement({
+             requesterSessionKey,
+             requesterAgentId,
++            ...(parentOnly && requesterYieldedAfterDelivery && requesterDepth === 0 && directOrigin
++              ? {
++                  requesterPresentation: {
++                    runId: directIdempotencyKey,
++                    sessionKey: requesterSessionKey,
++                    sessionId: requesterEntry.sessionId,
++                    source: directOrigin,
++                    assertCurrent: () => {
++                      if (!isSourceSessionEffectsAllowed()) {
++                        throw new Error("requester continuation presentation owner changed");
++                      }
++                    },
++                  },
++                }
++              : {}),
+             requesterRunTimeoutSeconds:
+               requesterDepth >= 1 && requesterRun
+                 ? (requesterRun.runTimeoutSeconds ?? 0)
 diff --git a/src/agents/subagents/registry/subagent-control-kill.ts b/src/agents/subagents/registry/subagent-control-kill.ts
 index 040363bbfdcb7f11af9124a493af01dbd926abfe..467517481cae15b6c7e80b7b4fdda21a5058b648 100644
 --- a/src/agents/subagents/registry/subagent-control-kill.ts
@@ -51637,6 +52681,51 @@ index aaccd02eae4322a54c72c72fdff72dadc4f51f69..bbb45826012ff6c2b0375d20e76e403c
  export const PAIRING_APPROVED_MESSAGE =
 -  "✅ OpenClaw access approved. Send a message to start chatting.";
 +  "OpenClaw access approved. Send a message to start chatting.";
+diff --git a/src/channels/plugins/types.core.ts b/src/channels/plugins/types.core.ts
+index 462cd9ba1b2bbcc29bff0f21b7e5c4290e923eb1..f1cc0e0b10ad81ff945efcb2dd4437f9cac0a52c 100644
+--- a/src/channels/plugins/types.core.ts
++++ b/src/channels/plugins/types.core.ts
+@@ -9,6 +9,7 @@ import type {
+   GatewayClientMode,
+   GatewayClientName,
+ } from "../../../packages/gateway-protocol/src/client-info.js";
++import type { GetReplyOptions } from "../../auto-reply/get-reply-options.types.js";
+ import type { ReplyDeliveryContext, ReplyPayload } from "../../auto-reply/reply-payload.js";
+ import type { MsgContext } from "../../auto-reply/templating.js";
+ import type { MarkdownTableMode } from "../../config/types.base.js";
+@@ -342,6 +343,32 @@ export type ChannelMentionAdapter = {
+ };
+ 
+ export type ChannelStreamingAdapter = {
++  /** Reuse the channel's progress draft for a resumed original requester. No final delivery. */
++  createContinuationProgress?: (params: {
++    cfg: OpenClawConfig;
++    to: string;
++    accountId?: string;
++    threadId?: string | number | null;
++    signal: AbortSignal;
++    assertCurrent: () => void;
++  }) => Promise<
++    | {
++        replyOptions: Pick<
++          GetReplyOptions,
++          | "onToolStart"
++          | "onItemEvent"
++          | "onCommandOutput"
++          | "onNarrationUpdate"
++          | "onProgressNarratorLifecycle"
++          | "isProgressDraftVisible"
++          | "narrationHideCommandText"
++        >;
++        finish: () => Promise<void>;
++        cleanup: () => Promise<void>;
++      }
++    | undefined
++  >;
++
+   blockStreamingCoalesceDefaults?: {
+     minChars: number;
+     idleMs: number;
 diff --git a/src/channels/progress-draft-compositor.plan.test.ts b/src/channels/progress-draft-compositor.plan.test.ts
 index 197d6b6f0528267bf68c6fb023ca7f4f229170f9..bdca1c170c0c872036df36420959b85f34a2ccf8 100644
 --- a/src/channels/progress-draft-compositor.plan.test.ts
@@ -60224,6 +61313,100 @@ index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca1
    | { kind: "command-timeout"; mode: "wall-clock" | "no-output" }
    | {
        kind: "script-failure";
+diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
+index f8b96bf1a289089982b7f32b5dee3de6354023a7..e8d0af7af8ff4e5a236b297a374c67c18368c255 100644
+--- a/src/gateway/agent-turn/agent-run-execution-phase.ts
++++ b/src/gateway/agent-turn/agent-run-execution-phase.ts
+@@ -8,6 +8,7 @@ import {
+   buildAgentRunTerminalOutcome,
+   type AgentRunTerminalOutcome,
+ } from "../../agents/agent-run-terminal-outcome.js";
++import type { RequesterPresentation } from "../../agents/command/requester-presentation.js";
+ import { repairMainSessionRecoveryMutation } from "../../agents/main-session-recovery/main-session-recovery-lifecycle.js";
+ import { scheduleMainSessionRecoveryPendingTarget } from "../../agents/main-session-recovery/main-session-recovery-owner-release.js";
+ import {
+@@ -68,6 +69,7 @@ import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.
+ 
+ export async function startAgentRunExecution(params: {
+   assertContextCurrent?: () => void;
++  requesterPresentation?: RequesterPresentation;
+   prepared: PreparedAgentRunDispatch;
+   mainRestartRecoveryOwnerLease?: MainSessionRecoveryOwnerLease;
+   request: AgentRunRequest;
+@@ -385,6 +387,7 @@ export async function startAgentRunExecution(params: {
+               },
+               cronCreatorAuthority: prepared.cronCreatorAuthority,
+               ingressOpts: {
++                requesterPresentation: params.requesterPresentation,
+                 skillLibraryAuthoring,
+                 message,
+                 images: params.images,
+diff --git a/src/gateway/agent-turn/agent-turn-service.ts b/src/gateway/agent-turn/agent-turn-service.ts
+index 232ac08f1990b95f22f25bdc6ad84a27294193bc..98ee3743fb7669d81a71f580e1c46988116a7bfe 100644
+--- a/src/gateway/agent-turn/agent-turn-service.ts
++++ b/src/gateway/agent-turn/agent-turn-service.ts
+@@ -1,5 +1,6 @@
+ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { ErrorCodes, type AgentWaitParams } from "../../../packages/gateway-protocol/src/index.js";
++import type { RequesterPresentation } from "../../agents/command/requester-presentation.js";
+ import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../agents/main-session-recovery/main-session-recovery-admission.js";
+ import { scheduleMainSessionRecoveryPendingTarget } from "../../agents/main-session-recovery/main-session-recovery-owner-release.js";
+ import {
+@@ -37,6 +38,7 @@ import type { AgentTurnIo, AgentTurnPrincipal } from "./types.js";
+ 
+ type AgentTurnStartRequest = {
+   privateCompletion?: true;
++  requesterPresentation?: RequesterPresentation;
+   assertAdmissionCurrent?: () => void;
+   hasCurrentClientAuthority?: () => boolean;
+   preflight: AgentRequestPreflight;
+@@ -51,6 +53,7 @@ export function createAgentTurnService(
+ ) {
+   const startTurn = async ({
+     privateCompletion,
++    requesterPresentation,
+     assertAdmissionCurrent,
+     hasCurrentClientAuthority,
+     preflight,
+@@ -555,6 +558,7 @@ export function createAgentTurnService(
+       void context
+         .trackExecution(() =>
+           startAgentRunExecution({
++            requesterPresentation,
+             assertContextCurrent,
+             prepared: preparedDispatch,
+             mainRestartRecoveryOwnerLease,
+diff --git a/src/gateway/agent-turn/internal-facade.ts b/src/gateway/agent-turn/internal-facade.ts
+index 29a6f5d445f5c67b12ab8042df5922ba7b0d2e77..d702ca2ef39a67c3053f831aff6190966b459353 100644
+--- a/src/gateway/agent-turn/internal-facade.ts
++++ b/src/gateway/agent-turn/internal-facade.ts
+@@ -250,6 +250,7 @@ export function createInternalAgentTurnFacade(
+               onRunObserved,
+               assertAdmissionCurrent: dispatchOptions.assertAdmissionCurrent,
+               privateCompletion: dispatchOptions.privateCompletion,
++              requesterPresentation: dispatchOptions.requesterPresentation,
+             });
+           },
+           {
+diff --git a/src/gateway/agent-turn/internal-facade.types.ts b/src/gateway/agent-turn/internal-facade.types.ts
+index ff972ffa01a493485c14f359ccf7b68004776409..d8ff54da09ba1f6c13e3506baec9d89c7895988c 100644
+--- a/src/gateway/agent-turn/internal-facade.types.ts
++++ b/src/gateway/agent-turn/internal-facade.types.ts
+@@ -1,5 +1,6 @@
+ import type { AgentWaitParams } from "../../../packages/gateway-protocol/src/index.js";
+ import type { ConnectParams } from "../../../packages/gateway-protocol/src/schema/frames.js";
++import type { RequesterPresentation } from "../../agents/command/requester-presentation.js";
+ import type { GatewayMethodDispatchResponse } from "../server-in-process-dispatch.types.js";
+ import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
+ import type { GatewayClient } from "../server-methods/client-types.js";
+@@ -19,6 +20,7 @@ export type AgentTurnStartOwner = {
+ export type InternalAgentTurnDispatchOptions = {
+   /** Internal completion delivery owns its hidden input and durable processing receipt. */
+   privateCompletion?: true;
++  requesterPresentation?: RequesterPresentation;
+   // The source owns admission only; accepted children execute under their own lifetime.
+   assertAdmissionCurrent?: () => void;
+   cancelOnDeadline?: boolean;
 diff --git a/src/gateway/auth-token-source-conflict.test.ts b/src/gateway/auth-token-source-conflict.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..2d61a3a05bd3cc8299f4564d420e2a0bd64ccd0d
@@ -60783,6 +61966,33 @@ index caf3e4ec146cd188a9afb726185dccb010512a33..0677b177ef23c3e7c6fca91246438d81
      entry: params.entry,
      cfg: params.cfg,
    });
+diff --git a/src/gateway/server-plugin-in-process-dispatch.ts b/src/gateway/server-plugin-in-process-dispatch.ts
+index 6f2e405433dd59d7174fa73cc66273103eecf2c7..b33c75523ca8909d4c4f8d4a92a5c4fb64229693 100644
+--- a/src/gateway/server-plugin-in-process-dispatch.ts
++++ b/src/gateway/server-plugin-in-process-dispatch.ts
+@@ -1,5 +1,6 @@
+ import { AsyncLocalStorage } from "node:async_hooks";
+ import type { AgentWaitParams } from "../../packages/gateway-protocol/src/index.js";
++import type { RequesterPresentation } from "../agents/command/requester-presentation.js";
+ import type { SubagentCompletionToolHandoffRegistration } from "../agents/subagents/announce/subagent-announce-handoff.js";
+ import { getActivePluginRegistry } from "../plugins/runtime.js";
+ import {
+@@ -93,6 +94,7 @@ export function runWithOperatorToolGatewayCleanupContext<T>(run: () => T): T {
+ 
+ type DispatchGatewayMethodInProcessOptions = {
+   privateCompletion?: true;
++  requesterPresentation?: RequesterPresentation;
+   allowSyntheticModelOverride?: boolean;
+   allowSyntheticCronRunContinuation?: boolean;
+   agentToolCaller?: TrustedAgentToolCaller;
+@@ -462,6 +464,7 @@ export async function dispatchGatewayMethodInProcess<T>(
+         ? await facade.dispatch<T>(params as AgentRunRequest, {
+             assertAdmissionCurrent: options?.sessionMutationCommitGuard,
+             privateCompletion: options?.privateCompletion,
++            requesterPresentation: options?.requesterPresentation,
+             cancelOnDeadline: options?.cancelOnDeadline,
+             expectFinal: options?.expectFinal,
+             onAccepted: options?.onAccepted,
 diff --git a/src/gateway/server-plugin-subagent-runtime.test.ts b/src/gateway/server-plugin-subagent-runtime.test.ts
 index 740b9184c8195f71e644b40365503c63b4a999f8..6c4d129a927da9b4530e9a9ca028c255d071e685 100644
 --- a/src/gateway/server-plugin-subagent-runtime.test.ts
