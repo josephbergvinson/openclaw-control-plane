@@ -32,7 +32,7 @@ interrupted the diagnostic before child creation. The qualified companion retain
 private worker. MacBook installation and actual account entry remain separate
 gates. The behavior and acceptance boundaries below retain their dated scopes.
 
-Candidate `53e2a1d09511` adds safe quota continuation after settled tool work and
+Candidate `20799eb9bc55` adds safe quota continuation after settled tool work and
 binds connection reuse to the actual provider account and credential. It keeps
 completed tool results, avoids repeating the original task, respects pinned
 accounts and stops safely when eligible accounts are exhausted. An account switch
