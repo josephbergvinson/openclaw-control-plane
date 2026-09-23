@@ -48,7 +48,7 @@ final-delivery authority. Delayed progress writes recheck that authority and sto
 on cancellation or replacement. Seven owning test files pass 90 focused cases;
 hosted qualification and live acceptance remain separate.
 
-The current reconstructible candidate `1c206d4e554a` retains those repairs and adds
+The current reconstructible candidate `486da2f9ffc1` retains those repairs and adds
 separate interactive and autonomous model routing. The example policy uses Astra
 Max for conversation, optional `/think ultra` orchestration and Sol High for
 model-backed maintenance. Existing model parameters supply reasoning effort to
