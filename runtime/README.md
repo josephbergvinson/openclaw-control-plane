@@ -27,32 +27,32 @@ and agent schema 21. Its dated activation and capture evidence remain historical
 The preceding repair source `1fb1f66cfe29267902a768417b35e4a8c5c4e439` activated at
 `11:22:01.365523Z` through the same-version release owner. Successor
 `085711060c8477df71066402330eb5a2902d6824` activated at `12:37:05.013053Z`.
-The manifest records this exact release and activation-receipt hash. Fresh postflight
+The manifest records this exact release and activation-receipt hash. Postflight at that activation
 verified the selected process, health/readiness and preserved configuration, account
 ordering and scheduled-job definitions. Journal capture was visually accepted and
 enrolled for the new process; new-process scheduled synchronization remains unproven.
 
 The signed app from source `1fb1f66cfe29`, build `2609000592`, was separately installed,
-launched and observed connected on the originating Mac Mini. Signature and contents
+launched and observed connected on the originating Mac Mini on September 22. Signature and contents
 were verified. One macOS-added app-root metadata attribute was explicitly reconciled;
 unchanged metadata throughout is not claimed. MacBook installation, native
 credential/account acceptance and hosted checks for this public revision remain
 pending. A bounded native-goal final passed with exact Discord readback on `1fb`;
 longer-workflow delivery and backend settlement remain separate acceptance scopes.
 
-The currently activated Gateway source is `085711060c8477df71066402330eb5a2902d6824`.
+The September 22 activation record verified Gateway source `085711060c8477df71066402330eb5a2902d6824`.
 It retains the native credential correction, native-goal progress and final-delivery
 repair, registered-project delegation guidance, source CLI guidance and packaging
 pin repair. It additionally fixes existing Discord thread-channel send receipts:
 the provider records the actual thread identity for every chunk and the final
 aggregate, allowing strict source-delivery custody to recognize the visible final.
-Fourteen focused producer and composed settlement cases pass. The successor is
-activated; its fresh Discord diagnostic stopped on a provider rate limit before
-child creation, so actual live settlement acceptance remains pending. The signed companion and its
-matching private worker remain at qualified source `1fb`; this Gateway channel
+Fourteen focused producer and composed settlement cases pass. The successor
+activated on September 22; its fresh Discord diagnostic stopped on a provider rate limit before
+child creation, so actual live settlement acceptance remains pending. The September 22 qualification recorded the signed companion and its
+matching private worker at source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `189ec1fad1e017b8b14b54b2ce364cefcaf9f7f1`.
+The reconstructible candidate is now `24e9bfe5431e504a6a6bb299e939babe472c22e3`.
 It corrects quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
@@ -99,7 +99,7 @@ their private store without changing canonical settings. The lock-after-admissio
 case refused without a value and joined at its deadline. Visible OS-dialog
 disappearance was not inspected and is not claimed. Eighteen runtime cases passed
 for native-goal progress, final custody and dispatch. These source and process
-results are distinct from the now-verified signed package and Mini installation;
+results are distinct from the signed package and Mini installation verified on September 22;
 actual account entry and complete workflow delivery remain separate acceptance
 steps. The bounded native-goal readback above proves only its stated scope.
 Earlier native source `c4bee4279fdf` retains its original 18-test and four-case

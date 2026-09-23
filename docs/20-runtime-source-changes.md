@@ -22,23 +22,23 @@ source identity and gateway deployment status belong to the manifest. The
 [September 22 record](../runtime/README.md#september-22-upgrade) distinguishes verified
 gateway activation and the Mini installation from subsequent component and
 credential acceptance. Source `1fb1f66cfe29`, including the native credential
-compatibility reader and native-goal repair, remains installed as signed build
-`2609000592` on the originating Mini. A bounded native-goal final has exact Discord
-readback. The activated Gateway source
+compatibility reader and native-goal repair, was verified installed as signed build
+`2609000592` on the originating Mini on September 22. A bounded native-goal final has exact Discord
+readback. Gateway source
 `085711060c84` corrects existing Discord thread receipts so visible finals can
-settle their backend delivery obligation. It activated at `12:37:05.013053Z`;
+settle their backend delivery obligation. It activated on September 22 at `12:37:05.013053Z`;
 fresh live settlement acceptance remains pending after a provider rate limit
-interrupted the diagnostic before child creation. The qualified companion retains its matching `1fb`
+interrupted the diagnostic before child creation. That day's companion qualification verified its matching `1fb`
 private worker. MacBook installation and actual account entry remain separate
 gates. The behavior and acceptance boundaries below retain their dated scopes.
 
-Candidate `189ec1fad1e` adds safe quota continuation after settled tool work and
+Candidate `24e9bfe5431` adds safe quota continuation after settled tool work and
 binds connection reuse to the actual provider account and credential. It keeps
 completed tool results, avoids repeating the original task, respects pinned
 accounts and stops safely when eligible accounts are exhausted. An account switch
 opens a fresh connection without an old response ID or account-bound encrypted
 reasoning. The manifest distinguishes this reconstructible candidate from the
-currently activated Gateway. Focused source tests pass; hosted qualification and
+Gateway recorded in the September 22 activation receipt. Focused source tests pass; hosted qualification and
 live acceptance remain pending.
 
 The same candidate restores configured typing, progress drafts and activity

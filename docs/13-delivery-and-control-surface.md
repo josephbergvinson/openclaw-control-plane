@@ -28,7 +28,7 @@ During substantial work, post meaningful milestones and explain real dependencie
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
-Candidate `189ec1fad1e` addresses a later gap in that lifecycle: a worker could
+Candidate `24e9bfe5431` addresses a later gap in that lifecycle: a worker could
 resume its original requester without the presentation route used for ordinary
 incoming messages. The model kept working while typing, progress and narration
 were absent. The repair carries current run/session/destination authority through
@@ -44,7 +44,7 @@ A native goal could acknowledge the command and retain a completed model answer 
 
 The repair selects the existing core durable route for continuing-goal finals and retains the actual command-target session identity. Private acknowledgements and ordinary slash responses keep their existing interaction hooks. Final preparation drains completed progress first; hooks may rewrite or cancel content, multi-part replies retain their delivery receipts, and an unsupported durable route reports failure without claiming that a message was sent.
 
-The real adapter/channel-turn/queue regression reproduced zero physical final sends before the repair. Eighteen focused cases subsequently passed across custody, dispatch/adoption and goal progress, including hook cancellation, multi-part delivery and ordinary slash responses. Source `1fb1f66cfe29` activated on the originating gateway at 11:22:01.365523 UTC on September 22. Its signed app, build `2609000592`, is installed and connected on the originating Mini. A bounded native-goal final subsequently passed with exact Discord readback; that result does not establish longer-work progress or every completion path.
+The real adapter/channel-turn/queue regression reproduced zero physical final sends before the repair. Eighteen focused cases subsequently passed across custody, dispatch/adoption and goal progress, including hook cancellation, multi-part delivery and ordinary slash responses. Source `1fb1f66cfe29` activated on the originating gateway at 11:22:01.365523 UTC on September 22. Its signed app, build `2609000592`, was verified installed and observed connected on the originating Mini on September 22. A bounded native-goal final subsequently passed with exact Discord readback; that result does not establish longer-work progress or every completion path.
 
 A later owned-handoff check delivered its final into an existing Discord thread, but the backend incorrectly reported missing visible delivery. Existing thread channels lacked canonical thread identity in the provider receipt. Source `085711060c84` records that identity from actual channel metadata in each chunk and the aggregate receipt. It leaves strict source matching, account authority and refusal handling intact. Fourteen producer and composed settlement cases pass, including nonthread, unknown-metadata, account, target, partial, progress-only and dry-run refusals. Transport and model/handoff boundaries are substituted in those tests; the successor activated at 12:37:05.013053 UTC. Its fresh diagnostic reached a provider rate limit before child creation, so actual live settlement remains pending. The qualified native companion is unchanged because this producer runs in the external Gateway.
 
