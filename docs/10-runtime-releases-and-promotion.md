@@ -124,6 +124,20 @@ Restoring after a successful activation is a distinct explicit mode because effe
 may have occurred after startup. Never delete the result or start fence merely to
 make another attempt fit the same namespace.
 
+Completed activation history survives an APFS remount through stable volume UUID
+and inode bindings. The original device number remains a historical observation.
+For an older terminal record without a UUID, a changed device number is admitted
+only by this locked retirement owner after verifying the registered data volume,
+the same physical read-only release inode, its full sealed content inventory,
+candidate seal and snapshot provenance. Original result, fence, seal and snapshot
+bytes are preserved. New retirement receipts carry the stable bindings used by
+the existing ScreenCapture-history and release-retention readers. Unverifiable
+legacy archive history stays ineligible; it does not grant deletion authority.
+This does not requalify a capture process or make an old seal, stopped snapshot,
+bootstrap or process identity usable for a new lifecycle operation. Those checks
+still require their exact current-incarnation identities and fresh stopped state.
+
+
 Release and promotion retention preserve selected releases, rollback references,
 active operations and unknown layouts. Their dry-run reports must be read before
 applying a deletion. Unknown ownership means preserve until resolved.

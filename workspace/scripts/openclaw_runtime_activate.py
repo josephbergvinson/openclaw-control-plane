@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import http.client
+import importlib.util
 import json
 import os
 import posixpath
@@ -46,6 +47,7 @@ DEFAULT_HEALTH_TIMEOUT_SECONDS = 900.0
 SNAPSHOT_TIMEOUT_SECONDS = 3600.0
 START_CONSUMED_NAME = "activation-start-consumed.json"
 RETIREMENT_RECEIPT_NAME = "retirement-receipt.json"
+HISTORY_VOLUME_CONTRACT = Path(__file__).resolve().parents[1] / "registry" / "external_volume_guard.json"
 SCREEN_CAPTURE_ROUTE = "gateway cron command -> Python -> Python new session -> Python new session -> Peekaboo Journal window capture"
 
 
@@ -506,6 +508,114 @@ def _screen_capture_file_identity(info: os.stat_result) -> tuple[int, ...]:
             info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def _history_volume_guard():
+    # Also work under the activator's isolated (-I -S) interpreter. Reuse the
+    # existing metadata reader without enabling its retired liveness probe.
+    name = "openclaw_activation_volume_metadata"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("external_volume_guard.py"))
+        if spec is None or spec.loader is None:
+            raise ActivationError("activation history volume reader is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[name] = module
+    return sys.modules[name]
+
+
+def historical_volume_uuid(path: Path, info: os.stat_result) -> str:
+    try:
+        value = _history_volume_guard().read_volume_uuid(path)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ActivationError("activation history volume UUID is unavailable") from exc
+    if (not isinstance(value, str)
+            or re.fullmatch(r"[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}", value) is None
+            or value == "00000000-0000-0000-0000-000000000000"
+            or _screen_capture_file_identity(os.lstat(path)) != _screen_capture_file_identity(info)):
+        raise ActivationError("activation history volume changed during inspection")
+    return value
+
+
+def historical_identity_matches(binding: dict[str, Any], path: Path, info: os.stat_result) -> bool:
+    """Historical observation only; never use for process or mutation admission."""
+    if (binding.get("path") != str(path) or type(binding.get("device")) is not int
+            or type(binding.get("inode")) is not int or binding["inode"] != info.st_ino
+            or path.resolve(strict=True) != path):
+        return False
+    if "volumeUuid" in binding:
+        return binding["volumeUuid"] == historical_volume_uuid(path, info)
+    # A legacy record has no cross-mount authority. Only the locked retirement
+    # owner below can revalidate a legacy release against its sealed inventory.
+    return binding["device"] == info.st_dev
+
+
+def historical_release_identity_matches(record: dict[str, Any], proof: Any, path: Path) -> bool:
+    info = os.lstat(path)
+    if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o222
+            or record.get("path") != str(path)):
+        return False
+    if proof is None:
+        return historical_identity_matches(record, path, info)
+    return (isinstance(proof, dict)
+            and set(proof) == {"path", "device", "inode", "volumeUuid", "recordSha256"}
+            and proof.get("inode") == record.get("inode")
+            and proof.get("recordSha256") == sha256_bytes(canonical_json_bytes(record))
+            and historical_identity_matches(proof, path, info))
+
+
+def retirement_release_identities(receipt: dict[str, Any]) -> dict[str, Any]:
+    if "releaseIdentities" not in receipt:
+        return {}
+    identities = receipt["releaseIdentities"]
+    if (not isinstance(identities, dict)
+            or set(identities) not in ({"candidate", "selected"}, {"candidate", "selected", "rollback"})
+            or any(not isinstance(value, dict) for value in identities.values())):
+        raise ActivationError("activation retirement release identities are invalid")
+    return identities
+
+
+def _terminal_release_identity(paths: ActivationPaths, record: dict[str, Any]) -> dict[str, Any]:
+    path = Path(str(record.get("path", "")))
+    before = os.lstat(path)
+    if (path.parent != paths.releases_root or path.resolve(strict=True) != path
+            or not stat.S_ISDIR(before.st_mode) or stat.S_IMODE(before.st_mode) & 0o222
+            or type(record.get("device")) is not int or type(record.get("inode")) is not int
+            or record["inode"] != before.st_ino):
+        raise ActivationError("terminal activation release identity drift")
+    volume_uuid = historical_volume_uuid(path, before)
+    if record["device"] != before.st_dev:
+        guard = _history_volume_guard()
+        try:
+            contract = guard.normalize_contract(HISTORY_VOLUME_CONTRACT)
+            mount = Path(contract["mountPoint"])
+            metadata = guard.volume_metadata(mount)
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
+            raise ActivationError("terminal activation registered volume is unavailable") from exc
+        if (mount.resolve(strict=True) != mount or mount not in paths.releases_root.parents
+                or metadata.get("available") is not True or metadata.get("mounted") is not True
+                or metadata.get("mountDevice") != before.st_dev
+                or metadata.get("volumeUuid") != volume_uuid or contract["volumeUuid"] != volume_uuid):
+            raise ActivationError("terminal activation registered volume identity drift")
+        observed = validate_release(paths, path, require_commit(record.get("commit"), "terminal release commit"),
+                                    require_candidate_native_entrypoints=False)
+        if any(record.get(key) != value for key, value in observed.items() if key != "device"):
+            raise ActivationError("terminal activation sealed release inventory drift")
+    if historical_volume_uuid(path, before) != volume_uuid:
+        raise ActivationError("terminal activation volume changed during inspection")
+    return {"path": str(path), "device": before.st_dev, "inode": before.st_ino,
+            "volumeUuid": volume_uuid, "recordSha256": sha256_bytes(canonical_json_bytes(record))}
+
+
+def _validate_terminal_candidate_seal(candidate: dict[str, Any]) -> None:
+    value, payload, info = read_json(Path(str(candidate.get("sealPath", ""))), "terminal candidate seal")
+    if (stat.S_IMODE(info.st_mode) & 0o222 or value.get("schemaVersion") != 1
+            or sha256_bytes(payload) != candidate.get("sealSha256")
+            or value.get("candidate") != {key: candidate.get(key) for key in
+                    ("path", "commit", "device", "inode", "packageVersion", "releaseInventory")}
+            or not isinstance(value.get("createdAt"), str)
+            or value.get("bundledExtensions") != validate_bundled_extensions(Path(candidate["path"]))):
+        raise ActivationError("terminal activation candidate seal provenance drift")
+
+
 def _read_screen_capture_retirement_json(path: Path, label: str) -> tuple[dict[str, Any], bytes, os.stat_result]:
     """Read a small immutable owner record without opening a device or FIFO."""
     before = os.lstat(path)
@@ -532,7 +642,7 @@ def _read_screen_capture_retirement_json(path: Path, label: str) -> tuple[dict[s
     return value, payload, after
 
 
-def _screen_capture_selected_release(path: Path, selected: dict[str, Any]) -> os.stat_result:
+def _screen_capture_selected_release(path: Path, selected: dict[str, Any], identity: Any = None) -> os.stat_result:
     selected_link = path.parent / "current"
     selected_path = Path(selected["path"])
     selected_info = os.lstat(selected_path)
@@ -540,8 +650,7 @@ def _screen_capture_selected_release(path: Path, selected: dict[str, Any]) -> os
             or os.readlink(selected_link) != str(selected_path)
             or not stat.S_ISDIR(selected_info.st_mode)
             or selected_path.resolve(strict=True) != selected_path
-            or (selected_info.st_dev, selected_info.st_ino)
-            != (selected.get("device"), selected.get("inode"))):
+            or not historical_release_identity_matches(selected, identity, selected_path)):
         raise ActivationError("ScreenCapture selected activation drift")
     return os.lstat(selected_link)
 
@@ -549,6 +658,7 @@ def _screen_capture_selected_release(path: Path, selected: dict[str, Any]) -> os
 def _screen_capture_restored_evidence(
     path: Path, result: dict[str, Any], payload: bytes, restore_path: Path,
     fence_path: Path, node: Path, responsible_pid: int | None,
+    selected_identity: Any = None,
 ) -> dict[str, str]:
     """Bind the existing restore owner; never promote a stopped or uncertain restore."""
     snapshot = result.get("snapshot")
@@ -591,7 +701,7 @@ def _screen_capture_restored_evidence(
     gateway = verification.get("gateway")
     loaded = gateway.get("loaded") if isinstance(gateway, dict) else None
     node_loaded = verification.get("node")
-    selector = _screen_capture_selected_release(path, predecessor)
+    selector = _screen_capture_selected_release(path, predecessor, selected_identity)
     for label, owner in ((OPERATOR.require_string("runtime.gateway_label"), loaded), (OPERATOR.require_string("runtime.node_label"), node_loaded)):
         binding = bootstraps[label]
         if (not isinstance(owner, dict) or owner.get("bootstrapBinding") != binding
@@ -711,6 +821,7 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
         if len(selected) != 1:
             raise ActivationError("ScreenCapture latest retirement is ambiguous")
         _, generation, receipt = selected[0]
+        release_identities = retirement_release_identities(receipt)
         result_path = generation / path.name
         fence_path = generation / START_CONSUMED_NAME
         if any(os.lstat(item).st_size > 256 * 1024 for item in (result_path, fence_path)):
@@ -721,10 +832,10 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
                 ("result", result_path, payload, result_info),
                 ("startFence", fence_path, fence_payload, fence_info)):
             binding = receipt.get(key)
-            if (not isinstance(binding, dict) or set(binding) != {"path", "sha256", "device", "inode"}
+            if (not isinstance(binding, dict) or set(binding) not in (
+                    {"path", "sha256", "device", "inode"}, {"path", "sha256", "device", "inode", "volumeUuid"})
                     or binding["path"] != str(actual_path) or binding["sha256"] != sha256_bytes(actual_payload)
-                    or type(binding["device"]) is not int or type(binding["inode"]) is not int
-                    or (binding["device"], binding["inode"]) != (info.st_dev, info.st_ino)
+                    or not historical_identity_matches(binding, actual_path, info)
                     or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o400):
                 raise ActivationError("ScreenCapture retired activation binding drift")
         candidate, start = result.get("candidate"), result.get("startConsumption")
@@ -739,7 +850,7 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
         if receipt["outcome"] == "activated" and result.get("outcome") == "activated":
             if receipt.get("selectedPath") != candidate.get("path") or "restoreResult" in receipt:
                 raise ActivationError("ScreenCapture selected activation drift")
-            _screen_capture_selected_release(path, candidate)
+            _screen_capture_selected_release(path, candidate, release_identities.get("selected"))
             evidence = {"activationReceiptSha256": sha256_bytes(payload)}
         elif receipt["outcome"] == "restored":
             restore_ref = receipt.get("restoreResult")
@@ -748,14 +859,15 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
                 raise ActivationError("ScreenCapture retired restore snapshot is invalid")
             restore_path = generation / f"activation-restore-result-{str(snapshot.get('manifestSha256', ''))[:16]}.json"
             _, restore_bytes, restore_info = _read_screen_capture_retirement_json(restore_path, "retired ScreenCapture restore")
-            if (not isinstance(restore_ref, dict) or set(restore_ref) != {"path", "sha256", "device", "inode"}
-                    or type(restore_ref["device"]) is not int or type(restore_ref["inode"]) is not int
-                    or restore_ref != {"path": str(restore_path), "sha256": sha256_bytes(restore_bytes),
-                                       "device": restore_info.st_dev, "inode": restore_info.st_ino}
+            if (not isinstance(restore_ref, dict) or set(restore_ref) not in (
+                    {"path", "sha256", "device", "inode"}, {"path", "sha256", "device", "inode", "volumeUuid"})
+                    or restore_ref.get("sha256") != sha256_bytes(restore_bytes)
+                    or not historical_identity_matches(restore_ref, restore_path, restore_info)
                     or receipt.get("selectedPath") != snapshot.get("predecessor", {}).get("path")):
                 raise ActivationError("ScreenCapture retired restore binding drift")
             evidence = _screen_capture_restored_evidence(
-                path, result, payload, restore_path, fence_path, node, responsible_pid)
+                path, result, payload, restore_path, fence_path, node, responsible_pid,
+                release_identities.get("selected"))
         else:
             raise ActivationError("ScreenCapture effective evidence needs a fresh native route probe")
         after = os.lstat(archive)
@@ -2768,16 +2880,26 @@ def retire_terminal_receipts(
                 or os.readlink(paths.current_link) != str(selected_path)
                 or not terminal_bound):
             raise ActivationError("terminal activation receipt binding drift")
-        observed_info = os.lstat(candidate_path)
-        if (not stat.S_ISDIR(observed_info.st_mode)
-                or (observed_info.st_dev, observed_info.st_ino)
-                != (candidate.get("device"), candidate.get("inode"))):
-            raise ActivationError("terminal activation candidate identity drift")
-        selected_info = os.lstat(selected_path)
-        if (not stat.S_ISDIR(selected_info.st_mode)
-                or (selected_info.st_dev, selected_info.st_ino)
-                != (selected_record.get("device"), selected_record.get("inode"))):
-            raise ActivationError("terminal activation selected release identity drift")
+        release_records = {"candidate": candidate, "selected": selected_record}
+        if isinstance(result.get("rollback"), dict):
+            release_records["rollback"] = result["rollback"]
+        release_identities: dict[str, Any] = {}
+        observed_releases: dict[str, Any] = {}
+        for role, record in release_records.items():
+            key = sha256_bytes(canonical_json_bytes(record))
+            if key not in observed_releases:
+                observed_releases[key] = _terminal_release_identity(paths, record)
+            release_identities[role] = observed_releases[key]
+        if any(identity["device"] != release_records[role]["device"]
+               for role, identity in release_identities.items()):
+            _validate_terminal_candidate_seal(candidate)
+            manifest, payload, info = read_json(Path(snapshot["manifestPath"]), "terminal stopped snapshot")
+            if (stat.S_IMODE(info.st_mode) & 0o222
+                    or sha256_bytes(payload) != snapshot["manifestSha256"]
+                    or not isinstance(manifest.get("predecessor"), dict)
+                    or any(snapshot["predecessor"].get(key) != value
+                           for key, value in manifest["predecessor"].items())):
+                raise ActivationError("terminal activation snapshot provenance drift")
         if late_verification_required:
             assert backend is not None
             backend.bind_bootstrap_receipt(
@@ -2865,17 +2987,20 @@ def retire_terminal_receipts(
                 "candidatePath": str(candidate_path),
                 "candidateCommit": candidate.get("commit"),
                 "selectedPath": str(selected_path),
+                "releaseIdentities": release_identities,
                 "result": {
                     "path": str(archived_result),
                     "sha256": sha256_bytes(result_payload),
                     "device": archived_result_info.st_dev,
                     "inode": archived_result_info.st_ino,
+                    "volumeUuid": historical_volume_uuid(archived_result, archived_result_info),
                 },
                 "startFence": {
                     "path": str(archived_fence),
                     "sha256": sha256_bytes(fence_payload),
                     "device": archived_fence_info.st_dev,
                     "inode": archived_fence_info.st_ino,
+                    "volumeUuid": historical_volume_uuid(archived_fence, archived_fence_info),
                 },
             }
             if (archived_restore is not None and archived_restore_info is not None
@@ -2885,7 +3010,17 @@ def retire_terminal_receipts(
                     "sha256": sha256_bytes(restore_payload),
                     "device": archived_restore_info.st_dev,
                     "inode": archived_restore_info.st_ino,
+                    "volumeUuid": historical_volume_uuid(archived_restore, archived_restore_info),
                 }
+            # Stable history identifiers do not relax this operation's race fence.
+            for identity in release_identities.values():
+                release_path = Path(identity["path"])
+                info = os.lstat(release_path)
+                if ((info.st_dev, info.st_ino) != (identity["device"], identity["inode"])
+                        or not historical_identity_matches(identity, release_path, info)):
+                    raise ActivationError("terminal activation release changed during retirement")
+            if not paths.current_link.is_symlink() or os.readlink(paths.current_link) != str(selected_path):
+                raise ActivationError("terminal activation selector changed during retirement")
             if late_verification is not None:
                 receipt["lateVerification"] = late_verification
             create_immutable_file(
