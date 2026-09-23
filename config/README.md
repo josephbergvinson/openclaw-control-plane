@@ -21,10 +21,11 @@ The profile carries these reference choices:
 | Setting | Value and purpose |
 |---|---|
 | Main model | `openai/gpt-6-astra`, OpenClaw runtime, no automatic fallback. |
-| Main reasoning | `ultra`; inspect the actual provider request to verify normalization and execution. |
+| Main reasoning | `max`; an explicit Discord `/think ultra` enables orchestration while provider reasoning remains Max. |
 | Fast mode | Global default `false`; inline, session and per-agent overrides take precedence. |
 | Alternate model | `openai/gpt-5.6-sol` mapped to the Codex runtime when explicitly selected. |
-| Subagents | Astra with `max` reasoning; maximum eight concurrent subagents, four main runs. |
+| Subagents | Inherit the initiating turn’s model and reasoning; maximum eight concurrent subagents, four main runs. Explicit task choices take precedence. |
+| Autonomous inference | `openai/gpt-6-sol` with High reasoning for scheduled agent turns, heartbeat, active memory, dreaming and utility work. Pure command jobs have no scheduler model. |
 | Image understanding | Astra in `imageModel`. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
@@ -48,6 +49,69 @@ enroll a service.
 Large bootstrap and retention settings have real context and latency costs. Verify
 the compiled prompt and compaction behavior using the exact model and channel path.
 Do not label a configured reasoning level or a copied memory file as runtime proof.
+
+## Background model and existing overrides
+
+The native OpenAI provider must have an authenticated ChatGPT subscription route
+and an authored `gpt-6-sol` model row if account discovery does not yet list it.
+Add the following row to the existing `models.providers.openai.models` collection,
+preserving every other provider/model entry and the authenticated route:
+
+```json
+{
+  "id": "gpt-6-sol",
+  "name": "GPT-6 Sol",
+  "api": "openai-chatgpt-responses",
+  "reasoning": true,
+  "input": ["text", "image"],
+  "contextWindow": 1050000,
+  "maxTokens": 128000,
+  "compat": {
+    "supportedReasoningEfforts": ["none", "low", "medium", "high", "xhigh", "max"]
+  }
+}
+```
+
+These context/output values retain the reference installation’s operator caps;
+verify capabilities on the selected account. Cost metadata is omitted rather than
+copied from another model. The profile leaves provider enrollment separate so a
+preference merge cannot replace an adopter’s model collection or credentials.
+An empty discovery result does not prove the explicit route is unavailable. A
+configured row does not prove access either: run a read-only Sol/High request and
+inspect its effective model and outcome before enabling autonomous work. Keep the
+existing OAuth authority; this configuration does not require an API key.
+
+This profile requires the matching reconstructed runtime’s heartbeat thinking,
+per-phase dreaming effort, and utility reasoning support. Autonomous heartbeat
+settings do not override admitted user-task continuations. Configured dreaming
+model failures remain on the selected route and produce the existing degraded
+outcome instead of silently calling the interactive model.
+
+A merge retains omitted keys. For an earlier profile with global child model or
+thinking pins, apply this native deletion patch after reviewing the current values:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "subagents": { "model": null, "thinking": null }
+    }
+  }
+}
+```
+
+This restores current-turn inheritance: interactive Astra/Max or explicitly chosen
+Ultra stays with user orchestration, while scheduled Sol/High stays with autonomous
+work. Review per-agent `thinkingDefault` values that previously duplicated the old
+Ultra default and update those defaults to Max. Preserve deliberate per-session,
+inline and per-task choices; do not bulk rewrite saved sessions. Use `/think default`
+to restore inheritance when clearing a session override is intended.
+
+Existing `agentTurn` jobs need their own `payload.model: "openai/gpt-6-sol"` and
+`payload.thinking: "high"`; changing the default model does not rewrite job
+payloads. Preserve job IDs, enabled states, schedules, prompts, budgets and delivery
+settings. Inspect command implementations for nested inference rather than treating
+all `command` payloads as model-free. See [scheduling and background work](../docs/12-scheduling-and-background-work.md).
 
 ## Local memory setup
 
