@@ -8490,10 +8490,11 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..4b733cc1b2bcfb26b6861a0fb6682f20
  
 diff --git a/extensions/discord/src/continuation-progress.test.ts b/extensions/discord/src/continuation-progress.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..5fc127c5f5641e29f692fa53a1c959f354903fa2
+index 0000000000000000000000000000000000000000..53795667ab47715ae9efc63857d78167a5ddc014
 --- /dev/null
 +++ b/extensions/discord/src/continuation-progress.test.ts
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,104 @@
++import type { DiscordConfig } from "openclaw/plugin-sdk/config-contracts";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { RequestClient } from "./internal/discord.js";
 +const client = vi.hoisted(() => ({ create: vi.fn() }));
@@ -8514,15 +8515,15 @@ index 0000000000000000000000000000000000000000..5fc127c5f5641e29f692fa53a1c959f3
 +      return Response.json({ id: "123456789012345678" });
 +    },
 +  });
-+  const config = {
++  const config: DiscordConfig = {
 +    streaming: {
-+      mode: "progress" as const,
++      mode: "progress",
 +      progress: {
 +        label: false,
 +        maxLines: 3,
 +        maxLineChars: 560,
 +        toolProgress: false,
-+        commandText: "status" as const,
++        commandText: "status",
 +        commentary: true,
 +        narration: true,
 +      },
@@ -22330,10 +22331,10 @@ index ab3cd36b20f3c3be508332de77fd2e1cc6f0af9a..2ebcbbc016e443f5ce12863772b03150
      onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
 diff --git a/src/agents/command/continuation-presentation.test.ts b/src/agents/command/continuation-presentation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e3a1ec045ae0c882a9854ff01cd2b0b751568ed0
+index 0000000000000000000000000000000000000000..30679ea2238797ce58862d6f91141877e90bb497
 --- /dev/null
 +++ b/src/agents/command/continuation-presentation.test.ts
-@@ -0,0 +1,226 @@
+@@ -0,0 +1,227 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import type { GetReplyOptions } from "../../auto-reply/get-reply-options.types.js";
 +import type { CliDeps } from "../../cli/deps.types.js";
@@ -22499,9 +22500,10 @@ index 0000000000000000000000000000000000000000..e3a1ec045ae0c882a9854ff01cd2b0b7
 +      await vi.advanceTimersByTimeAsync(1);
 +    }
 +    expect(h.updates.length).toBeGreaterThan(1);
-+    expect(Math.max(...h.updates.slice(1).map((u, i) => u.at - h.updates[i].at))).toBeLessThan(
-+      180_000,
-+    );
++    h.updates.reduce((previous, update) => {
++      expect(update.at - previous.at).toBeLessThan(180_000);
++      return update;
++    });
 +    expect(mocks.typing).toHaveBeenCalled();
 +    expect(h.opts.deliver).toBe(false);
 +    expect(JSON.stringify(h.updates)).not.toContain("PRIVATE CHILD RESULT");
