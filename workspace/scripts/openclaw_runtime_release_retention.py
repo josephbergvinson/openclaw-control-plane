@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import plistlib
@@ -133,6 +134,8 @@ MUTATION_DEADLINE_SECONDS = _positive_float_env(
 )
 DEFERRED_BUDGET_STATE = 'deferred_run_budget'
 LAST_PROMOTION_OPERATION_CLASSIFICATIONS: list[dict[str, Any]] = []
+LAST_TERMINAL_ARCHIVE_NOTES: list[dict[str, str]] = []
+ORPHAN_MIN_AGE_DAYS = 2
 
 
 def mutation_deadline(seconds: float | None = None) -> float | None:
@@ -819,6 +822,10 @@ def collect_activation_result_refs(
             f'activation result must be one physical regular file: {path}'
         )
     record = load_json_object(path)
+    try:
+        from . import openclaw_runtime_activate as activation
+    except ImportError:
+        import openclaw_runtime_activate as activation
     if (
         record.get('outcome') != 'activated'
         or record.get('statesVisited') != ['preflight', 'apply', 'verify', 'terminal']
@@ -851,8 +858,9 @@ def collect_activation_result_refs(
             not stat.S_ISDIR(release_info.st_mode)
             or type(value.get('device')) is not int
             or type(value.get('inode')) is not int
-            or (value['device'], value['inode'])
-            != (release_info.st_dev, release_info.st_ino)
+            # This reader already resolves supported host aliases within the
+            # releases root. Preserve that contract without rewriting history.
+            or not activation.historical_identity_matches({**value, 'path': str(release)}, release, release_info)
         ):
             raise ValueError(
                 f'activation result {role} release identity drifted: {release}'
@@ -1080,6 +1088,7 @@ def collect_references(
     )
     refs.extend(collect_process_refs(deadline=deadline))
     refs.extend(collect_promotion_dependency_refs())
+    refs.extend(collect_unfinished_release_refs())
     return refs
 
 
@@ -1140,6 +1149,80 @@ def protect_retention_window(
             reason = f'younger-than-{max(min_age_days, 0)}d'
             if reason not in record.protected_reasons:
                 record.protected_reasons.append(reason)
+
+
+def collect_unfinished_release_refs() -> list[Reference]:
+    """A sealed candidate is not disposable merely because no process uses it.
+
+    Reuse terminal promotion records and the activator's existing immutable
+    retirement receipts. No new producer marker or retention database is used.
+    """
+    global LAST_TERMINAL_ARCHIVE_NOTES
+    LAST_TERMINAL_ARCHIVE_NOTES = []
+    terminal: set[Path] = set()
+    for classification in LAST_PROMOTION_OPERATION_CLASSIFICATIONS:
+        if classification.get('terminal_state') not in PROMOTION_TERMINAL_STATES:
+            continue
+        lock = Path(classification['operation_lock_path'])
+        payload = load_json_object(lock)
+        for entry in iter_json_objects(payload):
+            for field in PROMOTION_OPERATION_DEPENDENCIES:
+                if entry.get(field) is not None:
+                    terminal.add(normalize_release_dependency_path(entry[field], source=str(lock), releases_root=OPERATOR.require_path("paths.runtime_releases_root")))
+    archive = effective_activation_result_path().parent / 'archive'
+    if os.path.lexists(archive):
+        if archive.is_symlink() or not archive.is_dir():
+            raise ValueError('activation retirement archive must be a physical directory')
+        generations = list(archive.iterdir())
+        if len(generations) > 4096:
+            raise ValueError('activation retirement metadata count exceeds bound')
+        try:
+            from . import openclaw_runtime_activate as activation
+        except ImportError:
+            import openclaw_runtime_activate as activation
+        for generation in generations:
+            try:
+                if generation.is_symlink() or not generation.is_dir():
+                    raise ValueError('activation retirement generation is not physical')
+                receipt_path = generation / 'retirement-receipt.json'
+                if not os.path.lexists(receipt_path):
+                    continue  # Interrupted preservation is not a terminal proof.
+                if receipt_path.lstat().st_size > 256 * 1024:
+                    raise ValueError('activation retirement receipt exceeds bound')
+                receipt, _, _ = activation.read_json(receipt_path, 'retirement receipt')
+                result_path = generation / 'activation-result.json'
+                if (receipt.get('schemaVersion') != 1 or receipt.get('outcome') not in
+                        {'activated', 'restored', 'restored_stopped', 'restored_after_late_verification'}
+                        or receipt.get('result', {}).get('path') != str(result_path)):
+                    raise ValueError('activation retirement receipt binding drift')
+                if result_path.lstat().st_size > 256 * 1024:
+                    raise ValueError('archived activation result exceeds bound')
+                result, data, info = activation.read_json(result_path, 'archived activation result')
+                binding = receipt['result']
+                if (hashlib.sha256(data).hexdigest() != binding.get('sha256')
+                        or not activation.historical_identity_matches(binding, result_path, info)):
+                    raise ValueError('archived activation result identity/hash drift')
+                identities = activation.retirement_release_identities(receipt)
+                for role in ('candidate', 'rollback'):
+                    value = result.get(role)
+                    if not isinstance(value, dict) or not isinstance(value.get('path'), str):
+                        continue
+                    path = realpath(Path(value['path']))
+                    if path.parent != realpath(OPERATOR.require_path("paths.runtime_releases_root")) or not path.name.startswith('openclaw-'):
+                        continue
+                    if os.path.lexists(path):
+                        if activation.historical_release_identity_matches(value, identities.get(role), path):
+                            terminal.add(path)
+            except (OSError, ValueError, activation.ActivationError) as exc:
+                # Ineligible historical evidence is not current lifecycle authority.
+                # It grants no immediate disposal; the 48-hour orphan gate remains.
+                LAST_TERMINAL_ARCHIVE_NOTES.append({"generation":generation.name, "reason":str(exc)})
+    now = utc_now().timestamp()
+    return [Reference('orphan-younger-than-2d', child)
+            for child in OPERATOR.require_path("paths.runtime_releases_root").iterdir()
+            if child.name.startswith('openclaw-') and not child.is_symlink()
+            and child.is_dir() and realpath(child) not in terminal
+            and now - max(child.stat().st_mtime, child.stat().st_ctime) < ORPHAN_MIN_AGE_DAYS * 86400]
 
 
 def retention_lock_path() -> Path:
@@ -1598,11 +1681,13 @@ def report_payload(
         'policy': {
             'keep_latest': keep_latest,
             'min_age_days': min_age_days,
+            'orphan_min_age_days': ORPHAN_MIN_AGE_DAYS,
             'inactive_operation_dependencies': 'ignored unless an explicit retention disposition is present',
             'active_operation_lock': 'hard-block unless a strictly matching terminal receipt proves the lock stale',
         },
         'process_scan': dict(LAST_PROCESS_SCAN_REPORT),
         'promotion_operation_classifications': list(LAST_PROMOTION_OPERATION_CLASSIFICATIONS),
+        'historical_evidence_ignored': list(LAST_TERMINAL_ARCHIVE_NOTES),
         'before': before,
         'filesystem_space': filesystem_space,
         'summary': {

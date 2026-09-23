@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from test_openclaw_runtime_activate import activate_module as activation, fixture, run
+from test_openclaw_runtime_activate import activate_module as activation, fixture, run, simulate_release_remount
 from test_screen_capture_continuity import capture_binding
 
 
@@ -203,3 +203,29 @@ def test_fifo_replacement_between_inspection_and_open_is_nonblocking(fixture, re
     with pytest.raises(activation.ActivationError):
         activation.verify_screen_capture_binding(binding, fixture.paths.node, require_current_process=True)
     assert replaced
+
+
+def test_retired_capture_uses_stable_release_identity_after_remount(fixture, retired_capture, monkeypatch):
+    binding, _, _ = retired_capture
+    simulate_release_remount(fixture, monkeypatch)
+    result = activation.verify_screen_capture_binding(binding, fixture.paths.node, require_current_process=True)
+    assert result["effectiveCaptureVerifiedForCurrentProcess"] is True
+    assert result["scheduledSyncProven"] is False
+
+
+@pytest.mark.parametrize("wrong_uuid", [False, True])
+def test_archived_receipt_file_identity_uses_volume_uuid(fixture, retired_capture, wrong_uuid):
+    binding, archive, _ = retired_capture
+    path = archive / activation.RETIREMENT_RECEIPT_NAME
+    receipt = json.loads(path.read_text())
+    for key in ("result", "startFence"):
+        receipt[key]["device"] -= 4  # Simulate an observation from the previous mount.
+        if wrong_uuid:
+            receipt[key]["volumeUuid"] = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    path.chmod(0o600); path.write_text(json.dumps(receipt)); path.chmod(0o400)
+    if wrong_uuid:
+        with pytest.raises(activation.ActivationError):
+            activation.verify_screen_capture_binding(binding, fixture.paths.node, require_current_process=True)
+    else:
+        assert activation.verify_screen_capture_binding(binding, fixture.paths.node,
+            require_current_process=True)["effectiveCaptureVerifiedForCurrentProcess"] is True
