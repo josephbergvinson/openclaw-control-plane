@@ -235,7 +235,10 @@ verify the effective runtime behavior rather than treating a selector as proof.
 
 Autonomous LLM jobs, hooks, heartbeat, active memory, dreaming and utility work use
 `openai/gpt-6-sol` with High reasoning. Set native `agentTurn` payload.model and
-payload.thinking explicitly. Pure command jobs have no scheduler model/thinking;
+payload.thinking explicitly for operator-owned jobs. For system-owned skill review
+jobs, preserve the projected payload and use supported execution-session model and
+thinking preferences. Heartbeat, dreaming and utility effort comes from the
+selected model’s existing `params.thinking`. Pure command jobs have no scheduler model/thinking;
 if an executable invokes an LLM internally, its inference owner follows the same
 background policy. Preserve deliberately disabled jobs and their existing scope.
 

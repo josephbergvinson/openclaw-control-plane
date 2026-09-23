@@ -60,6 +60,11 @@ multi-agent orchestration with underlying Max reasoning. Autonomous inference us
 `openai/gpt-6-sol` with High reasoning. Native `agentTurn` jobs carry those values in
 `payload.model` and `payload.thinking`, including intentionally disabled jobs when
 their saved policy is updated. Keep their enablement, schedule and delivery intact.
+For system-owned skill review jobs, leave the projected payload with its owner and
+set the supported execution-session preferences through `sessions.patch` using
+`agent:<agent-id>:cron:<job-id>`, `model: "openai/gpt-6-sol"` and
+`thinkingLevel: "high"`. Check the existing job remains disabled when intended;
+changing its model policy is not authorization to enable it.
 
 The [preferences profile](../config/openclaw.preferences.json) configures the same
 Sol/High policy for heartbeat, active memory, all three dreaming phases and utility
