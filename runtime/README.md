@@ -52,7 +52,7 @@ child creation, so actual live settlement acceptance remains pending. The Septem
 matching private worker at source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `b186ca230fdd56e8d22f75042fc132b589ca71fc`.
+The reconstructible candidate is now `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`.
 It retains the preceding candidate’s corrections to quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
@@ -93,6 +93,15 @@ not acquire an LLM dependency. This uses the existing configuration schema, so
 the retained signed companion can continue reading it. Focused routing and
 compatibility tests passed; source qualification, activation and live acceptance
 of this combined candidate remain pending.
+
+The native command transport now waits for an explicitly bounded command to
+finish, allowing five seconds for the response after that command deadline. Its
+previous fixed 20-second socket wait could report an unavailable companion while
+the app was still running. Existing authentication, cancellation and no-replay
+checks remain in place. The repair runs in the companion's bundled worker, so
+activating the Gateway alone does not install it. A matching signed companion
+package and host installation are required; those steps and actual Reminders
+write/readback acceptance remain pending.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that
