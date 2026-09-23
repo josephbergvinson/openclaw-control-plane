@@ -66168,6 +66168,151 @@ index 258992554f150f3ccc058cbd95e2973c4f807bf5..70d15d47b5f01695da125406683f41ab
  export function snapshotFromExecApprovalsRow(params: {
    path: string;
    row?: ExecApprovalsConfigRow;
+diff --git a/src/infra/exec-host.test.ts b/src/infra/exec-host.test.ts
+index 397aacd181cf1542efcc29b1a70055fea67cd202..dd0a61efcc1e791a04ce814e1739df04f588d081 100644
+--- a/src/infra/exec-host.test.ts
++++ b/src/infra/exec-host.test.ts
+@@ -1,6 +1,12 @@
+ // Covers exec host socket request signing and response handling.
+ import crypto from "node:crypto";
++import { once } from "node:events";
++import net from "node:net";
++import path from "node:path";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
++import { MAX_SAFE_TIMEOUT_DELAY_MS } from "../../packages/gateway-client/src/timeouts.js";
++import { createDeferred } from "../../test/helpers/promise.js";
++import { withTestDir } from "../test-helpers/temp-dir.js";
+ 
+ const requestJsonlSocketMock = vi.hoisted(() => vi.fn());
+ 
+@@ -8,6 +14,14 @@ vi.mock("./jsonl-socket.js", () => ({
+   requestJsonlSocket: (...args: unknown[]) => requestJsonlSocketMock(...args),
+ }));
+ 
++// jsonl-socket binds node:timers at import time. Forward that boundary to the
++// current global clock so fake time covers the real transport's deadline too.
++vi.mock("node:timers", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("node:timers")>()),
++  setTimeout: (callback: () => void, delay?: number) => globalThis.setTimeout(callback, delay),
++  clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
++}));
++
+ import { requestExecHostViaSocket } from "./exec-host.js";
+ 
+ type JsonlSocketCall = {
+@@ -128,4 +142,82 @@ describe("requestExecHostViaSocket", () => {
+ 
+     expect(requireJsonlSocketCall().timeoutMs).toBe(123);
+   });
++
++  it.each([
++    { program: 60_000, outer: undefined, expected: 65_000 },
++    { program: 1_000, outer: undefined, expected: 20_000 },
++    { program: 60_000, outer: 123, expected: 123 },
++    { program: 60_000, outer: 0, expected: 0 },
++    { program: undefined, outer: undefined, expected: 20_000 },
++    { program: null, outer: undefined, expected: 20_000 },
++    { program: 0, outer: undefined, expected: 20_000 },
++    { program: -1, outer: undefined, expected: 20_000 },
++    { program: Number.NaN, outer: undefined, expected: 20_000 },
++    { program: Number.POSITIVE_INFINITY, outer: undefined, expected: 20_000 },
++    { program: Number.MAX_VALUE, outer: undefined, expected: MAX_SAFE_TIMEOUT_DELAY_MS },
++  ])("preserves timeout semantics for program $program and outer $outer", async (testCase) => {
++    requestJsonlSocketMock.mockResolvedValueOnce(null);
++    await requestExecHostViaSocket({
++      socketPath: "/tmp/socket",
++      token: "secret",
++      timeoutMs: testCase.outer,
++      request: { command: ["echo", "hi"], timeoutMs: testCase.program },
++    });
++    expect(requireJsonlSocketCall().timeoutMs).toBe(testCase.expected);
++  });
++
++  it.runIf(process.platform !== "win32")(
++    "receives a command result beyond twenty seconds through the real socket transport",
++    async () => {
++      const { requestJsonlSocket } =
++        await vi.importActual<typeof import("./jsonl-socket.js")>("./jsonl-socket.js");
++      requestJsonlSocketMock.mockImplementation(requestJsonlSocket);
++      await withTestDir({ prefix: "oc-exec-budget-", parentDir: "/tmp" }, async (dir) => {
++        const socketPath = path.join(dir, "host.sock");
++        const admitted = createDeferred();
++        const sockets: net.Socket[] = [];
++        const response = {
++          type: "exec-res",
++          ok: true,
++          payload: { success: true, timedOut: false, exitCode: 0, stdout: "done", stderr: "" },
++        };
++        const server = net.createServer({ allowHalfOpen: true }, (socket) => {
++          sockets.push(socket);
++          socket.on("data", () => {});
++          socket.on("end", () => {
++            setTimeout(() => socket.end(`${JSON.stringify(response)}\n`), 25_000);
++            admitted.resolve();
++          });
++        });
++        try {
++          const listening = once(server, "listening");
++          server.listen(socketPath);
++          await listening;
++          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
++          let settled = false;
++          const result = requestExecHostViaSocket({
++            socketPath,
++            token: "test-token",
++            request: { command: ["long-running-command"], timeoutMs: 60_000 },
++          }).then((value) => {
++            settled = true;
++            return value;
++          });
++          await admitted.promise;
++          await vi.advanceTimersByTimeAsync(21_000);
++          expect(settled).toBe(false);
++          await vi.advanceTimersByTimeAsync(4_000);
++          await expect(result).resolves.toEqual({ ok: true, payload: response.payload });
++        } finally {
++          vi.useRealTimers();
++          for (const socket of sockets) {
++            socket.destroy();
++          }
++          await new Promise<void>((resolve) => {
++            server.close(() => resolve());
++          });
++        }
++      });
++    },
++  );
+ });
+diff --git a/src/infra/exec-host.ts b/src/infra/exec-host.ts
+index 4c744aa1bffd330b5076abbd8a608dcded3f72fb..42334db1b99beb89005b760886f6a6149da21ce3 100644
+--- a/src/infra/exec-host.ts
++++ b/src/infra/exec-host.ts
+@@ -1,5 +1,6 @@
+ // Sends HMAC-protected exec host requests over the local socket.
+ import crypto from "node:crypto";
++import { addSafeTimeoutDelayGraceMs } from "../utils/timer-delay.js";
+ import type { ExecApprovalPolicySnapshot } from "./exec-approvals.js";
+ import { requestJsonlSocket } from "./jsonl-socket.js";
+ 
+@@ -50,7 +51,17 @@ export async function requestExecHostViaSocket(params: {
+   if (!socketPath || !token) {
+     return null;
+   }
+-  const timeoutMs = params.timeoutMs ?? 20_000;
++  // The socket awaits the completed command, not just admission. Keep its
++  // response budget beyond a finite program deadline without changing the
++  // caller's explicit transport budget or the no-program-timer fallback.
++  const programTimeoutMs = request.timeoutMs;
++  const inferredTimeoutMs =
++    typeof programTimeoutMs === "number" &&
++    Number.isFinite(programTimeoutMs) &&
++    programTimeoutMs > 0
++      ? Math.max(20_000, addSafeTimeoutDelayGraceMs(programTimeoutMs, 5_000))
++      : 20_000;
++  const timeoutMs = params.timeoutMs ?? inferredTimeoutMs;
+   const requestJson = JSON.stringify(request);
+   const nonce = crypto.randomBytes(16).toString("hex");
+   const ts = Date.now();
 diff --git a/src/infra/heartbeat-runner-execution.ts b/src/infra/heartbeat-runner-execution.ts
 index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..edab46735e665175d4e6ba219858efbd8c870159 100644
 --- a/src/infra/heartbeat-runner-execution.ts

@@ -48,7 +48,7 @@ final-delivery authority. Delayed progress writes recheck that authority and sto
 on cancellation or replacement. Seven owning test files pass 90 focused cases;
 hosted qualification and live acceptance remain separate.
 
-The current reconstructible candidate `b186ca230fdd` retains those repairs and adds
+The current reconstructible candidate `5b5942def95c` retains those repairs and adds
 separate interactive and autonomous model routing. The example policy uses Astra
 Max for conversation, optional `/think ultra` orchestration and Sol High for
 model-backed maintenance. Existing model parameters supply reasoning effort to
@@ -67,6 +67,14 @@ conversation can otherwise retain a disposed writer and fail while recording its
 result before delivery. Real-timer regression tests verify durable completion,
 idempotent replay and continued rejection of writes through the retired caller.
 This source repair does not by itself prove live reminder delivery.
+
+Native execution also derives its response deadline from an explicitly bounded
+command, with response grace, instead of ending every socket wait after 20 seconds.
+An explicit transport override still wins. Authentication, cancellation and
+uncertain-result no-replay behavior remain unchanged. This JavaScript owner runs
+inside the signed companion's private worker, so its deployment requires rebuilding
+and installing that bundle as well as activating the Gateway. Actual socket and
+admission regressions pass; package and host acceptance remain separate.
 
 | Change family | Source behavior and acceptance boundary |
 |---|---|
