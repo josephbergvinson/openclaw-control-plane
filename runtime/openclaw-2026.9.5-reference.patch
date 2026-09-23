@@ -2884,7 +2884,7 @@ index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..7560f64bef866ac04ce670422f760721
  src/agents/agent-run-terminal-delivery.ts	1
  src/agents/agent-run-terminal-outcome.ts	2
 diff --git a/config/knip.config.ts b/config/knip.config.ts
-index ed16c1a5bc157a63b8c7d71dbd9daf5001d8c21a..0501911983542c5962b6dd64ca382433e53c95d7 100644
+index ed16c1a5bc157a63b8c7d71dbd9daf5001d8c21a..fd9eaeb33deb02cb850aebae32b12863c00bf7c5 100644
 --- a/config/knip.config.ts
 +++ b/config/knip.config.ts
 @@ -248,6 +248,8 @@ const rootEntries = [
@@ -2896,12 +2896,15 @@ index ed16c1a5bc157a63b8c7d71dbd9daf5001d8c21a..0501911983542c5962b6dd64ca382433
    // Uploaded in the worker bundle and launched by rsync; no static host import exists.
    "src/worker/workspace-rsync-receiver.ts!",
    // v2026.9.1 Gateways lazy-import this stable dist entry after an in-place update.
-@@ -526,6 +528,8 @@ const config = {
+@@ -526,6 +528,11 @@ const config = {
      "src/gateway/board-view-ticket.ts": ["exports"],
      // Focused startup tests consume this explicit seam; production imports only the bootstrap.
      "src/gateway/server-startup-bootstrap.ts": ["exports"],
 +    // Focused auth tests import the resolver seam; production calls it inside the IPC owner.
 +    "src/node-host/local-gateway-auth.ts": ["exports"],
++    // Focused continuation tests import the presentation seam; production calls it in-module.
++    // The full-tree companion still audits the export against its test consumers.
++    "src/agents/command/continuation-presentation.ts": ["exports"],
      // Registry facades retain direct registration/reset compatibility seams used by focused
      // tests; the full-tree scan still audits every named export against those consumers.
      "src/agents/harness/registry.ts": ["exports"],
@@ -3212,7 +3215,7 @@ index dadbe4690bb6385daabdc250186a0fed13147089..92e394001c0431565b86c01209fbb70b
  - **Deterministic batches.** Frozen run IDs are sorted. Findings use creation
    time, completion time, and child session identity as tie-breakers. Superseded
 diff --git a/docs/gateway/heartbeat.md b/docs/gateway/heartbeat.md
-index 07350a9a9ff338300a6d7b636591d9a49089ff22..4f5329bb8aaddb21a143cc346d14e37777530a05 100644
+index 07350a9a9ff338300a6d7b636591d9a49089ff22..6a9d95b72fe82c660219052e619055d2b3f3a76c 100644
 --- a/docs/gateway/heartbeat.md
 +++ b/docs/gateway/heartbeat.md
 @@ -101,7 +101,7 @@ string. `heartbeat.target` accepts `owner`, `last`, `none`, or a channel ID such
@@ -3224,6 +3227,15 @@ index 07350a9a9ff338300a6d7b636591d9a49089ff22..4f5329bb8aaddb21a143cc346d14e377
  
  ## What the heartbeat prompt is for
  
+@@ -271,7 +271,7 @@ Use `accountId` to target a specific account on multi-account channels like Tele
+   Heartbeat interval (duration string, default unit minutes).
+ </ParamField>
+ <ParamField path="model" type="string">
+-  Optional model override for heartbeat runs (`provider/model`).
++  Optional model override for autonomous heartbeat runs (`provider/model`). Its configured `params.thinking` sets the turn effort. Unset preserves existing thinking resolution. Admitted user-task continuations keep their conversation model and effort.
+ </ParamField>
+ <ParamField path="lightContext" type="boolean" default="false">
+   When true, heartbeat runs use lightweight bootstrap context and skip workspace bootstrap files. Monitor scratch is injected by the heartbeat runner either way.
 diff --git a/docs/gateway/permission-modes.md b/docs/gateway/permission-modes.md
 index 72e371695acddcd6735fdeff2c50bb5462b2a185..39ae6c8076e912f0b1d42925c059e42405e0eed6 100644
 --- a/docs/gateway/permission-modes.md
@@ -8490,10 +8502,10 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..4b733cc1b2bcfb26b6861a0fb6682f20
  
 diff --git a/extensions/discord/src/continuation-progress.test.ts b/extensions/discord/src/continuation-progress.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..53795667ab47715ae9efc63857d78167a5ddc014
+index 0000000000000000000000000000000000000000..386969931a081916cb1f74d1c65083249266f276
 --- /dev/null
 +++ b/extensions/discord/src/continuation-progress.test.ts
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,108 @@
 +import type { DiscordConfig } from "openclaw/plugin-sdk/config-contracts";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { RequestClient } from "./internal/discord.js";
@@ -8510,7 +8522,11 @@ index 0000000000000000000000000000000000000000..53795667ab47715ae9efc63857d78167
 +      if (init?.method === "DELETE") {
 +        return new Response(null, { status: 204 });
 +      }
-+      const body = JSON.parse(String(init?.body)) as { content: string };
++      const bodyText = init?.body;
++      if (typeof bodyText !== "string") {
++        throw new Error("Expected serialized Discord request body");
++      }
++      const body = JSON.parse(bodyText) as { content: string };
 +      writes.push({ method: init!.method!, text: body.content, at: Date.now() });
 +      return Response.json({ id: "123456789012345678" });
 +    },
@@ -14128,10 +14144,10 @@ index 9242aafaf1e274131633363c6b2198f2bb9b0690..a65cc42c5b6d75826eca465ac13359b5
        if (!tool) {
 diff --git a/extensions/memory-core/src/dreaming-completion-effort.test.ts b/extensions/memory-core/src/dreaming-completion-effort.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca132e6c6419
+index 0000000000000000000000000000000000000000..226f2814719c2b23cb84931a5c570f5b2fa60946
 --- /dev/null
 +++ b/extensions/memory-core/src/dreaming-completion-effort.test.ts
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,209 @@
 +// Exercise the admitted managed hook through real phase selection and publication.
 +import fs from "node:fs/promises";
 +import path from "node:path";
@@ -14159,11 +14175,30 @@ index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca13
 +
 +describe("managed Dreaming completion effort", () => {
 +  it.each([
-+    { trigger: "cron", configured: undefined, expected: "high" },
-+    { trigger: "heartbeat", configured: "medium", expected: "medium" },
++    {
++      trigger: "cron",
++      configured: undefined,
++      model: undefined,
++      phaseModels: undefined,
++      expected: ["low", "high", "high", "high"],
++    },
++    {
++      trigger: "cron",
++      configured: { light: "high", rem: "high", deep: "high" },
++      model: "openai/gpt-6-sol",
++      phaseModels: undefined,
++      expected: ["high", "high", "high", "high"],
++    },
++    {
++      trigger: "heartbeat",
++      configured: { light: "high", rem: "low", deep: "medium" },
++      model: "openai/gpt-6-sol",
++      phaseModels: { light: "openai/gpt-6-astra", rem: "openai/gpt-5.6-sol" },
++      expected: ["high", "low", "medium", "medium"],
++    },
 +  ] as const)(
-+    "uses sweep effort for every conditional completion ($trigger, $expected)",
-+    async ({ trigger, configured, expected }) => {
++    "honors each phase's model and effort ($trigger, $expected)",
++    async ({ trigger, configured, model, phaseModels, expected }) => {
 +      vi.useFakeTimers({ toFake: ["Date"] });
 +      vi.setSystemTime(NOW);
 +      const workspaceDir = await createTempWorkspace("dreaming-effort-");
@@ -14194,6 +14229,22 @@ index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca13
 +      }
 +      const config: OpenClawConfig = {
 +        agents: {
++          defaults: {
++            thinkingDefault: "max",
++            ...(model && configured
++              ? {
++                  models: {
++                    [model]: { params: { thinking: configured.deep } },
++                    ...(phaseModels
++                      ? {
++                          [phaseModels.light]: { params: { thinking: configured.light } },
++                          [phaseModels.rem]: { params: { thinking: configured.rem } },
++                        }
++                      : {}),
++                  },
++                }
++              : {}),
++          },
 +          entries: {
 +            main: { workspace: workspaceDir, model: "openai/gpt-5.5", thinkingDefault: "ultra" },
 +          },
@@ -14205,14 +14256,20 @@ index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca13
 +                dreaming: {
 +                  enabled: true,
 +                  timezone: "UTC",
++                  ...(model ? { model } : {}),
 +                  phases: {
-+                    light: { enabled: true },
-+                    rem: { enabled: true },
++                    light: {
++                      enabled: true,
++                      ...(phaseModels ? { execution: { model: phaseModels.light } } : {}),
++                    },
++                    rem: {
++                      enabled: true,
++                      ...(phaseModels ? { execution: { model: phaseModels.rem } } : {}),
++                    },
 +                    deep: {
 +                      minScore: 0,
 +                      minRecallCount: 1,
 +                      minUniqueQueries: 1,
-+                      ...(configured ? { execution: { thinking: configured } } : {}),
 +                    },
 +                  },
 +                },
@@ -14277,7 +14334,12 @@ index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca13
 +        }
 +      });
 +      const requests = complete.mock.calls.map(([request]) => request);
-+      expect(requests.every((request) => request.model === undefined)).toBe(true);
++      expect(requests.map((request) => request.model)).toEqual([
++        phaseModels?.light ?? model,
++        phaseModels?.rem ?? model,
++        model,
++        model,
++      ]);
 +      expect(complete.mock.contexts.every((receiver) => receiver === completionRuntime)).toBe(true);
 +      expect(requests.every((request) => request.timeoutMs === 60_000)).toBe(true);
 +      expect(requests).toHaveLength(4); // light, REM, consolidation, deep
@@ -14288,13 +14350,192 @@ index 0000000000000000000000000000000000000000..10957e6a1ecf9015c0681e7aac9bca13
 +      ).toHaveLength(1);
 +      expect(
 +        requests.map((request) => ({ agentId: request.agentId, thinking: request.thinking })),
-+      ).toEqual(Array.from({ length: 4 }, () => ({ agentId: "main", thinking: expected })));
++      ).toEqual(expected.map((thinking) => ({ agentId: "main", thinking })));
 +      expect(await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf8")).toContain(snippet);
 +      expect(config.agents?.entries?.main?.thinkingDefault).toBe("ultra");
 +      expect(logger.error).not.toHaveBeenCalled();
 +    },
 +  );
 +});
+diff --git a/extensions/memory-core/src/dreaming-narrative.test.ts b/extensions/memory-core/src/dreaming-narrative.test.ts
+index a803b1ead9cc978ed1b325952b912fb943d2a1f0..22f4827ea7ac51887bd3d075532221d5d1de8aac 100644
+--- a/extensions/memory-core/src/dreaming-narrative.test.ts
++++ b/extensions/memory-core/src/dreaming-narrative.test.ts
+@@ -61,11 +61,11 @@ describe("runDreamNarrative", () => {
+   it.each([
+     new Error("model unavailable"),
+     new Error("Completion failed", { cause: new Error("unknown model: ollama/missing-model") }),
+-  ])("retries an unavailable configured model with the default (%s)", async (error) => {
++  ])("preserves the configured model when it is unavailable (%s)", async (error) => {
+     const workspaceDir = await createTempWorkspace("dreaming-model-retry-");
+     const subagent = createCompletion("The default model carried the diary home.");
+     subagent.complete.mockRejectedValueOnce(error);
+-    await runDreamNarrative({
++    const outcome = await runDreamNarrative({
+       agentId: "main",
+       subagent,
+       workspaceDir,
+@@ -74,11 +74,11 @@ describe("runDreamNarrative", () => {
+       logger: createLogger(),
+     });
+ 
+-    expect(subagent.complete).toHaveBeenCalledTimes(2);
++    expect(outcome).toMatchObject({ status: "degraded" });
++    expect(subagent.complete).toHaveBeenCalledTimes(1);
+     expect(subagent.complete.mock.calls[0]?.[0].model).toBe("ollama/missing-model");
+-    expect(subagent.complete.mock.calls[1]?.[0]).not.toHaveProperty("model");
+     expect(await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf8")).toContain(
+-      "The default model carried the diary home.",
++      "A memory trace surfaced, but details were unavailable in this run.",
+     );
+   });
+ 
+diff --git a/extensions/memory-core/src/dreaming-narrative.ts b/extensions/memory-core/src/dreaming-narrative.ts
+index 0612e3361c4d59dac9d4406032fb1fcb4e8e6f3b..af9fc6e2f4a9c0a4bed4ce991a4bc7a518d86c6d 100644
+--- a/extensions/memory-core/src/dreaming-narrative.ts
++++ b/extensions/memory-core/src/dreaming-narrative.ts
+@@ -118,64 +118,6 @@ export async function appendFallbackNarrativeEntry(params: {
+   }
+ }
+ 
+-function isConfiguredModelUnavailableNarrativeError(error: unknown): boolean {
+-  const errors: Error[] = [];
+-  for (
+-    let current = error;
+-    current instanceof Error && !errors.includes(current);
+-    current = current.cause
+-  ) {
+-    errors.push(current);
+-  }
+-  // Runtime wrappers retain provider causes, but denied authority never authorizes
+-  // a retry through the default model even if a nested cause names a missing model.
+-  if (errors.some((entry) => extractErrorCode(entry) === "LLM_COMPLETION_NOT_AUTHORIZED")) {
+-    return false;
+-  }
+-  return errors.some((entry) => isModelUnavailableMessage(entry.message));
+-}
+-
+-function isModelUnavailableMessage(raw: string): boolean {
+-  const message = raw.trim();
+-  if (!message) {
+-    return false;
+-  }
+-  if (/requested model may be(?: temporarily)? unavailable/i.test(message)) {
+-    return true;
+-  }
+-  if (/model unavailable/i.test(message)) {
+-    return true;
+-  }
+-  if (/no endpoints found for/i.test(message)) {
+-    return true;
+-  }
+-  if (/unknown model/i.test(message)) {
+-    return true;
+-  }
+-  if (/model(?:[_\-\s])?not(?:[_\-\s])?found/i.test(message)) {
+-    return true;
+-  }
+-  if (/\b404\b/.test(message) && /not(?:[_\-\s])?found/i.test(message)) {
+-    return true;
+-  }
+-  if (/not_found_error/i.test(message)) {
+-    return true;
+-  }
+-  if (/models\/[^\s]+ is not found/i.test(message)) {
+-    return true;
+-  }
+-  if (/model/i.test(message) && /does not exist/i.test(message)) {
+-    return true;
+-  }
+-  if (/unsupported model/i.test(message)) {
+-    return true;
+-  }
+-  if (/is not a valid model id/i.test(message)) {
+-    return true;
+-  }
+-  return false;
+-}
+-
+ // ── Prompt building ────────────────────────────────────────────────────
+ 
+ function buildNarrativePrompt(data: NarrativePhaseData): string {
+@@ -235,6 +177,7 @@ export type DreamNarrativeRequest = {
+   nowMs?: number;
+   timezone?: string;
+   model?: string;
++  thinking?: Parameters<DreamingCompletion["complete"]>[0]["thinking"];
+   logger: Logger;
+ };
+ 
+@@ -249,28 +192,17 @@ async function generateAndAppendDreamNarrative(
+     typeof params.nowMs === "number" && Number.isFinite(params.nowMs) ? params.nowMs : Date.now();
+   const message = buildNarrativePrompt(params.data);
+   try {
+-    const attemptModels = params.model ? [params.model, undefined] : [undefined];
+-    let narrative = "";
+-    for (const model of attemptModels) {
+-      try {
+-        const result = await params.subagent.complete({
+-          agentId: params.agentId,
+-          message,
+-          extraSystemPrompt: NARRATIVE_SYSTEM_PROMPT,
+-          ...(model ? { model } : {}),
+-          timeoutMs: NARRATIVE_TIMEOUT_MS,
+-        });
+-        narrative = result.text.trim();
+-        break;
+-      } catch (error) {
+-        if (!model || !isConfiguredModelUnavailableNarrativeError(error)) {
+-          throw error;
+-        }
+-        params.logger.warn(
+-          `memory-core: narrative generation could not use configured model "${model}" for ${params.data.phase} phase; retrying with the agent default (${formatErrorMessage(error)}).`,
+-        );
+-      }
+-    }
++    // A configured phase model must not silently fall back to the interactive
++    // model. Failure writes the generic diary trace below without another call.
++    const result = await params.subagent.complete({
++      agentId: params.agentId,
++      message,
++      extraSystemPrompt: NARRATIVE_SYSTEM_PROMPT,
++      ...(params.model ? { model: params.model } : {}),
++      ...(params.thinking !== undefined ? { thinking: params.thinking } : {}),
++      timeoutMs: NARRATIVE_TIMEOUT_MS,
++    });
++    const narrative = result.text.trim();
+     if (!narrative) {
+       params.logger.warn(
+         `memory-core: narrative generation produced no text for ${params.data.phase} phase; writing fallback diary entry.`,
+diff --git a/extensions/memory-core/src/dreaming-phases.ts b/extensions/memory-core/src/dreaming-phases.ts
+index e5fbeab24a00bc1fb2bafc7d0c9dd67ed7304dad..1ce96d922c15d1fab191b5eb44660be7fc308bff 100644
+--- a/extensions/memory-core/src/dreaming-phases.ts
++++ b/extensions/memory-core/src/dreaming-phases.ts
+@@ -80,7 +80,7 @@ type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
+ type DreamingPhaseStorageConfig = {
+   timezone?: string;
+   storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
+-  execution?: { model?: string };
++  execution?: Pick<DreamNarrativeRequest, "model" | "thinking">;
+ };
+ type LightDreamingConfig = DreamingPhaseStorageConfig & {
+   enabled: boolean;
+@@ -1451,6 +1451,7 @@ async function runLightDreaming(
+       nowMs,
+       timezone: params.config.timezone,
+       model: params.config.execution?.model,
++      thinking: params.config.execution?.thinking,
+       logger: params.logger,
+       detached: params.detachNarratives,
+     });
+@@ -1543,6 +1544,7 @@ async function runRemDreaming(
+       nowMs,
+       timezone: params.config.timezone,
+       model: params.config.execution?.model,
++      thinking: params.config.execution?.thinking,
+       logger: params.logger,
+       detached: params.detachNarratives,
+     });
 diff --git a/extensions/memory-core/src/dreaming-workspace-ownership.ts b/extensions/memory-core/src/dreaming-workspace-ownership.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..85fc4bebe4df2306ab38993284fde86b6be263a2
@@ -14359,7 +14600,7 @@ index 0000000000000000000000000000000000000000..85fc4bebe4df2306ab38993284fde86b
 +  return workspaces;
 +}
 diff --git a/extensions/memory-core/src/dreaming.ts b/extensions/memory-core/src/dreaming.ts
-index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f656b7a0b6 100644
+index 2f453fbb51e5333f13e7a869fd77d259cac9f845..6193df5a91b75e8de1afa5030143381978164014 100644
 --- a/extensions/memory-core/src/dreaming.ts
 +++ b/extensions/memory-core/src/dreaming.ts
 @@ -1,6 +1,7 @@
@@ -14437,25 +14678,26 @@ index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f6
    if (workspaces.length === 0) {
      params.logger.warn(
        "memory-core: dreaming promotion skipped because no memory workspace is available.",
-@@ -542,6 +501,17 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+@@ -542,6 +501,18 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
      );
    }
  
-+  // One managed sweep owns its completion effort, independent of interactive agent defaults.
++  // Each phase owns its effort; remaining sweep calls use deep effort, not interactive defaults.
 +  // Keep the original capability receiver and all model/credential authorization intact.
 +  const completionRuntime = params.subagent;
 +  const thinking = params.config.execution?.thinking;
 +  const subagent: OpenClawPluginApi["runtime"]["subagent"] | undefined = completionRuntime
 +    ? {
 +        ...completionRuntime,
-+        complete: (request) => completionRuntime.complete({ ...request, thinking }),
++        complete: (request) =>
++          completionRuntime.complete({ ...request, thinking: request.thinking ?? thinking }),
 +      }
 +    : undefined;
 +
    let totalCandidates = 0;
    let totalApplied = 0;
    let failedWorkspaces = 0;
-@@ -573,7 +543,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+@@ -573,7 +544,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
          pluginConfig,
          cfg: params.cfg,
          logger: params.logger,
@@ -14464,7 +14706,7 @@ index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f6
          detachNarratives,
          nowMs: sweepNowMs,
        });
-@@ -639,7 +609,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+@@ -639,7 +610,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
            agentIds,
          }),
          consolidation: {
@@ -14473,7 +14715,7 @@ index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f6
            ...(params.config.execution?.model ? { model: params.config.execution.model } : {}),
            logger: params.logger,
          },
-@@ -695,7 +665,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+@@ -695,7 +666,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
            promotions: applied.appliedCandidates.map((c) => c.snippet).filter(Boolean),
            sourceEntryKeys: [...new Set(applied.appliedCandidates.map((c) => c.key))],
          };
@@ -14482,7 +14724,7 @@ index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f6
            await appendFallbackNarrativeEntry({
              workspaceDir,
              data,
-@@ -707,7 +677,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
+@@ -707,7 +678,7 @@ async function runShortTermDreamingPromotionIfTriggered(params: {
          } else {
            const narrativeOutcome = await runDreamNarrative({
              agentId,
@@ -14491,6 +14733,14 @@ index 2f453fbb51e5333f13e7a869fd77d259cac9f845..79db20f191b410c3d857aa4e196377f6
              workspaceDir,
              data,
              nowMs: sweepNowMs,
+@@ -994,6 +965,7 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
+         const config = resolveMemoryDeepDreamingConfig({
+           pluginConfig: resolveMemoryDreamingPluginConfig(currentConfig),
+           cfg: currentConfig,
++          agentId: ctx.agentId,
+         });
+         return await runShortTermDreamingPromotionIfTriggered({
+           cleanedBody: event.cleanedBody,
 diff --git a/extensions/memory-core/src/memory-search-tool-query.test.ts b/extensions/memory-core/src/memory-search-tool-query.test.ts
 index a870eff5ccc9d30b17b60a503af07f55ffebdda0..c261755a84deca0986965f64f175e0c404f7bff2 100644
 --- a/extensions/memory-core/src/memory-search-tool-query.test.ts
@@ -30787,6 +31037,36 @@ index 3c2c704eb60856fa143e94f97323e2f176e320c8..c3ee2b1e27973ec4fbd5510a7e822c43
    it("does not allow a locked OAuth profile to resolve as another profile", async () => {
      const profileId = "openai:default";
      authProfileMocks.resolveApiKeyForProfile.mockResolvedValueOnce({
+diff --git a/src/agents/model-extra-params.ts b/src/agents/model-extra-params.ts
+index 045ffe51e65e7ba86f25203795d567d6a2b3a4ea..26f7d0d2ca49a4713aa80dd8883437b57ce8e89c 100644
+--- a/src/agents/model-extra-params.ts
++++ b/src/agents/model-extra-params.ts
+@@ -1,5 +1,5 @@
+ import { normalizeFastMode } from "@openclaw/normalization-core/string-coerce";
+-import { normalizeThinkLevel } from "../auto-reply/thinking.shared.js";
++import { normalizeThinkLevel, type ThinkLevel } from "../auto-reply/thinking.shared.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import { modelKey } from "../shared/model-key.js";
+ import { resolveAgentEntry } from "./agent-scope-config.js";
+@@ -70,6 +70,18 @@ export function resolveModelExtraParamSources(params: {
+   return { defaultParams, modelParams, agentModelParams, agentParams: agent?.params };
+ }
+ 
++/** Explicit model effort, without inheriting the agent's interactive thinking default. */
++export function resolveConfiguredModelThinking(
++  params: Parameters<typeof resolveModelExtraParamSources>[0],
++): ThinkLevel | undefined {
++  const { modelParams, agentModelParams } = resolveModelExtraParamSources(params);
++  const thinking = agentModelParams?.thinking ?? modelParams?.thinking;
++  if (thinking === false || thinking === "disabled") {
++    return "off";
++  }
++  return typeof thinking === "string" ? normalizeThinkLevel(thinking) : undefined;
++}
++
+ /** Returns whether embedded OpenClaw would apply authored provider request parameters. */
+ export function hasAuthoredProviderRequestParams(
+   params: Parameters<typeof resolveModelExtraParamSources>[0],
 diff --git a/src/agents/model-fallback.quota-continuation.e2e.test.ts b/src/agents/model-fallback.quota-continuation.e2e.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..5e78613bc863e37b279090b13c17faa28e5b91f5
@@ -31298,6 +31578,51 @@ index 3f483f655d1405b8a9a4a52ea3bc57885f96215c..60e0adb331563bcf56a341f608e509fa
    it("keeps a pinned model on its rate-limit surface instead of escalating to fallback", async () => {
      await withModelFallbackWorkspace(async ({ agentDir, workspaceDir }) => {
        await writeFallbackMultiProfileAuthStore(agentDir);
+diff --git a/src/agents/model-thinking-default-core.ts b/src/agents/model-thinking-default-core.ts
+index ac124a84008c7bca156fa9072c8c1f0491aed112..683d805cd8ffd7251acae31c1a7bb6331ece2b02 100644
+--- a/src/agents/model-thinking-default-core.ts
++++ b/src/agents/model-thinking-default-core.ts
+@@ -3,12 +3,12 @@ import {
+   resolveThinkingSelectionForModel,
+   type ThinkingCatalogResolver,
+ } from "../auto-reply/thinking.js";
+-import { normalizeThinkLevel, type ThinkLevel } from "../auto-reply/thinking.shared.js";
++import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import type { ProviderThinkingPolicySource } from "../plugins/provider-thinking.types.js";
+ import { resolveAgentEntry } from "./agent-scope-config.js";
+ import type { ModelCatalogEntry } from "./model-catalog.types.js";
+-import { resolveModelExtraParamSources } from "./model-extra-params.js";
++import { resolveConfiguredModelThinking } from "./model-extra-params.js";
+ import { buildConfiguredModelCatalog } from "./model-selection-shared.js";
+ 
+ type ThinkingDefaultParams = {
+@@ -34,19 +34,13 @@ export function resolveConfiguredThinkingDefaultCore(params: {
+   if (agentThinking) {
+     return agentThinking;
+   }
+-  const { modelParams, agentModelParams } = resolveModelExtraParamSources({
+-    config: params.cfg,
+-    provider: params.provider,
+-    modelId: params.model,
+-    agentId: params.agentId,
+-  });
+-  const perModelThinking = agentModelParams?.thinking ?? modelParams?.thinking;
+-  if (perModelThinking === false || perModelThinking === "disabled") {
+-    return "off";
+-  }
+   return (
+-    (typeof perModelThinking === "string" ? normalizeThinkLevel(perModelThinking) : undefined) ??
+-    params.cfg.agents?.defaults?.thinkingDefault
++    resolveConfiguredModelThinking({
++      config: params.cfg,
++      provider: params.provider,
++      modelId: params.model,
++      agentId: params.agentId,
++    }) ?? params.cfg.agents?.defaults?.thinkingDefault
+   );
+ }
+ 
 diff --git a/src/agents/openclaw-tools.registration.test.ts b/src/agents/openclaw-tools.registration.test.ts
 index e5599fdffafde1be5085cd113f3d05bb341b90dd..80e0ba8439a53dd03cece8978e99313a4ace88ce 100644
 --- a/src/agents/openclaw-tools.registration.test.ts
@@ -40301,6 +40626,148 @@ index 0a093f5914ba71ba145a8bb2b043a2b48cfc9be0..cdb08dbf551d7ee31c9da38c909b449a
    it("does not disclose a resolved session key when sessionId access is denied", async () => {
      const tool = createSessionsSendTool({
        agentSessionKey: MAIN_AGENT_SESSION_KEY,
+diff --git a/src/agents/utility-completion.test.ts b/src/agents/utility-completion.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..110d99e27af331e24f1632a490e6d3d8a3cc29bc
+--- /dev/null
++++ b/src/agents/utility-completion.test.ts
+@@ -0,0 +1,107 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { OpenClawConfig } from "../config/types.js";
++import { resolveSimpleCompletionSelectionForAgent } from "./simple-completion-runtime.js";
++import { prepareUtilityCompletionForAgent } from "./utility-completion.js";
++
++vi.mock("./simple-completion-runtime.js", () => ({
++  resolveSimpleCompletionSelectionForAgent: vi.fn(),
++}));
++
++const MODEL_KEY = "openai/gpt-6-sol";
++
++function utilityConfig(thinking?: unknown): OpenClawConfig {
++  return {
++    agents: {
++      defaults: {
++        model: "openai/gpt-6-astra",
++        thinkingDefault: "max",
++        utilityModel: MODEL_KEY,
++        models: {
++          [MODEL_KEY]: { params: thinking === undefined ? {} : { thinking } },
++        },
++      },
++      entries: { main: { thinkingDefault: "ultra" } },
++    },
++  };
++}
++
++function prepare(cfg: OpenClawConfig) {
++  return prepareUtilityCompletionForAgent({ cfg, agentId: "main", useUtilityModel: true });
++}
++
++beforeEach(() => {
++  vi.mocked(resolveSimpleCompletionSelectionForAgent).mockReset().mockReturnValue({
++    provider: "openai",
++    modelId: "gpt-6-sol",
++    agentDir: "/tmp/utility-agent",
++  });
++});
++
++describe("prepareUtilityCompletionForAgent", () => {
++  it("carries the utility model's configured High without inheriting interactive Max or Ultra", async () => {
++    expect(await prepare(utilityConfig("high"))).toMatchObject({
++      provider: "openai",
++      model: "gpt-6-sol",
++      thinkLevel: "high",
++    });
++  });
++
++  it.each([
++    { thinking: "low", expected: "low" },
++    { thinking: false, expected: "off" },
++  ])("prefers the agent's explicit model setting ($thinking)", async ({ thinking, expected }) => {
++    const cfg = utilityConfig("high");
++    cfg.agents!.entries!.main!.models = { [MODEL_KEY]: { params: { thinking } } };
++    expect(await prepare(cfg)).toHaveProperty("thinkLevel", expected);
++  });
++
++  it("retains the shared model setting when the agent has no thinking override for it", async () => {
++    const cfg = utilityConfig("high");
++    cfg.agents!.entries!.main!.models = { [MODEL_KEY]: { params: { temperature: 0 } } };
++    expect(await prepare(cfg)).toHaveProperty("thinkLevel", "high");
++  });
++
++  it.each([false, "disabled", "none", "extra-high"])(
++    "normalizes explicit model reasoning %s using the existing thinking vocabulary",
++    async (thinking) => {
++      expect(await prepare(utilityConfig(thinking))).toHaveProperty(
++        "thinkLevel",
++        thinking === "extra-high" ? "xhigh" : "off",
++      );
++    },
++  );
++
++  it.each([undefined, "not-a-thinking-level", { type: "enabled" }])(
++    "leaves reasoning unset without a recognized explicit model setting (%s)",
++    async (thinking) => {
++      expect(await prepare(utilityConfig(thinking))).not.toHaveProperty("thinkLevel");
++    },
++  );
++
++  it("preserves selected authentication and strict visible output", async () => {
++    vi.mocked(resolveSimpleCompletionSelectionForAgent).mockReturnValue({
++      provider: "openai",
++      modelId: "gpt-6-sol",
++      profileId: "selected-profile",
++      agentDir: "/tmp/utility-agent",
++    });
++    const cfg = utilityConfig("high");
++    expect(
++      await prepareUtilityCompletionForAgent({
++        cfg,
++        agentId: "main",
++        useUtilityModel: true,
++        preferredProfile: "fallback-profile",
++      }),
++    ).toEqual({
++      config: cfg,
++      provider: "openai",
++      model: "gpt-6-sol",
++      authProfileId: "selected-profile",
++      outputTextPolicy: "strict-visible",
++      agentId: "main",
++      agentDir: "/tmp/utility-agent",
++      thinkLevel: "high",
++    });
++  });
++});
+diff --git a/src/agents/utility-completion.ts b/src/agents/utility-completion.ts
+index ac0b43f60ceb3d16d5347b8b80ddc5b078bd6339..2a9376e68fdd6bccb2b9de8e6554571069ae28df 100644
+--- a/src/agents/utility-completion.ts
++++ b/src/agents/utility-completion.ts
+@@ -1,3 +1,4 @@
++import { resolveConfiguredModelThinking } from "./model-extra-params.js";
+ import { resolveSimpleCompletionSelectionForAgent } from "./simple-completion-runtime.js";
+ 
+ /** Keep visible-text retry/fallback in callers; the runtime owns authentication. */
+@@ -10,6 +11,12 @@ export async function prepareUtilityCompletionForAgent(
+   if (!selection) {
+     throw new Error(`No utility model configured for agent ${params.agentId}.`);
+   }
++  const thinkLevel = resolveConfiguredModelThinking({
++    config: params.cfg,
++    provider: selection.provider,
++    modelId: selection.modelId,
++    agentId: params.agentId,
++  });
+   return {
+     config: params.cfg,
+     provider: selection.provider,
+@@ -18,5 +25,6 @@ export async function prepareUtilityCompletionForAgent(
+     outputTextPolicy: "strict-visible" as const,
+     agentId: params.agentId,
+     agentDir: selection.agentDir,
++    ...(thinkLevel !== undefined ? { thinkLevel } : {}),
+   };
+ }
 diff --git a/src/auto-reply/command-auth.ts b/src/auto-reply/command-auth.ts
 index ef7092a90198f8d2780cb3948e64ee15c7ecf0bc..d7e319fe0d3da12305db914a67d363f204e14000 100644
 --- a/src/auto-reply/command-auth.ts
@@ -40361,6 +40828,19 @@ index 6441e8531f8c36cd702aeed3fbb48238e29c43fb..c50f4c11f5052f01558f4647ffd340e8
  }
  
  type ResolvedFallbackTransition = {
+diff --git a/src/auto-reply/get-reply-options.types.ts b/src/auto-reply/get-reply-options.types.ts
+index f2adbe96a09ee14d9c05d5838828254c4454a6ef..5f5170f0a506fb97ab78858d23ff1a81f75b536a 100644
+--- a/src/auto-reply/get-reply-options.types.ts
++++ b/src/auto-reply/get-reply-options.types.ts
+@@ -188,7 +188,7 @@ export type GetReplyOptions = {
+   typingPolicy?: TypingPolicy;
+   /** Force-disable typing indicators for this run (system/internal/cross-channel routes). */
+   suppressTyping?: boolean;
+-  /** Resolved heartbeat model override (provider/model string from merged per-agent config). */
++  /** Resolved heartbeat model; empty explicitly preserves a task continuation's conversation model. */
+   heartbeatModelOverride?: string;
+   /** One-shot thinking level override for this run; does not persist to the session. */
+   thinkingLevelOverride?: string;
 diff --git a/src/auto-reply/reply-payload.ts b/src/auto-reply/reply-payload.ts
 index a7b6518d9e8481366e96fa0c2a455f2e774fdde7..d6859599a54d3c573c15b68519ab9d3ae2b337d1 100644
 --- a/src/auto-reply/reply-payload.ts
@@ -50130,10 +50610,33 @@ index a1890751b2702209a1ca452f58957d28d0449788..c4e29ba5a1683e3e841cb47f211ff3d9
    vi.doMock("./get-reply-directives.js", () => ({
      resolveReplyDirectives: (...args: unknown[]) => handles.resolveReplyDirectives(...args),
 diff --git a/src/auto-reply/reply/get-reply.ts b/src/auto-reply/reply/get-reply.ts
-index c513942fe94a9b85d60967d2f030e8442e225fc7..9cf39825a6ef858d2c20100db8daea3827cadccf 100644
+index c513942fe94a9b85d60967d2f030e8442e225fc7..d775712702b10c8a6cd1d3b3e5cb547c39319000 100644
 --- a/src/auto-reply/reply/get-reply.ts
 +++ b/src/auto-reply/reply/get-reply.ts
-@@ -462,8 +462,8 @@ export async function getReplyFromConfig(
+@@ -14,6 +14,7 @@ import {
+ import { resolveConversationCapabilityProfile } from "../../agents/conversation-capability-profile.js";
+ import { projectConversationToolNames } from "../../agents/conversation-tool-policy-pipeline.js";
+ import type { ModelCatalogSnapshot } from "../../agents/model-catalog.types.js";
++import { resolveConfiguredModelThinking } from "../../agents/model-extra-params.js";
+ import { splitTrailingAuthProfile } from "../../agents/model-ref-profile.js";
+ import { resolveModelRefFromString } from "../../agents/model-selection.js";
+ import { publishedModelCatalogOwnerMatchesAgent } from "../../agents/prepared-model-catalog-owner.js";
+@@ -429,9 +430,11 @@ export async function getReplyFromConfig(
+     // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
+     // fall back to the global defaults heartbeat model for backward compatibility.
+     const heartbeatRaw =
+-      normalizeOptionalString(opts.heartbeatModelOverride) ??
+-      normalizeOptionalString(agentCfg?.heartbeat?.model) ??
+-      "";
++      opts.heartbeatModelOverride === ""
++        ? ""
++        : (normalizeOptionalString(opts.heartbeatModelOverride) ??
++          normalizeOptionalString(agentCfg?.heartbeat?.model) ??
++          "");
+     const heartbeatRef = heartbeatRaw
+       ? resolveModelRefFromString({
+           cfg,
+@@ -462,8 +465,8 @@ export async function getReplyFromConfig(
          agentDir: preparedAgentDir ?? resolveAgentDir(cfg, agentId),
          timeoutMs: resolveAgentTimeoutMs({
            cfg,
@@ -50143,6 +50646,129 @@ index c513942fe94a9b85d60967d2f030e8442e225fc7..9cf39825a6ef858d2c20100db8daea38
          }),
        };
      });
+@@ -737,17 +740,25 @@ export async function getReplyFromConfig(
+     hasResolvedHeartbeatModelOverride = false;
+     heartbeatAuthProfile = undefined;
+   }
++  const heartbeatThinking = hasResolvedHeartbeatModelOverride
++    ? resolveConfiguredModelThinking({ config: cfg, provider, modelId: model, agentId })
++    : undefined;
++  const optsWithHeartbeatThinking =
++    heartbeatThinking !== undefined &&
++    optsWithCommandQueueOverride?.thinkingLevelOverride === undefined
++      ? { ...optsWithCommandQueueOverride, thinkingLevelOverride: heartbeatThinking }
++      : optsWithCommandQueueOverride;
+   // Utility-model narration is turn-local decoration. Initialize the durable
+   // session first, then keep it completely outside model-locked native runs.
+   const admittedSessionSettings =
+     // SAFETY: Gateway dispatch owns this internal extension and forwards the same options object here.
+-    (optsWithCommandQueueOverride as InternalGetReplyOptions | undefined)?.admittedSessionSettings;
++    (optsWithHeartbeatThinking as InternalGetReplyOptions | undefined)?.admittedSessionSettings;
+   const turnToolOverrides = admittedSessionSettings
+     ? admittedSessionSettings.toolOverrides
+     : sessionEntry.toolOverrides;
+   const optsWithSessionSkillOverrides = turnToolOverrides?.skills
+-    ? { ...optsWithCommandQueueOverride, skillOverrides: turnToolOverrides.skills }
+-    : optsWithCommandQueueOverride;
++    ? { ...optsWithHeartbeatThinking, skillOverrides: turnToolOverrides.skills }
++    : optsWithHeartbeatThinking;
+   const resolvedOpts = attachProgressNarratorToReplyOptions({
+     cfg,
+     agentId,
+diff --git a/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts b/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts
+index e6d71282e595f9add5097667c944885a4d81b1f8..89a6e5217d5136f5f04f2c6205d064e2f11e428b 100644
+--- a/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts
++++ b/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts
+@@ -26,6 +26,7 @@ import {
+   type TurnModelSelectionPath,
+   type TurnModelSelectionVerdict,
+ } from "../../test-utils/turn-model-selection-differential.js";
++import type { GetReplyOptions } from "../get-reply-options.types.js";
+ import { markCompleteReplyConfig } from "./get-reply-fast-path.test-support.js";
+ import {
+   buildGetReplyCtx,
+@@ -90,10 +91,11 @@ async function seedFixtureStore(
+ }
+ 
+ async function observeReplySelection(params: {
+-  fixture: TurnModelDifferentialFixture;
++  fixture: Pick<TurnModelDifferentialFixture, "name" | "ctx" | "child" | "heartbeat" | "locked">;
+   cfg: OpenClawConfig;
+   sessionKey: string;
+   sessionStore: Record<string, SessionEntry>;
++  replyOptions?: GetReplyOptions;
+ }): Promise<TurnModelSelectionVerdict> {
+   const { fixture, cfg, sessionKey, sessionStore } = params;
+   mocks.initSessionState.mockResolvedValue(
+@@ -118,12 +120,13 @@ async function observeReplySelection(params: {
+   expect(isPathInside(state.root, resolveAgentWorkspaceDirMock(cfg, "main"))).toBe(true);
+   await getReplyFromConfig(
+     buildGetReplyCtx({ SessionKey: sessionKey, ...fixture.ctx }),
+-    fixture.heartbeat
+-      ? {
+-          isHeartbeat: true,
+-          heartbeatModelOverride: turnModelRefLabel(TURN_MODEL_OVERRIDE_REF),
+-        }
+-      : undefined,
++    params.replyOptions ??
++      (fixture.heartbeat
++        ? {
++            isHeartbeat: true,
++            heartbeatModelOverride: turnModelRefLabel(TURN_MODEL_OVERRIDE_REF),
++          }
++        : undefined),
+     cfg,
+   );
+   const selected = vi.mocked(runPreparedReplyMock).mock.calls[0]?.[0];
+@@ -309,6 +312,48 @@ describe("getReplyFromConfig channel model input boundary", () => {
+ });
+ 
+ describe("turn model selection reply-path differential", () => {
++  it.each([
++    { override: "", expected: TURN_MODEL_SESSION_REF, effort: undefined },
++    { override: undefined, expected: TURN_MODEL_OVERRIDE_REF, effort: "high" },
++    { override: "   ", expected: TURN_MODEL_OVERRIDE_REF, effort: "high" },
++    {
++      override: turnModelRefLabel(TURN_MODEL_OVERRIDE_REF),
++      expected: TURN_MODEL_OVERRIDE_REF,
++      effort: "high",
++    },
++  ] as const)(
++    "resolves heartbeat model and effort with override '$override'",
++    async ({ override, expected, effort }) => {
++      const storePath = path.join(state.sessionsDir("main"), "sessions.json");
++      const sessionKey = "agent:main:discord:direct:continuation";
++      const child = {
++        ...createTurnModelEntry({ override: TURN_MODEL_SESSION_REF }),
++        thinkingLevel: "ultra",
++      };
++      const fixture = { name: "heartbeat continuation", ctx: {}, child };
++      const sessionStore = await seedFixtureStore(storePath, sessionKey, fixture);
++      const cfg = createConfig({ storePath, workspaceDir: state.workspaceDir });
++      Object.assign(cfg.agents!.defaults!, {
++        thinkingDefault: "max",
++        heartbeat: { model: turnModelRefLabel(TURN_MODEL_OVERRIDE_REF) },
++        models: { [turnModelRefLabel(TURN_MODEL_OVERRIDE_REF)]: { params: { thinking: "high" } } },
++      });
++      await expect(
++        observeReplySelection({
++          fixture,
++          cfg,
++          sessionKey,
++          sessionStore,
++          replyOptions: { isHeartbeat: true, heartbeatModelOverride: override },
++        }),
++      ).resolves.toEqual(turnModelVerdict(expected));
++      const directives = mocks.resolveReplyDirectives.mock.calls.at(-1)?.[0];
++      expect(directives?.opts?.thinkingLevelOverride).toBe(effort);
++      expect(child.thinkingLevel).toBe("ultra");
++      expect(cfg.agents?.defaults?.thinkingDefault).toBe("max");
++    },
++  );
++
+   it.each(TURN_MODEL_DIFFERENTIAL_FIXTURES)("pins observed $name behavior", async (fixture) => {
+     const storePath = path.join(state.sessionsDir("main"), "sessions.json");
+     const sessionKey = "agent:main:telegram:group:selection";
 diff --git a/src/auto-reply/reply/groups.ts b/src/auto-reply/reply/groups.ts
 index a5819f725a2445fa0cc78899e5eee5a58cd693a9..fcccdc13d4f31f257540ae3a27aba17b3e9e0338 100644
 --- a/src/auto-reply/reply/groups.ts
@@ -65061,6 +65687,100 @@ index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..edab46735e665175d4e6ba219858efbd
    const isReplyRunActive =
      opts.deps?.isReplyRunActive ?? ((key: string) => replyRunRegistry.isActive(key));
    if (isReplyRunActive(sessionKey) || hasActiveRunForSession(sessionKey, listActiveEmbeddedRuns)) {
+diff --git a/src/infra/heartbeat-runner-run.ts b/src/infra/heartbeat-runner-run.ts
+index 15671b9aad5b6c9a264e0331864d420084d91e35..2e07215f4c989346a21d583f78b3bc687674b820 100644
+--- a/src/infra/heartbeat-runner-run.ts
++++ b/src/infra/heartbeat-runner-run.ts
+@@ -118,7 +118,10 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
+             isHeartbeat: true,
+           }),
+           [REPLY_OPERATION_RUN_STATE]: state,
+-          heartbeatModelOverride: heartbeat?.model?.trim(),
++          // User-task continuations retain their model and effort after wake coalescing.
++          heartbeatModelOverride: prepared.hasTaskContinuation
++            ? ""
++            : heartbeat?.model?.trim() || undefined,
+           ...(prepared.usesHeartbeatResponseTool
+             ? {
+                 enableHeartbeatTool: true,
+diff --git a/src/infra/heartbeat-runner.model-override.test.ts b/src/infra/heartbeat-runner.model-override.test.ts
+index 1d25937eebd61b008b2514ca92a96fc36b770de6..bcdf7f2d526f0066101aab1877f700349bd825fa 100644
+--- a/src/infra/heartbeat-runner.model-override.test.ts
++++ b/src/infra/heartbeat-runner.model-override.test.ts
+@@ -22,6 +22,7 @@ type SeedSessionInput = {
+   lastChannel: string;
+   lastTo: string;
+   updatedAt?: number;
++  thinkingLevel?: "ultra";
+ };
+ type AgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]>;
+ type HeartbeatConfig = NonNullable<AgentDefaultsConfig["heartbeat"]>;
+@@ -54,6 +55,7 @@ async function withHeartbeatFixture(
+       const seedSession = async (sessionKey: string, input: SeedSessionInput) => {
+         await seedSessionStore(storePath, sessionKey, {
+           updatedAt: input.updatedAt,
++          thinkingLevel: input.thinkingLevel,
+           lastChannel: input.lastChannel,
+           lastProvider: input.lastChannel,
+           lastTo: input.lastTo,
+@@ -345,9 +347,11 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+           defaults: {
+             workspace: tmpDir,
+             timeoutSeconds: testCase.defaultTimeoutSeconds,
++            thinkingDefault: "ultra",
+             heartbeat: {
+               every: "30m",
+               target: "whatsapp",
++              model: "test/background",
+               ...testCase.heartbeat,
+             },
+           },
+@@ -356,7 +360,11 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+         session: { store: storePath },
+       };
+       const sessionKey = `${resolveMainSessionKey(cfg)}${testCase.isolatedEvent ? ":heartbeat" : ""}`;
+-      await seedSession(sessionKey, { lastChannel: "whatsapp", lastTo: "+1555" });
++      await seedSession(sessionKey, {
++        lastChannel: "whatsapp",
++        lastTo: "+1555",
++        thinkingLevel: "ultra",
++      });
+       enqueueSystemEvent(
+         testCase.eventText ?? "Exec finished (gateway id=build, code 0)\nBuild passed",
+         { sessionKey, contextKey: testCase.contextKey },
+@@ -390,6 +398,12 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       expect(
+         resolveAgentTimeoutMs({ cfg: passedConfig, overrideSeconds: opts?.timeoutOverrideSeconds }),
+       ).toBe(testCase.expectedTimeoutMs);
++      const autonomous = testCase.expectedTimeoutMs === 45_000;
++      expectReplyOptions(opts, {
++        heartbeatModelOverride: autonomous ? "test/background" : "",
++        thinkingLevelOverride: undefined,
++      });
++      expect(cfg.agents?.defaults?.thinkingDefault).toBe("ultra");
+     });
+   });
+ 
+@@ -525,11 +539,14 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+     });
+   });
+ 
+-  it("does not pass heartbeatModelOverride when no heartbeat model is configured", async () => {
+-    const replyOpts = await runDefaultsHeartbeat({ model: undefined });
+-    const actual = expectReplyOptions(replyOpts, { isHeartbeat: true });
+-    expect(actual.heartbeatModelOverride).toBeUndefined();
+-  });
++  it.each([undefined, "", "   "])(
++    "does not pass heartbeatModelOverride when the configured heartbeat model is %s",
++    async (model) => {
++      const replyOpts = await runDefaultsHeartbeat({ model });
++      const actual = expectReplyOptions(replyOpts, { isHeartbeat: true });
++      expect(actual.heartbeatModelOverride).toBeUndefined();
++    },
++  );
+ 
+   it("trims heartbeat model override before passing it downstream", async () => {
+     const replyOpts = await runDefaultsHeartbeat({ model: "  ollama/llama3.2:1b  " });
 diff --git a/src/infra/heartbeat-runner.yielded-requester.test.ts b/src/infra/heartbeat-runner.yielded-requester.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..f96237df0ad3aafe581af364dd21850e9bdd34ab
@@ -66235,6 +66955,275 @@ index 2678bc5010b0b255a9aec30846caaac7299cad9c..87c8d37ebe9252083da2f01322b06ab3
  
  function formatEchoTranscript(transcript: string, format: string): string {
    // Function replacer keeps `$` sequences in the transcript literal instead of
+diff --git a/src/memory-host-sdk/dreaming.test.ts b/src/memory-host-sdk/dreaming.test.ts
+index e4b1bffa2d7e15a61895ec4313d3babd07cfb189..1c15958e8efc2e82c8fad156f19cef8eaa2dd504 100644
+--- a/src/memory-host-sdk/dreaming.test.ts
++++ b/src/memory-host-sdk/dreaming.test.ts
+@@ -149,6 +149,73 @@ describe("memory dreaming host helpers", () => {
+     expect(resolved.phases.rem.execution.model).toBe("xai/grok-4.1-fast");
+   });
+ 
++  it.each(["high", "off", "max"] as const)(
++    "uses the selected model's %s effort without inheriting interactive Ultra",
++    (thinking) => {
++      const resolved = resolveMemoryDreamingConfig({
++        cfg: {
++          agents: {
++            defaults: {
++              thinkingDefault: "ultra",
++              models: { "openai/gpt-6-sol": { params: { thinking } } },
++            },
++            entries: { main: { model: "openai/gpt-6-astra", thinkingDefault: "ultra" } },
++          },
++        },
++        agentId: "main",
++        pluginConfig: { dreaming: { model: "openai/gpt-6-sol" } },
++      });
++      expect(resolved.execution.defaults.thinking).toBe(thinking);
++      expect(Object.values(resolved.phases).map((phase) => phase.execution.thinking)).toEqual([
++        thinking,
++        thinking,
++        thinking,
++      ]);
++    },
++  );
++
++  it("resolves phase model aliases and keeps agent-specific model effort", () => {
++    const resolved = resolveMemoryDreamingConfig({
++      cfg: {
++        agents: {
++          defaults: {
++            models: {
++              "openai/gpt-6-sol": { alias: "background", params: { thinking: "high" } },
++              "openai/gpt-6-astra": { alias: "review", params: { thinking: "high" } },
++            },
++          },
++          entries: {
++            main: {
++              model: "openai/gpt-6-astra",
++              thinkingDefault: "ultra",
++              models: { "openai/gpt-6-sol": { params: { thinking: "medium" } } },
++            },
++          },
++        },
++      },
++      agentId: "main",
++      pluginConfig: {
++        dreaming: {
++          model: "background@openai:worker",
++          phases: { rem: { execution: { model: "review" } } },
++        },
++      },
++    });
++    expect(resolved.phases.light.execution.thinking).toBe("medium");
++    expect(resolved.phases.deep.execution.thinking).toBe("medium");
++    expect(resolved.phases.rem.execution.thinking).toBe("high");
++  });
++
++  it("keeps phase defaults when the selected model has no authored effort", () => {
++    const resolved = resolveMemoryDreamingConfig({
++      cfg: { agents: { defaults: { thinkingDefault: "ultra" } } },
++      pluginConfig: { dreaming: { model: "openai/gpt-6-sol" } },
++    });
++    expect(resolved.phases.light.execution.thinking).toBe("low");
++    expect(resolved.phases.deep.execution.thinking).toBe("high");
++    expect(resolved.phases.rem.execution.thinking).toBe("high");
++  });
++
+   it("enables dreaming by default and falls back to cfg timezone and deep defaults", () => {
+     const cfg = {
+       agents: {
+diff --git a/src/memory-host-sdk/dreaming.ts b/src/memory-host-sdk/dreaming.ts
+index 9a860c2e97042cc08103208f8822877da46eaefc..fa68c1f592309e76eb5c03babf8c2357f1fa57ad 100644
+--- a/src/memory-host-sdk/dreaming.ts
++++ b/src/memory-host-sdk/dreaming.ts
+@@ -16,7 +16,14 @@ import {
+   resolveAgentWorkspaceDir,
+   resolveDefaultAgentId,
+ } from "../agents/agent-scope.js";
++import { resolveConfiguredModelThinking } from "../agents/model-extra-params.js";
++import { resolveDefaultModelForAgent } from "../agents/model-selection-config.js";
++import {
++  buildModelAliasIndex,
++  resolveModelRefFromString,
++} from "../agents/model-selection-shared.js";
+ import { resolveWorkspaceStateIdentity } from "../agents/workspace-state-identity.js";
++import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ 
+ const DEFAULT_MEMORY_DREAMING_ENABLED = true;
+@@ -65,7 +72,7 @@ const DEFAULT_MEMORY_DREAMING_THINKING = "medium";
+ const DEFAULT_MEMORY_DREAMING_BUDGET = "medium";
+ 
+ type MemoryDreamingSpeed = "fast" | "balanced" | "slow";
+-type MemoryDreamingThinking = "low" | "medium" | "high";
++type MemoryDreamingThinking = ThinkLevel;
+ type MemoryDreamingBudget = "cheap" | "medium" | "expensive";
+ type MemoryDreamingStorageMode = "inline" | "separate" | "both";
+ 
+@@ -352,6 +359,7 @@ function normalizeBudget(value: unknown): MemoryDreamingBudget | undefined {
+ function resolveExecutionConfig(
+   value: unknown,
+   fallback: MemoryDreamingExecutionConfig,
++  context: { cfg?: OpenClawConfig; agentId?: string },
+ ): MemoryDreamingExecutionConfig {
+   const record = asNullableRecord(value);
+   const maxOutputTokens = parseStrictPositiveInteger(record?.maxOutputTokens);
+@@ -362,10 +370,29 @@ function resolveExecutionConfig(
+       ? Math.min(2, temperatureRaw)
+       : undefined;
+   const model = normalizeOptionalString(record?.model) ?? fallback.model;
++  let modelThinking: ThinkLevel | undefined;
++  if (model && context.cfg) {
++    const selection = { cfg: context.cfg, agentId: context.agentId };
++    const defaultProvider = resolveDefaultModelForAgent(selection).provider;
++    const ref = resolveModelRefFromString({
++      ...selection,
++      raw: model,
++      defaultProvider,
++      aliasIndex: buildModelAliasIndex({ ...selection, defaultProvider }),
++    })?.ref;
++    if (ref) {
++      modelThinking = resolveConfiguredModelThinking({
++        config: context.cfg,
++        provider: ref.provider,
++        modelId: ref.model,
++        agentId: context.agentId,
++      });
++    }
++  }
+ 
+   return {
+     speed: normalizeSpeed(record?.speed) ?? fallback.speed,
+-    thinking: normalizeThinking(record?.thinking) ?? fallback.thinking,
++    thinking: normalizeThinking(record?.thinking) ?? modelThinking ?? fallback.thinking,
+     budget: normalizeBudget(record?.budget) ?? fallback.budget,
+     ...(model ? { model } : {}),
+     ...(typeof maxOutputTokens === "number" ? { maxOutputTokens } : {}),
+@@ -409,6 +436,7 @@ export function resolveMemoryDreamingPluginConfig(
+ export function resolveMemoryDreamingConfig(params: {
+   pluginConfig?: Record<string, unknown>;
+   cfg?: OpenClawConfig;
++  agentId?: string;
+ }): MemoryDreamingConfig {
+   const dreaming = asNullableRecord(params.pluginConfig?.dreaming);
+   const frequency =
+@@ -422,12 +450,16 @@ export function resolveMemoryDreamingConfig(params: {
+   const phases = asNullableRecord(dreaming?.phases);
+   const topLevelModel = normalizeOptionalString(dreaming?.model);
+ 
+-  const defaultExecution = resolveExecutionConfig(execution?.defaults, {
+-    speed: DEFAULT_MEMORY_DREAMING_SPEED,
+-    thinking: DEFAULT_MEMORY_DREAMING_THINKING,
+-    budget: DEFAULT_MEMORY_DREAMING_BUDGET,
+-    ...(topLevelModel ? { model: topLevelModel } : {}),
+-  });
++  const defaultExecution = resolveExecutionConfig(
++    execution?.defaults,
++    {
++      speed: DEFAULT_MEMORY_DREAMING_SPEED,
++      thinking: DEFAULT_MEMORY_DREAMING_THINKING,
++      budget: DEFAULT_MEMORY_DREAMING_BUDGET,
++      ...(topLevelModel ? { model: topLevelModel } : {}),
++    },
++    params,
++  );
+ 
+   const light = asNullableRecord(phases?.light);
+   const deep = asNullableRecord(phases?.deep);
+@@ -467,12 +499,16 @@ export function resolveMemoryDreamingConfig(params: {
+           ["daily", "sessions", "recall"] as const,
+           DEFAULT_MEMORY_LIGHT_DREAMING_SOURCES,
+         ),
+-        execution: resolveExecutionConfig(light?.execution, {
+-          ...defaultExecution,
+-          speed: "fast",
+-          thinking: "low",
+-          budget: "cheap",
+-        }),
++        execution: resolveExecutionConfig(
++          light?.execution,
++          {
++            ...defaultExecution,
++            speed: "fast",
++            thinking: "low",
++            budget: "cheap",
++          },
++          params,
++        ),
+       },
+       deep: {
+         enabled: parseBoolean(deep?.enabled) ?? true,
+@@ -526,12 +562,16 @@ export function resolveMemoryDreamingConfig(params: {
+             DEFAULT_MEMORY_DEEP_DREAMING_RECOVERY_AUTO_WRITE_MIN_CONFIDENCE,
+           ),
+         },
+-        execution: resolveExecutionConfig(deep?.execution, {
+-          ...defaultExecution,
+-          speed: "balanced",
+-          thinking: "high",
+-          budget: "medium",
+-        }),
++        execution: resolveExecutionConfig(
++          deep?.execution,
++          {
++            ...defaultExecution,
++            speed: "balanced",
++            thinking: "high",
++            budget: "medium",
++          },
++          params,
++        ),
+       },
+       rem: {
+         enabled: parseBoolean(rem?.enabled) ?? true,
+@@ -549,12 +589,16 @@ export function resolveMemoryDreamingConfig(params: {
+           ["memory", "daily", "deep"] as const,
+           DEFAULT_MEMORY_REM_DREAMING_SOURCES,
+         ),
+-        execution: resolveExecutionConfig(rem?.execution, {
+-          ...defaultExecution,
+-          speed: "slow",
+-          thinking: "high",
+-          budget: "expensive",
+-        }),
++        execution: resolveExecutionConfig(
++          rem?.execution,
++          {
++            ...defaultExecution,
++            speed: "slow",
++            thinking: "high",
++            budget: "expensive",
++          },
++          params,
++        ),
+       },
+     },
+   };
+@@ -563,6 +607,7 @@ export function resolveMemoryDreamingConfig(params: {
+ export function resolveMemoryDeepDreamingConfig(params: {
+   pluginConfig?: Record<string, unknown>;
+   cfg?: OpenClawConfig;
++  agentId?: string;
+ }): MemoryDeepDreamingConfig & {
+   timezone?: string;
+   verboseLogging: boolean;
+@@ -581,6 +626,7 @@ export function resolveMemoryDeepDreamingConfig(params: {
+ export function resolveMemoryLightDreamingConfig(params: {
+   pluginConfig?: Record<string, unknown>;
+   cfg?: OpenClawConfig;
++  agentId?: string;
+ }): MemoryLightDreamingConfig & {
+   timezone?: string;
+   verboseLogging: boolean;
+@@ -599,6 +645,7 @@ export function resolveMemoryLightDreamingConfig(params: {
+ export function resolveMemoryRemDreamingConfig(params: {
+   pluginConfig?: Record<string, unknown>;
+   cfg?: OpenClawConfig;
++  agentId?: string;
+ }): MemoryRemDreamingConfig & {
+   timezone?: string;
+   verboseLogging: boolean;
 diff --git a/src/node-host/local-gateway-auth.test.ts b/src/node-host/local-gateway-auth.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..e10fe29cd793b738538f1ffe73a6560e442ab2c1
