@@ -48,6 +48,16 @@ final-delivery authority. Delayed progress writes recheck that authority and sto
 on cancellation or replacement. Seven owning test files pass 90 focused cases;
 hosted qualification and live acceptance remain separate.
 
+The current reconstructible candidate `1c206d4e554a` retains those repairs and adds
+separate interactive and autonomous model routing. The example policy uses Astra
+Max for conversation, optional `/think ultra` orchestration and Sol High for
+model-backed maintenance. Existing model parameters supply reasoning effort to
+utility completions, autonomous heartbeat and memory dreaming. User-task
+continuations and delegated children retain their initiating settings. No new
+configuration schema is required by the retained signed companion. See the
+[scheduling policy](12-scheduling-and-background-work.md) for configured owners.
+This source identity is not a claim of activation or live acceptance.
+
 | Change family | Source behavior and acceptance boundary |
 |---|---|
 | Task ownership and steering | Native Codex completion tracking preserves the target's per-assignment run identity, session incarnation and requester custody. Owned child follow-ups retain a stable logical completion identity; an accepted send is not proof that the parent received its result. |

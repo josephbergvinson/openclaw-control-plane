@@ -52,8 +52,8 @@ child creation, so actual live settlement acceptance remains pending. The Septem
 matching private worker at source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `24e9bfe5431e504a6a6bb299e939babe472c22e3`.
-It corrects quota recovery after completed tool work and account-bound WebSocket
+The reconstructible candidate is now `1c206d4e554adc38e1abb5634bf3601dea983e3a`.
+It retains the preceding candidate’s corrections to quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
 task. User-pinned accounts, cancellation, active tool work and exhausted candidates
@@ -81,6 +81,18 @@ replacement and completion stop pending updates without changing the final owner
 The seven owning test files passed 90 focused cases. CI now runs those exact
 agent and Discord suites and preserves their logs separately. These source tests
 do not establish a fresh live progress or final-delivery result for the candidate.
+
+The September 23 candidate also separates interactive and autonomous model policy.
+The example configuration selects Astra Max for ordinary conversation, with
+`/think ultra` retaining opt-in orchestration, and Sol High for model-backed
+maintenance. Utility completion, autonomous heartbeat and all memory-dreaming
+phases use the selected model’s existing reasoning parameters. A wake that
+continues an admitted user task retains that task’s model and effort. Children
+inherit their initiating task unless explicitly overridden. Script-only jobs do
+not acquire an LLM dependency. This uses the existing configuration schema, so
+the retained signed companion can continue reading it. Focused routing and
+compatibility tests passed; source qualification, activation and live acceptance
+of this combined candidate remain pending.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that
