@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -11,6 +13,19 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class RuntimeEnvironmentTemplateTests(unittest.TestCase):
+    def test_template_renders_with_the_native_operator_contract(self):
+        spec = importlib.util.spec_from_file_location('startup_operator_contract',
+            ROOT / 'workspace/scripts/operator_contract.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        source = (ROOT / 'workspace/launchd/runtime-environment.plist.template.json').read_text()
+        paths = {key: '/fixture/' + key for key in re.findall(r'\$\{operator:paths\.([^}]+)\}', source)}
+        result = module.OperatorContract({'paths': paths}).render(json.loads(source))
+        self.assertEqual('/fixture/state_root', result['EnvironmentVariables']['OPENCLAW_STATE_DIR'])
+        self.assertNotIn('${operator:', json.dumps(result))
 
 
 @unittest.skipUnless(shutil.which('zsh'), 'runtime loader uses the macOS zsh contract')
