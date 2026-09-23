@@ -14391,7 +14391,7 @@ index a803b1ead9cc978ed1b325952b912fb943d2a1f0..22f4827ea7ac51887bd3d075532221d5
    });
  
 diff --git a/extensions/memory-core/src/dreaming-narrative.ts b/extensions/memory-core/src/dreaming-narrative.ts
-index 0612e3361c4d59dac9d4406032fb1fcb4e8e6f3b..af9fc6e2f4a9c0a4bed4ce991a4bc7a518d86c6d 100644
+index 0612e3361c4d59dac9d4406032fb1fcb4e8e6f3b..07b62a0551043c44dac2fb751604a845b5be2aee 100644
 --- a/extensions/memory-core/src/dreaming-narrative.ts
 +++ b/extensions/memory-core/src/dreaming-narrative.ts
 @@ -118,64 +118,6 @@ export async function appendFallbackNarrativeEntry(params: {
@@ -14507,10 +14507,43 @@ index 0612e3361c4d59dac9d4406032fb1fcb4e8e6f3b..af9fc6e2f4a9c0a4bed4ce991a4bc7a5
      if (!narrative) {
        params.logger.warn(
          `memory-core: narrative generation produced no text for ${params.data.phase} phase; writing fallback diary entry.`,
+@@ -318,6 +250,23 @@ async function generateAndAppendDreamNarrative(
+   return { status: "completed" };
+ }
+ 
++/** Maps phase configuration into the shared narrative dispatch contract. */
++export function runConfiguredDreamNarrative(
++  params: Omit<Parameters<typeof runDreamNarrative>[0], "timezone" | "model" | "thinking"> & {
++    config: Pick<DreamNarrativeRequest, "timezone"> & {
++      execution?: Pick<DreamNarrativeRequest, "model" | "thinking">;
++    };
++  },
++): Promise<DreamNarrativeOutcome> {
++  const { config, ...request } = params;
++  return runDreamNarrative({
++    ...request,
++    timezone: config.timezone,
++    model: config.execution?.model,
++    thinking: config.execution?.thinking,
++  });
++}
++
+ /**
+  * Single entry point for every dreaming phase. Cron sweeps detach so a stalled diary run
+  * cannot hold the sweep open; heartbeat sweeps await so the phase reports the outcome.
 diff --git a/extensions/memory-core/src/dreaming-phases.ts b/extensions/memory-core/src/dreaming-phases.ts
-index e5fbeab24a00bc1fb2bafc7d0c9dd67ed7304dad..1ce96d922c15d1fab191b5eb44660be7fc308bff 100644
+index e5fbeab24a00bc1fb2bafc7d0c9dd67ed7304dad..4d99c0b49724ef380cfaa93f0ef33baf70b2b849 100644
 --- a/extensions/memory-core/src/dreaming-phases.ts
 +++ b/extensions/memory-core/src/dreaming-phases.ts
+@@ -32,7 +32,7 @@ import {
+   type DreamNarrativeRequest,
+   type DreamNarrativeOutcome,
+   type NarrativePhaseData,
+-  runDreamNarrative,
++  runConfiguredDreamNarrative,
+ } from "./dreaming-narrative.js";
+ import { formatErrorMessage } from "./dreaming-shared.js";
+ import {
 @@ -80,7 +80,7 @@ type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
  type DreamingPhaseStorageConfig = {
    timezone?: string;
@@ -14520,19 +14553,37 @@ index e5fbeab24a00bc1fb2bafc7d0c9dd67ed7304dad..1ce96d922c15d1fab191b5eb44660be7
  };
  type LightDreamingConfig = DreamingPhaseStorageConfig & {
    enabled: boolean;
-@@ -1451,6 +1451,7 @@ async function runLightDreaming(
+@@ -1443,14 +1443,13 @@ async function runLightDreaming(
+       ...(themes.length > 0 ? { themes } : {}),
+       ...(recentDiaryEntries.length > 0 ? { recentDiaryEntries } : {}),
+     };
+-    return await runDreamNarrative({
++    return await runConfiguredDreamNarrative({
+       agentId: params.agentId,
+       subagent: params.subagent,
+       workspaceDir: params.workspaceDir,
+       data,
        nowMs,
-       timezone: params.config.timezone,
-       model: params.config.execution?.model,
-+      thinking: params.config.execution?.thinking,
+-      timezone: params.config.timezone,
+-      model: params.config.execution?.model,
++      config: params.config,
        logger: params.logger,
        detached: params.detachNarratives,
      });
-@@ -1543,6 +1544,7 @@ async function runRemDreaming(
+@@ -1535,14 +1534,13 @@ async function runRemDreaming(
+               .filter(Boolean),
+       ...(themes.length > 0 ? { themes } : {}),
+     };
+-    return await runDreamNarrative({
++    return await runConfiguredDreamNarrative({
+       agentId: params.agentId,
+       subagent: params.subagent,
+       workspaceDir: params.workspaceDir,
+       data,
        nowMs,
-       timezone: params.config.timezone,
-       model: params.config.execution?.model,
-+      thinking: params.config.execution?.thinking,
+-      timezone: params.config.timezone,
+-      model: params.config.execution?.model,
++      config: params.config,
        logger: params.logger,
        detached: params.detachNarratives,
      });
@@ -49649,6 +49700,70 @@ index 8e94a4d6aa4eedd59e3f9588c295bbcbd39ebadb..904b4189ad60a19773e6ab693a033f56
      }
    });
  });
+diff --git a/src/auto-reply/reply/get-reply-heartbeat-model.ts b/src/auto-reply/reply/get-reply-heartbeat-model.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d9726ba840e33108f39ab9622e2e4aec1562f20d
+--- /dev/null
++++ b/src/auto-reply/reply/get-reply-heartbeat-model.ts
+@@ -0,0 +1,58 @@
++import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
++import { resolveConfiguredModelThinking } from "../../agents/model-extra-params.js";
++import { splitTrailingAuthProfile } from "../../agents/model-ref-profile.js";
++import type { ModelRef } from "../../agents/model-ref-shared.js";
++import { resolveModelRefFromString, type ModelAliasIndex } from "../../agents/model-selection.js";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import type { GetReplyOptions } from "../get-reply-options.types.js";
++
++/** Resolve turn-local heartbeat routing without changing the conversation model. */
++export function resolveReplyHeartbeatModel(params: {
++  cfg: OpenClawConfig;
++  agentId: string;
++  defaultProvider: string;
++  aliasIndex: ModelAliasIndex;
++  opts: GetReplyOptions | undefined;
++}): { ref: ModelRef; authProfile?: ModelRef & { profileId: string } } | undefined {
++  const { cfg, agentId, defaultProvider, aliasIndex, opts } = params;
++  if (!opts?.isHeartbeat) {
++    return undefined;
++  }
++  // An empty override preserves a task continuation's model. Otherwise prefer
++  // the runner's per-agent selection, then the global heartbeat default.
++  const raw =
++    opts.heartbeatModelOverride === ""
++      ? ""
++      : (normalizeOptionalString(opts.heartbeatModelOverride) ??
++        normalizeOptionalString(cfg.agents?.defaults?.heartbeat?.model) ??
++        "");
++  const selection = raw
++    ? resolveModelRefFromString({ cfg, agentId, raw, defaultProvider, aliasIndex })
++    : null;
++  if (!selection) {
++    return undefined;
++  }
++  const profileId = splitTrailingAuthProfile(raw).profile;
++  return {
++    ref: selection.ref,
++    authProfile: profileId ? { ...selection.ref, profileId } : undefined,
++  };
++}
++
++/** Apply model effort only after the caller has honored any native model lock. */
++export function applyHeartbeatThinkingOverride(params: {
++  cfg: OpenClawConfig;
++  provider: string;
++  model: string;
++  agentId: string;
++  hasResolvedHeartbeatModelOverride: boolean;
++  opts: GetReplyOptions | undefined;
++}): GetReplyOptions | undefined {
++  const { cfg, provider, model, agentId, hasResolvedHeartbeatModelOverride, opts } = params;
++  const thinking = hasResolvedHeartbeatModelOverride
++    ? resolveConfiguredModelThinking({ config: cfg, provider, modelId: model, agentId })
++    : undefined;
++  return thinking !== undefined && opts?.thinkingLevelOverride === undefined
++    ? { ...opts, thinkingLevelOverride: thinking }
++    : opts;
++}
 diff --git a/src/auto-reply/reply/get-reply-inline-actions.skip-when-config-empty.test.ts b/src/auto-reply/reply/get-reply-inline-actions.skip-when-config-empty.test.ts
 index 55162d7c78959155803d811e26ae64cdeb375b87..5bc2a3f41d6d6f27793c379289faac5cb7b48faf 100644
 --- a/src/auto-reply/reply/get-reply-inline-actions.skip-when-config-empty.test.ts
@@ -50610,33 +50725,75 @@ index a1890751b2702209a1ca452f58957d28d0449788..c4e29ba5a1683e3e841cb47f211ff3d9
    vi.doMock("./get-reply-directives.js", () => ({
      resolveReplyDirectives: (...args: unknown[]) => handles.resolveReplyDirectives(...args),
 diff --git a/src/auto-reply/reply/get-reply.ts b/src/auto-reply/reply/get-reply.ts
-index c513942fe94a9b85d60967d2f030e8442e225fc7..d775712702b10c8a6cd1d3b3e5cb547c39319000 100644
+index c513942fe94a9b85d60967d2f030e8442e225fc7..82886c7248bd237f85afc9237ec00e62d9738480 100644
 --- a/src/auto-reply/reply/get-reply.ts
 +++ b/src/auto-reply/reply/get-reply.ts
-@@ -14,6 +14,7 @@ import {
+@@ -14,7 +14,6 @@ import {
  import { resolveConversationCapabilityProfile } from "../../agents/conversation-capability-profile.js";
  import { projectConversationToolNames } from "../../agents/conversation-tool-policy-pipeline.js";
  import type { ModelCatalogSnapshot } from "../../agents/model-catalog.types.js";
-+import { resolveConfiguredModelThinking } from "../../agents/model-extra-params.js";
- import { splitTrailingAuthProfile } from "../../agents/model-ref-profile.js";
+-import { splitTrailingAuthProfile } from "../../agents/model-ref-profile.js";
  import { resolveModelRefFromString } from "../../agents/model-selection.js";
  import { publishedModelCatalogOwnerMatchesAgent } from "../../agents/prepared-model-catalog-owner.js";
-@@ -429,9 +430,11 @@ export async function getReplyFromConfig(
-     // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
-     // fall back to the global defaults heartbeat model for backward compatibility.
-     const heartbeatRaw =
+ import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
+@@ -70,6 +69,10 @@ import {
+   resolveGetReplyConfig,
+   shouldUseReplyFastTestBootstrap,
+ } from "./get-reply-fast-path.js";
++import {
++  applyHeartbeatThinkingOverride,
++  resolveReplyHeartbeatModel,
++} from "./get-reply-heartbeat-model.js";
+ import { handleInlineActions } from "./get-reply-inline-actions.js";
+ import { maybeResolveNativeSlashCommandFastReply } from "./get-reply-native-slash-fast-path.js";
+ import { runPreparedReply } from "./get-reply-run.js";
+@@ -421,34 +424,17 @@ export async function getReplyFromConfig(
+         agentId,
+       }),
+   );
+-  let provider = defaultProvider;
+-  let model = defaultModel;
+-  let hasResolvedHeartbeatModelOverride = false;
+-  let heartbeatAuthProfile: { provider: string; model: string; profileId: string } | undefined;
+-  if (opts?.isHeartbeat) {
+-    // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
+-    // fall back to the global defaults heartbeat model for backward compatibility.
+-    const heartbeatRaw =
 -      normalizeOptionalString(opts.heartbeatModelOverride) ??
 -      normalizeOptionalString(agentCfg?.heartbeat?.model) ??
 -      "";
-+      opts.heartbeatModelOverride === ""
-+        ? ""
-+        : (normalizeOptionalString(opts.heartbeatModelOverride) ??
-+          normalizeOptionalString(agentCfg?.heartbeat?.model) ??
-+          "");
-     const heartbeatRef = heartbeatRaw
-       ? resolveModelRefFromString({
-           cfg,
-@@ -462,8 +465,8 @@ export async function getReplyFromConfig(
+-    const heartbeatRef = heartbeatRaw
+-      ? resolveModelRefFromString({
+-          cfg,
+-          agentId,
+-          raw: heartbeatRaw,
+-          defaultProvider,
+-          aliasIndex,
+-        })
+-      : null;
+-    if (heartbeatRef) {
+-      provider = heartbeatRef.ref.provider;
+-      model = heartbeatRef.ref.model;
+-      hasResolvedHeartbeatModelOverride = true;
+-      const profileId = splitTrailingAuthProfile(heartbeatRaw).profile;
+-      heartbeatAuthProfile = profileId ? { ...heartbeatRef.ref, profileId } : undefined;
+-    }
+-  }
++  const heartbeatModel = resolveReplyHeartbeatModel({
++    cfg,
++    agentId,
++    defaultProvider,
++    aliasIndex,
++    opts,
++  });
++  let provider = heartbeatModel?.ref.provider ?? defaultProvider;
++  let model = heartbeatModel?.ref.model ?? defaultModel;
++  let hasResolvedHeartbeatModelOverride = heartbeatModel !== undefined;
++  let heartbeatAuthProfile = heartbeatModel?.authProfile;
+ 
+   const { workspaceDirRaw, workspaceDirForNativeCommand, agentDir, timeoutMs } =
+     resolverTiming.measureSync("reply.resolve_workspace_agent_dir", () => {
+@@ -462,8 +448,8 @@ export async function getReplyFromConfig(
          agentDir: preparedAgentDir ?? resolveAgentDir(cfg, agentId),
          timeoutMs: resolveAgentTimeoutMs({
            cfg,
@@ -50646,18 +50803,18 @@ index c513942fe94a9b85d60967d2f030e8442e225fc7..d775712702b10c8a6cd1d3b3e5cb547c
          }),
        };
      });
-@@ -737,17 +740,25 @@ export async function getReplyFromConfig(
+@@ -737,17 +723,25 @@ export async function getReplyFromConfig(
      hasResolvedHeartbeatModelOverride = false;
      heartbeatAuthProfile = undefined;
    }
-+  const heartbeatThinking = hasResolvedHeartbeatModelOverride
-+    ? resolveConfiguredModelThinking({ config: cfg, provider, modelId: model, agentId })
-+    : undefined;
-+  const optsWithHeartbeatThinking =
-+    heartbeatThinking !== undefined &&
-+    optsWithCommandQueueOverride?.thinkingLevelOverride === undefined
-+      ? { ...optsWithCommandQueueOverride, thinkingLevelOverride: heartbeatThinking }
-+      : optsWithCommandQueueOverride;
++  const optsWithHeartbeatThinking = applyHeartbeatThinkingOverride({
++    cfg,
++    provider,
++    model,
++    agentId,
++    hasResolvedHeartbeatModelOverride,
++    opts: optsWithCommandQueueOverride,
++  });
    // Utility-model narration is turn-local decoration. Initialize the durable
    // session first, then keep it completely outside model-locked native runs.
    const admittedSessionSettings =
