@@ -6631,6 +6631,62 @@ index 628dbdc716c28a8f4301cd35d0bb409a134a20b2..9a46887b06e133dbb79ca24a16ebb8fb
  
    it("does not replace a prepared persisted store changed during refresh", async () => {
      const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-app-server-"));
+diff --git a/extensions/codex/src/app-server/bounded-turn.test.ts b/extensions/codex/src/app-server/bounded-turn.test.ts
+index 88a4dcd56d8a53e642292c58e1cef27e08089ba6..13cc3bab050132d34c016140d437a3f2531c3788 100644
+--- a/extensions/codex/src/app-server/bounded-turn.test.ts
++++ b/extensions/codex/src/app-server/bounded-turn.test.ts
+@@ -13,6 +13,29 @@ import type { JsonValue } from "./protocol.js";
+ import { createClientHarness } from "./test-support.js";
+ 
+ describe("runBoundedCodexAppServerTurn settled finalization isolation", () => {
++  it.each([
++    { effort: "high", expected: "high" },
++    { effort: null, expected: null },
++    { effort: undefined, expected: "low" },
++  ])("sends requested effort $effort at the native turn boundary", async ({ effort, expected }) => {
++    const fake = createClientFactory();
++
++    await runBoundedCodexAppServerTurn({
++      model: { mode: "required", id: "gpt-5.4" },
++      effort,
++      timeoutMs: 5_000,
++      options: { clientFactory: fake.factory },
++      taskLabel: "isolated completion",
++      developerInstructions: "Name the conversation.",
++      input: [{ type: "text", text: "Help me plan a garden.", text_elements: [] }],
++      requiredModalities: ["text"],
++      isolation: "configured-transport",
++    });
++
++    const request = fake.request.mock.calls.find(([method]) => method === "turn/start")?.[1];
++    expect(request).toMatchObject({ effort: expected });
++  });
++
+   it.each(["bound notification", "queued notification", "terminal response"] as const)(
+     "keeps an accepted %s when the transport closes immediately afterward",
+     async (receipt) => {
+diff --git a/extensions/codex/src/app-server/bounded-turn.ts b/extensions/codex/src/app-server/bounded-turn.ts
+index 0dd5e82428f629adf87594cce6d9fb655c6649b2..883ad8e45cc08dd6735300cadae1752242e0ec45 100644
+--- a/extensions/codex/src/app-server/bounded-turn.ts
++++ b/extensions/codex/src/app-server/bounded-turn.ts
+@@ -103,6 +103,8 @@ type CodexBoundedTurnParams = {
+   options: CodexBoundedTurnOptions;
+   taskLabel: string;
+   developerInstructions: string;
++  /** Isolated callers may select effort; other bounded operations retain Low. */
++  effort?: CodexTurnStartParams["effort"];
+   input: CodexUserInput[];
+   requiredModalities: string[];
+   isolation: "configured-transport" | "private-stdio";
+@@ -309,7 +311,7 @@ async function runBoundedCodexAppServerTurnInWorkspace(
+             threadId: thread.thread.id,
+             input: params.input,
+             approvalPolicy: "on-request",
+-            effort: "low",
++            effort: params.effort === undefined ? "low" : params.effort,
+           } satisfies CodexTurnStartParams,
+           requestOptions,
+         ),
 diff --git a/extensions/codex/src/app-server/dynamic-tool-session-spawns.ts b/extensions/codex/src/app-server/dynamic-tool-session-spawns.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..577883b4573de2ceec591a9a8dabf01c2e47a09a
@@ -7192,6 +7248,53 @@ index 8f35e571da7df1aa590e6d66814ddf759d55f585..d3e1db44cc5f76c5dc90cb2e7192fdc5
      const memory = {
        instructions: "native memory instructions",
        input: [],
+diff --git a/extensions/codex/src/app-server/isolated-completion.test.ts b/extensions/codex/src/app-server/isolated-completion.test.ts
+index d69f2ce0aba0a4a5b04c98e55b2c32368a3635b5..de916b57eebb872e8e4e6f005904fb0d80897d2e 100644
+--- a/extensions/codex/src/app-server/isolated-completion.test.ts
++++ b/extensions/codex/src/app-server/isolated-completion.test.ts
+@@ -86,6 +86,22 @@ describe("runCodexIsolatedCompletion", () => {
+     });
+   });
+ 
++  it.each([
++    { thinkLevel: "high", effort: "high" },
++    { thinkLevel: "low", effort: "low" },
++    { thinkLevel: "off", effort: "none" },
++    { thinkLevel: "adaptive", effort: "medium" },
++    { thinkLevel: "ultra", effort: "max" },
++    { thinkLevel: undefined, effort: undefined },
++  ] as const)(
++    "forwards isolated $thinkLevel reasoning as $effort",
++    async ({ thinkLevel, effort }) => {
++      await runCodexIsolatedCompletion({ ...createParams(), thinkLevel }, {});
++
++      expect(mocks.runBoundedTurn).toHaveBeenCalledWith(expect.objectContaining({ effort }));
++    },
++  );
++
+   it("uses native authorization on a ring-zero configured-transport turn", async () => {
+     const params = { ...createParams(), assertCurrent: vi.fn() };
+ 
+diff --git a/extensions/codex/src/app-server/isolated-completion.ts b/extensions/codex/src/app-server/isolated-completion.ts
+index e5eb74a44a15327f66df011a048d24f62474aaa1..f78f9c394c9ef4df7fb5b0b60adc40b460508dcd 100644
+--- a/extensions/codex/src/app-server/isolated-completion.ts
++++ b/extensions/codex/src/app-server/isolated-completion.ts
+@@ -55,6 +55,15 @@ export async function runCodexIsolatedCompletion(
+     options,
+     taskLabel: "isolated completion",
+     developerInstructions: params.systemPrompt,
++    // Prompt-only completions use the same effort normalization as the host path.
++    effort:
++      params.thinkLevel === "adaptive"
++        ? "medium"
++        : params.thinkLevel === "ultra"
++          ? "max"
++          : params.thinkLevel === "off"
++            ? "none"
++            : params.thinkLevel,
+     input: [{ type: "text", text: params.prompt, text_elements: [] }],
+     requiredModalities: ["text"],
+     isolation: "configured-transport",
 diff --git a/extensions/codex/src/app-server/native-subagent-child-ownership.ts b/extensions/codex/src/app-server/native-subagent-child-ownership.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..ea6f7cc0b2f772dfdcec1aa28d054c5c880c8fb1
@@ -29464,6 +29567,93 @@ index 7eaf2b4d94921c274971353778fb1985edeafea4..ec5299b6aa5bdaaf60e6172112a0044e
        request.workspace.sessionKey !== attempt.sessionKey ||
        request.workspace.sessionId !== attempt.sessionId
      ) {
+diff --git a/src/agents/isolated-completion.test.ts b/src/agents/isolated-completion.test.ts
+index a2e27563b07ea3c513ff3a9e2da28e7ca6584c8e..9b7faeb56832b4ccbc7c7bf28a715a8b66bca5cc 100644
+--- a/src/agents/isolated-completion.test.ts
++++ b/src/agents/isolated-completion.test.ts
+@@ -1,4 +1,5 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import type { AgentRunDelegatedAuthority } from "../infra/agent-run-registry.js";
+ import type { AdmittedRunContext } from "./admitted-run-context.js";
+ import {
+@@ -30,6 +31,48 @@ const { PROVIDER_FAILURE_WITH_OUTPUT_ERROR_CODE } = await import("../llm/types.j
+ beforeEach(resetIsolatedCompletionTestState);
+ 
+ describe("runIsolatedCompletion", () => {
++  it.each([
++    { modelThinking: "high", explicit: undefined, agentThinking: undefined, expected: "high" },
++    { modelThinking: "high", explicit: "low", agentThinking: undefined, expected: "low" },
++    { modelThinking: "high", explicit: "off", agentThinking: undefined, expected: "off" },
++    { modelThinking: "high", explicit: undefined, agentThinking: "low", expected: "low" },
++    { modelThinking: "high", explicit: undefined, agentThinking: false, expected: "off" },
++    {
++      modelThinking: undefined,
++      explicit: undefined,
++      agentThinking: undefined,
++      expected: undefined,
++    },
++  ] as const)(
++    "dispatches selected-model effort without inheriting interactive defaults ($expected; explicit=$explicit; agent=$agentThinking)",
++    async ({ modelThinking, explicit, agentThinking, expected }) => {
++      const config: OpenClawConfig = {
++        agents: {
++          defaults: {
++            thinkingDefault: "max",
++            models: { "openai/gpt-test": { params: { thinking: modelThinking } } },
++          },
++          entries: {
++            main: {
++              thinkingDefault: "ultra",
++              models: { "openai/gpt-test": { params: { thinking: agentThinking } } },
++            },
++          },
++        },
++      };
++      Object.assign(preparedModelRuntime, { config });
++      const dispatch = vi.fn(async () => ({
++        assistant: isolatedAssistant([{ type: "text", text: "done" }]),
++      }));
++      registerIsolatedHarness({ runIsolatedCompletionV2: dispatch });
++
++      await runIsolatedCompletion({ ...isolatedRequest(), thinkLevel: explicit });
++
++      expect(dispatch).toHaveBeenCalledOnce();
++      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ thinkLevel: expected }));
++    },
++  );
++
+   it.each(["v1", "v2"] as const)(
+     "rejects a retained %s dispatch callback after isolated completion closes",
+     async (version) => {
+diff --git a/src/agents/isolated-completion.ts b/src/agents/isolated-completion.ts
+index e7c83eda0fe9cadb187cf2e5374bcd8bc6b451f9..46fc3fb41f84dd44b63d21c26c7f76fd493d79f3 100644
+--- a/src/agents/isolated-completion.ts
++++ b/src/agents/isolated-completion.ts
+@@ -32,6 +32,7 @@ import type {
+   AgentHarnessIsolatedCompletionResult,
+ } from "./harness/types.js";
+ import { ensureAuthProfileStore } from "./model-auth.js";
++import { resolveConfiguredModelThinking } from "./model-extra-params.js";
+ import {
+   isCliRuntimeAliasForProvider,
+   resolveCliRuntimeExecutionProvider,
+@@ -437,7 +438,14 @@ async function runIsolatedCompletionOwned(
+         workspaceDir: lease.snapshot.workspaceDir ?? requestedWorkspaceDir,
+       };
+       const { config, agentDir, workspaceDir } = context;
+-      const request = { ...input, ...context, assertCurrent };
++      const request = {
++        ...input,
++        ...context,
++        assertCurrent,
++        thinkLevel:
++          input.thinkLevel ??
++          resolveConfiguredModelThinking({ config, provider, modelId: input.model, agentId }),
++      };
+       await ensureSelectedAgentHarnessPlugin({
+         provider,
+         modelId: request.model,
 diff --git a/src/agents/main-session-recovery/main-session-restart-recovery-target.ts b/src/agents/main-session-recovery/main-session-restart-recovery-target.ts
 index 7bfc07d9d5237b62624a8533199284ce23e342b2..e4cb5cf70cb51853bf7102477278a4243363481e 100644
 --- a/src/agents/main-session-recovery/main-session-restart-recovery-target.ts
@@ -62514,6 +62704,158 @@ index 36740d0e2026a95ae1dd3fb80dc42b6ec35d75ca..d5f139622220059744d7b8c9fe4261c5
        mode: GATEWAY_CLIENT_MODES.PROBE,
        sharedStateMode: "read-only",
        instanceId,
+diff --git a/src/gateway/scheduled-run-gateway-context.test.ts b/src/gateway/scheduled-run-gateway-context.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dca79611e957fd32365806391c7f17a127836f1e
+--- /dev/null
++++ b/src/gateway/scheduled-run-gateway-context.test.ts
+@@ -0,0 +1,111 @@
++import path from "node:path";
++import { afterEach, describe, expect, it } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
++import { createEmbeddedAttemptTranscriptLifecycle } from "../agents/embedded-agent-runner/run/attempt-transcript-lifecycle.js";
++import { loadTranscriptEvents, replaceSessionEntry } from "../config/sessions/session-accessor.js";
++import { readTranscriptEventMessage } from "../config/sessions/session-accessor.sqlite-read.js";
++import {
++  runWithOwnedSessionTranscriptWrite,
++  withOwnedSessionTranscriptWrites,
++} from "../config/sessions/transcript-write-context.js";
++import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
++import { commitBackgroundResultToSession } from "../sessions/background-session-result.js";
++import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
++import { runWithScheduledGatewayContext } from "./scheduled-run-gateway-context.js";
++
++describe("scheduler-owned transcript context", () => {
++  const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
++    afterEach(() => {
++      closeOpenClawAgentDatabasesForTest();
++      cleanup();
++    }),
++  );
++
++  it.each([true, false])(
++    "commits a timed completion once after its creating attempt retires (resolver=%s)",
++    async (hasResolver) => {
++      const storePath = path.join(
++        tempDirs.make("openclaw-scheduled-transcript-"),
++        "agents",
++        "main",
++        "sessions",
++        "sessions.json",
++      );
++      const target = {
++        agentId: "main",
++        sessionKey: "agent:main:discord:channel:reminder-fixture",
++        sessionId: "reminder-conversation",
++        storePath,
++      };
++      const generation = { sessionId: target.sessionId, lifecycleRevision: "source-revision" };
++      await replaceSessionEntry(target, { ...generation, updatedAt: 1 });
++      const lifecycle = createEmbeddedAttemptTranscriptLifecycle({
++        runId: "reminder-creating-attempt",
++        sessionId: target.sessionId,
++      });
++      const resolveGatewayContext = hasResolver ? () => undefined : undefined;
++      const completion = {
++        agentId: target.agentId,
++        sessionKey: target.sessionKey,
++        expectedGeneration: generation,
++        text: "Reminder: time to leave for your appointment.",
++        idempotencyKey: "cron-current-completion:cron:reminder-fixture:1000",
++        provenance: {
++          kind: "cron" as const,
++          jobId: "reminder-fixture",
++          runId: "cron:reminder-fixture:1000",
++        },
++        config: { session: { store: storePath } },
++      };
++      await withOwnedSessionTranscriptWrites(
++        {
++          sessionTarget: target,
++          withTranscriptWrite: (write) => lifecycle.withTranscriptWrite(write),
++        },
++        async () => {
++          // Real timers retain the creating attempt's AsyncLocalStorage; fake timers do not.
++          let releaseTimer!: () => void;
++          const ready = new Promise<void>((resolve) => {
++            releaseTimer = resolve;
++          });
++          const fired = new Promise<void>((resolve, reject) => {
++            setTimeout(() => {
++              void ready
++                .then(() =>
++                  runWithScheduledGatewayContext({
++                    resolveGatewayContext,
++                    run: async () => {
++                      expect(getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext).toBe(
++                        resolveGatewayContext,
++                      );
++                      const first = await commitBackgroundResultToSession(completion);
++                      expect(first.ok).toBe(true);
++                      expect(await commitBackgroundResultToSession(completion)).toEqual(first);
++                    },
++                  }),
++                )
++                .then(resolve, reject);
++            }, 0);
++          });
++          await lifecycle.dispose();
++          releaseTimer();
++          await fired;
++          // Detaching scheduled work must not reopen the caller's retired writer.
++          await expect(
++            runWithOwnedSessionTranscriptWrite({ sessionTarget: target }, () => undefined),
++          ).rejects.toThrow("attempt disposed before transcript write");
++        },
++      );
++      const messages = (await loadTranscriptEvents(target))
++        .map(readTranscriptEventMessage)
++        .filter((message) => message?.role === "assistant");
++      expect(messages).toEqual([
++        expect.objectContaining({
++          idempotencyKey: completion.idempotencyKey,
++          openclawAutomation: completion.provenance,
++          content: [{ type: "text", text: completion.text }],
++        }),
++      ]);
++    },
++  );
++});
+diff --git a/src/gateway/scheduled-run-gateway-context.ts b/src/gateway/scheduled-run-gateway-context.ts
+index 51c91819ae439920342ba29f211f9b0de760c51f..b915081ebfd70dfa4c258ac2ff93ffce0ec66b3d 100644
+--- a/src/gateway/scheduled-run-gateway-context.ts
++++ b/src/gateway/scheduled-run-gateway-context.ts
+@@ -6,6 +6,7 @@
+  * no context and fail mid-run. RPC-triggered runs already inherit a scope from
+  * their caller and must keep it.
+  */
++import { runWithoutOwnedSessionTranscriptWrites } from "../config/sessions/transcript-write-context.js";
+ import {
+   bindGatewayContextResolver,
+   withPluginRuntimeGatewayContextResolver,
+@@ -54,11 +55,16 @@ export async function runWithScheduledGatewayContext<T>(params: {
+   resolveGatewayContext?: ScheduledGatewayContextResolver;
+   run: () => Promise<T>;
+ }): Promise<T> {
+-  const resolveGatewayContext = params.resolveGatewayContext;
+-  if (!resolveGatewayContext) {
+-    return await params.run();
+-  }
+-  return await withPluginRuntimeGatewayContextResolver(resolveGatewayContext, params.run, {
+-    inheritRequestScope: false,
++  // An arming tool call may carry a writer that retires before the job fires.
++  // Scheduled runs acquire their own admission; their conversation completion
++  // must not borrow the creating attempt's disposed transcript lifecycle.
++  return await runWithoutOwnedSessionTranscriptWrites(async () => {
++    const resolveGatewayContext = params.resolveGatewayContext;
++    if (!resolveGatewayContext) {
++      return await params.run();
++    }
++    return await withPluginRuntimeGatewayContextResolver(resolveGatewayContext, params.run, {
++      inheritRequestScope: false,
++    });
+   });
+ }
 diff --git a/src/gateway/server-methods/agent-session-reset.ts b/src/gateway/server-methods/agent-session-reset.ts
 index 7bcf6ea2b9ed8362b70e6eb9be289427bce26687..64c033cd73d8ded9821d5f36d03b3ae001f55c24 100644
 --- a/src/gateway/server-methods/agent-session-reset.ts
