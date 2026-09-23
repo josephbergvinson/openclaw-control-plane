@@ -201,6 +201,21 @@ assert set(a.validate_plists(p)) == {'gateway', 'node'}
                                       "PYTHONPATH": str(self.workspace / "scripts"),
                                       "OPENCLAW_OPERATOR_CONFIG": str(self.workspace / "operator.json")})
         self.assertEqual(0, checked.returncode, checked.stderr)
+        default_marker = Path(paths["host_home"]) / ".openclaw/disable-launchagent"
+        canonical_marker = Path(paths["state_root"]) / "disable-launchagent"
+        self.assertTrue(default_marker.is_file())
+        self.assertFalse(default_marker.is_symlink())
+        self.assertTrue(canonical_marker.is_file())
+        # A manual/default-profile launch may precede the login environment.
+        # Its physical native marker survives the canonical volume being absent.
+        state = Path(paths["state_root"])
+        away = state.with_name(state.name + "-unmounted")
+        state.rename(away)
+        try:
+            self.assertTrue(default_marker.is_file())
+            self.assertFalse(canonical_marker.exists())
+        finally:
+            away.rename(state)
         before = Path(paths["gateway_plist"]).read_bytes()
         repeated = self.run_documented_preparation(release, staged)
         self.assertNotEqual(0, repeated.returncode)

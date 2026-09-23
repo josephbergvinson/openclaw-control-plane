@@ -356,6 +356,23 @@ if len(plists) != 2 or set(links) & set(plists):
 for target in (*links, *plists):
     if os.path.lexists(target):
         raise SystemExit(f'First-install destination already exists: {target}')
+default_profile = c.require_path('paths.host_home') / '.openclaw'
+if default_profile.is_symlink():
+    raise SystemExit('Default app profile must be a physical directory for mount-independent attach-only policy')
+markers = (default_profile / 'disable-launchagent',
+           c.require_path('paths.state_root') / 'disable-launchagent')
+for marker in markers:
+    if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+        raise SystemExit(f'Invalid native attach-only marker: {marker}')
+default_profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+for marker in markers:
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        if marker.is_symlink() or not marker.is_file():
+            raise SystemExit(f'Native attach-only marker changed during preparation: {marker}')
+    else:
+        os.close(fd)
 for target, destination in links.items():
     target.parent.mkdir(parents=True, exist_ok=True)
     target.symlink_to(destination)
@@ -375,6 +392,29 @@ must have `WorkingDirectory=host_home`, `RunAtLoad=true`, `KeepAlive=true` and t
 `gateway --port` vector; the node uses `node run --host 127.0.0.1 --port` with the same
 port. Both use external supervisor/repair mode. Native node authentication resolves
 from the initialized local gateway configuration; do not paste tokens into a plist.
+
+### Keep one app login owner
+
+The staged `runtime-environment` LaunchAgent is the app login owner: it supplies the
+canonical state/config paths and external supervisor/repair flags, then executes the
+app with its supported `--attach-only` option. Do not enable a second `ai.openclaw.mac`
+login owner alongside it. Preserve the user's autostart preference when replacing an
+existing login owner; retiring its future trigger does not authorize terminating an
+active app or Gateway. Inspect both persisted and loaded definitions at cutover.
+
+Keep physical `disable-launchagent` markers in both the default account-home profile
+and canonical state directory before enabling the app. A manual/Finder launch can
+precede login environment setup, and the internal marker must still block native
+Gateway installation when the external volume is absent. These markers express
+lifecycle ownership; they do not create another configuration or account store.
+The loader refuses to create a missing canonical state root or launch against it.
+
+The loader no longer reads Keychain credentials or exports a global Gateway token.
+It clears the obsolete inherited/global variable and uses the native configuration
+auth bridge. Remove the old token-producing login script during migration as well
+as clearing its already-loaded value. Preserve Keychain items and secret references
+used by other consumers. Keep the exact Gateway/node selector definitions above;
+a stock `gateway install --force` rewrite would bypass that external owner.
 
 ### Start and qualify the real predecessor
 

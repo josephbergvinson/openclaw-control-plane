@@ -1,49 +1,62 @@
 #!/bin/zsh
 
 set -eu
+umask 077
 
+: "${HOME:?required account home}"
 : "${CLAUDE_CODE_TMPDIR:?required installation binding}"
 : "${OPENCLAW_STATE_DIR:?required installation binding}"
-: "${OPENCLAW_GATEWAY_KEYCHAIN_ACCOUNT:?required installation binding}"
-: "${OPENCLAW_GATEWAY_KEYCHAIN_SERVICE:?required installation binding}"
 : "${PYTEST_DEBUG_TEMPROOT:?required installation binding}"
 : "${NODE_COMPILE_CACHE:?required installation binding}"
 : "${PYTHONPYCACHEPREFIX:?required installation binding}"
 : "${OPENCLAW_RUNTIME_APP:?required installation binding}"
 
-# Keep Claude Code command plumbing on the configured temporary storage. The other developer
-# state paths remain fail-closed so they cannot silently refill the internal disk.
-: "${CLAUDE_CODE_TMPDIR:?required temporary directory}"
-export CLAUDE_CODE_TMPDIR
-: "${OPENCLAW_STATE_DIR:?required native state root}"
-export OPENCLAW_STATE_DIR
-/bin/launchctl setenv CLAUDE_CODE_TMPDIR "$CLAUDE_CODE_TMPDIR"
-/bin/launchctl setenv OPENCLAW_STATE_DIR "$OPENCLAW_STATE_DIR"
+ensure_attach_only_marker() {
+    local marker="$1"
+    if [[ -L "$marker" || ( -e "$marker" && ! -f "$marker" ) ]]; then
+        print -u2 -- "Attach-only marker must be a physical regular file: $marker"
+        return 1
+    fi
+    if [[ ! -e "$marker" ]]; then
+        # Never truncate an existing marker, including a concurrent creator's file.
+        ( set -C; : > "$marker" ) || [[ -f "$marker" && ! -L "$marker" ]]
+    fi
+}
 
-# Finder-launched OpenClaw cannot yet resolve the configured file SecretRef
-# (upstream #128171), and a background shell cannot read that external-volume
-# file. Read the mirrored login-Keychain item so no plaintext token is embedded
-# in this script or a launchd plist.
-gateway_token_value=$(
-    /usr/bin/security find-generic-password \
-        -a "${OPENCLAW_GATEWAY_KEYCHAIN_ACCOUNT:?required Keychain account}" \
-        -s "${OPENCLAW_GATEWAY_KEYCHAIN_SERVICE:?required Keychain service}" \
-        -w
-)
-export OPENCLAW_GATEWAY_TOKEN="$gateway_token_value"
-/bin/launchctl setenv OPENCLAW_GATEWAY_TOKEN "$OPENCLAW_GATEWAY_TOKEN"
-unset gateway_token_value
+# The native app can be opened by Finder before this login owner runs. Install
+# this same physical marker before enabling autostart (see the adoption guide),
+# and retain it on internal storage when the canonical volume is unavailable.
+[[ -d "$HOME" && ! -L "$HOME/.openclaw" ]] || {
+    print -u2 -- "The default native profile requires a physical account-home directory"
+    exit 1
+}
+/bin/mkdir -p "$HOME/.openclaw"
+ensure_attach_only_marker "$HOME/.openclaw/disable-launchagent"
 
-: "${PYTEST_DEBUG_TEMPROOT:?required configured directory}"
-export PYTEST_DEBUG_TEMPROOT
-: "${NODE_COMPILE_CACHE:?required configured directory}"
-export NODE_COMPILE_CACHE
-: "${PYTHONPYCACHEPREFIX:?required configured directory}"
-export PYTHONPYCACHEPREFIX
-/bin/launchctl setenv PYTEST_DEBUG_TEMPROOT "$PYTEST_DEBUG_TEMPROOT"
-/bin/launchctl setenv NODE_COMPILE_CACHE "$NODE_COMPILE_CACHE"
-/bin/launchctl setenv PYTHONPYCACHEPREFIX "$PYTHONPYCACHEPREFIX"
+# The native auth bridge resolves the canonical configuration. A global token
+# would override that authority and survive account/configuration rotation.
+unset OPENCLAW_GATEWAY_TOKEN
+/bin/launchctl unsetenv OPENCLAW_GATEWAY_TOKEN
 
-# One login owner: resolve the file-backed secret first, then replace this
-# short-lived loader with the app so it inherits the exact process environment.
-exec "${OPENCLAW_RUNTIME_APP:?required desktop runtime app executable}"
+# Do not create a shadow state directory or launch an app against a missing mount.
+[[ -d "$OPENCLAW_STATE_DIR" && -f "$OPENCLAW_STATE_DIR/openclaw.json" ]] || {
+    print -u2 -- "Canonical OpenClaw state is unavailable; app startup deferred"
+    exit 1
+}
+ensure_attach_only_marker "$OPENCLAW_STATE_DIR/disable-launchagent"
+
+export OPENCLAW_SUPERVISOR_MODE=external
+export OPENCLAW_SERVICE_REPAIR_POLICY=external
+export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"
+
+# Keep the established state and developer cache bindings for later GUI launches.
+for oc_env_key in CLAUDE_CODE_TMPDIR OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH \
+    OPENCLAW_SUPERVISOR_MODE OPENCLAW_SERVICE_REPAIR_POLICY \
+    PYTEST_DEBUG_TEMPROOT NODE_COMPILE_CACHE PYTHONPYCACHEPREFIX
+do
+    /bin/launchctl setenv "$oc_env_key" "${(P)oc_env_key}"
+done
+
+# This loader is the sole app login owner. Manual launches are protected by the
+# persistent native marker too; the app never owns our external Gateway lifecycle.
+exec "$OPENCLAW_RUNTIME_APP" --attach-only
