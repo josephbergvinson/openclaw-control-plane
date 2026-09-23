@@ -11,21 +11,19 @@ The examples below use explicit paths; replace them with the intended local path
 
 ## 1. Reconstruct and check the runtime
 
-Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.3`,
+Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.5`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
+expected tree is `56a9bcae6a403eadf5aa48949cfe4a9c767a4ed8`.
 
-The [September 21 repair](../runtime/README.md#september-21-follow-up-repair)
-has passed local source checks, fresh reconstruction, activation and a bounded
-live Discord handoff check. Hosted qualification passed for that earlier source.
-The current patch includes the later
-[active-child correction](../runtime/README.md#active-child-follow-up-correction),
-whose full build, activation and bounded live follow-up and warning-deferral checks
-passed. Hosted qualification remains pending. Use the workflow result for
-the manifest being adopted; the originating host's live result does not qualify
-your installation.
+The source pinned to `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8` passed
+[hosted qualification](../runtime/README.md#current-source-qualification) at public
+commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`, including the complete native
+plan, reconstructed build and owned regression suites. Deployment records and
+bounded live results are recorded separately. Match the workflow's source and
+patch identities to the manifest being adopted; neither a source test nor the
+originating host's live result qualifies your installation.
 
-Use Node.js 24.16.0 and pnpm 12.3.4. Run the documented frozen dependency installation,
+Use Node.js 24.16.0 and pnpm 12.4.0. Run the documented frozen dependency installation,
 native changed-source checks and build from that checkout. The source package
 contains the complete delta from the official release. A new commit hash is expected
 because the adopter supplies its author and timestamp; the tree is the source check.
@@ -244,7 +242,7 @@ applying this first-install recipe over it.
 ### Package and seal the initial release
 
 Choose a new physical `initial_release` directly under `paths.runtime_releases_root`,
-with a name such as `openclaw-2026.9.3-initial`. Set `source_commit` to the complete
+with a name such as `openclaw-2026.9.5-initial`. Set `source_commit` to the complete
 commit recorded after reconstruction, not the original host's commit. This must match
 the build's `dist/build-info.json`. The already completed frozen install and build
 must include the full dependencies and required bundled plugins.

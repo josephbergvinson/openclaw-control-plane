@@ -2,7 +2,7 @@
 
 This repository describes a working pattern for one person's OpenClaw installation: a persistent assistant that can move between research, writing, software projects, personal administration and native desktop applications. It includes the operating instructions and source changes needed to build the reference, as well as the reasons for them.
 
-The reference starts from **OpenClaw 2026.9.3**. A maintained set of runtime changes extends that release. The version, source base, patch and validation instructions must travel together; installing the same version number alone does not reproduce a modified build. Follow the [adoption guide](17-adoption-guide.md) for the pinned reconstruction path.
+The reference starts from **OpenClaw 2026.9.5**. A maintained set of runtime changes extends that release. The version, source base, patch and validation instructions must travel together; installing the same version number alone does not reproduce a modified build. Follow the [adoption guide](17-adoption-guide.md) for the pinned reconstruction path.
 
 ## Follow a request
 

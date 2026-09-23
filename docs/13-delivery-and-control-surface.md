@@ -36,7 +36,9 @@ the internal resume and reuses the channel's configured progress card. Private
 worker completion prompts are excluded from narration. Progress does not acquire
 final-delivery custody; stale, replaced or cancelled owners cannot send delayed
 updates. Ninety focused cases pass across the agent and Discord owners. The
-candidate still requires hosted qualification and fresh live channel acceptance.
+current `5b5942def95c` source retains this repair and passed
+[hosted qualification](../runtime/README.md#current-source-qualification).
+Fresh live channel acceptance remains separate.
 
 ## September 22 native goal delivery repair
 
@@ -116,8 +118,10 @@ A second live check retained a real failed `sessions_send` result through a
 successful yield. The same child completed, the parent resumed automatically, and
 Discord received exactly one final response in 117.275 seconds with no stale failure
 warning. The nonzero shell exit in the first check was not used as tool-error proof.
-Hosted qualification of the corrected source remains pending. The earlier completed-child
-check did not cover this active-child mode mismatch.
+Hosted qualification of that exact historical public revision remained pending
+at this checkpoint; the current source's separate hosted result is recorded in the
+[runtime package](../runtime/README.md#current-source-qualification). The earlier
+completed-child check did not cover this active-child mode mismatch.
 
 ## Additional Discord repair qualification
 
