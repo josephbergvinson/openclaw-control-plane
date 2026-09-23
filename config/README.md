@@ -81,11 +81,14 @@ configured row does not prove access either: run a read-only Sol/High request an
 inspect its effective model and outcome before enabling autonomous work. Keep the
 existing OAuth authority; this configuration does not require an API key.
 
-This profile requires the matching reconstructed runtime’s heartbeat thinking,
-per-phase dreaming effort, and utility reasoning support. Autonomous heartbeat
-settings do not override admitted user-task continuations. Configured dreaming
-model failures remain on the selected route and produce the existing degraded
-outcome instead of silently calling the interactive model.
+This profile uses existing model fields and the selected model’s
+`params.thinking: "high"` for heartbeat, dreaming and utility work. It requires the
+matching reconstructed runtime to carry that effort into these background calls;
+there is no added `heartbeat.thinking` or dreaming `execution.thinking` field for a
+retained native app to reject. Autonomous heartbeat settings do not override
+admitted user-task continuations. Configured dreaming model failures remain on the
+selected route and produce the existing degraded outcome instead of silently
+calling the interactive model.
 
 A merge retains omitted keys. For an earlier profile with global child model or
 thinking pins, apply this native deletion patch after reviewing the current values:
@@ -100,6 +103,12 @@ thinking pins, apply this native deletion patch after reviewing the current valu
 }
 ```
 
+When calling native `config.patch`, include the current `baseHash`. If the deleted
+model object contains a `fallbacks` array, also pass
+`replacePaths: ["agents.defaults.subagents.model.fallbacks"]` alongside `raw` and
+`baseHash`; the native owner requires the exact destructive array path even when
+its parent is deleted. Review and name any other reported array removal explicitly.
+
 This restores current-turn inheritance: interactive Astra/Max or explicitly chosen
 Ultra stays with user orchestration, while scheduled Sol/High stays with autonomous
 work. Review per-agent `thinkingDefault` values that previously duplicated the old
@@ -110,7 +119,10 @@ to restore inheritance when clearing a session override is intended.
 Existing `agentTurn` jobs need their own `payload.model: "openai/gpt-6-sol"` and
 `payload.thinking: "high"`; changing the default model does not rewrite job
 payloads. Preserve job IDs, enabled states, schedules, prompts, budgets and delivery
-settings. Inspect command implementations for nested inference rather than treating
+settings. System-owned skill collection review jobs retain their owner-projected
+payloads: use supported `sessions.patch` on each exact
+`agent:<agent-id>:cron:<job-id>` key to set `model` and `thinkingLevel`, then verify
+the job’s enablement is unchanged. Inspect command implementations for nested inference rather than treating
 all `command` payloads as model-free. See [scheduling and background work](../docs/12-scheduling-and-background-work.md).
 
 ## Local memory setup
