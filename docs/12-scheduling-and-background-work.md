@@ -53,6 +53,34 @@ Keep exact time semantics with the job: the civil timezone, period being process
 
 A stored delivery route is part of the already-authorized scheduled task. Use its intended account, destination and message class. Do not choose a different recipient because the preferred route failed, or route a domain alert by guessing from its prose. Routine no-change checks can be silent; explicitly configured daily maintenance reports may report both success and failure.
 
+## Model and reasoning ownership
+
+Interactive work defaults to Astra/Max; an explicit Discord `/think ultra` adds
+multi-agent orchestration with underlying Max reasoning. Autonomous inference uses
+`openai/gpt-6-sol` with High reasoning. Native `agentTurn` jobs carry those values in
+`payload.model` and `payload.thinking`, including intentionally disabled jobs when
+their saved policy is updated. Keep their enablement, schedule and delivery intact.
+
+The [preferences profile](../config/openclaw.preferences.json) configures the same
+Sol/High policy for heartbeat, active memory, all three dreaming phases and utility
+calls. The [configuration guide](../config/README.md#background-model-and-existing-overrides)
+describes provider enrollment and migration of older settings. A model row or a
+successful catalog refresh is not acceptance; verify the effective Sol/High route
+with a read-only request before relying on the scheduled path.
+
+Global child model and thinking pins stay unset. Children inherit the initiating
+turn, so scheduled Sol/High work remains Sol/High and explicitly selected interactive
+Ultra remains available. Admitted user-task continuations retain their conversation
+model and effort when a heartbeat carries the wake. Existing explicit session or
+per-task selections are not bulk rewritten as part of a defaults change.
+
+Classify command work by its implementation. A script that reads receipts, exports
+data or performs deterministic maintenance has no scheduler reasoning setting.
+A script that invokes an LLM must select Sol/High at that internal inference owner.
+Foreground helpers belonging to a user turn do not become autonomous jobs merely
+because they run in another process. Configured background-model failures must not
+silently fall back to the interactive model.
+
 ## Inventory and ownership
 
 Reconcile native job IDs and installed launchd labels with an ownership inventory. Record the canonical entrypoint, interpreter, environment, cadence, current enablement, intended effect and evidence pointer. The [nine maintenance definitions](../workspace/scheduler/maintenance-jobs.template.json) preserve the current command schedules as disabled native inputs. The [host manifest](../workspace/host-templates.json) selects the exact definitions to render; [the installation runbook](../workspace/runbooks/host-maintenance.md) explains registration and acceptance.

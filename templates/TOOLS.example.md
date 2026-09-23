@@ -226,6 +226,25 @@ Keep source, selector, service definition, loaded process and provider behavior 
 
 Invoke the checked activator from its supported independent process boundary. Do not boot out/bootstrap the live gateway from the gateway's own process tree or stack an extra restart around activation. An ambiguous result is contained and reconciled; a rollback outcome means the predecessor recovered, not that the candidate activated.
 
+## Model and reasoning policy
+
+Interactive work defaults to `openai/gpt-6-astra` with Max reasoning. An explicit
+Discord `/think ultra` remains available for automatic multi-agent orchestration;
+the underlying provider effort is Max. Respect existing user/session choices and
+verify the effective runtime behavior rather than treating a selector as proof.
+
+Autonomous LLM jobs, hooks, heartbeat, active memory, dreaming and utility work use
+`openai/gpt-6-sol` with High reasoning. Set native `agentTurn` payload.model and
+payload.thinking explicitly. Pure command jobs have no scheduler model/thinking;
+if an executable invokes an LLM internally, its inference owner follows the same
+background policy. Preserve deliberately disabled jobs and their existing scope.
+
+Leave global subagent model/thinking pins unset so children inherit the initiating
+turn. Explicit user orchestration, including Ultra, keeps its requested settings;
+a background Sol/High parent passes those settings to its children. A user-task
+continuation carried by a heartbeat remains user work. Do not silently use the
+interactive model when a configured background route is unavailable.
+
 ## Schedulers, monitoring and retained state
 
 Export or back up existing job definitions before an authorized change. Classify affected jobs as active, intentionally disabled or removed. Active commands target canonical paths or a documented host shim. Retired paths may remain historical evidence but do not belong in live integrity hard-fail expectations.
