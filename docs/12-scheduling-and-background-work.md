@@ -8,10 +8,12 @@ The reference combines the native OpenClaw scheduler with macOS launchd. Each re
 
 | Layer | Owns | Current authority | Availability boundary |
 | --- | --- | --- | --- |
-| Native OpenClaw scheduler | Recurring commands, agent turns, reminders and runtime-owned background work | Job definitions, runtime state and receipts in the shared SQLite state database | Dispatch depends on the gateway being available |
+| Native OpenClaw scheduler | Recurring commands, agent turns, explicitly requested chat reminders and runtime-owned background work | Job definitions, runtime state and receipts in the shared SQLite state database | Dispatch depends on the gateway being available |
 | macOS launchd | Gateway/node process supervision, independent host helpers and selected project timers | Installed service definition plus loaded job/process state | Depends on the relevant system or user service domain |
 
 The native scheduler is not limited to model calls. Most routine host maintenance uses a `command` payload: a pinned interpreter invokes a checked helper, captures a bounded result and lets the runtime deliver it. An `agentTurn` is appropriate when a task needs reasoning and tools. Runtime-managed recurring work, such as memory consolidation, also has its own lifecycle.
+
+Reminder requests resolve their destination from the operator's durable preferences. This reference defaults to Apple Reminders, including timed one-off alerts; a generic “remind me” does not select the native scheduler. Use the supported Apple integration and read back the saved reminder and alert before confirming creation. The native scheduler remains available when the operator explicitly requests a chat reminder or schedules assistant work. Do not silently replace an unavailable Apple route with a different destination.
 
 The [upstream automation guide](https://docs.openclaw.ai/automation/cron-jobs) describes the native interface. This reference adds host-specific launch definitions, wrappers, result checks and operating conventions. Historical JSON files or exported lists do not become a second writable scheduler simply because they remain on disk.
 
@@ -52,6 +54,8 @@ or remove its owner's obligation to observe completion.
 Keep exact time semantics with the job: the civil timezone, period being processed, catch-up policy and whether a late execution may write an earlier period. A timer firing after an outage does not by itself authorize backdating data.
 
 A stored delivery route is part of the already-authorized scheduled task. Use its intended account, destination and message class. Do not choose a different recipient because the preferred route failed, or route a domain alert by guessing from its prose. Routine no-change checks can be silent; explicitly configured daily maintenance reports may report both success and failure.
+
+For an explicitly requested one-shot chat reminder, use the existing job-level `failureAlert: { after: 1 }` and verify its alert destination. The default threshold of two consecutive execution failures cannot report a job that runs only once. This is a per-job creation setting, not a change to recurring maintenance alert policies.
 
 ## Model and reasoning ownership
 

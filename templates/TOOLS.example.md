@@ -139,6 +139,18 @@ A supported Apple Calendar adapter may need an event-finder read plus a dedicate
 
 Use one bounded availability-window call through the registered Apple adapter. If it reports blocked, timed out or incomplete, preserve that boundary: do not automatically inspect `Calendar.sqlitedb`, switch automation frameworks or substitute Google Calendar. An explicitly requested alternate route remains subject to its own authority. Keep raw event titles, locations and descriptions private when the requested answer is simply availability.
 
+## Reminders
+
+Resolve the destination from USER: Apple Reminders in this example, including one-time alerts. This explicit preference resolves the bundled skill's generic destination question; do not silently substitute a chat reminder. Project tracking and scheduled assistant work keep their own owners.
+
+Use the supported `apple-reminders` skill and installed `remindctl` interface. Check capability and Reminders authorization, select the intended account/list, and bind the requested title and due time with timezone. Use the configured default list when none is specified; ask only if the intended destination remains materially ambiguous.
+
+Inspect matching reminders before writing. Update the existing identity for the same request or create the missing reminder once. Read back its stable identifier, list, due time and alert before saying it is set; a due date alone does not prove a timed alert. Preserve the identifier and reconcile an uncertain write before retrying. A missing or denied Apple route requires repair or a clear explanation of the actual limitation, not a promise to remind later.
+
+For an explicitly requested chat reminder, verify the native scheduled job and its delivery destination. When diagnosing failure, distinguish dispatch, execution and confirmed delivery; a timer firing is not proof that the operator was notified.
+
+For a one-shot chat reminder, set the existing job-level `failureAlert: { after: 1 }` and verify its intended alert destination. The default two-failure threshold cannot report a job that runs only once. Preserve other jobs' alert policies.
+
 ## Documents, pages and task trackers
 
 Resolve the exact account, workspace and parent/container before writing. Read the current target. Choose create, revise, replace, append, archive or delete from the intended outcome and current structure. Revise an existing reader-facing object in place where appropriate; append only when requested or when the destination is a real log/appendix. Do not create test shells or replacement objects simply to prove access.
