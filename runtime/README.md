@@ -27,7 +27,7 @@ and agent schema 21. Its dated activation and capture evidence remain historical
 The preceding repair source `1fb1f66cfe29267902a768417b35e4a8c5c4e439` activated at
 `11:22:01.365523Z` through the same-version release owner. Successor
 `085711060c8477df71066402330eb5a2902d6824` activated at `12:37:05.013053Z`.
-The manifest records this exact release and activation-receipt hash. Postflight at that activation
+The dated record binds this exact release and activation-receipt hash. Postflight at that activation
 verified the selected process, health/readiness and preserved configuration, account
 ordering and scheduled-job definitions. Journal capture was visually accepted and
 enrolled for the new process; new-process scheduled synchronization remains unproven.
@@ -35,9 +35,9 @@ enrolled for the new process; new-process scheduled synchronization remains unpr
 The signed app from source `1fb1f66cfe29`, build `2609000592`, was separately installed,
 launched and observed connected on the originating Mac Mini on September 22. Signature and contents
 were verified. One macOS-added app-root metadata attribute was explicitly reconciled;
-unchanged metadata throughout is not claimed. MacBook installation, native
-credential/account acceptance and hosted checks for this public revision remain
-pending. A bounded native-goal final passed with exact Discord readback on `1fb`;
+unchanged metadata throughout is not claimed. That checkpoint did not establish
+MacBook installation or native credential/account acceptance. Later source
+qualification is recorded separately below. A bounded native-goal final passed with exact Discord readback on `1fb`;
 longer-workflow delivery and backend settlement remain separate acceptance scopes.
 
 The September 22 activation record verified Gateway source `085711060c8477df71066402330eb5a2902d6824`.
@@ -52,7 +52,33 @@ child creation, so actual live settlement acceptance remains pending. The Septem
 matching private worker at source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`.
+## September 23 qualified source
+
+The reconstructible source is `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`.
+Its [complete reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835806)
+and [Steering regression](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835793)
+passed at public commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4` on September 23.
+These are exact source-qualification results, separate from Gateway activation,
+companion installation, live workflow acceptance and checks of later public commits.
+
+The originating Gateway activated that exact source on September 23 at
+18:59:26.156345 UTC as release
+`openclaw-2026.9.5-5b5942def95c-20260923T1834Z-selfcontained`. The checked owner
+made one candidate attempt with no rollback; its activation receipt SHA-256 is
+`961d04a7e7f60c65bbd3811741ca127c862bb78d354efc0e3548cdbbe6bcf35f`.
+The stopped-state snapshot was retained. Postflight verified the selected
+Gateway and node, successful health/readiness responses, unchanged configuration,
+account ordering and scheduled-job definitions, and capture for the current
+process. Scheduled capture synchronization and individual workflow results remain
+separate acceptance scopes.
+
+The remaining model defaults were applied afterward through acknowledged native
+configuration updates, without a restart. Readback matched the five intended
+settings for utility completion, autonomous heartbeat, active memory, memory
+dreaming and its model-override permission, with no unexpected leaf changes.
+This is configuration acceptance; each real inference path still needs its own
+observed model/effort evidence.
+
 It retains the preceding candidate’s corrections to quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
@@ -65,12 +91,12 @@ An account or credential change opens a fresh connection with the completed tool
 history and without the previous connection's response ID or account-bound
 encrypted reasoning. The identity digest stays private in memory. Focused tests
 include five production-runner cases with exactly one physical write each and
-59 owning transport cases. Full hosted qualification and live acceptance of this
-candidate remain pending. CI corrections remove stale size and assertion counts, distinguish test fixture
+59 owning transport cases. Hosted qualification passed for the current source;
+live acceptance of these recovery paths remains separate. CI corrections remove stale size and assertion counts, distinguish test fixture
 wrappers from production functions, and align the existing settle-wake expectation.
 The fixture rename preserves all call sites and passed its 135 owning tests.
 
-The candidate also restores visible activity when a completed worker resumes its
+The source also restores visible activity when a completed worker resumes its
 original requester. That continuation retained final-delivery custody but could
 bypass typing, progress drafts and narration while the model continued working.
 The repair carries a run- and session-bound presentation capability through the
@@ -82,7 +108,7 @@ The seven owning test files passed 90 focused cases. CI now runs those exact
 agent and Discord suites and preserves their logs separately. These source tests
 do not establish a fresh live progress or final-delivery result for the candidate.
 
-The September 23 candidate also separates interactive and autonomous model policy.
+The September 23 source also separates interactive and autonomous model policy.
 The example configuration selects Astra Max for ordinary conversation, with
 `/think ultra` retaining opt-in orchestration, and Sol High for model-backed
 maintenance. Utility completion, autonomous heartbeat and all memory-dreaming
@@ -91,8 +117,8 @@ continues an admitted user task retains that task’s model and effort. Children
 inherit their initiating task unless explicitly overridden. Script-only jobs do
 not acquire an LLM dependency. This uses the existing configuration schema, so
 the retained signed companion can continue reading it. Focused routing and
-compatibility tests passed; source qualification, activation and live acceptance
-of this combined candidate remain pending.
+compatibility tests and the complete hosted source qualification passed. Activation
+and live acceptance of this combined source are recorded separately.
 
 The native command transport now waits for an explicitly bounded command to
 finish, allowing five seconds for the response after that command deadline. Its
@@ -100,8 +126,52 @@ previous fixed 20-second socket wait could report an unavailable companion while
 the app was still running. Existing authentication, cancellation and no-replay
 checks remain in place. The repair runs in the companion's bundled worker, so
 activating the Gateway alone does not install it. A matching signed companion
-package and host installation are required; those steps and actual Reminders
-write/readback acceptance remain pending.
+package and host installation are required. The matching signed package is build
+`2609000593`; direct bundled-worker inspection confirms the same source and build
+identity. This signed app was installed and observed connected on the originating
+Mini on September 23. Full resources and metadata matched the qualified package,
+except one macOS-added app-root `com.apple.macl` attribute that was explicitly
+reconciled.
+
+At 18:51:02 UTC, a bounded native execution returned its expected output after
+23.01 seconds with `isError: false`, beyond the previous 20-second cutoff. The
+native route does not expose a separate exit-code or timed-out field; none is
+inferred. The acceptance receipt SHA-256 is
+`0db88de11699fc73d9242f8e3b87c492caaa2cee714264f8ab0d6a9a12dabac8`.
+This verifies the installed Mini command path. The same signed build and private
+worker were installed on the MacBook and observed connected on September 23. The
+full 43,919-entry installation inventory matched, with only the same explicitly
+reconciled macOS-added app-root attribute. Actual process identities, executable
+hashes and the app and CLI Apple-anchor/exact-leaf signature checks passed. Its
+installed connection acceptance receipt SHA-256 is
+`95466686cb3cf1841aaee786f9a3dcfea9995dd5b5a689a6bdac1a8724fdcb12`.
+These installation and connection checks do not establish credential entry or
+successful authentication.
+
+The existing daily retention job was manually admitted after the copied-cache
+mount-identity repair on September 23. All four cleanup children returned zero,
+all 64 effect predicates passed, no timeout or residual process remained, and its
+normal Discord result was read back. There were no eligible removals, so this is
+a verified no-op with no reclaimed-space claim. The original failed invocation
+is retained; the next natural daily tick has not been observed. The effect and
+delivery receipt SHA-256 is
+`2378edc972d469055a12d4c9b33df3b059bb66bae0e85c3d920eced46cecca17`.
+The [host chapter](../docs/19-host-operations-and-backups.md#guarded-storage-cleanup)
+describes the preserved volume and cleanup guards.
+
+A separate September 23 Reminders authorization attempt through build `2609000593`
+reached the correct app, with its purpose text present. macOS deferred the prompt;
+the single bounded 90-second command timed out without a grant or denial. The
+reason for the delay is not established. A previously verified native Reminders UI
+route remains the fallback, and policy avoids repeating the same authorization
+wait for every reminder until an observed permission-state change warrants a
+recheck. CLI permission remains pending. Time-correlated OS logs for the existing
+UI fixture show alarm firing and muted Notification Center delivery during screen
+sharing, with no sound. Association with that fixture is inferred from the matching
+edit, due and cleanup times; the log does not expose its title. Visible banner and
+iPhone delivery remain unverified. The read-only notification disposition receipt
+SHA-256 is
+`ec38036fcdc21b79ac9ad8b3185bed37b2acdf8e20058f4ce1731816922f8d20`.
 
 Credential resolution runs in a bounded private child of the signed Mac app.
 Direct Keychain access disables interaction inside that child. Existing items that
@@ -128,12 +198,12 @@ synthetic qualification; those results alone did not qualify the subsequent
 compatibility reader.
 
 In the manifest, `source.referenceCommit` and `source.normalizedTree` identify what
-CI reconstructs, while `source.deployed*` retains the verified `085711` gateway
-activation. `candidateOnly` is true and `source.referenceDeploymentStatus` is
-`candidate-not-activated` until this successor has its own activation receipt.
-The existing `components.macCompanion.candidate` record now distinguishes the
-verified originating Mini installation from pending other-host and account checks.
-Prior gateway and companion acceptance records retain their dates and scopes.
+CI reconstructs. `source.deployed*` now binds the verified `5b5942def95c` Gateway
+activation, `candidateOnly` is false and `source.referenceDeploymentStatus` is
+`activated`. The companion's current record binds signed build `2609000593` and
+its verified Mini and MacBook installations and connections while retaining
+separate credential-entry and authentication checks. The prior `085711` Gateway and `1fb`/`2609000592` Mini records, plus
+earlier acceptance, retain their dated historical scopes.
 
 ## Active-child follow-up correction
 
@@ -164,9 +234,9 @@ found no actionable findings. The pinned full build passed in 232.79 seconds, an
 sealed-release activation selected this exact source. A bounded live check of active
 and completed child follow-ups passed, followed by a separate live check retaining
 a real tool error through a successful yield without a stale final warning.
-**Hosted qualification of this source remains pending.** Earlier workflows do not qualify the
-correction. The workflow adds the full terminal-preparation suite in its own
-invocation against the reconstructed build.
+Hosted qualification of that exact historical public revision was still pending
+at this checkpoint. The current source retains this correction and its full
+terminal-preparation suite; its separate hosted result is recorded below.
 
 ## September 21 follow-up repair
 
@@ -324,6 +394,27 @@ run or partial command log does not qualify the reference.
 
 ### Current source qualification
 
+Source `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`, normalized tree
+`56a9bcae6a403eadf5aa48949cfe4a9c767a4ed8`, passed
+[Verify reference](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835806)
+at public commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4` on September 23 at
+18:25:01 UTC. The artifact records all 35 native planned commands completing
+successfully, including all 92 hosted lint shards. The native plan took 90 minutes
+36 seconds; the separate reconstructed build and owned delivery, quota and
+continuation regression suites also passed. The
+[Steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835793)
+passed all ten steering cases and its ownership tests.
+
+The hosted reconstructed tree matches the manifest's normalized source; the patch
+SHA-256 is `4f007edf5de1d7cf4c93593c12eff245cc84a0b09e949cbc54a36f9dfdeee28c`.
+An independent standalone reconstruction also matched all 44,895 entries and modes,
+with only the two documented fixture-label substitutions. Failed or cancelled
+predecessor runs remain historical and are not counted as passing qualification.
+These results qualify the named source and public commit, not later documentation
+revisions or an unverified deployment.
+
+### Historical September 21 local source qualification
+
 Reference `18b432ca2f83a107b1bc329cedf2221f20e61639` passed all 279 focused tests
 listed above and the native changed-source checks for its six changed paths.
 The unchanged public helper passed preflight and application in a fresh standalone
@@ -332,8 +423,8 @@ confirmed matching production blobs and every file mode; only the two establishe
 fixture labels differ. The pinned full build passed in 232.79 seconds on the clean
 source, with build-info SHA-256
 `f7f5c94110df6ea497843194c8fe7d3e6924ba7850a9a1feac76962a7617e4af`.
-Both bounded live checks passed as recorded below. Hosted qualification of this
-source remains pending.
+Both bounded live checks passed as recorded below. Hosted qualification of that
+exact historical public revision remained pending at this checkpoint.
 
 ### Active-child correction deployment
 
