@@ -48,15 +48,25 @@ final-delivery authority. Delayed progress writes recheck that authority and sto
 on cancellation or replacement. Seven owning test files pass 90 focused cases;
 hosted qualification and live acceptance remain separate.
 
-The current reconstructible candidate `486da2f9ffc1` retains those repairs and adds
+The current reconstructible candidate `b186ca230fdd` retains those repairs and adds
 separate interactive and autonomous model routing. The example policy uses Astra
 Max for conversation, optional `/think ultra` orchestration and Sol High for
 model-backed maintenance. Existing model parameters supply reasoning effort to
-utility completions, autonomous heartbeat and memory dreaming. User-task
+utility completions, autonomous heartbeat and memory dreaming. Isolated completion
+admission also applies selected-model effort when the caller omits it; native
+Codex forwards that effort to the actual turn request while preserving explicit
+choices and the defaults of unrelated bounded operations. User-task
 continuations and delegated children retain their initiating settings. No new
 configuration schema is required by the retained signed companion. See the
 [scheduling policy](12-scheduling-and-background-work.md) for configured owners.
 This source identity is not a claim of activation or live acceptance.
+
+The scheduled-run boundary also releases the creating attempt's transcript context
+before detached cron, heartbeat or hook work begins. A timer armed inside a
+conversation can otherwise retain a disposed writer and fail while recording its
+result before delivery. Real-timer regression tests verify durable completion,
+idempotent replay and continued rejection of writes through the retired caller.
+This source repair does not by itself prove live reminder delivery.
 
 | Change family | Source behavior and acceptance boundary |
 |---|---|

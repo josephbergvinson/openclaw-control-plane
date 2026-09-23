@@ -52,7 +52,7 @@ child creation, so actual live settlement acceptance remains pending. The Septem
 matching private worker at source `1fb`; this Gateway channel
 producer change does not require another native build.
 
-The reconstructible candidate is now `486da2f9ffc14d1310f707c406bc6e2a17730f14`.
+The reconstructible candidate is now `b186ca230fdd56e8d22f75042fc132b589ca71fc`.
 It retains the preceding candidate’s corrections to quota recovery after completed tool work and account-bound WebSocket
 reuse. Eligible recovery advances through the existing authorized account order,
 keeps the same model and committed transcript, and does not replay the original
