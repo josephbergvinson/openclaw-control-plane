@@ -817,6 +817,43 @@ refreshes the Gateway-served build without reinstalling the app.
 All 33 mechanical postflight checks passed. The raw approval-state difference was
 reconciled to usage bookkeeping; policy was unchanged. The acceptance receipt SHA-256
 is `cc5ea281a5f42f9fb6497c7b8e34e8d0837de6508685eb5798a91f4647e2ebf1`.
-Exact-head hosted qualification remains pending. Current-process screen capture
+The later public `25e1d5881e5d` qualification passed its full build but failed
+only the auth-status test growth ratchet; the successor below retains that history.
+Current-process screen capture
 passed; no automation was replayed and no later natural scheduled success is
 inferred from this change.
+
+## September 24 Discord progress successor
+
+Source `c42af6f66b8abd23620aa9a8a110b9813c1bf5de` corrects two causes of invisible
+long-running work: foreground commentary that only edited an earlier Discord post,
+and ordinary interactive child tasks that did not opt into the existing yielded
+progress owner. Foreground updates produce a new post after a three-minute
+checkpoint; native background progress starts after a 15-second coalescing window
+and repeats every three minutes while the exact yield remains authoritative.
+Operator notification overrides, cancellation and the original final-delivery
+owner remain intact. See the [source and synthetic before/after proof](../docs/20-runtime-source-changes.md#long-running-discord-progress-checkpoints).
+
+Public revision `25e1d5881e5dff77a524a7826b31c363292d4a15` passed the complete
+reconstruction build, reference checks and steering tests, but its native checks
+stopped at the auth-status test file growth ratchet. The successor extracts those
+unchanged cases into a focused test file. The original
+[reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/36014726278)
+and [steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/36014726303)
+retain that dated outcome; it is not qualification of this successor.
+
+This exact source activated on September 24 at `15:49:57.891411Z` as
+`openclaw-2026.9.5-c42af6f66b8a-20260924T1528Z-selfcontained` in one attempt with no rollback.
+The activation receipt SHA-256 is
+`6a0666726f5895087c0111d17ffde2804ca74ab01e0c279ae4b187061a084758`. All 33 mechanical postflight
+checks passed: selected source and processes, health/readiness, configuration,
+account ordering, scheduled-job definitions, terminal sessions and retained native
+companions were verified. Current-process Journal capture was visually inspected
+and enrolled; a later natural scheduled sync is not inferred.
+
+The preceding `5233aa69090d` auth/Inbox activation retains its dated receipts.
+Native companions and private workers remain `f29bb229c5c8`, build `2609000594`;
+this central change does not rebuild or install them. MacBook native credential
+acceptance remains separate. Actual Discord progress delivery is pending at this
+publication checkpoint; its subsequent result and hosted qualification are recorded
+separately against the exact public revision in PR checks and artifacts.
