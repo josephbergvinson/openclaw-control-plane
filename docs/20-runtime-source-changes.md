@@ -424,6 +424,29 @@ forced run, checkpoint mutation, business replay or failure-history reset.
 This verifies the reported trigger incident, not every automation. Hosted
 qualification remains separate and binds the exact public revision.
 
+## SDK contract qualification reference
+
+Reference `db4ae8b2e6e0cbb6fdd14d4dd4ebb9e99b0c2f6c` differs from the installed `205ba711eb3d` source
+only in the SDK contract documentation, its direct behavior test, and the
+hand-maintained SDK surface inventory. Every other tracked blob and mode matches
+the installed runtime. No new runtime activation or native build is represented.
+
+Public revision `24dcc596e2ef` passed its normal reconstruction build, repository
+checks, all owned follow-up, quota and Discord regressions, and steering tests.
+Its native plan stopped at command 19 because the intentional
+`sanitizeProgressStatusText` export had not been accounted for: one focused
+`channel-outbound` export and the existing `channel-message` compatibility
+projection add two public exports, two callable exports and one deprecated
+entrypoint projection. The correction records exactly those counts, documents
+the existing shared normalization contract, and adds 13 direct SDK cases.
+It changes no evaluator, wildcard rule, forbidden export rule, global silent-reply
+behavior or production implementation. The original failed run remains recorded;
+later native commands were not run there. The reference's own complete checks
+are attached to its exact public revision.
+
+The six existing images and all actual `205ba711eb3d` activation, scheduled-trigger,
+Discord and native companion receipts retain their original scope.
+
 ## Reproduction and verification boundaries
 
 The manifest identifies the exact official base, custom commit, normalized tree,
