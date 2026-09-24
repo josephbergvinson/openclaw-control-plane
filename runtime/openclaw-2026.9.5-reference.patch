@@ -57918,6 +57918,364 @@ index 0000000000000000000000000000000000000000..c5a13b1a6f055df3c27a681aa9b2f156
 +  const { runCronIsolatedAgentTurn } = await import("./run.js");
 +  return runCronIsolatedAgentTurn;
 +}
+diff --git a/src/cron/isolated-agent/run-prework-failure.test.ts b/src/cron/isolated-agent/run-prework-failure.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..def6df51a0020f76cd7830d339917de3520a3b72
+--- /dev/null
++++ b/src/cron/isolated-agent/run-prework-failure.test.ts
+@@ -0,0 +1,253 @@
++import { expectDefined } from "@openclaw/normalization-core";
++import { Value } from "typebox/value";
++import { describe, expect, it, vi } from "vitest";
++import { CronRunLogEntrySchema } from "../../../packages/gateway-protocol/src/schema/cron.js";
++import {
++  createCronRegressionState,
++  createDueIsolatedJob,
++} from "../../../test/helpers/cron/service-regression-fixtures.js";
++import { FailoverError } from "../../agents/failover-error.js";
++import { makeAssistantMessageFixture } from "../../agents/test-helpers/assistant-message-fixtures.js";
++import { replaceTranscriptEvents } from "../../config/sessions/session-accessor.js";
++import { runWithSessionTranscriptReadFence } from "../../config/sessions/session-transcript-read-fence.js";
++import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { emitCronOutcomeEventForJob } from "../service/timer-outcome-events.js";
++import { authorCronRunCompletion, applyJobResult } from "../service/timer.js";
++import { cronRunLogEntryFromEvent } from "../task-run-event-codec.js";
++import { makeIsolatedAgentParamsFixture } from "./job-fixtures.js";
++import {
++  CRON_PREWORK_FAILURE_DIAGNOSTIC,
++  hasSettledCronPreworkFailure,
++} from "./run-prework-failure.js";
++import { setupRunCronIsolatedAgentTurnSuite } from "./run.suite-helpers.js";
++import {
++  loadRunCronIsolatedAgentTurn,
++  makeCronSession,
++  resolveCronSessionMock,
++  mockRunCronFallbackPassthrough,
++  runEmbeddedAgentMock,
++  dispatchCronDeliveryMock,
++  resolveCronDeliveryPlanMock,
++} from "./run.test-harness.js";
++
++const runCronIsolatedAgentTurn = await loadRunCronIsolatedAgentTurn();
++const sessionId = "test-session-id";
++const jobId = "test-job";
++const sessionKey = `agent:main:cron:${jobId}:run:${sessionId}`;
++
++function history() {
++  return [
++    { type: "session", id: sessionId, version: 3 },
++    {
++      type: "model_change",
++      id: "model",
++      parentId: null,
++      provider: "openai",
++      modelId: "test-model",
++    },
++    { type: "thinking_level_change", id: "thinking", parentId: "model", thinkingLevel: "high" },
++    {
++      type: "custom",
++      id: "snapshot",
++      parentId: "thinking",
++      customType: "model-snapshot",
++      data: {},
++    },
++    {
++      type: "message",
++      id: "input",
++      parentId: "snapshot",
++      message: {
++        role: "user",
++        content: "Check changes",
++        provenance: {
++          kind: "internal_system",
++          sourceTool: "cron",
++          jobId,
++          runId: sessionId,
++          sourceSessionKey: sessionKey,
++        },
++      },
++    },
++    {
++      type: "custom_message",
++      id: "context",
++      parentId: "input",
++      customType: "openclaw.runtime-context",
++      content: "Current run",
++      display: false,
++    },
++    {
++      type: "message",
++      id: "error",
++      parentId: "context",
++      message: {
++        ...makeAssistantMessageFixture({
++          content: [],
++          stopReason: "error",
++          errorMessage: "429 rate limit",
++        }),
++        usage: { input: 0, output: 0 },
++        __openclaw: { runId: sessionId },
++        idempotencyKey: `${sessionId}:terminal-error`,
++      },
++    },
++  ];
++}
++
++describe("settled cron prework failure", () => {
++  setupRunCronIsolatedAgentTurnSuite();
++
++  it.each([
++    "complete",
++    "tool",
++    "partial",
++    "branch",
++    "unknown",
++    "missing-terminal",
++    "wrong-run",
++    "fenced",
++    "truncated",
++    "display",
++  ])("requires complete canonical prework proof (%s)", async (scenario) => {
++    await withOpenClawTestState({ label: "cron-prework-proof" }, async (state) => {
++      const scope = {
++        agentId: "main",
++        sessionId,
++        sessionKey,
++        storePath: state.statePath("agents", "main", "agent", "openclaw-agent.sqlite"),
++      };
++      const events = history();
++      if (scenario === "tool") {
++        events.splice(6, 0, {
++          type: "message",
++          id: "tool",
++          parentId: "context",
++          message: {
++            role: "assistant",
++            content: [{ type: "toolCall", id: "send", name: "message", arguments: {} }],
++          },
++        } as never);
++      }
++      if (scenario === "partial") {
++        expectDefined(events[6], "Missing fixture event").message!.content = [
++          { type: "text", text: "Already sent" },
++        ] as never;
++      }
++      if (scenario === "branch") {
++        expectDefined(events[6], "Missing fixture event").parentId = "input";
++      }
++      if (scenario === "unknown") {
++        expectDefined(events[3], "Missing fixture event").customType = "unrecognized";
++      }
++      if (scenario === "missing-terminal") {
++        events.pop();
++      }
++      if (scenario === "wrong-run") {
++        expectDefined(events[4], "Missing fixture event").message!.provenance!.runId = "old-run";
++      }
++      if (scenario === "display") {
++        Object.assign(expectDefined(events[6], "Missing fixture event").message!, {
++          openclawDisplayContent: [{ type: "text", text: "Sent" }],
++        });
++      }
++      if (scenario === "truncated") {
++        expectDefined(events[5], "Missing fixture event").content = "x".repeat(512_001);
++      }
++      await replaceTranscriptEvents(scope, events);
++      const check = () => hasSettledCronPreworkFailure({ ...scope, jobId });
++      const actual =
++        scenario === "fenced"
++          ? await runWithSessionTranscriptReadFence({ agentId: "main", sessionId } as never, check)
++          : await check();
++      expect(actual).toBe(scenario === "complete");
++    });
++  });
++
++  it.each([false, true])(
++    "native owner retains a no-send fact only before any work (tool=%s)",
++    async (toolStarted) => {
++      await withOpenClawTestState({ label: "cron-prework-owner" }, async (state) => {
++        const storePath = state.statePath("agents", "main", "agent", "openclaw-agent.sqlite");
++        resolveCronSessionMock.mockReturnValue(makeCronSession({ storePath }));
++        mockRunCronFallbackPassthrough();
++        resolveCronDeliveryPlanMock.mockReturnValue({
++          requested: true,
++          mode: "announce",
++          channel: "discord",
++          to: "channel:test",
++        });
++        runEmbeddedAgentMock.mockImplementationOnce(async (params) => {
++          const scope = {
++            agentId: "main",
++            sessionId: params.sessionId,
++            sessionKey: params.sessionKey,
++            storePath,
++          };
++          expect(scope.sessionKey).toBe(sessionKey);
++          await replaceTranscriptEvents(scope, history().slice(0, 6));
++          if (toolStarted) {
++            params.onExecutionPhase?.({ phase: "tool_execution_started" });
++          }
++          params.assistantErrorTranscript.record(
++            makeAssistantMessageFixture({
++              content: [],
++              stopReason: "error",
++              errorMessage: "429 rate limit",
++              usage: {
++                input: 0,
++                output: 0,
++                cacheRead: 0,
++                cacheWrite: 0,
++                totalTokens: 0,
++                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++              },
++            }),
++            scope,
++          );
++          throw new FailoverError("429 rate limit", { reason: "rate_limit", provider: "openai" });
++        });
++        const job = createDueIsolatedJob({ id: jobId, nowMs: Date.now(), nextRunAtMs: Date.now() });
++        job.delivery = { mode: "announce", channel: "discord", to: "channel:test" };
++        const result = await runCronIsolatedAgentTurn(
++          makeIsolatedAgentParamsFixture({ job, agentId: "main", sessionKey: `cron:${jobId}` }),
++        );
++        expect(result.error).toContain("429 rate limit");
++        expect(result.status).toBe("error");
++        expect(dispatchCronDeliveryMock).not.toHaveBeenCalled();
++        expect(result.delivered).toBe(toolStarted ? undefined : false);
++        const onEvent = vi.fn();
++        const service = createCronRegressionState({
++          storePath: state.statePath("cron", "jobs.json"),
++          onEvent,
++          runIsolatedAgentJob: vi.fn(),
++        });
++        const outcome = {
++          ...authorCronRunCompletion(service, job, result),
++          job,
++          jobId,
++          startedAt: Date.now(),
++          endedAt: Date.now(),
++        };
++        applyJobResult(service, job, outcome, { failureAlerts: false });
++        emitCronOutcomeEventForJob(service, job, outcome);
++        const row = cronRunLogEntryFromEvent(
++          expectDefined(onEvent.mock.calls[0], "Missing terminal cron event")[0],
++          Date.now(),
++        );
++        expect(Value.Check(CronRunLogEntrySchema, row)).toBe(true);
++        expect(row).not.toHaveProperty("deliveryAttempted");
++        expect(row.deliveryStatus).toBe(toolStarted ? "unknown" : "not-delivered");
++        expect(row.deliveryError).toBe(result.error);
++        expect(
++          row.diagnostics?.entries.some(
++            (entry) =>
++              entry.source === "agent-run" &&
++              entry.severity === "info" &&
++              entry.message === CRON_PREWORK_FAILURE_DIAGNOSTIC,
++          ),
++        ).toBe(!toolStarted);
++      });
++    },
++  );
++});
+diff --git a/src/cron/isolated-agent/run-prework-failure.ts b/src/cron/isolated-agent/run-prework-failure.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..68489b0db73d03dc5f7d47989feec71d872ab0b0
+--- /dev/null
++++ b/src/cron/isolated-agent/run-prework-failure.ts
+@@ -0,0 +1,93 @@
++import { asOptionalObjectRecord as record } from "@openclaw/normalization-core/record-coerce";
++import { resolveSessionTranscriptReadFence } from "../../config/sessions/session-transcript-read-fence.js";
++import { hasPersistedMedia } from "../../sessions/user-turn-media.js";
++import { ASSISTANT_DISPLAY_CONTENT_FIELD } from "../../shared/assistant-display-content.js";
++import { loadSessionAccessorRuntime } from "./run-prepare-runtime.js";
++
++export const CRON_PREWORK_FAILURE_DIAGNOSTIC =
++  "cron isolated failure verified before tool execution or assistant output";
++
++/** Positive proof from the settled native transcript, never from display history. */
++export async function hasSettledCronPreworkFailure(params: {
++  agentId: string;
++  sessionId: string;
++  sessionKey: string;
++  storePath: string;
++  jobId: string;
++}): Promise<boolean> {
++  try {
++    // A fenced page can be complete only before the admitted input. Do not
++    // mistake that prefix for the whole run or bypass the admission boundary.
++    if (resolveSessionTranscriptReadFence(params)) {
++      return false;
++    }
++    const { readTranscriptRawDelta } = await loadSessionAccessorRuntime();
++    const page = readTranscriptRawDelta(params, { maxEvents: 8, maxBytes: 512_000 });
++    if (page.kind !== "page" || page.hasMore || page.requiredBytes || page.events.length !== 7) {
++      return false;
++    }
++    const expectedTypes = [
++      "session",
++      "model_change",
++      "thinking_level_change",
++      "custom",
++      "message",
++      "custom_message",
++      "message",
++    ];
++    const events = page.events.map(({ event }) => record(event));
++    if (
++      events.some(
++        (event, index) =>
++          !event ||
++          event.type !== expectedTypes[index] ||
++          page.events[index]?.seq !== index ||
++          typeof event.id !== "string" ||
++          !event.id ||
++          (index === 1
++            ? event.parentId !== null
++            : index > 1 && event.parentId !== events[index - 1]?.id),
++      ) ||
++      new Set(events.map((event) => event?.id)).size !== 7
++    ) {
++      return false;
++    }
++    if (
++      events[0]?.id !== params.sessionId ||
++      events[3]?.customType !== "model-snapshot" ||
++      events[5]?.customType !== "openclaw.runtime-context"
++    ) {
++      return false;
++    }
++    const input = record(events[4]?.message);
++    const provenance = record(input?.provenance);
++    const terminal = record(events[6]?.message);
++    const usage = record(terminal?.usage);
++    const identity = record(terminal?.["__openclaw"]);
++    // run-entry awaits the exact terminal-error write before rejecting. Any
++    // tools, output, earlier turns, branching or unknown records fail closed.
++    return (
++      params.sessionKey.endsWith(`:cron:${params.jobId}:run:${params.sessionId}`) &&
++      input?.role === "user" &&
++      provenance?.kind === "internal_system" &&
++      provenance.sourceTool === "cron" &&
++      provenance.jobId === params.jobId &&
++      provenance.runId === params.sessionId &&
++      provenance.sourceSessionKey === params.sessionKey &&
++      terminal?.role === "assistant" &&
++      terminal.stopReason === "error" &&
++      Array.isArray(terminal.content) &&
++      terminal.content.length === 0 &&
++      identity?.runId === params.sessionId &&
++      terminal.idempotencyKey === `${params.sessionId}:terminal-error` &&
++      usage?.input === 0 &&
++      usage.output === 0 &&
++      terminal.openclawDelivery === undefined &&
++      !hasPersistedMedia(terminal) &&
++      terminal[ASSISTANT_DISPLAY_CONTENT_FIELD] === undefined
++    );
++  } catch {
++    // A failed or incomplete proof must not replace the original run error.
++    return false;
++  }
++}
 diff --git a/src/cron/isolated-agent/run-prompt-executor.ts b/src/cron/isolated-agent/run-prompt-executor.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..29351e5e19281638504a2b18b37e7ffda588ed99
@@ -60501,7 +60859,7 @@ index c3870577cbda17425d5541b22c90e349b579b5f6..89252745a141159940823aefcea69ffe
 -}
 -/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 diff --git a/src/cron/isolated-agent/run.ts b/src/cron/isolated-agent/run.ts
-index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e84af343c 100644
+index 2a19cb707bcc0cd351ea810697218ba52b42c261..a0d914a1e9577d96fa82cb4bc7157d49ef6af386 100644
 --- a/src/cron/isolated-agent/run.ts
 +++ b/src/cron/isolated-agent/run.ts
 @@ -2,8 +2,10 @@ import { retireSessionMcpRuntime } from "../../agents/agent-bundle-mcp-tools.js"
@@ -60529,7 +60887,44 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
  import { removeCronRunContinuationSessionIfIdle } from "../../tasks/cron-run-continuation-cleanup.js";
  import { CronExecutionRootRuntimeError } from "../execution-root-runtime.js";
  import { createCronRunDiagnosticsFromError, mergeCronRunDiagnostics } from "../run-diagnostics.js";
-@@ -175,6 +182,12 @@ export async function runCronIsolatedAgentTurn(
+@@ -37,6 +44,10 @@ import type { CronCompletedPromptRun } from "./run-executor.js";
+ import { finalizeCronRun } from "./run-finalize.js";
+ import type { RunCronAgentTurnParams } from "./run-prepare-runtime.js";
+ import { prepareCronRunContext } from "./run-prepare.js";
++import {
++  CRON_PREWORK_FAILURE_DIAGNOSTIC,
++  hasSettledCronPreworkFailure,
++} from "./run-prework-failure.js";
+ import { CronSessionLifecycleClaimError, type MutableCronSession } from "./run-session-state.js";
+ import { applyCronRunUsage, recordCronRunUsage } from "./run-usage.js";
+ import { logWarn } from "./run.runtime.js";
+@@ -119,12 +130,14 @@ export async function runCronIsolatedAgentTurn(
+           let runContextOwnerToken: string | undefined;
+           let runLifecycleGeneration = admittedLifecycleGeneration;
+           let executionStarted = false;
++          let preworkProofExcluded = false;
+           const notifyExecutionStarted = (info?: {
+             lifecycleGeneration?: string;
+             isFallback?: boolean;
+             provider?: string;
+             model?: string;
+           }) => {
++            preworkProofExcluded ||= info?.isFallback === true;
+             executionStarted = true;
+             if (info?.lifecycleGeneration) {
+               runLifecycleGeneration = info.lifecycleGeneration;
+@@ -144,6 +157,10 @@ export async function runCronIsolatedAgentTurn(
+             info: Pick<CronAgentExecutionPhaseUpdate, "phase"> &
+               Partial<Omit<CronAgentExecutionPhaseUpdate, "jobId" | "phase">>,
+           ) => {
++            preworkProofExcluded ||=
++              info.phase === "process_spawned" ||
++              info.phase === "tool_execution_started" ||
++              info.phase === "assistant_output_started";
+             params.onExecutionPhase?.({
+               jobId: params.job.id,
+               agentId: prepared.context.agentId,
+@@ -175,6 +192,12 @@ export async function runCronIsolatedAgentTurn(
              }
            })();
  
@@ -60542,7 +60937,7 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
            let outcome: "completed" | "error" = "completed";
            let outcomeError: string | undefined;
            let cronRunSessionCleanupHandled = false;
-@@ -228,6 +241,8 @@ export async function runCronIsolatedAgentTurn(
+@@ -228,6 +251,8 @@ export async function runCronIsolatedAgentTurn(
              );
              const { executeCronRun } = await cronExecutorRuntimeLoader.load();
              const executionParams: Parameters<typeof executeCronRun>[0] = {
@@ -60551,7 +60946,7 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
                cfg: params.cfg,
                cfgWithAgentDefaults: prepared.context.cfgWithAgentDefaults,
                job: params.job,
-@@ -289,6 +304,10 @@ export async function runCronIsolatedAgentTurn(
+@@ -289,6 +314,10 @@ export async function runCronIsolatedAgentTurn(
              // Publish the execution fact captured before bookkeeping; cron persistence
              // and delivery retain their separate workflow outcome.
              lifecycle.emit("end", execution.runResult);
@@ -60562,7 +60957,7 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
              const finalized = await finalizeCronRun({
                prepared: prepared.context,
                execution,
-@@ -301,11 +320,83 @@ export async function runCronIsolatedAgentTurn(
+@@ -301,11 +330,83 @@ export async function runCronIsolatedAgentTurn(
                // Self-deleting sessions must release before their own lifecycle mutation.
                // Other runs retain admission through delivery and release in finally.
                beforeSessionDelete: prepared.context.sessionWorkAdmission.release,
@@ -60646,7 +61041,7 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
              const delayMs = consumeCronNextCheckProposal(initialSessionId, params.job.id);
              return finalized.status !== "ok" || delayMs === undefined
                ? finalized
-@@ -323,6 +414,29 @@ export async function runCronIsolatedAgentTurn(
+@@ -323,6 +424,29 @@ export async function runCronIsolatedAgentTurn(
              );
              outcome = "error";
              outcomeError = error;
@@ -60676,15 +61071,35 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
              const admissionDisposition =
                err instanceof CronSessionLifecycleClaimError
                  ? err.admissionDisposition
-@@ -341,6 +455,7 @@ export async function runCronIsolatedAgentTurn(
+@@ -340,7 +464,27 @@ export async function runCronIsolatedAgentTurn(
+                 }
                }
              }
++            const preworkFailure =
++              !isCronLaneTimeout &&
++              !preworkProofExcluded &&
++              params.job.sessionTarget === "isolated" &&
++              prepared.context.deliveryRequested &&
++              prepared.context.cronSession.sessionEntry.agentHarnessId === "openclaw" &&
++              completedPromptRuns.length === 0 &&
++              !finalizedResult &&
++              yieldedChildBatches.size === 0 &&
++              nativeContinuations.size === 0 &&
++              prepared.context.currentRunSessionId() === initialSessionId &&
++              (await hasSettledCronPreworkFailure({
++                agentId: prepared.context.agentId,
++                sessionId: initialSessionId,
++                sessionKey: prepared.context.runSessionKey,
++                storePath: prepared.context.cronSession.storePath,
++                jobId: params.job.id,
++              }));
              return prepared.context.withRunSession({
 +              ...finalizedResult,
++              ...(preworkFailure ? { delivered: false, deliveryAttempted: false } : {}),
                status: "error",
                error,
                errorClassification: errorReason
-@@ -349,14 +464,11 @@ export async function runCronIsolatedAgentTurn(
+@@ -349,21 +493,28 @@ export async function runCronIsolatedAgentTurn(
                executionStarted,
                usage,
                ...(admissionDisposition ? { admissionDisposition } : {}),
@@ -60703,7 +61118,14 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..4bb5e507627728e1d8c756860f71a50e
                  createCronRunDiagnosticsFromError(
                    isCronLaneTimeout ? "cron-setup" : "agent-run",
                    isCronLaneTimeout ? error : err,
-@@ -364,6 +476,9 @@ export async function runCronIsolatedAgentTurn(
+                 ),
++                preworkFailure
++                  ? createCronRunDiagnosticsFromError(
++                      "agent-run",
++                      CRON_PREWORK_FAILURE_DIAGNOSTIC,
++                      { severity: "info" },
++                    )
++                  : undefined,
                ),
              });
            } finally {

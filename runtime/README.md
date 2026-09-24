@@ -207,10 +207,10 @@ earlier acceptance, retain their dated historical scopes.
 
 ## September 24 native prompt successor
 
-The reconstructible source is now `f29bb229c5c8f033fd3a7966dbc8ecf1f6cab572`,
+At this checkpoint, the reconstructible source was `f29bb229c5c8f033fd3a7966dbc8ecf1f6cab572`,
 normalized tree `b8d24593af90951eb74769c1849a2b09d0c1cd2b`. Its only delta from
 `5b5942def95c` is the native credential prompt owner and its regression tests.
-The Gateway remains on `5b5942def95c`; no Gateway activation is needed for this
+The Gateway remained on `5b5942def95c`; no Gateway activation was needed for this
 Mac-only correction. The signed companion and bundled worker use source
 `f29bb229c5c8`, build `2609000594`. They are installed and connected on both
 the originating Mini and MacBook.
@@ -259,13 +259,12 @@ SHA-256 is
 The earlier bounded admission attempt stopped before signaling or replacing the
 app while scheduled work was active; the successful continuation reused verified
 stage and rollback copies, preserved the first failure and released its exact
-native exclusion lease. The Gateway remains at source `5b5942def95c` with its
-process and configuration unchanged. The successor's hosted checks are tracked
-on this public revision. Prior installation and test records retain their dated
+native exclusion lease. At that companion checkpoint, the Gateway stayed at source
+`5b5942def95c` with its process and configuration unchanged. Prior installation and test records retain their dated
 scopes. Visible Reminders banner delivery is a nonblocking, unverified effect
 limit; iPhone work is excluded from this goal.
 
-### Current source qualification
+### Native prompt source qualification
 
 The preceding complete [September 23 source qualification](#september-23-source-qualification)
 remains scoped to `5b5942def95c`. The `f29bb229c5c8` patch checksum is
@@ -273,6 +272,47 @@ remains scoped to `5b5942def95c`. The `f29bb229c5c8` patch checksum is
 Hosted checks must reconstruct the successor tree from the updated manifest.
 The native Swift regression and package evidence remain separate from the Linux
 reference workflow and from each host's actual authentication result.
+
+## September 24 scheduled-run recovery successor
+
+Source `2c102f590298efa7294e6fcea7e8147aeca22efe` retains the companion correction
+and changes the isolated cron exception owner. A provider failure before any work
+could previously leave delivery unknown and strand an unstaged announcement
+checkpoint. The owner now records a positive no-send fact only when the settled,
+complete canonical transcript proves that the exact run failed before tools or
+assistant output. Fenced, partial, branched or unknown records, fallback,
+continuations and observed work preserve uncertainty. The original error remains
+visible. The private collector consumes the persisted proof without sending a
+replacement or advancing covered source history; its export boundary is unchanged.
+
+The focused native tests, production and owning test types, type-aware lint, and
+245 control-plane cases passed. A fresh official-tag reconstruction compared all
+44,897 tracked entries and modes; only the two established fixture labels differ.
+The normalized tree is `950818a3cc1530dc6545090c3b1ade6ac7a025af`, and the patch
+SHA-256 is `2c1abf0e1d195fc91a9bf539b9a050ea65ecd9ff677aee90a622c1a03c835136`.
+The originating Gateway activated this exact source on September 24 at
+10:03:56.892630 UTC as
+`openclaw-2026.9.5-2c102f590298-20260924T0939Z-selfcontained`. The activation
+receipt SHA-256 is
+`791b0a8e6db29cbcddf41fa232aa1b96200e8738a558b618a6b463c7e80930b8`.
+Postflight verified health/readiness, connected Discord and Telegram, and capture
+for the new process. Configuration, account ordering, execution approvals,
+scheduled-job definitions and native companion processes were preserved. The
+initial missing-window capture attempt was retained and reconciled before capture
+acceptance. Final-head hosted CI remains a separate required qualification; the
+pull request records its actual result.
+
+The signed companion stays at `f29bb229c5c8`, build `2609000594`; this cron-only
+correction does not require rebuilding it. The MacBook reconnected at 10:04 UTC
+and again reported Accessibility and Screen Recording denied. Its actual native
+interaction remains unverified; the Mini's earlier accepted authentication result
+retains its own host-specific scope.
+
+The related control-plane repair recognizes the deliberately disabled retired
+native launcher while retaining the other integrity checks. Autonomous heartbeat
+uses its own isolated session. The existing guard, daily health and source-change
+announcement jobs each passed one manually admitted execution with confirmed
+delivery after recovery; these checks do not claim a later natural scheduled run.
 
 ## Active-child follow-up correction
 

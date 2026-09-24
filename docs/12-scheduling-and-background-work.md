@@ -147,6 +147,27 @@ Preparation output also needs a byte limit: an upgrade can touch thousands of pa
 
 A failed trigger can prepare evidence before its output is rejected, leaving an unstaged checkpoint. Releasing it requires explicit reconciliation bound to the exact checkpoint hash, a unique native pre-payload failure, and the same idle trigger/configuration and run identity. Preserve the failed receipt and old pending snapshot; do not advance source coverage, reset delivery records or send a replacement message. The existing natural schedule can then prepare the still-uncovered changes again.
 
+A provider failure after dispatch can also leave an unstaged checkpoint. Its
+explicit recovery requires a reviewed, hash-bound complete canonical transcript
+that proves failure before any tool action or assistant output, the exact failed
+run, and a disabled, idle job with unchanged trigger and delivery ownership. Bind
+the current session identity, terminal leaf and absence of active or pending work
+before releasing the checkpoint. Displayed chat history is only a liveness check:
+its active branch and reset window do not prove that the full raw record contains
+no other work. Retain the complete proof privately and leave the covered frontier
+and previous delivery unchanged. Recovery itself does not resend or re-enable the
+job; those remain separate, explicitly reconciled operations.
+
+For new isolated native runs, the execution owner can persist a positive
+prework-failure diagnostic after the terminal transcript has settled. This proof
+requires the complete, unfenced canonical record for that exact run, with no
+tool action, assistant output, fallback or continuation. The collector may then
+release only an unstaged checkpoint whose failed, not-delivered receipt matches
+that proof and contains no conflicting delivery evidence. The original provider
+error remains visible; coverage and prior delivery do not advance. Incomplete,
+branched, truncated or ambiguous evidence stays held, and this reconciliation
+does not send a message or replay the failed task.
+
 ## Independent safety nets
 
 Put checks in a different failure domain where that improves coverage. A host timer can inspect whether an expected period's result exists even when the gateway scheduler did not dispatch it. An internal backup supervisor can still request a pause while external workspace storage is unavailable.
