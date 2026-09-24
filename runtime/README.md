@@ -782,3 +782,41 @@ are recorded above, but do not establish fresh slash-command or interaction-expi
 acceptance. Those paths retain their separate live-check requirement.
 Adopters should complete the [live acceptance checks](../docs/17-adoption-guide.md)
 against their own installation.
+
+## September 24 OAuth authentication health successor
+
+Source `5233aa69090d540f73af8258e39718c20495c806` prevents refreshable OAuth access-token expiry
+from producing a false sign-in warning. It also preserves actionable per-account
+warnings beside a healthy provider pool and derives their age from known expiry
+rather than the latest status poll. The [source map and synthetic before/after
+proof](../docs/20-runtime-source-changes.md#oauth-authentication-health-and-inbox)
+show the behavior and its evidence boundary.
+
+This exact source was activated on September 24 at `14:24:24.542477Z` as
+`openclaw-2026.9.5-5233aa69090d-20260924T1407Z-selfcontained`, in one attempt with no
+rollback. The activation receipt SHA-256 is
+`07a4703f0300ac5026f73d1a406eff844f49273ea73cb6e5b1fec2b691d5ed1d`.
+The preceding `2c102f590298` deployment and its receipts remain historical.
+
+All nine live profiles report authenticated, refreshable credentials without a
+required sign-in; model capacity and quota availability remain separate. The eight
+JavaScript and CSS assets served by the Gateway match the activated build, and the actual native Mini Inbox has no authentication warning.
+Before activation, the existing credential owner successfully renewed the affected
+profile and extended its persisted expiry while preserving shared and agent profile
+order. That renewal and the post-activation UI observation have separate receipts;
+neither is a new account sign-in result.
+
+Native companions and their private workers remain at `f29bb229c5c8`, build
+`2609000594`; no native rebuild, installation or restart was performed for this
+central change. Both native nodes are connected. At `14:28:09 UTC`, the MacBook
+reported Screen Recording granted and Accessibility denied. Its Inbox was not
+directly inspected, and native credential-entry acceptance remains pending
+Accessibility and an actual interaction check. The existing UI reconnect path
+refreshes the Gateway-served build without reinstalling the app.
+
+All 33 mechanical postflight checks passed. The raw approval-state difference was
+reconciled to usage bookkeeping; policy was unchanged. The acceptance receipt SHA-256
+is `cc5ea281a5f42f9fb6497c7b8e34e8d0837de6508685eb5798a91f4647e2ebf1`.
+Exact-head hosted qualification remains pending. Current-process screen capture
+passed; no automation was replayed and no later natural scheduled success is
+inferred from this change.

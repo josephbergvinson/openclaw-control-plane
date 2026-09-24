@@ -295,6 +295,41 @@ revocation or an expired external login impossible. Onboarding, profile ordering
 supported refresh, durable state readback and recovery remain separate checks.
 Never copy another operator's account database into a fresh installation.
 
+## OAuth authentication health and Inbox
+
+Source `5233aa69090d540f73af8258e39718c20495c806` separates access-token expiry from a sign-in
+that actually needs operator action. The Gateway reports refresh eligibility and
+actionable profile status; the Inbox consumes those facts instead of asking for
+sign-in whenever a refreshable access token expires. A genuinely unusable account
+remains visible even while another account keeps the provider pool usable. Its age
+comes from the known credential expiry, and is omitted when no incident time is known.
+Refresh, account order and credential custody retain their existing owners.
+
+These synthetic captures render the actual Inbox component. They contain no real
+accounts or credentials. They prove the presentation boundary, not live token
+refresh, account sign-in or MacBook acceptance.
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Refreshable expired access token | ![False expired-auth warning](assets/auth-inbox-20260924/before-refreshable.png) | ![No sign-in action required](assets/auth-inbox-20260924/after-refreshable.png) |
+| One account needs reconnection beside a healthy pool | ![Account failure hidden](assets/auth-inbox-20260924/before-reconnect.png) | ![Account sign-in warning with expiry age](assets/auth-inbox-20260924/after-reconnect.png) |
+
+The Gateway activated this source on September 24 at `14:24:24.542477Z`.
+Live authentication metadata reports authenticated, refreshable credentials for all
+nine profiles with no required sign-in; capacity and quota remain separate. The
+served UI assets match the activated build. The native Mini Inbox was directly inspected and has no authentication warning. The affected
+profile had already renewed successfully through its existing owner before this
+activation, with shared and agent profile order preserved.
+
+Native companions and private workers remain at `f29bb229c5c8`, build `2609000594`;
+this central auth/UI change does not rebuild, install or restart them. The MacBook
+node is connected and now reports Screen Recording granted, but Accessibility is
+still denied. Its frontend appearance was not directly inspected, and its native
+credential-entry acceptance remains pending. All 33 mechanical postflight checks
+passed, with approval-state changes reconciled to usage bookkeeping and unchanged
+policy. Exact-head hosted qualification remains pending. The prior `2c102f590298`
+acceptance keeps its original dated scope.
+
 ## Reproduction and verification boundaries
 
 The manifest identifies the exact official base, custom commit, normalized tree,

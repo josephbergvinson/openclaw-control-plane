@@ -21053,6 +21053,478 @@ index 83c938612577b5f1a5d8937f4b517877cebaee43..0cc298c7242ee26185467edfada65ca2
  function normalizeCompactionSuffix(suffix: string | CompactionSuffix): CompactionSuffix {
    return typeof suffix === "string" ? { text: suffix, contextRanges: [] } : suffix;
  }
+diff --git a/src/agents/auth-health.test.ts b/src/agents/auth-health.test.ts
+index 38a8229f81ccf9f6e5a7c3f4a40f03bdb2194d47..34452256c1d3b86e0e2ac954d7c95cc6061d110a 100644
+--- a/src/agents/auth-health.test.ts
++++ b/src/agents/auth-health.test.ts
+@@ -5,8 +5,12 @@
+  */
+ import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import {
++  createFailedOAuthRefreshFence,
++  createOAuthRefreshFence,
++} from "./auth-profiles/oauth-refresh-marker.js";
+ import { parseLegacyCredentialEntry } from "./auth-profiles/persisted.js";
+-import type { OAuthCredential } from "./auth-profiles/types.js";
++import type { AuthProfileStore, OAuthCredential } from "./auth-profiles/types.js";
+ import type { ProviderAuthAliasLookupParams } from "./provider-auth-aliases.js";
+ 
+ const { readCodexCliCredentialsCachedMock, resolveProviderIdForAuthMock } = vi.hoisted(() => ({
+@@ -151,12 +155,205 @@ describe("buildAuthHealthSummary", () => {
+     expect(statuses["anthropic:api"]).toBe("static");
+ 
+     const provider = summary.providers.find((entry) => entry.provider === "anthropic");
+-    expect(provider?.status).toBe("expired");
++    expect(provider?.status).toBe("ok");
+     expect(
+       provider?.profiles.find((profile) => profile.profileId === "anthropic:expired")?.status,
+     ).toBe("expired");
+   });
+ 
++  it.each([
++    {
++      name: "renewable expired access",
++      refresh: "refresh",
++      expires: now - 1,
++      refreshable: true,
++      action: false,
++      pool: "ok",
++    },
++    {
++      name: "expired access without refresh",
++      refresh: "",
++      expires: now - 1,
++      refreshable: false,
++      action: true,
++      pool: "expired",
++    },
++    {
++      name: "missing expiry without refresh",
++      refresh: "",
++      expires: 0,
++      refreshable: false,
++      action: true,
++      pool: "missing",
++    },
++  ])(
++    "distinguishes $name from a lost sign-in",
++    ({ refresh, expires, refreshable, action, pool }) => {
++      vi.spyOn(Date, "now").mockReturnValue(now);
++      const summary = buildAuthHealthSummary({
++        store: buildOpenAiCodexOAuthStore({ access: "access", refresh, expires }),
++      });
++      expect(summary.profiles[0]).toMatchObject({ refreshable, requiresUserAction: action });
++      expect(summary.providers[0]?.status).toBe(pool);
++    },
++  );
++
++  it.each([false, true])(
++    "distinguishes a pending refresh from a failed refresh (failed=%s)",
++    (failed) => {
++      vi.spyOn(Date, "now").mockReturnValue(now);
++      const store = buildOpenAiCodexOAuthStore({
++        access: "access",
++        refresh: "refresh",
++        expires: now - 1,
++      });
++      const pending = createOAuthRefreshFence({
++        profileId: "openai:default",
++        credential: store.profiles["openai:default"],
++      });
++      store.profiles["openai:default"] = failed ? createFailedOAuthRefreshFence(pending) : pending;
++      const summary = buildAuthHealthSummary({ store });
++      expect(summary.profiles[0]).toMatchObject({
++        status: "expired",
++        refreshable: false,
++        requiresUserAction: failed,
++      });
++    },
++  );
++
++  it.each([
++    {
++      name: "auth disable",
++      usage: { disabledUntil: now + 60_000, disabledReason: "auth" },
++      action: true,
++    },
++    {
++      name: "permanent auth disable",
++      usage: { disabledUntil: now + 60_000, disabledReason: "auth_permanent" },
++      action: true,
++    },
++    {
++      name: "session expiry cooldown",
++      usage: { cooldownUntil: now + 60_000, cooldownReason: "session_expired" },
++      action: true,
++    },
++    {
++      name: "expired auth disable",
++      usage: { disabledUntil: now - 1, disabledReason: "auth" },
++      action: false,
++    },
++    {
++      name: "rate limit",
++      usage: { cooldownUntil: now + 60_000, cooldownReason: "rate_limit" },
++      action: false,
++    },
++    {
++      name: "subscription quota",
++      usage: { blockedUntil: now + 60_000, blockedReason: "subscription_limit" },
++      action: false,
++    },
++  ] as const)("classifies $name without changing account rotation", ({ usage, action }) => {
++    vi.spyOn(Date, "now").mockReturnValue(now);
++    const store: AuthProfileStore = {
++      ...buildOpenAiCodexOAuthStore({
++        access: "access",
++        refresh: "refresh",
++        expires: now + 3_600_000,
++      }),
++      usageStats: { "openai:default": { ...usage } },
++    };
++    const summary = buildAuthHealthSummary({ store });
++    expect(summary.profiles[0]).toMatchObject({
++      status: "ok",
++      refreshable: !action,
++      requiresUserAction: action,
++    });
++    if (
++      "disabledUntil" in usage &&
++      typeof usage.disabledUntil === "number" &&
++      usage.disabledUntil < now
++    ) {
++      expect(store.usageStats?.["openai:default"]?.disabledUntil).toBeUndefined();
++    } else {
++      expect(store.usageStats?.["openai:default"]).toEqual(usage);
++    }
++  });
++
++  it.each(["ordinary-expiry", "auth-denial", "failed-fence", "missing-expiry"] as const)(
++    "keeps external CLI ownership distinct from %s",
++    (condition) => {
++      vi.spyOn(Date, "now").mockReturnValue(now);
++      const profileId = "openai:default";
++      const credential = {
++        type: "oauth" as const,
++        provider: "openai",
++        access: "access",
++        refresh: "",
++        expires: condition === "missing-expiry" ? 0 : now - 1,
++      };
++      const store = {
++        version: 1,
++        profiles: {
++          [profileId]:
++            condition === "failed-fence"
++              ? createFailedOAuthRefreshFence(createOAuthRefreshFence({ profileId, credential }))
++              : credential,
++        },
++        runtimeExternalCliProfileIds: [profileId],
++        ...(condition === "auth-denial"
++          ? {
++              usageStats: {
++                [profileId]: {
++                  disabledUntil: now + 60_000,
++                  disabledReason: "auth_permanent" as const,
++                },
++              },
++            }
++          : {}),
++      };
++      expect(buildAuthHealthSummary({ store }).profiles[0]?.requiresUserAction).toBe(
++        condition !== "ordinary-expiry",
++      );
++    },
++  );
++
++  it("does not substitute a static key for a failed OAuth pool", () => {
++    vi.spyOn(Date, "now").mockReturnValue(now);
++    const store = buildOpenAiCodexOAuthStore({ access: "access", refresh: "", expires: now - 1 });
++    const summary = buildAuthHealthSummary({
++      store: {
++        ...store,
++        profiles: {
++          ...store.profiles,
++          "openai:key": { type: "api_key", provider: "openai", key: "test-key" },
++        },
++      },
++    });
++    expect(summary.providers[0]?.status).toBe("expired");
++  });
++
++  it("retains an actionable account warning while another account is usable", () => {
++    vi.spyOn(Date, "now").mockReturnValue(now);
++    const store = buildOpenAiCodexOAuthStore({ access: "access", refresh: "", expires: now - 1 });
++    const summary = buildAuthHealthSummary({
++      store: {
++        ...store,
++        profiles: {
++          ...store.profiles,
++          "openai:healthy": {
++            ...store.profiles["openai:default"],
++            refresh: "refresh",
++            expires: now + 3_600_000,
++          },
++        },
++      },
++    });
++    expect(summary.providers[0]?.status).toBe("ok");
++    expect(
++      summary.profiles.find((profile) => profile.profileId === "openai:default"),
++    ).toMatchObject({ status: "expired", requiresUserAction: true });
++  });
++
+   it("reports unresolved legacy Codex OAuth sidecars as missing auth", () => {
+     vi.spyOn(Date, "now").mockReturnValue(now);
+     mockFreshCodexCliCredentials();
+@@ -539,9 +736,13 @@ describe("buildAuthHealthSummary", () => {
+     const profile = summary.profiles.find((entry) => entry.profileId === "openai:bad-expiry");
+     const provider = summary.providers.find((entry) => entry.provider === "openai");
+ 
+-    expect(profile?.status).toBe("missing");
++    expect(profile).toMatchObject({
++      status: "missing",
++      refreshable: true,
++      requiresUserAction: false,
++    });
+     expect(profile?.expiresAt).toBeUndefined();
+-    expect(provider?.status).toBe("missing");
++    expect(provider?.status).toBe("ok");
+     expect(provider?.expiresAt).toBeUndefined();
+   });
+ 
+diff --git a/src/agents/auth-health.ts b/src/agents/auth-health.ts
+index ad1b2f4bb1b24e9a15e1e268f700c4200de8374f..945d7e282e5e3f4ee5de3f0196c2d8af4a64d3b6 100644
+--- a/src/agents/auth-health.ts
++++ b/src/agents/auth-health.ts
+@@ -19,7 +19,9 @@ import {
+ } from "./auth-profiles/credential-state.js";
+ import { resolveAuthProfileDisplayLabel } from "./auth-profiles/display.js";
+ import { resolveEffectiveOAuthCredential } from "./auth-profiles/effective-oauth.js";
++import { isPendingOAuthRefreshFence } from "./auth-profiles/oauth-refresh-marker.js";
+ import { resolveAuthProfileOrder } from "./auth-profiles/order.js";
++import { getRuntimeExternalCliProfileIds } from "./auth-profiles/runtime-external-profile-references.js";
+ import type { AuthProfileCredential, AuthProfileStore } from "./auth-profiles/types.js";
+ import {
+   type ProviderAuthAliasLookupParams,
+@@ -36,6 +38,10 @@ type AuthProfileHealth = {
+   type: "oauth" | "token" | "api_key";
+   status: AuthProfileHealthStatus;
+   reasonCode?: AuthCredentialReasonCode;
++  /** Available refresh material, not evidence that a provider refresh has succeeded. */
++  refreshable?: boolean;
++  /** Credential repair needs operator action; ordinary OAuth access expiry does not. */
++  requiresUserAction?: boolean;
+   expiresAt?: number;
+   remainingMs?: number;
+   source: AuthProfileSource;
+@@ -152,6 +158,7 @@ function buildProfileHealth(params: {
+       type: credential.type,
+       status: "missing",
+       reasonCode: "setup_inactive",
++      requiresUserAction: false,
+       source,
+       label: `${label} (saved, inactive)`,
+     };
+@@ -169,6 +176,7 @@ function buildProfileHealth(params: {
+         type: "api_key",
+         status: "missing",
+         reasonCode: eligibility.reasonCode,
++        requiresUserAction: true,
+         source,
+         label,
+       };
+@@ -178,6 +186,7 @@ function buildProfileHealth(params: {
+       provider,
+       type: "api_key",
+       status: "static",
++      requiresUserAction: false,
+       source,
+       label,
+     };
+@@ -197,6 +206,7 @@ function buildProfileHealth(params: {
+         type: "token",
+         status,
+         reasonCode: eligibility.reasonCode,
++        requiresUserAction: true,
+         source,
+         label,
+       };
+@@ -209,6 +219,7 @@ function buildProfileHealth(params: {
+         provider,
+         type: "token",
+         status: "static",
++        requiresUserAction: false,
+         source,
+         label,
+       };
+@@ -224,6 +235,7 @@ function buildProfileHealth(params: {
+       type: "token",
+       status,
+       reasonCode: status === "expired" ? "expired" : undefined,
++      requiresUserAction: status === "expired",
+       expiresAt: normalizedExpiresAt,
+       remainingMs,
+       source,
+@@ -242,6 +254,8 @@ function buildProfileHealth(params: {
+       type: "oauth",
+       status: "missing",
+       reasonCode: storedEligibility.reasonCode,
++      refreshable: false,
++      requiresUserAction: true,
+       source,
+       label,
+     };
+@@ -264,6 +278,8 @@ function buildProfileHealth(params: {
+       type: "oauth",
+       status: eligibility.reasonCode === "expired" ? "expired" : "missing",
+       reasonCode: eligibility.reasonCode,
++      refreshable: false,
++      requiresUserAction: !isPendingOAuthRefreshFence(effectiveCredential),
+       source,
+       label,
+     };
+@@ -279,11 +295,32 @@ function buildProfileHealth(params: {
+     expiresAt,
+     remainingMs,
+   } = resolveOAuthStatus(effectiveCredential.expires, now, oauthWarnAfterMs);
++  const usage = store.usageStats?.[profileId];
++  const authenticationBlocked = Boolean(
++    (usage?.disabledUntil &&
++      usage.disabledUntil > now &&
++      (usage.disabledReason === "auth" ||
++        usage.disabledReason === "auth_permanent" ||
++        usage.disabledReason === "session_expired")) ||
++    (usage?.cooldownUntil &&
++      usage.cooldownUntil > now &&
++      (usage.cooldownReason === "auth" ||
++        usage.cooldownReason === "auth_permanent" ||
++        usage.cooldownReason === "session_expired")),
++  );
++  const refreshable =
++    Boolean(normalizeSecretInputString(effectiveCredential.refresh)) && !authenticationBlocked;
+   return {
+     profileId,
+     provider,
+     type: "oauth",
+     status: rawStatus,
++    refreshable,
++    requiresUserAction:
++      authenticationBlocked ||
++      ((rawStatus === "expired" || rawStatus === "missing") &&
++        !refreshable &&
++        !(rawStatus === "expired" && getRuntimeExternalCliProfileIds(store).includes(profileId))),
+     expiresAt,
+     remainingMs,
+     source,
+@@ -291,6 +328,37 @@ function buildProfileHealth(params: {
+   };
+ }
+ 
++/** Keep token expiry diagnostic while reporting the available authentication pool. */
++export function aggregateAuthProfileAvailability(
++  profiles: readonly AuthProfileHealth[],
++  now: number,
++): Pick<AuthProviderHealth, "status" | "expiresAt" | "remainingMs"> {
++  const usable = profiles.filter(
++    (profile) =>
++      !profile.requiresUserAction &&
++      (profile.refreshable === true ||
++        profile.status === "ok" ||
++        profile.status === "static" ||
++        profile.status === "expiring"),
++  );
++  const candidates = usable.length > 0 ? usable : profiles;
++  const statuses = new Set(
++    candidates.map((profile) => (profile.refreshable === true ? "ok" : profile.status)),
++  );
++  const priority =
++    usable.length > 0 ? (["ok", "static", "expiring"] as const) : (["expired", "missing"] as const);
++  const status = priority.find((candidate) => statuses.has(candidate)) ?? "missing";
++  const expiries = candidates
++    .filter((profile) => usable.length === 0 || profile.status !== "expired")
++    .map((profile) => profile.expiresAt)
++    .filter(
++      (expiry): expiry is number =>
++        typeof expiry === "number" && asDateTimestampMs(expiry) !== undefined,
++    );
++  const expiresAt = expiries.length > 0 ? Math.min(...expiries) : undefined;
++  return { status, expiresAt, remainingMs: expiresAt === undefined ? undefined : expiresAt - now };
++}
++
+ /** Build profile and provider auth health rollups from an auth profile store. */
+ export function buildAuthHealthSummary(params: {
+   store: AuthProfileStore;
+@@ -412,59 +480,15 @@ export function buildAuthHealthSummary(params: {
+       continue;
+     }
+ 
+-    let hasApiKeyProfile = false;
+-    let hasExpirableProfile = false;
+-    let hasExpired = false;
+-    let hasMissing = false;
+-    let hasExpiring = false;
+-    let earliestExpiry: number | undefined;
+-    for (const profile of effectiveProfiles) {
+-      if (profile.type === "api_key") {
+-        if (profile.status === "static") {
+-          hasApiKeyProfile = true;
+-        } else if (profile.status === "missing") {
+-          hasMissing = true;
+-        }
+-        continue;
+-      }
+-      if (profile.type !== "oauth" && profile.type !== "token") {
+-        continue;
+-      }
+-      hasExpirableProfile = true;
+-      if (typeof profile.expiresAt === "number" && Number.isFinite(profile.expiresAt)) {
+-        earliestExpiry =
+-          earliestExpiry === undefined
+-            ? profile.expiresAt
+-            : Math.min(earliestExpiry, profile.expiresAt);
+-      }
+-      if (profile.status === "expired") {
+-        hasExpired = true;
+-      } else if (profile.status === "missing") {
+-        hasMissing = true;
+-      } else if (profile.status === "expiring") {
+-        hasExpiring = true;
+-      }
+-    }
+-
+-    if (!hasExpirableProfile) {
+-      provider.status = hasMissing ? "missing" : hasApiKeyProfile ? "static" : "missing";
+-      continue;
+-    }
+-
+-    if (earliestExpiry !== undefined) {
+-      provider.expiresAt = earliestExpiry;
+-      provider.remainingMs = provider.expiresAt - now;
+-    }
+-
+-    if (hasExpired) {
+-      provider.status = "expired";
+-    } else if (hasMissing) {
+-      provider.status = "missing";
+-    } else if (hasExpiring) {
+-      provider.status = "expiring";
+-    } else {
+-      provider.status = "ok";
+-    }
++    // Keep OAuth/token health authoritative over a static-key sibling, as before.
++    const expirableProfiles = effectiveProfiles.filter((profile) => profile.type !== "api_key");
++    Object.assign(
++      provider,
++      aggregateAuthProfileAvailability(
++        expirableProfiles.length > 0 ? expirableProfiles : effectiveProfiles,
++        now,
++      ),
++    );
+   }
+ 
+   const providers = Array.from(providersMap.values()).toSorted((a, b) =>
 diff --git a/src/agents/auth-profiles/constants.ts b/src/agents/auth-profiles/constants.ts
 index cd5294d9dc04ab3836f0577cdf888f85caf20f71..88c20a403cce5de01729e3763cdcd4c9e9e901ea 100644
 --- a/src/agents/auth-profiles/constants.ts
@@ -63561,6 +64033,285 @@ index 76e8aa9c8baec947e8a7eaca14da2d6693c2d423..971c89af9b7c08b3923231a0f967e829
      toolOverrides: normalizeSessionToolOverrides(entry?.toolOverrides),
    });
  }
+diff --git a/src/gateway/server-methods/models-auth-status.test.ts b/src/gateway/server-methods/models-auth-status.test.ts
+index 7e6d1654d18b871a1b0473aa18564fd3b9103933..3ce940d36992e0ad9e05fbfed894cd0c14aeebd6 100644
+--- a/src/gateway/server-methods/models-auth-status.test.ts
++++ b/src/gateway/server-methods/models-auth-status.test.ts
+@@ -636,6 +636,43 @@ describe("models.authStatus", () => {
+     expect(result.providers[0]?.profiles[0]?.logoutSupported).toBe(true);
+   });
+ 
++  it("projects repair requirements without turning a partial pool failure into an outage", async () => {
++    const health = createOpenAiCodexOauthHealthSummary();
++    const healthy = health.profiles[0];
++    if (!healthy) {
++      throw new Error("Expected health fixture profile");
++    }
++    const failed = {
++      ...healthy,
++      profileId: "openai:failed",
++      status: "expired" as const,
++      refreshable: false,
++      requiresUserAction: true,
++    };
++    healthy.refreshable = true;
++    healthy.requiresUserAction = false;
++    health.profiles.push(failed);
++    health.providers[0]?.profiles.push(failed);
++    mocks.buildAuthHealthSummary.mockReturnValue(health);
++    const provider = await firstAuthStatusProvider();
++    expect(provider?.status).toBe("ok");
++    expect(provider?.profiles).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          profileId: healthy.profileId,
++          refreshable: true,
++          requiresUserAction: false,
++        }),
++        expect.objectContaining({
++          profileId: failed.profileId,
++          status: "expired",
++          refreshable: false,
++          requiresUserAction: true,
++        }),
++      ]),
++    );
++  });
++
+   it.each([false, true])(
+     "projects explicit priority with local reset ownership %s",
+     async (localOrderStored) => {
+@@ -897,59 +934,67 @@ describe("models.authStatus", () => {
+     expect(provider?.profiles[0]?.logoutSupported).toBeUndefined();
+   });
+ 
+-  it("reports external CLI-managed OAuth as signed in across access-token expiry", async () => {
+-    const profileId = "anthropic:claude-cli";
+-    const profile = {
+-      profileId,
+-      provider: "claude-cli",
+-      type: "oauth",
+-      status: "expired",
+-      expiresAt: 1,
+-      remainingMs: -1,
+-      source: "store",
+-      label: profileId,
+-    } satisfies AuthHealthSummary["profiles"][number];
+-    setPreparedAuthStore(
+-      Object.assign(
+-        {
+-          version: 1,
+-          profiles: {
+-            [profileId]: {
+-              type: "oauth",
+-              provider: "claude-cli",
+-              access: "expired-access",
+-              refresh: "cli-owned-refresh",
+-              expires: 1,
+-            } satisfies AuthProfileStore["profiles"][string],
++  it.each([false, true])(
++    "keeps CLI expiry refresh separate from required credential repair (%s)",
++    async (requiresUserAction) => {
++      const profileId = "anthropic:claude-cli";
++      const profile = {
++        profileId,
++        provider: "claude-cli",
++        type: "oauth",
++        status: "expired",
++        requiresUserAction,
++        expiresAt: 1,
++        remainingMs: -1,
++        source: "store",
++        label: profileId,
++      } satisfies AuthHealthSummary["profiles"][number];
++      setPreparedAuthStore(
++        Object.assign(
++          {
++            version: 1,
++            profiles: {
++              [profileId]: {
++                type: "oauth",
++                provider: "claude-cli",
++                access: "expired-access",
++                refresh: "cli-owned-refresh",
++                expires: 1,
++              } satisfies AuthProfileStore["profiles"][string],
++            },
+           },
+-        },
+-        { runtimeExternalCliProfileIds: [profileId] },
+-      ),
+-    );
+-    mocks.buildAuthHealthSummary.mockReturnValue({
+-      now: 2,
+-      warnAfterMs: 0,
+-      profiles: [profile],
+-      providers: [
+-        {
+-          provider: "claude-cli",
+-          status: "expired",
+-          expiresAt: 1,
+-          remainingMs: -1,
+-          profiles: [profile],
+-        },
+-      ],
+-    });
++          { runtimeExternalCliProfileIds: [profileId] },
++        ),
++      );
++      mocks.buildAuthHealthSummary.mockReturnValue({
++        now: 2,
++        warnAfterMs: 0,
++        profiles: [profile],
++        providers: [
++          {
++            provider: "claude-cli",
++            status: "expired",
++            expiresAt: 1,
++            remainingMs: -1,
++            profiles: [profile],
++          },
++        ],
++      });
+ 
+-    const provider = await firstAuthStatusProvider();
++      const provider = await firstAuthStatusProvider();
+ 
+-    expect(provider).toMatchObject({
+-      provider: "claude-cli",
+-      status: "ok",
+-      profiles: [{ profileId, status: "expired" }],
+-    });
+-    expect(provider?.expiry).toBeUndefined();
+-  });
++      expect(provider).toMatchObject({
++        provider: "claude-cli",
++        status: requiresUserAction ? "expired" : "ok",
++        profiles: [{ profileId, status: "expired", requiresUserAction }],
++      });
++      if (requiresUserAction) {
++        expect(provider?.expiry?.at).toBe(1);
++      } else {
++        expect(provider?.expiry).toBeUndefined();
++      }
++    },
++  );
+ 
+   it("keeps an unrelated effective token expiry visible beside owned CLI OAuth", async () => {
+     const profileId = "anthropic:claude-cli";
+@@ -3011,8 +3056,8 @@ describe("aggregateRefreshableAuthStatus", () => {
+     expect(missingResult.status).toBe("missing");
+   });
+ 
+-  it("precedence: expired/missing > expiring > ok > static", () => {
+-    // expiring + ok → expiring (expired-marker absent)
++  it("reports available pool health without hiding raw failed profiles", () => {
++    // A healthy account keeps the pool available.
+     const res1 = aggregateRefreshableAuthStatus(
+       {
+         provider: "openai",
+@@ -3021,9 +3066,9 @@ describe("aggregateRefreshableAuthStatus", () => {
+       },
+       NOW,
+     );
+-    expect(res1.status).toBe("expiring");
++    expect(res1.status).toBe("ok");
+ 
+-    // expired beats expiring
++    // An expired sibling does not remove the usable expiring account.
+     const res2 = aggregateRefreshableAuthStatus(
+       {
+         provider: "openai",
+@@ -3032,7 +3077,18 @@ describe("aggregateRefreshableAuthStatus", () => {
+       },
+       NOW,
+     );
+-    expect(res2.status).toBe("expired");
++    expect(res2.status).toBe("expiring");
++  });
++
++  it("accepts renewable access expiry without claiming that renewal succeeded", () => {
++    const expired = { ...oauth("expired", NOW - 1), refreshable: true, requiresUserAction: false };
++    const result = aggregateRefreshableAuthStatus(
++      { provider: "openai", status: "expired", profiles: [expired] },
++      NOW,
++    );
++    expect(result).toMatchObject({ status: "ok" });
++    expect(result.expiresAt).toBeUndefined();
++    expect(expired.status).toBe("expired");
+   });
+ 
+   it("picks the earliest expiresAt across OAuth profiles", () => {
+diff --git a/src/gateway/server-methods/models-auth-status.ts b/src/gateway/server-methods/models-auth-status.ts
+index 99dd548a44a8b5b7bd470d9c8efaf67e81cab8ca..99dc3318ddfc15c6fa5ff1ba85c9ff8d9ffb42df 100644
+--- a/src/gateway/server-methods/models-auth-status.ts
++++ b/src/gateway/server-methods/models-auth-status.ts
+@@ -14,10 +14,10 @@ import {
+ import { tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope-config.js";
+ import {
+   type AuthHealthSummary,
+-  type AuthProfileHealthStatus,
+   type AuthProviderHealth,
+   type AuthProviderHealthStatus,
+   buildAuthHealthSummary,
++  aggregateAuthProfileAvailability,
+   formatRemainingShort,
+ } from "../../agents/auth-health.js";
+ import {
+@@ -193,16 +193,7 @@ function aggregateProfileStatus(
+   profiles: AuthProviderHealth["profiles"],
+   now: number,
+ ): ModelAuthStatusRollup {
+-  const statuses = new Set<AuthProfileHealthStatus>(profiles.map((profile) => profile.status));
+-  const status = (["expired", "missing", "expiring", "ok", "static"] as const).find((candidate) =>
+-    statuses.has(candidate),
+-  );
+-  const expirable = profiles
+-    .map((p) => p.expiresAt)
+-    .filter((v): v is number => asDateTimestampMs(v) !== undefined);
+-  const expiresAt = expirable.length > 0 ? Math.min(...expirable) : undefined;
+-  const remainingMs = expiresAt !== undefined ? expiresAt - now : undefined;
+-  return { status: status ?? "static", expiresAt, remainingMs };
++  return aggregateAuthProfileAvailability(profiles, now);
+ }
+ 
+ /**
+@@ -291,7 +282,10 @@ function mapProvider(
+   const externalCliOwnsOAuthRefresh =
+     refreshableProfiles.length > 0 &&
+     refreshableProfiles.every(
+-      (profile) => profile.type === "oauth" && externalCliProfileIds.has(profile.profileId),
++      (profile) =>
++        profile.type === "oauth" &&
++        externalCliProfileIds.has(profile.profileId) &&
++        profile.requiresUserAction !== true,
+     );
+   const rollup: ModelAuthStatusRollup =
+     externalCliOwnsOAuthRefresh &&
+@@ -317,6 +311,8 @@ function mapProvider(
+         type: prof.type,
+         status: prof.status,
+         reasonCode: prof.reasonCode,
++        refreshable: prof.refreshable,
++        requiresUserAction: prof.requiresUserAction,
+         source: configBoundProfileIds.has(prof.profileId)
+           ? "config"
+           : externalProfileIds.has(prof.profileId)
+diff --git a/src/gateway/server-methods/models-auth-status.types.ts b/src/gateway/server-methods/models-auth-status.types.ts
+index 50fa2287bddc6984659e265c07b39e38687849cc..daa13e92d29622a04177856b80ac93dce8835c58 100644
+--- a/src/gateway/server-methods/models-auth-status.types.ts
++++ b/src/gateway/server-methods/models-auth-status.types.ts
+@@ -21,6 +21,10 @@ export type ModelAuthStatusProfile = {
+   type: "oauth" | "token" | "api_key";
+   status: AuthProfileHealthStatus;
+   reasonCode?: AuthCredentialReasonCode;
++  /** Refresh material is available; renewal success is not implied. */
++  refreshable?: boolean;
++  /** Canonical account repair need, independent of provider pool availability. */
++  requiresUserAction?: boolean;
+   expiry?: ModelAuthExpiry;
+   /** True only for saved OAuth/token profiles this gateway can remove. */
+   logoutSupported?: boolean;
 diff --git a/src/gateway/server-methods/sessions-compaction-runner.ts b/src/gateway/server-methods/sessions-compaction-runner.ts
 index caf3e4ec146cd188a9afb726185dccb010512a33..0677b177ef23c3e7c6fca91246438d81b527c28e 100644
 --- a/src/gateway/server-methods/sessions-compaction-runner.ts
@@ -73696,3 +74447,471 @@ index c8109efbdd02f409e05119d5ab920c1f3d71c862..6801241884431e02966b7af6bd74eb31
      "crabbox-wrapper": "scripts/crabbox-wrapper.mts",
      "docker-healthcheck": "src/docker-healthcheck.ts",
      // Ensure this module is bundled as an entry so legacy CLI shims can resolve its exports.
+diff --git a/ui/src/components/sidebar-attention-auth-deadline.test.ts b/ui/src/components/sidebar-attention-auth-deadline.test.ts
+index fbf3e2936678250f2c4d3d7658bc8edd4c9af404..4b5dfcc6d9a338743c12f613a39d71914aa61e5e 100644
+--- a/ui/src/components/sidebar-attention-auth-deadline.test.ts
++++ b/ui/src/components/sidebar-attention-auth-deadline.test.ts
+@@ -43,7 +43,12 @@ function setup(expiresInMs?: number) {
+                 expiry: { at: expiresAt, remainingMs: expiresAt - Date.now(), label: "remaining" },
+               }),
+           profiles: [
+-            { profileId: "test:token", type: "token", status: expired ? "expired" : "ok" },
++            {
++              profileId: "test:token",
++              type: "token",
++              status: expired ? "expired" : "ok",
++              requiresUserAction: expired,
++            },
+           ],
+         },
+       ],
+diff --git a/ui/src/components/sidebar-attention-entries.ts b/ui/src/components/sidebar-attention-entries.ts
+index 77750361dec375982140df9ca5048366968d8cc3..25e29714d82dbdfe32e98d0b21cc6337c33c5ec1 100644
+--- a/ui/src/components/sidebar-attention-entries.ts
++++ b/ui/src/components/sidebar-attention-entries.ts
+@@ -29,7 +29,7 @@ export type SidebarAttentionItem = SidebarInboxEntryBase<"automations" | "system
+   icon: IconName;
+   label: string;
+   detail: string;
+-  meta?: { context?: string; status: string; time: string };
++  meta?: { context?: string; status: string; time?: string };
+   action:
+     | { kind: "navigate"; routeId: NavigationRouteId }
+     | { kind: "askCustodian"; alert: CustodianAlert };
+diff --git a/ui/src/components/sidebar-attention-items.test.ts b/ui/src/components/sidebar-attention-items.test.ts
+index 35b52c43a35fb38b69abedb33a5536f772cabab9..db330635be613d5e0169680ab4e942e4aaade9d8 100644
+--- a/ui/src/components/sidebar-attention-items.test.ts
++++ b/ui/src/components/sidebar-attention-items.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from "vitest";
+ import type { MentionInboxItem } from "../../../packages/gateway-protocol/src/index.js";
+-import type { CronJob } from "../api/types.ts";
++import type { CronJob, ModelAuthStatusProvider } from "../api/types.ts";
+ import {
+   buildScopeUpgradeInboxEntry,
+   buildSidebarInboxEntries,
+@@ -47,6 +47,201 @@ function cronItems(cronJobs: readonly CronJob[], now = 0, cronSchedulerEnabled =
+   });
+ }
+ 
++describe("auth attention actionability", () => {
++  const expiredAt = 1_000_000;
++  const now = expiredAt + 3_600_000;
++  const provider: ModelAuthStatusProvider = {
++    provider: "openai",
++    displayName: "OpenAI",
++    status: "ok",
++    profiles: [
++      { profileId: "openai:current", type: "oauth", status: "ok", requiresUserAction: false },
++      {
++        profileId: "openai:idle",
++        type: "oauth",
++        status: "expired",
++        refreshable: true,
++        requiresUserAction: false,
++        expiry: { at: expiredAt, remainingMs: -3_600_000, label: "expired" },
++      },
++    ],
++  };
++  const items = (providers: ModelAuthStatusProvider[], ts = now) =>
++    buildSidebarAttentionEntries({
++      cronJobs: [],
++      cronSchedulerEnabled: true,
++      modelAuthAgentId: "main",
++      modelAuthStatus: { ts, providers },
++      now,
++    });
++
++  it("does not ask for sign-in for an idle account eligible for automatic refresh", () => {
++    expect(items([provider])).toEqual([]);
++    expect(items([{ ...provider, status: "expired" }])).toEqual([]);
++  });
++
++  it("keeps genuine account failures visible beside usable accounts and ages them from expiry", () => {
++    const failed = {
++      ...provider,
++      profiles: provider.profiles.map((profile) =>
++        profile.profileId === "openai:idle"
++          ? { ...profile, refreshable: false, requiresUserAction: true }
++          : profile,
++      ),
++    };
++    const first = items([failed], now - 60_000);
++    const refreshed = items([failed]);
++    expect(first).toHaveLength(1);
++    expect(first[0]).toMatchObject({
++      severity: "warning",
++      meta: { context: "openai:idle", status: "Sign-in required", time: "1h" },
++    });
++    expect(refreshed).toEqual(first);
++  });
++
++  it("does not invent a failure age for a missing login", () => {
++    const missing = items([
++      { provider: "openai", displayName: "OpenAI", status: "missing", profiles: [] },
++    ]);
++    expect(missing).toHaveLength(1);
++    expect(missing[0]).toMatchObject({ severity: "error", meta: { status: "Sign-in required" } });
++    expect(missing[0]?.meta?.time).toBeUndefined();
++    expect(missing[0]?.detail).not.toContain("0s");
++  });
++
++  it("scopes account dismissals to the account and expiry episode", () => {
++    const profile = {
++      profileId: "openai:failed",
++      type: "token" as const,
++      status: "expired" as const,
++      requiresUserAction: true,
++    };
++    const failures = items([
++      { ...provider, profiles: [profile, { ...profile, profileId: "openai:other" }] },
++    ]);
++    expect(failures).toHaveLength(2);
++    expect(failures[0]?.signature).not.toBe(failures[1]?.signature);
++    const later = items([
++      {
++        ...provider,
++        profiles: [
++          { ...profile, expiry: { at: expiredAt, remainingMs: -3_600_000, label: "expired" } },
++        ],
++      },
++    ]);
++    expect(later[0]?.signature).not.toBe(failures[0]?.signature);
++  });
++
++  it("does not turn a pending refresh or an explicitly excluded profile into a login request", () => {
++    expect(
++      items([
++        {
++          ...provider,
++          status: "missing",
++          profiles: [
++            {
++              profileId: "openai:pending",
++              type: "oauth",
++              status: "missing",
++              requiresUserAction: false,
++            },
++          ],
++        },
++      ]),
++    ).toEqual([]);
++    expect(
++      items([
++        {
++          ...provider,
++          status: "missing",
++          profileOrder: [],
++          profiles: [
++            {
++              profileId: "openai:excluded",
++              type: "oauth",
++              status: "missing",
++              requiresUserAction: true,
++            },
++          ],
++        },
++      ]),
++    ).toEqual([]);
++  });
++
++  it("reports one account once when canonical and credential aliases both contain it", () => {
++    const failed = {
++      ...provider,
++      profiles: [
++        {
++          profileId: "openai:failed",
++          type: "oauth" as const,
++          status: "expired" as const,
++          requiresUserAction: true,
++        },
++      ],
++    };
++    expect(
++      items([
++        { ...failed, provider: "anthropic" },
++        { ...failed, provider: "claude-cli" },
++      ]),
++    ).toHaveLength(1);
++  });
++
++  it("applies each auth owner's exclusions before grouping display aliases", () => {
++    const failed = {
++      profileId: "anthropic:cli",
++      type: "oauth" as const,
++      status: "expired" as const,
++      requiresUserAction: true,
++    };
++    const result = items([
++      {
++        provider: "anthropic",
++        displayName: "Anthropic",
++        status: "ok",
++        profileOrder: [],
++        profiles: [{ ...failed, profileId: "anthropic:excluded" }],
++      },
++      {
++        provider: "claude-cli",
++        displayName: "Claude CLI",
++        status: "expired",
++        profileOrder: [failed.profileId],
++        profiles: [failed],
++      },
++    ]);
++    expect(result).toHaveLength(1);
++    expect(result[0]?.meta?.context).toBe("anthropic:cli");
++  });
++
++  it("reports a configured account that is absent without reviving excluded saved accounts", () => {
++    const result = items([{ ...provider, status: "missing", profileOrder: ["openai:absent"] }]);
++    expect(result).toHaveLength(1);
++    expect(result[0]?.severity).toBe("error");
++    expect(result[0]?.meta?.context).toBe("main");
++  });
++
++  it("keeps missing OAuth sign-in visible when only an API key is saved", () => {
++    expect(
++      items([
++        {
++          ...provider,
++          status: "missing",
++          profiles: [
++            {
++              profileId: "openai:key",
++              type: "api_key",
++              status: "static",
++              requiresUserAction: false,
++            },
++          ],
++        },
++      ]),
++    ).toHaveLength(1);
++  });
++});
++
+ describe("automation attention", () => {
+   it("lists each failed job as direct automation navigation", () => {
+     const primary = cronJob("primary");
+diff --git a/ui/src/components/sidebar-attention-items.ts b/ui/src/components/sidebar-attention-items.ts
+index 215217a28c80df9cf2b3f3645b727c8095e6af47..78c08edb47689dd1113f7e13ad0f1283c360b4d1 100644
+--- a/ui/src/components/sidebar-attention-items.ts
++++ b/ui/src/components/sidebar-attention-items.ts
+@@ -2,7 +2,11 @@ import type { CronJob, ModelAuthStatusResult } from "../api/types.ts";
+ import { t } from "../i18n/index.ts";
+ import { isCronJobActiveFailure, isCronJobRunning } from "../lib/cron-status.ts";
+ import { clampText, formatTimeAgo } from "../lib/format.ts";
+-import { isMonitoredAuthProvider, listEffectiveModelAuthProviders } from "../lib/model-auth.ts";
++import {
++  canonicalModelAuthProviderId,
++  isMonitoredAuthProvider,
++  listEffectiveModelAuthProviders,
++} from "../lib/model-auth.ts";
+ import type { CustodianAlert } from "./custodian-alert-contract.ts";
+ import type { SidebarAttentionItem } from "./sidebar-attention-entries.ts";
+ 
+@@ -130,65 +134,106 @@ export function buildSidebarAttentionEntries(params: {
+     );
+   }
+ 
+-  const monitored = listEffectiveModelAuthProviders(params.modelAuthStatus?.providers ?? []).filter(
+-    isMonitoredAuthProvider,
+-  );
+-  const expired = monitored.filter(
+-    (provider) => provider.status === "expired" || provider.status === "missing",
+-  );
+-  for (const provider of expired) {
+-    // Auth is agent-scoped; one agent's dismissal must not hide another's warning.
+-    const signature = params.modelAuthAgentId
++  // Display aliases can share a label while keeping distinct credential owners.
++  // Apply each owner's explicit order before merging the display inventory.
++  const monitored = listEffectiveModelAuthProviders(
++    (params.modelAuthStatus?.providers ?? []).map((provider) =>
++      Object.assign({}, provider, {
++        profiles: provider.profiles.filter(
++          (profile) =>
++            provider.profileOrder === undefined ||
++            provider.profileOrder.includes(profile.profileId),
++        ),
++      }),
++    ),
++  ).filter(isMonitoredAuthProvider);
++  for (const provider of monitored) {
++    // The Gateway owns refresh eligibility. An expired access token alone does
++    // not imply expired sign-in: OAuth can renew lazily on the next use.
++    const actionable = provider.profiles.filter((profile) => profile.requiresUserAction === true);
++    // Credential aliases may project the same saved account more than once.
++    const affected = [
++      ...new Map(actionable.map((profile) => [profile.profileId, profile])).values(),
++    ];
++    // A missing canonical route can coexist with an unrelated CLI-auth alias.
++    const missingProvider =
++      provider.status === "missing" &&
++      affected.length === 0 &&
++      params.modelAuthStatus?.providers.some(
++        (source) =>
++          canonicalModelAuthProviderId(source.provider) === provider.provider &&
++          source.status === "missing" &&
++          source.profileOrder?.length !== 0 &&
++          !source.profiles.some(
++            (profile) =>
++              profile.type !== "api_key" &&
++              (source.profileOrder === undefined ||
++                source.profileOrder.includes(profile.profileId)),
++          ),
++      );
++    if (affected.length === 0 && !missingProvider) {
++      continue;
++    }
++    const providerSignature = params.modelAuthAgentId
+       ? `agent:${params.modelAuthAgentId}\n${provider.provider}`
+       : provider.provider;
+-    const fact = `${provider.displayName}: ${provider.status}`;
+-    const scope =
+-      provider.profiles.find(
+-        (profile) => profile.status === "expired" || profile.status === "missing",
+-      )?.profileId ?? params.modelAuthAgentId?.trim();
+-    const time = formatTimeAgo(
+-      Math.max(0, params.now - (params.modelAuthStatus?.ts ?? params.now)),
+-      { suffix: false },
+-    );
+-    const detail = scope
+-      ? t("attention.modelAuthExpiredWithScope", { scope, time })
+-      : t("attention.modelAuthExpiredState", { time });
+-    const alertTitle = t("attention.modelAuthExpired", { providers: provider.displayName });
+-    entries.push(
+-      attentionEntry(
+-        explainedItem(
+-          {
+-            kind: "modelAuthExpired",
+-            severity: "error",
+-            icon: "plug",
+-            label: provider.displayName,
+-            detail,
+-            meta: {
+-              ...(scope ? { context: scope } : {}),
+-              status: t("attention.authExpired"),
+-              time,
+-            },
+-            inlineAction: {
+-              label: t("attention.reconnect"),
+-              routeId: "model-providers",
++    for (const profile of missingProvider ? [undefined] : affected) {
++      const scope = profile?.profileId ?? params.modelAuthAgentId?.trim();
++      const signature = profile
++        ? `${providerSignature}\n${profile.profileId}@${profile.expiry?.at ?? profile.status}`
++        : providerSignature;
++      const fact = profile
++        ? `${provider.displayName} (${profile.profileId}): ${profile.status}`
++        : `${provider.displayName}: ${provider.status}`;
++      // Poll time is not incident time. Missing credentials and failures before
++      // access-token expiry have no known expiry age, so omit it.
++      const expiredAt = profile?.expiry?.at;
++      const time =
++        expiredAt !== undefined && expiredAt <= params.now
++          ? formatTimeAgo(params.now - expiredAt, { suffix: false })
++          : undefined;
++      const status = t("attention.authExpired");
++      const detail = [scope, status, time].filter(Boolean).join(" · ");
++      const alertTitle = t("attention.modelAuthExpired", { providers: provider.displayName });
++      entries.push(
++        attentionEntry(
++          explainedItem(
++            {
++              kind: "modelAuthExpired",
++              severity:
++                provider.status === "expired" || provider.status === "missing"
++                  ? "error"
++                  : "warning",
++              icon: "plug",
++              label: provider.displayName,
++              detail,
++              meta: {
++                ...(scope ? { context: scope } : {}),
++                status,
++                ...(time ? { time } : {}),
++              },
++              inlineAction: {
++                label: t("attention.reconnect"),
++                routeId: "model-providers",
++              },
++              signature,
+             },
+-            signature,
+-          },
+-          {
+-            title: alertTitle,
+-            facts: [fact],
+-            question: boundedQuestion(
+-              t("attention.alerts.modelAuthExpiredQuestion", { facts: fact }),
+-            ),
+-            action: {
+-              label: t("routeTitles.modelProviders"),
+-              target: { kind: "navigate", routeId: "model-providers" },
++            {
++              title: alertTitle,
++              facts: [fact],
++              question: boundedQuestion(
++                t("attention.alerts.modelAuthExpiredQuestion", { facts: fact }),
++              ),
++              action: {
++                label: t("routeTitles.modelProviders"),
++                target: { kind: "navigate", routeId: "model-providers" },
++              },
+             },
+-          },
++          ),
++          "system",
+         ),
+-        "system",
+-      ),
+-    );
++      );
++    }
+   }
+   return entries;
+ }
+diff --git a/ui/src/components/sidebar-issue-item.ts b/ui/src/components/sidebar-issue-item.ts
+index d5e1b24319556ea29b0eccf9bfa61046ef79b5f7..f99ea162ab4875ebb817c31cdf9c765677b8a7ad 100644
+--- a/ui/src/components/sidebar-issue-item.ts
++++ b/ui/src/components/sidebar-issue-item.ts
+@@ -329,8 +329,12 @@ function renderItemMeta(item: SidebarAttentionItem) {
+         : nothing
+     }
+     <span class="sidebar-issues-panel__meta-status">${item.meta.status}</span>
+-    <span aria-hidden="true">·</span>
+-    <span class="sidebar-issues-panel__meta-time">${item.meta.time}</span>
++    ${
++      item.meta.time
++        ? html`<span aria-hidden="true">·</span>
++            <span class="sidebar-issues-panel__meta-time">${item.meta.time}</span>`
++        : nothing
++    }
+   </span>`;
+ }
+ 
+diff --git a/ui/src/i18n/locales/en.ts b/ui/src/i18n/locales/en.ts
+index 984202df33733f20ac12678319665f2eb85b6e4a..bd358256f45c9bb6e41ebb108393991509dbe931 100644
+--- a/ui/src/i18n/locales/en.ts
++++ b/ui/src/i18n/locales/en.ts
+@@ -3298,10 +3298,8 @@ export const en: TranslationMap & {
+       refresh: "Refresh mentions",
+       error: "Mentions could not be updated. Refresh or try dismissing again.",
+     },
+-    modelAuthExpired: "Model auth expired: {providers}",
+-    authExpired: "Auth expired",
+-    modelAuthExpiredState: "Auth expired · {time}",
+-    modelAuthExpiredWithScope: "{scope} · Auth expired · {time}",
++    modelAuthExpired: "Model sign-in required: {providers}",
++    authExpired: "Sign-in required",
+     reconnect: "Reconnect",
+     pendingApproval: "{count} pending approval",
+     pendingApprovals: "{count} pending approvals",
+@@ -3314,7 +3312,7 @@ export const en: TranslationMap & {
+       cronOverdueQuestion:
+         "These automations are overdue:\n{facts}\nExplain why they have not run and how to fix them.",
+       modelAuthExpiredQuestion:
+-        "These model-provider credentials need attention:\n{facts}\nExplain what expired and how to re-authenticate them.",
++        "These model-provider credentials need attention:\n{facts}\nExplain which accounts need sign-in and how to reconnect them.",
+     },
+   },
+   standingGrants: {
