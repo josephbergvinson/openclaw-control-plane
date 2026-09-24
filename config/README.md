@@ -90,6 +90,13 @@ admitted user-task continuations. Configured dreaming model failures remain on t
 selected route and produce the existing degraded outcome instead of silently
 calling the interactive model.
 
+Autonomous heartbeats use `isolatedSession: true`: each run starts with a fresh
+transcript while retaining its originating conversation's delivery policy.
+Background checks therefore do not reuse an interactive conversation's history
+or replace its latest run status. Their recorded outcomes remain available for
+diagnosis and subsequent conversation context. This setting does not clear past
+failures or change the configured heartbeat destination.
+
 A merge retains omitted keys. For an earlier profile with global child model or
 thinking pins, apply this native deletion patch after reviewing the current values:
 

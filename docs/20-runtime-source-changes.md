@@ -105,7 +105,19 @@ entry and macOS authentication; the QA process and execution scope closed
 afterward. The MacBook installation and existing credential bindings are
 verified, but its fresh process reports Accessibility and Screen Recording
 denied. Native interaction on that host remains pending actual OS grants and
-verification. The Gateway remains at `5b5942def95c`.
+verification. At that companion checkpoint, the Gateway remained at `5b5942def95c`.
+
+The [scheduled-run recovery successor](../runtime/README.md#september-24-scheduled-run-recovery-successor),
+`2c102f590298`, retains the original provider error while proving no-send only for
+a settled, complete canonical prework failure in the exact isolated native run.
+The existing exception owner excludes tool/output activity, fallback and
+continuations; filtered or incomplete evidence stays unknown. The private
+collector can release a matching unstaged checkpoint without advancing coverage
+or replaying delivery. The owning regression checks both native transcript
+settlement and the persisted cron receipt shape. This exact source activated on
+September 24 at 10:03:56.892630 UTC with accepted postflight and current-process
+capture. The signed companion remains unchanged, and exact-final-head hosted CI
+is a separate qualification.
 
 | Change family | Source behavior and acceptance boundary |
 |---|---|
