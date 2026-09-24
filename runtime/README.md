@@ -854,6 +854,33 @@ and enrolled; a later natural scheduled sync is not inferred.
 The preceding `5233aa69090d` auth/Inbox activation retains its dated receipts.
 Native companions and private workers remain `f29bb229c5c8`, build `2609000594`;
 this central change does not rebuild or install them. MacBook native credential
-acceptance remains separate. Actual Discord progress delivery is pending at this
-publication checkpoint; its subsequent result and hosted qualification are recorded
-separately against the exact public revision in PR checks and artifacts.
+acceptance remains separate. The subsequent real Discord review on this c42 deployment passed foreground
+checkpoint, repeated yielded progress, requester resumption and final delivery.
+It also identified the two source edge cases corrected by the successor below.
+Public revision `fd3fc75f8580` subsequently passed all five hosted checks,
+including all 35 native commands, 92 lint shards and the full runtime build;
+all six artifact digests and exact source identities were verified. Those results
+retain their c42 scope and do not qualify the successor below. Successful channel
+delivery does not imply that those source defects were absent.
+
+## September 24 progress and trigger follow-up
+
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` adds three bounded corrections: canonical
+normalization before a foreground checkpoint, consistent ownership of queued
+native task notifications, and a fresh tool-refresh scope for scheduled scripts.
+See the [source explanation](../docs/20-runtime-source-changes.md#progress-ownership-and-scheduled-trigger-scope).
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` activated on September 24 at
+`2026-09-24T17:15:56.505319Z` as
+`openclaw-2026.9.5-205ba711eb3d-20260924T1657Z-selfcontained` in one attempt with no rollback.
+All 33 mechanical postflight checks passed. The activation receipt SHA-256 is
+`0609079db56f3ea6bc07000557bc9f892f99a0af713b3fc3529c2c2b3e759101`; the acceptance receipt is
+`8015885b3eb062adf8892891aa950229d41316b414443774c01eae647ec4ef7b`. The dated auth, Journal and native companion
+receipts retain their original scope. Native apps and workers remain at
+`f29bb229c5c8`, build `2609000594`; this central successor does not install or restart
+them. The original 18:17 BST scheduled trigger then completed naturally through
+Sol in 104.677 seconds. Its exact summary reached Discord at 17:18:43.559 UTC,
+with one match among the 12 messages read; error counters returned to zero through
+normal scheduler behavior. Configuration and schedule were unchanged, with no
+forced run, checkpoint mutation, business replay or failure-history reset.
+This verifies the reported trigger incident, not every automation. Hosted
+qualification remains separate and binds the exact public revision.

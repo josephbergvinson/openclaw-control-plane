@@ -347,8 +347,9 @@ progress. Its first update coalesces for 15 seconds and eligible slow tools or
 nested waits continue at three-minute intervals, without requiring a new tool
 event. Each send rechecks current task and requester authority. Cancellation,
 completion, parent resumption, replacement, muting and lifecycle reset stop stale
-updates. Generic native task state messages are suppressed so a second owner
-cannot duplicate the progress or expose child prose.
+updates. Generic native task state messages are suppressed only while the exact
+pending yield has an authoritative progress owner, preventing duplicates or
+disclosure of child prose while preserving explicit queued-task notifications.
 
 These captures use actual serialized REST payloads from the baseline and candidate
 controllers, rendered in the same synthetic message-list fixture. They show the
@@ -378,9 +379,50 @@ and enrolled; a later natural scheduled sync is not inferred.
 The preceding `5233aa69090d` auth/Inbox activation retains its dated receipts.
 Native companions and private workers remain `f29bb229c5c8`, build `2609000594`;
 this central change does not rebuild or install them. MacBook native credential
-acceptance remains separate. Actual Discord progress delivery is pending at this
-publication checkpoint; its subsequent result and hosted qualification are recorded
-separately against the exact public revision in PR checks and artifacts.
+acceptance remains separate. The subsequent real Discord review on this c42 deployment passed foreground
+checkpoint, repeated yielded progress, requester resumption and final delivery.
+It also identified the two source edge cases corrected by the successor below.
+Public revision `fd3fc75f8580` subsequently passed all five hosted checks,
+including all 35 native commands, 92 lint shards and the full runtime build;
+all six artifact digests and exact source identities were verified. Those results
+retain their c42 scope and do not qualify the successor below. Successful channel
+delivery does not imply that those source defects were absent.
+
+## Progress ownership and scheduled trigger scope
+
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` corrects three cases found during verification of the
+preceding progress deployment:
+
+- Foreground checkpoint eligibility uses the channel's canonical visible-text
+  normalization. A wrapped `NO_REPLY` token cannot seal a preview, discard the
+  next correction, or leave an orphaned message.
+- One shared ownership predicate distinguishes an interactive pending yield from
+  queued or detached native work. Explicit `state_changes` delivery still works
+  when there is no matching pending requester yield; a real yield keeps its sole
+  native progress owner and respects notification overrides.
+- A scheduled script obtains its own registered-tool refresh scope. A scheduler
+  timer cannot accidentally reuse the expired scope of the interactive request
+  that created it. The production parser/evaluator and expired inherited scope
+  are exercised together in the focused regression.
+
+The existing images above remain dated, synthetic demonstrations of normal
+progress and auth presentation. Their normal-message behavior is checked
+separately from the new suppressed-message and scheduled-scope regressions.
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` activated on September 24 at
+`2026-09-24T17:15:56.505319Z` as
+`openclaw-2026.9.5-205ba711eb3d-20260924T1657Z-selfcontained` in one attempt with no rollback.
+All 33 mechanical postflight checks passed. The activation receipt SHA-256 is
+`0609079db56f3ea6bc07000557bc9f892f99a0af713b3fc3529c2c2b3e759101`; the acceptance receipt is
+`8015885b3eb062adf8892891aa950229d41316b414443774c01eae647ec4ef7b`. The dated auth, Journal and native companion
+receipts retain their original scope. Native apps and workers remain at
+`f29bb229c5c8`, build `2609000594`; this central successor does not install or restart
+them. The original 18:17 BST scheduled trigger then completed naturally through
+Sol in 104.677 seconds. Its exact summary reached Discord at 17:18:43.559 UTC,
+with one match among the 12 messages read; error counters returned to zero through
+normal scheduler behavior. Configuration and schedule were unchanged, with no
+forced run, checkpoint mutation, business replay or failure-history reset.
+This verifies the reported trigger incident, not every automation. Hosted
+qualification remains separate and binds the exact public revision.
 
 ## Reproduction and verification boundaries
 
