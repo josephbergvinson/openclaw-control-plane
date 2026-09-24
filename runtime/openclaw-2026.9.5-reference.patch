@@ -8876,10 +8876,10 @@ index 0000000000000000000000000000000000000000..32c05196c402aefd0d2c1f23c4688dee
 +  };
 +};
 diff --git a/extensions/discord/src/draft-stream.ts b/extensions/discord/src/draft-stream.ts
-index 2d574e7a70b4f7136fc58e4edc1f79fa4a25e519..383d30097ebe2d0be4d9960bbf9b07da29f94ca1 100644
+index 2d574e7a70b4f7136fc58e4edc1f79fa4a25e519..54d8530b1c40faf8562d8a0a2bc86130d7b6e3f8 100644
 --- a/extensions/discord/src/draft-stream.ts
 +++ b/extensions/discord/src/draft-stream.ts
-@@ -36,6 +36,8 @@ type DiscordDraftUpdate = { text: string; complete: boolean };
+@@ -36,12 +36,16 @@ type DiscordDraftUpdate = { text: string; complete: boolean };
  
  export function createDiscordDraftStream(params: {
    rest: RequestClient;
@@ -8888,7 +8888,15 @@ index 2d574e7a70b4f7136fc58e4edc1f79fa4a25e519..383d30097ebe2d0be4d9960bbf9b07da
    channelId: string;
    maxChars?: number;
    replyToMessageId?: string | (() => string | undefined);
-@@ -103,6 +105,7 @@ export function createDiscordDraftStream(params: {
+   throttleMs?: number;
+   /** Minimum chars before sending first message (debounce for push notifications) */
+   minInitialChars?: number;
++  /** Called after Discord acknowledges a new message owned by the current generation. */
++  onMessageCreated?: () => void;
+   suppressEmbeds?: boolean;
+   log?: (message: string) => void;
+   warn?: (message: string) => void;
+@@ -103,6 +107,7 @@ export function createDiscordDraftStream(params: {
  
      lastSentText = trimmed;
      try {
@@ -8896,6 +8904,14 @@ index 2d574e7a70b4f7136fc58e4edc1f79fa4a25e519..383d30097ebe2d0be4d9960bbf9b07da
        if (streamMessageId !== undefined) {
          // Edit existing message
          await editChannelMessage(rest, channelId, streamMessageId, {
+@@ -148,6 +153,7 @@ export function createDiscordDraftStream(params: {
+         return false;
+       }
+       streamMessageId = sentMessageId;
++      params.onMessageCreated?.();
+       return true;
+     } catch (err) {
+       if (activeCreateGeneration === generation) {
 diff --git a/extensions/discord/src/monitor/agent-components-context.ts b/extensions/discord/src/monitor/agent-components-context.ts
 index 6f79e2325696eaf09a597f0128e9f8aebb715f78..7ea16506100e27ff97fd753b8b43eda428aaae84 100644
 --- a/extensions/discord/src/monitor/agent-components-context.ts
@@ -8948,6 +8964,296 @@ index 5aeb5a03418aebb9354331e4ead389b4e1397343..26b3bafe398cbef9d4ae6af5fa6f7c5f
            ephemeral: true,
          });
        } catch {}
+diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0218d8932492d4e529ebf0734dede2e1cdc7c86
+--- /dev/null
++++ b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
+@@ -0,0 +1,284 @@
++import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { RequestClient } from "../internal/discord.js";
++import { createDiscordDraftPreviewController } from "./message-handler.draft-preview.js";
++
++function createHarness() {
++  const visible = new Map<string, { channel: string; text: string }>();
++  const requests: Array<{ method: string; channel: string; id: string; text?: string }> = [];
++  let nextId = 0;
++  let beforeEdit: (() => Promise<void>) | undefined;
++  const rest = new RequestClient("test-token", {
++    queueRequests: false,
++    fetch: async (input, init) => {
++      const url = new URL(input instanceof Request ? input.url : input);
++      const parts = url.pathname.split("/");
++      const channel = parts.at(-3) === "channels" ? parts.at(-2)! : parts.at(-3)!;
++      const method = init?.method ?? "GET";
++      const id = method === "POST" ? String(++nextId) : parts.at(-1)!;
++      if (method === "DELETE") {
++        visible.delete(id);
++        requests.push({ method, channel, id });
++        return new Response(null, { status: 204 });
++      }
++      if (typeof init?.body !== "string") {
++        throw new Error("Expected a serialized Discord message");
++      }
++      const body = JSON.parse(init.body) as {
++        content: string;
++        allowed_mentions: { parse: string[] };
++      };
++      expect(body.allowed_mentions).toEqual({ parse: [] });
++      if (method === "PATCH") {
++        await beforeEdit?.();
++      }
++      visible.set(id, { channel, text: body.content });
++      requests.push({ method, channel, id, text: body.content });
++      return Response.json({ id });
++    },
++  });
++  const controller = createDiscordDraftPreviewController({
++    cfg: {},
++    discordConfig: {
++      streaming: {
++        mode: "progress",
++        progress: { label: false, toolProgress: false, commentary: true, narration: true },
++      },
++    },
++    accountId: "default",
++    sourceRepliesAreToolOnly: false,
++    textLimit: 2_000,
++    deliveryRest: rest,
++    deliverChannelId: "source",
++    replyReference: { peek: () => undefined },
++    tableMode: "off",
++    maxLinesPerMessage: undefined,
++    chunkMode: "length",
++    log: vi.fn(),
++  });
++  const preamble = async (itemId: string, progressText: string, phase = "end") => {
++    await controller.pushPreambleItemEvent({ itemId, progressText, phase });
++    await controller.flush();
++  };
++  return {
++    controller,
++    visible,
++    requests,
++    preamble,
++    blockEdit: (fn: () => Promise<void>) => {
++      beforeEdit = fn;
++    },
++  };
++}
++
++describe("Discord foreground progress checkpoints", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++    vi.setSystemTime(new Date("2026-09-24T14:32:00Z"));
++  });
++  afterEach(() => vi.useRealTimers());
++
++  it("creates a new notification from fresh completed progress after three minutes", async () => {
++    const h = createHarness();
++    await h.preamble(
++      "first",
++      "I found the submitted documents; I’m checking the remaining fields.",
++    );
++    await vi.advanceTimersByTimeAsync(60_000);
++    await h.preamble(
++      "second",
++      "The account statements match. I’m checking the company ownership record.",
++    );
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    const retiredText = h.visible.get("1")?.text;
++    await vi.advanceTimersByTimeAsync(120_000);
++    await h.preamble("third", "The ownership record", "update");
++    expect(h.visible.get("1")?.text).toBe(retiredText);
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    await h.preamble(
++      "third",
++      "The ownership record is verified. I’m filling the remaining form fields.",
++    );
++    expect([...h.visible.values()].map((entry) => entry.text)).toEqual([
++      retiredText,
++      "The ownership record is verified. I’m filling the remaining form fields.",
++    ]);
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(2);
++    await h.preamble("first", "A delayed old commentary update.");
++    await h.preamble(
++      "replayed",
++      "The account statements match. I’m checking the company ownership record.",
++    );
++    expect(h.visible.get("2")?.text).not.toContain("delayed");
++    expect(h.visible.get("2")?.text).not.toContain("account statements");
++    h.controller.markFinalReplyStarted();
++    h.controller.markFinalReplyDelivered(false);
++    await h.controller.cleanup();
++    expect([...h.visible.keys()]).toEqual(["1"]);
++  });
++
++  it("does not generate idle notifications or rotate from hidden tool activity", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the original documents.");
++    await vi.advanceTimersByTimeAsync(600_000);
++    await h.controller.pushToolEvent({
++      toolCallId: "private",
++      name: "exec",
++      phase: "start",
++      args: { command: "private command" },
++    });
++    await h.controller.flush();
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    expect([...h.visible.values()][0]?.text).toBe("I’m checking the original documents.");
++    await h.controller.cleanup();
++  });
++
++  it("keeps one streaming item in its original message when completion crosses the interval", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the originals.");
++    await vi.advanceTimersByTimeAsync(179_000);
++    await h.preamble("second", "The original", "update");
++    await vi.advanceTimersByTimeAsync(2_000);
++    await h.preamble("second", "The original statement confirms the date.");
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    await h.controller.cleanup();
++  });
++
++  it("rotates fresh narration without carrying the previous commentary forward", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the submitted form.");
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.controller.pushNarrationProgress(
++      "The supporting records are verified; the revised form is being checked.",
++    );
++    await h.controller.flush();
++    expect(h.visible.get("2")?.text).toBe(
++      "The supporting records are verified; the revised form is being checked.",
++    );
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.controller.pushNarrationProgress(
++      "The supporting records are verified; the revised form is being checked.",
++    );
++    await h.controller.flush();
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(2);
++    await h.controller.cleanup();
++  });
++
++  it("does not create a checkpoint from private tags or silent commentary", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the records.");
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.preamble("private", "<think>Private deliberation</think>");
++    await h.preamble("silent", "NO_REPLY");
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    expect(h.requests.map((r) => r.text).join(" ")).not.toContain("Private deliberation");
++    await h.controller.cleanup();
++  });
++
++  it.each(["final", "queued"] as const)(
++    "cancels an in-flight rotation at the %s boundary",
++    async (boundary) => {
++      const h = createHarness();
++      await h.preamble("first", "I’m checking the records.");
++      const started = createDeferred<void>();
++      const release = createDeferred<void>();
++      h.blockEdit(async () => {
++        started.resolve();
++        await release.promise;
++      });
++      h.controller.draftStream?.update("A prior accepted progress edit.");
++      const flush = h.controller.flush();
++      await started.promise;
++      await vi.advanceTimersByTimeAsync(180_000);
++      const checkpoint = h.controller.pushPreambleItemEvent({
++        itemId: "stale",
++        phase: "end",
++        progressText: "This checkpoint was canceled.",
++      });
++      await Promise.resolve();
++      if (boundary === "final") {
++        h.controller.markFinalReplyStarted();
++        h.controller.markFinalReplyDelivered(false);
++      } else {
++        h.controller.handleQueuedFollowupAdmitted();
++      }
++      release.resolve();
++      await flush;
++      await checkpoint;
++      expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++      if (boundary === "queued") {
++        await h.preamble("next", "I’m working on the new follow-up.");
++        expect(h.visible.get("2")?.text).toBe("I’m working on the new follow-up.");
++      }
++      expect(h.requests.map((r) => r.text).join(" ")).not.toContain("checkpoint was canceled");
++      await h.controller.cleanup();
++    },
++  );
++
++  it("does not retire an unresolved approval card", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the records.");
++    await h.controller.pushApprovalEvent({
++      phase: "requested",
++      approvalId: "approval",
++      title: "Review the requested operation",
++    });
++    await h.controller.flush();
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.preamble("second", "The supporting records are ready.");
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
++    await h.controller.pushApprovalEvent({ phase: "resolved", approvalId: "approval" });
++    await h.controller.flush();
++    await h.preamble("third", "Approval is resolved; I’m finishing the form.");
++    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(2);
++    expect(h.visible.get("1")?.text).not.toContain("Review the requested operation");
++    await h.controller.cleanup();
++  });
++
++  it("keeps an approval arriving while a checkpoint waits for a REST edit", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the records.");
++    const started = createDeferred<void>();
++    const release = createDeferred<void>();
++    h.blockEdit(async () => {
++      started.resolve();
++      await release.promise;
++    });
++    h.controller.draftStream?.update("The supporting records are ready.");
++    const flush = h.controller.flush();
++    await started.promise;
++    await vi.advanceTimersByTimeAsync(180_000);
++    const checkpoint = h.controller.pushPreambleItemEvent({
++      itemId: "next",
++      phase: "end",
++      progressText: "I’m finishing the requested form.",
++    });
++    await Promise.resolve();
++    const approval = h.controller.pushApprovalEvent({
++      phase: "requested",
++      approvalId: "approval",
++      title: "Review the requested operation",
++    });
++    release.resolve();
++    await flush;
++    await checkpoint;
++    await approval;
++    await h.controller.flush();
++    expect(h.visible.get("2")?.text).toContain("I’m finishing the requested form.");
++    expect(h.visible.get("2")?.text).toContain("Review the requested operation");
++    await h.controller.cleanup();
++  });
++
++  it("keeps sealed checkpoints and moves only the active card into an adopted thread", async () => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the records.");
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.preamble("second", "The records are verified; I’m preparing the form.");
++    await h.controller.retarget("thread");
++    expect([...h.visible.values()]).toEqual([
++      { channel: "source", text: "I’m checking the records." },
++      { channel: "thread", text: "The records are verified; I’m preparing the form." },
++    ]);
++    await h.controller.cleanup();
++  });
++});
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts b/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts
 index dc8076bc7eabd2c00919a8b89f2e1efa13f66318..dd7b2c67f83b639b5c2e90cde3044b5d26ae4a05 100644
 --- a/extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts
@@ -8980,10 +9286,18 @@ index dc8076bc7eabd2c00919a8b89f2e1efa13f66318..dd7b2c67f83b639b5c2e90cde3044b5d
        expect(withActivity).toContain("Exec");
        expect(withActivity).not.toContain("private detail");
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.ts b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..ef7a8b98592768163245b35e7bc50aa7ab4eb37c 100644
+index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c08a085006 100644
 --- a/extensions/discord/src/monitor/message-handler.draft-preview.ts
 +++ b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-@@ -40,6 +40,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -19,6 +19,7 @@ import { resolveDiscordDraftStreamingChunking } from "../draft-chunking.js";
+ import { createDiscordDraftStream } from "../draft-stream.js";
+ import type { RequestClient } from "../internal/discord.js";
+ import { resolveDiscordPreviewStreamMode } from "../preview-streaming.js";
++import { createDiscordProgressCheckpoint } from "./message-handler.progress-checkpoint.js";
+ 
+ type DraftReplyReference = {
+   peek: () => string | undefined;
+@@ -40,6 +41,7 @@ export function createDiscordDraftPreviewController(params: {
    maxLinesPerMessage: number | undefined;
    chunkMode: Parameters<typeof chunkDiscordTextWithMode>[1]["chunkMode"];
    log: (message: string) => void;
@@ -8991,7 +9305,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..ef7a8b98592768163245b35e7bc50aa7
  }) {
    const discordStreamMode = resolveDiscordPreviewStreamMode(params.discordConfig);
    // Provider drafts are visible before outbound modifiers run. Keep them off whenever a hook
-@@ -66,6 +67,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -66,10 +68,12 @@ export function createDiscordDraftPreviewController(params: {
    const draftStream = canStreamDraft
      ? createDiscordDraftStream({
          rest: params.deliveryRest,
@@ -8999,7 +9313,12 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..ef7a8b98592768163245b35e7bc50aa7
          channelId: params.deliverChannelId,
          maxChars: draftMaxChars,
          replyToMessageId: () => params.replyReference.peek(),
-@@ -108,8 +110,6 @@ export function createDiscordDraftPreviewController(params: {
+         minInitialChars: discordStreamMode === "progress" ? 0 : 30,
++        onMessageCreated: () => progressCheckpoint.noteMessageCreated(),
+         suppressEmbeds: params.discordConfig?.suppressEmbeds ?? true,
+         throttleMs: 1200,
+         log: params.log,
+@@ -108,11 +112,9 @@ export function createDiscordDraftPreviewController(params: {
      mode: discordStreamMode,
      active: Boolean(draftStream),
      seed: progressSeed,
@@ -9007,7 +9326,159 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..ef7a8b98592768163245b35e7bc50aa7
 -    commentaryLinePrefix: "💬 ",
      commentaryItalics: false,
      update: async (previewText, options) => {
-       if (!draftStream) {
+-      if (!draftStream) {
++      if (!draftStream || progressCheckpoint.rotating) {
+         return false;
+       }
+       lastPartialText = previewText;
+@@ -142,6 +144,36 @@ export function createDiscordDraftPreviewController(params: {
+     draftChunker?.reset();
+   };
+ 
++  const progressCheckpoint = createDiscordProgressCheckpoint({
++    active: Boolean(draftStream) && discordStreamMode === "progress",
++    messageId: () => draftStream?.messageId(),
++    // An unresolved approval must retain its editable card until resolution.
++    canRotate: () =>
++      !progressDraft
++        .getSnapshot()
++        .lines.some((line) => typeof line !== "string" && line.kind === "approval"),
++    flush: async () => {
++      await draftStream?.flush();
++    },
++    seal: async () => {
++      await draftStream?.seal();
++    },
++    rotate: () => draftStream?.forceNewMessage("preserve"),
++    resetContent: () => {
++      progressDraft.reset();
++      resetProgressState();
++    },
++  });
++
++  const publicProgressText = (text?: string) => {
++    const cleaned = stripInlineDirectiveTagsForDelivery(
++      stripReasoningTagsFromText(text ?? "", { mode: "strict", trim: "both" }),
++    )
++      .text.replace(/\s+/g, " ")
++      .trim();
++    return /^NO_REPLY$/i.test(cleaned) || cleaned.startsWith("Reasoning:") ? "" : cleaned;
++  };
++
+   const forceNewMessageIfNeeded = () => {
+     if (shouldSplitPreviewMessages && hasStreamedAssistantText) {
+       params.log("discord: calling forceNewMessage() for draft stream");
+@@ -156,6 +188,7 @@ export function createDiscordDraftPreviewController(params: {
+       progressDraft.beginAssistantMessage();
+     }
+     if (beganNewTurn) {
++      progressCheckpoint.beginTurn();
+       progressDraftCollapsed = false;
+       progressDraftStartedBeforeFinal = false;
+       finalReplyError = undefined;
+@@ -203,11 +236,13 @@ export function createDiscordDraftPreviewController(params: {
+       progressNarratorLifecycle = lifecycle;
+     },
+     markFinalReplyStarted() {
++      progressCheckpoint.cancel();
+       progressDraftStartedBeforeFinal ||= progressDraft.hasStarted;
+       progressDraft.markFinalReplyStarted();
+       progressNarratorLifecycle?.stopTurn();
+     },
+     markFinalReplyDelivered(isError = false) {
++      progressCheckpoint.cancel();
+       finalReplyError = isError;
+       progressDraft.markFinalReplyDelivered();
+     },
+@@ -218,6 +253,7 @@ export function createDiscordDraftPreviewController(params: {
+       await draftStream?.retarget(channelId);
+     },
+     async finalizeProgressDraft() {
++      progressCheckpoint.cancel();
+       if (!draftStream || discordStreamMode !== "progress") {
+         return false;
+       }
+@@ -236,25 +272,53 @@ export function createDiscordDraftPreviewController(params: {
+       return true;
+     },
+     disableBlockStreamingForDraft: draftStream ? true : undefined,
+-    pushToolEvent: progressDraft.pushToolEvent,
+-    pushItemEvent: progressDraft.pushItemEvent,
+-    pushApprovalEvent: progressDraft.pushApprovalEvent.bind(progressDraft),
+-    pushCommandOutputEvent: progressDraft.pushCommandOutputEvent,
+-    pushPatchEvent: progressDraft.pushPatchEvent,
+-    pushPlanProgress: progressDraft.pushPlanProgress.bind(progressDraft),
+-    pushReasoningProgress: progressDraft.pushReasoningProgress.bind(progressDraft),
+-    pushNarrationProgress: progressDraft.pushNarrationProgress.bind(progressDraft),
+-    async pushPreambleItemEvent(payload: { itemId?: string; progressText?: string }) {
+-      const headlineAccepted = await progressDraft.pushPreambleHeadline(payload.progressText, {
+-        itemId: payload.itemId,
+-      });
+-      if (!progressDraft.commentaryProgressEnabled) {
+-        return headlineAccepted;
+-      }
+-      const commentaryAccepted = await progressDraft.pushCommentaryProgress(payload.progressText, {
+-        itemId: payload.itemId,
+-      });
+-      return headlineAccepted || commentaryAccepted;
++    pushToolEvent(...args: Parameters<typeof progressDraft.pushToolEvent>) {
++      return progressCheckpoint.run(() => progressDraft.pushToolEvent(...args));
++    },
++    pushItemEvent(...args: Parameters<typeof progressDraft.pushItemEvent>) {
++      return progressCheckpoint.run(() => progressDraft.pushItemEvent(...args));
++    },
++    pushApprovalEvent(...args: Parameters<typeof progressDraft.pushApprovalEvent>) {
++      return progressCheckpoint.run(() => progressDraft.pushApprovalEvent(...args));
++    },
++    pushCommandOutputEvent(...args: Parameters<typeof progressDraft.pushCommandOutputEvent>) {
++      return progressCheckpoint.run(() => progressDraft.pushCommandOutputEvent(...args));
++    },
++    pushPatchEvent(...args: Parameters<typeof progressDraft.pushPatchEvent>) {
++      return progressCheckpoint.run(() => progressDraft.pushPatchEvent(...args));
++    },
++    pushPlanProgress(...args: Parameters<typeof progressDraft.pushPlanProgress>) {
++      return progressCheckpoint.run(() => progressDraft.pushPlanProgress(...args));
++    },
++    pushReasoningProgress(...args: Parameters<typeof progressDraft.pushReasoningProgress>) {
++      return progressCheckpoint.run(() => progressDraft.pushReasoningProgress(...args));
++    },
++    pushNarrationProgress(text?: string) {
++      const publicText = publicProgressText(text);
++      return progressCheckpoint.publish(
++        { text: publicText, complete: true, source: "narration" },
++        () => progressDraft.pushNarrationProgress(publicText),
++      );
++    },
++    pushPreambleItemEvent(payload: { itemId?: string; progressText?: string; phase?: string }) {
++      const text = publicProgressText(payload.progressText);
++      const complete = payload.phase === undefined || payload.phase === "end";
++      return progressCheckpoint.publish(
++        { text, itemId: payload.itemId, complete, source: "preamble" },
++        async () => {
++          const headlineAccepted = await progressDraft.pushPreambleHeadline(text, {
++            itemId: payload.itemId,
++          });
++          if (!progressDraft.commentaryProgressEnabled) {
++            return headlineAccepted;
++          }
++          const commentaryAccepted = await progressDraft.pushCommentaryProgress(text, {
++            itemId: payload.itemId,
++            complete,
++          });
++          return headlineAccepted || commentaryAccepted;
++        },
++      );
+     },
+     resolvePreviewFinalText(text?: string) {
+       if (typeof text !== "string") {
+@@ -373,6 +437,7 @@ export function createDiscordDraftPreviewController(params: {
+     },
+     async cleanup({ finalDeliveryFailed = false }: { finalDeliveryFailed?: boolean } = {}) {
+       try {
++        progressCheckpoint.cancel();
+         progressDraft.cancel();
+         if (finalReplyError !== false) {
+           await draftStream?.discardPending();
 diff --git a/extensions/discord/src/monitor/message-handler.preflight-context.test.ts b/extensions/discord/src/monitor/message-handler.preflight-context.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2ac9591fb
@@ -9904,6 +10375,159 @@ index 440098527f781b45c1ec478993f939e1427e550d..cd8be06b0586ea94fc094539b4525e76
      const finalReceipt = dispatchResult?.settledReceipt?.counts.final;
      const finalDeliveryFailed =
        (finalReceipt?.failedBeforeSend ?? 0) + (finalReceipt?.failedAfterSend ?? 0) > 0;
+diff --git a/extensions/discord/src/monitor/message-handler.progress-checkpoint.ts b/extensions/discord/src/monitor/message-handler.progress-checkpoint.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4097fe8b571d668dcc343ad9bc65cb293e3e0c8e
+--- /dev/null
++++ b/extensions/discord/src/monitor/message-handler.progress-checkpoint.ts
+@@ -0,0 +1,147 @@
++// A long foreground turn keeps completed public checkpoints as separate Discord messages.
++const CHECKPOINT_INTERVAL_MS = 180_000;
++
++type PublicProgress = {
++  text: string;
++  itemId?: string;
++  complete: boolean;
++  source: "preamble" | "narration";
++};
++
++export function createDiscordProgressCheckpoint(params: {
++  active: boolean;
++  messageId: () => string | undefined;
++  canRotate: () => boolean;
++  flush: () => Promise<void>;
++  seal: () => Promise<void>;
++  rotate: () => void;
++  resetContent: () => void;
++}) {
++  let generation = 0;
++  let closed = false;
++  let rotating = false;
++  let createdAt: number | undefined;
++  let tail: Promise<unknown> = Promise.resolve();
++  const currentItems = new Set<string>();
++  const retiredItems = new Set<string>();
++  const completedTexts = new Set<string>();
++  const heldItems = new Set<string>();
++  let idlessItem = 0;
++  let idlessText = "";
++
++  const itemKey = (progress: PublicProgress) => {
++    if (progress.source === "narration") {
++      return `narration:${progress.text}`;
++    }
++    if (progress.itemId) {
++      return `preamble:${progress.itemId}`;
++    }
++    if (
++      progress.text &&
++      (!idlessText ||
++        !(progress.text.startsWith(idlessText) || idlessText.startsWith(progress.text)))
++    ) {
++      idlessItem += 1;
++    }
++    idlessText = progress.text;
++    return `preamble:idless:${idlessItem}`;
++  };
++
++  const enqueue = (publish: (isCurrent: () => boolean) => Promise<boolean>) => {
++    const owner = generation;
++    const isCurrent = () => !closed && owner === generation;
++    const run = tail.catch(() => {}).then(() => (isCurrent() ? publish(isCurrent) : false));
++    tail = run;
++    return run;
++  };
++
++  return {
++    run(publish: () => Promise<boolean>) {
++      return params.active ? enqueue(() => publish()) : publish();
++    },
++    get rotating() {
++      return rotating;
++    },
++    noteMessageCreated() {
++      createdAt = Date.now();
++    },
++    cancel() {
++      closed = true;
++      generation += 1;
++    },
++    beginTurn() {
++      closed = false;
++      generation += 1;
++      createdAt = undefined;
++      currentItems.clear();
++      retiredItems.clear();
++      completedTexts.clear();
++      heldItems.clear();
++      idlessItem = 0;
++      idlessText = "";
++    },
++    publish(progress: PublicProgress, publish: () => Promise<boolean>): Promise<boolean> {
++      if (!params.active) {
++        return publish();
++      }
++      return enqueue(async (isCurrent) => {
++        const key = itemKey(progress);
++        // A late update/retraction cannot replay an item sealed into an earlier checkpoint.
++        if (retiredItems.has(key)) {
++          return false;
++        }
++        if (progress.text && completedTexts.has(progress.text) && !currentItems.has(key)) {
++          return false;
++        }
++        const fresh = Boolean(progress.text) && !completedTexts.has(progress.text);
++        const due =
++          createdAt !== undefined &&
++          Date.now() - createdAt >= CHECKPOINT_INTERVAL_MS &&
++          Boolean(params.messageId()) &&
++          params.canRotate();
++        // Hold a new streaming item until its public completion boundary. Its prefix must not
++        // first appear in the retiring card and then be repeated in the new notification.
++        if (due && fresh && !currentItems.has(key) && !progress.complete) {
++          heldItems.add(key);
++        }
++        if (heldItems.has(key) && !progress.complete && progress.text) {
++          return false;
++        }
++        heldItems.delete(key);
++        if (due && fresh && !currentItems.has(key) && progress.complete) {
++          rotating = true;
++          try {
++            await params.flush();
++            if (!isCurrent()) {
++              return false;
++            }
++            await params.seal();
++            if (!isCurrent()) {
++              return false;
++            }
++            params.rotate();
++            params.resetContent();
++            for (const item of currentItems) {
++              retiredItems.add(item);
++            }
++            currentItems.clear();
++            createdAt = undefined;
++          } finally {
++            rotating = false;
++          }
++        }
++        if (!isCurrent()) {
++          return false;
++        }
++        const visible = await publish();
++        if (isCurrent() && progress.text) {
++          currentItems.add(key);
++          if (progress.complete) {
++            completedTexts.add(progress.text);
++          }
++        }
++        return visible;
++      });
++    },
++  };
++}
 diff --git a/extensions/discord/src/monitor/message-handler.retry.ts b/extensions/discord/src/monitor/message-handler.retry.ts
 index f7e5409373df9fafc181e475310d5ff7435076a8..4c9907c0a1bb55bb00af8862ac83917897e47548 100644
 --- a/extensions/discord/src/monitor/message-handler.retry.ts
@@ -37201,10 +37825,19 @@ index 1dca5ab5e79ec04e208fa2ca392650cfd11705df..8e3472f14079bbfba126fbf357bf83f2
        // remaps or terminalizes them. Generic resume would wait on an obsolete run.
        if (entry.execution.restartRecovery || entry.killIntent || entry.killReconciliation) {
 diff --git a/src/agents/subagents/registry/subagent-registry-run-launch.ts b/src/agents/subagents/registry/subagent-registry-run-launch.ts
-index 0876bca0903ec2bd835dabc568d5a691914c52b5..08b51d60eee3f9fbf92799e0f6f033ed4e7858bf 100644
+index 0876bca0903ec2bd835dabc568d5a691914c52b5..d85aee92454cba9410eb10f256b09620f63895cc 100644
 --- a/src/agents/subagents/registry/subagent-registry-run-launch.ts
 +++ b/src/agents/subagents/registry/subagent-registry-run-launch.ts
-@@ -11,9 +11,13 @@ import {
+@@ -4,17 +4,24 @@ import {
+   getAgentEventLifecycleGeneration,
+   isAgentEventLifecycleGenerationCurrent,
+ } from "../../../infra/agent-events.js";
++import { getAgentRunContext } from "../../../infra/agent-run-registry.js";
+ import { createSubsystemLogger } from "../../../logging/subsystem.js";
+ import { bindGatewayContextResolver } from "../../../plugins/runtime/gateway-request-scope.js";
++import { parseSessionDeliveryRoute } from "../../../sessions/session-key-utils.js";
+ import { emitSessionLifecycleEvent } from "../../../sessions/session-lifecycle-events.js";
+ import {
    createQueuedTaskRun,
    createRunningTaskRun,
    finalizeTaskRunByRunId,
@@ -37217,9 +37850,42 @@ index 0876bca0903ec2bd835dabc568d5a691914c52b5..08b51d60eee3f9fbf92799e0f6f033ed
 +  readTaskBackingInstance,
 +} from "../../../tasks/task-backing-authority.js";
  import { normalizeDeliveryContext } from "../../../utils/delivery-context.shared.js";
++import { isDeliverableMessageChannel } from "../../../utils/message-channel-normalize.js";
  import { resolveSubagentRequesterAgentId } from "../../subagent-requester-owner.js";
  import { updateSwarmCollectorCompletion } from "../swarm/swarm-collector.js";
-@@ -166,13 +170,37 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
+ import { bindSwarmRunReservation } from "../swarm/swarm-scheduler.js";
+@@ -136,6 +143,22 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
+     }
+     if (registerParams.taskRowOwnership !== "gateway_best_effort") {
+       try {
++        const requesterRun = registerParams.requesterTurnRunId
++          ? getAgentRunContext(registerParams.requesterTurnRunId)
++          : undefined;
++        const requesterRoute = parseSessionDeliveryRoute(requesterSessionKey);
++        // Only ordinary interactive channel work inherits visible progress. Cron,
++        // heartbeat, private and nested requesters retain their notification policy.
++        const reportProgress =
++          registerParams.expectsCompletionMessage === true &&
++          registerParams.collect !== true &&
++          registerParams.completionTarget !== "parent" &&
++          requesterRun?.sessionKey === requesterSessionKey &&
++          requesterRun.isHeartbeat === false &&
++          !requesterRun.cronRunsByJobId?.size &&
++          requesterRoute?.channel === requesterOrigin?.channel &&
++          Boolean(requesterOrigin?.to) &&
++          isDeliverableMessageChannel(requesterRoute?.channel ?? "");
+         const taskParams = {
+           runtime: "subagent",
+           sourceId: runId,
+@@ -152,6 +175,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
+           requesterAgentId: resolveSubagentRequesterAgentId(cfg, registerParams),
+           deliveryStatus:
+             registerParams.expectsCompletionMessage === false ? "not_applicable" : "pending",
++          ...(reportProgress ? { notifyPolicy: "state_changes" as const } : {}),
+           detail: createSubagentTaskBackingDetail(generation),
+         } as const;
+         const task = queued
+@@ -166,13 +190,37 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
              throw new Error(`detached task runtime created no task row for run ${runId}`);
            }
            log.warn("Failed to persist background task for subagent run", { runId });
@@ -64033,11 +64699,245 @@ index 76e8aa9c8baec947e8a7eaca14da2d6693c2d423..971c89af9b7c08b3923231a0f967e829
      toolOverrides: normalizeSessionToolOverrides(entry?.toolOverrides),
    });
  }
+diff --git a/src/gateway/server-methods/models-auth-status-rollup.test.ts b/src/gateway/server-methods/models-auth-status-rollup.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..23cc1d82addbb8e5e92140223a3e8ad6e5f6c438
+--- /dev/null
++++ b/src/gateway/server-methods/models-auth-status-rollup.test.ts
+@@ -0,0 +1,212 @@
++import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
++import { describe, expect, it } from "vitest";
++import { aggregateRefreshableAuthStatus } from "./models-auth-status.js";
++
++// Direct unit tests for aggregateRefreshableAuthStatus — this helper was introduced to
++// prevent a specific regression (mixed OAuth+token rollup mis-reporting
++// providers). Pinning its behavior here so refactors can't silently re-break
++// the same bug.
++describe("aggregateRefreshableAuthStatus", () => {
++  const NOW = 1_000_000;
++  const expiring = NOW + 60_000; // 1 min in future
++
++  function oauth(status: "ok" | "expiring" | "expired" | "missing", expiresAt?: number) {
++    return {
++      profileId: `p-${status}`,
++      provider: "openai",
++      type: "oauth" as const,
++      status,
++      expiresAt,
++      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
++      source: "store" as const,
++      label: `p-${status}`,
++    };
++  }
++
++  function token(status: "ok" | "expiring" | "expired" | "missing" | "static", expiresAt?: number) {
++    return {
++      profileId: `t-${status}`,
++      provider: "openai",
++      type: "token" as const,
++      status,
++      expiresAt,
++      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
++      source: "store" as const,
++      label: `t-${status}`,
++    };
++  }
++
++  it("ignores token profiles — healthy OAuth + expired token stays ok", () => {
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "expired",
++        profiles: [oauth("ok", expiring + 10_000_000), token("expired")],
++      },
++      NOW,
++    );
++    expect(result.status).toBe("ok");
++  });
++
++  it("uses effective OAuth profiles while keeping stale inventory visible", () => {
++    const healthy = oauth("ok", expiring + 10_000_000);
++    const stale = oauth("expired", NOW - 1);
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "ok",
++        effectiveProfiles: [healthy],
++        profiles: [stale, healthy],
++      },
++      NOW,
++    );
++    expect(result.status).toBe("ok");
++    expect(result.expiresAt).toBe(healthy.expiresAt);
++  });
++
++  it("falls back to prov.status when no OAuth profiles exist", () => {
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "anthropic",
++        status: "static",
++        profiles: [
++          {
++            profileId: "anthropic:default",
++            provider: "anthropic",
++            type: "api_key",
++            status: "static",
++            source: "store",
++            label: "anthropic:default",
++          },
++        ],
++      },
++      NOW,
++    );
++    expect(result.status).toBe("static");
++  });
++
++  it("keeps missing distinct from expired", () => {
++    const expiredResult = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "expired",
++        profiles: [oauth("expired", NOW - 1)],
++      },
++      NOW,
++    );
++    expect(expiredResult.status).toBe("expired");
++
++    const missingResult = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "missing",
++        profiles: [oauth("missing")],
++      },
++      NOW,
++    );
++    expect(missingResult.status).toBe("missing");
++  });
++
++  it("reports available pool health without hiding raw failed profiles", () => {
++    // A healthy account keeps the pool available.
++    const res1 = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "expiring",
++        profiles: [oauth("expiring", expiring), oauth("ok", expiring + 10_000_000)],
++      },
++      NOW,
++    );
++    expect(res1.status).toBe("ok");
++
++    // An expired sibling does not remove the usable expiring account.
++    const res2 = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "expired",
++        profiles: [oauth("expired", NOW - 1), oauth("expiring", expiring)],
++      },
++      NOW,
++    );
++    expect(res2.status).toBe("expiring");
++  });
++
++  it("accepts renewable access expiry without claiming that renewal succeeded", () => {
++    const expired = { ...oauth("expired", NOW - 1), refreshable: true, requiresUserAction: false };
++    const result = aggregateRefreshableAuthStatus(
++      { provider: "openai", status: "expired", profiles: [expired] },
++      NOW,
++    );
++    expect(result).toMatchObject({ status: "ok" });
++    expect(result.expiresAt).toBeUndefined();
++    expect(expired.status).toBe("expired");
++  });
++
++  it("picks the earliest expiresAt across OAuth profiles", () => {
++    const earlier = NOW + 1_000;
++    const later = NOW + 99_999;
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai",
++        status: "ok",
++        profiles: [oauth("ok", later), oauth("ok", earlier)],
++      },
++      NOW,
++    );
++    expect(result.expiresAt).toBe(earlier);
++    expect(result.remainingMs).toBe(1_000);
++  });
++
++  it.each([
++    ["ok", undefined],
++    ["expiring", expiring],
++    ["expired", NOW - 1],
++    ["missing", undefined],
++    ["static", undefined],
++  ] as const)(
++    "uses token status %s when no effective OAuth profile exists",
++    (status, expiresAt) => {
++      const result = aggregateRefreshableAuthStatus(
++        {
++          provider: "claude-cli",
++          status,
++          profiles: [token(status, expiresAt)],
++        },
++        NOW,
++        true,
++      );
++      expect(result).toEqual({
++        status,
++        ...(expiresAt === undefined ? {} : { expiresAt, remainingMs: expiresAt - NOW }),
++      });
++    },
++  );
++
++  it("keeps an empty effective profile selection missing", () => {
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "claude-cli",
++        status: "missing",
++        effectiveProfiles: [],
++        profiles: [token("ok")],
++      },
++      NOW,
++      true,
++    );
++    expect(result).toEqual({ status: "missing" });
++  });
++
++  it("ignores out-of-range OAuth expiry timestamps", () => {
++    const valid = NOW + 5_000;
++    const result = aggregateRefreshableAuthStatus(
++      {
++        provider: "openai-codex",
++        status: "ok",
++        profiles: [oauth("ok", MAX_DATE_TIMESTAMP_MS + 1), oauth("ok", valid)],
++      },
++      NOW,
++    );
++    expect(result.expiresAt).toBe(valid);
++    expect(result.remainingMs).toBe(5_000);
++  });
++});
 diff --git a/src/gateway/server-methods/models-auth-status.test.ts b/src/gateway/server-methods/models-auth-status.test.ts
-index 7e6d1654d18b871a1b0473aa18564fd3b9103933..3ce940d36992e0ad9e05fbfed894cd0c14aeebd6 100644
+index 7e6d1654d18b871a1b0473aa18564fd3b9103933..4c0d8827630cf35e6fa341a2102455c44b72d6d2 100644
 --- a/src/gateway/server-methods/models-auth-status.test.ts
 +++ b/src/gateway/server-methods/models-auth-status.test.ts
-@@ -636,6 +636,43 @@ describe("models.authStatus", () => {
+@@ -1,7 +1,6 @@
+ import { expectDefined } from "@openclaw/normalization-core";
+ // Model auth status tests cover profile health summaries, provider usage,
+ // credential cleanup, secret refresh, and provider run abort side effects.
+-import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
+ import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { validateModelsAuthSetApiKeyResult } from "../../../packages/gateway-protocol/src/index.js";
+@@ -141,7 +140,6 @@ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { modelsAuthOrderHandlers } from "./models-auth-order.js";
+ import { clearModelAuthStatusUsageCache } from "./models-auth-status-usage-cache.js";
+ import {
+-  aggregateRefreshableAuthStatus,
+   modelsAuthStatusHandlers,
+   type ModelAuthLogoutResult,
+   type ModelAuthStatusResult,
+@@ -636,6 +634,43 @@ describe("models.authStatus", () => {
      expect(result.providers[0]?.profiles[0]?.logoutSupported).toBe(true);
    });
  
@@ -64081,7 +64981,7 @@ index 7e6d1654d18b871a1b0473aa18564fd3b9103933..3ce940d36992e0ad9e05fbfed894cd0c
    it.each([false, true])(
      "projects explicit priority with local reset ownership %s",
      async (localOrderStored) => {
-@@ -897,59 +934,67 @@ describe("models.authStatus", () => {
+@@ -897,59 +932,67 @@ describe("models.authStatus", () => {
      expect(provider?.profiles[0]?.logoutSupported).toBeUndefined();
    });
  
@@ -64199,49 +65099,208 @@ index 7e6d1654d18b871a1b0473aa18564fd3b9103933..3ce940d36992e0ad9e05fbfed894cd0c
  
    it("keeps an unrelated effective token expiry visible beside owned CLI OAuth", async () => {
      const profileId = "anthropic:claude-cli";
-@@ -3011,8 +3056,8 @@ describe("aggregateRefreshableAuthStatus", () => {
-     expect(missingResult.status).toBe("missing");
+@@ -2906,201 +2949,4 @@ describe("models.authLogout", () => {
    });
+ });
  
+-// Direct unit tests for aggregateRefreshableAuthStatus — this helper was introduced to
+-// prevent a specific regression (mixed OAuth+token rollup mis-reporting
+-// providers). Pinning its behavior here so refactors can't silently re-break
+-// the same bug.
+-describe("aggregateRefreshableAuthStatus", () => {
+-  const NOW = 1_000_000;
+-  const expiring = NOW + 60_000; // 1 min in future
+-
+-  function oauth(status: "ok" | "expiring" | "expired" | "missing", expiresAt?: number) {
+-    return {
+-      profileId: `p-${status}`,
+-      provider: "openai",
+-      type: "oauth" as const,
+-      status,
+-      expiresAt,
+-      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
+-      source: "store" as const,
+-      label: `p-${status}`,
+-    };
+-  }
+-
+-  function token(status: "ok" | "expiring" | "expired" | "missing" | "static", expiresAt?: number) {
+-    return {
+-      profileId: `t-${status}`,
+-      provider: "openai",
+-      type: "token" as const,
+-      status,
+-      expiresAt,
+-      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
+-      source: "store" as const,
+-      label: `t-${status}`,
+-    };
+-  }
+-
+-  it("ignores token profiles — healthy OAuth + expired token stays ok", () => {
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "expired",
+-        profiles: [oauth("ok", expiring + 10_000_000), token("expired")],
+-      },
+-      NOW,
+-    );
+-    expect(result.status).toBe("ok");
+-  });
+-
+-  it("uses effective OAuth profiles while keeping stale inventory visible", () => {
+-    const healthy = oauth("ok", expiring + 10_000_000);
+-    const stale = oauth("expired", NOW - 1);
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "ok",
+-        effectiveProfiles: [healthy],
+-        profiles: [stale, healthy],
+-      },
+-      NOW,
+-    );
+-    expect(result.status).toBe("ok");
+-    expect(result.expiresAt).toBe(healthy.expiresAt);
+-  });
+-
+-  it("falls back to prov.status when no OAuth profiles exist", () => {
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "anthropic",
+-        status: "static",
+-        profiles: [
+-          {
+-            profileId: "anthropic:default",
+-            provider: "anthropic",
+-            type: "api_key",
+-            status: "static",
+-            source: "store",
+-            label: "anthropic:default",
+-          },
+-        ],
+-      },
+-      NOW,
+-    );
+-    expect(result.status).toBe("static");
+-  });
+-
+-  it("keeps missing distinct from expired", () => {
+-    const expiredResult = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "expired",
+-        profiles: [oauth("expired", NOW - 1)],
+-      },
+-      NOW,
+-    );
+-    expect(expiredResult.status).toBe("expired");
+-
+-    const missingResult = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "missing",
+-        profiles: [oauth("missing")],
+-      },
+-      NOW,
+-    );
+-    expect(missingResult.status).toBe("missing");
+-  });
+-
 -  it("precedence: expired/missing > expiring > ok > static", () => {
 -    // expiring + ok → expiring (expired-marker absent)
-+  it("reports available pool health without hiding raw failed profiles", () => {
-+    // A healthy account keeps the pool available.
-     const res1 = aggregateRefreshableAuthStatus(
-       {
-         provider: "openai",
-@@ -3021,9 +3066,9 @@ describe("aggregateRefreshableAuthStatus", () => {
-       },
-       NOW,
-     );
+-    const res1 = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "expiring",
+-        profiles: [oauth("expiring", expiring), oauth("ok", expiring + 10_000_000)],
+-      },
+-      NOW,
+-    );
 -    expect(res1.status).toBe("expiring");
-+    expect(res1.status).toBe("ok");
- 
+-
 -    // expired beats expiring
-+    // An expired sibling does not remove the usable expiring account.
-     const res2 = aggregateRefreshableAuthStatus(
-       {
-         provider: "openai",
-@@ -3032,7 +3077,18 @@ describe("aggregateRefreshableAuthStatus", () => {
-       },
-       NOW,
-     );
+-    const res2 = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "expired",
+-        profiles: [oauth("expired", NOW - 1), oauth("expiring", expiring)],
+-      },
+-      NOW,
+-    );
 -    expect(res2.status).toBe("expired");
-+    expect(res2.status).toBe("expiring");
-+  });
-+
-+  it("accepts renewable access expiry without claiming that renewal succeeded", () => {
-+    const expired = { ...oauth("expired", NOW - 1), refreshable: true, requiresUserAction: false };
-+    const result = aggregateRefreshableAuthStatus(
-+      { provider: "openai", status: "expired", profiles: [expired] },
-+      NOW,
-+    );
-+    expect(result).toMatchObject({ status: "ok" });
-+    expect(result.expiresAt).toBeUndefined();
-+    expect(expired.status).toBe("expired");
-   });
- 
-   it("picks the earliest expiresAt across OAuth profiles", () => {
+-  });
+-
+-  it("picks the earliest expiresAt across OAuth profiles", () => {
+-    const earlier = NOW + 1_000;
+-    const later = NOW + 99_999;
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai",
+-        status: "ok",
+-        profiles: [oauth("ok", later), oauth("ok", earlier)],
+-      },
+-      NOW,
+-    );
+-    expect(result.expiresAt).toBe(earlier);
+-    expect(result.remainingMs).toBe(1_000);
+-  });
+-
+-  it.each([
+-    ["ok", undefined],
+-    ["expiring", expiring],
+-    ["expired", NOW - 1],
+-    ["missing", undefined],
+-    ["static", undefined],
+-  ] as const)(
+-    "uses token status %s when no effective OAuth profile exists",
+-    (status, expiresAt) => {
+-      const result = aggregateRefreshableAuthStatus(
+-        {
+-          provider: "claude-cli",
+-          status,
+-          profiles: [token(status, expiresAt)],
+-        },
+-        NOW,
+-        true,
+-      );
+-      expect(result).toEqual({
+-        status,
+-        ...(expiresAt === undefined ? {} : { expiresAt, remainingMs: expiresAt - NOW }),
+-      });
+-    },
+-  );
+-
+-  it("keeps an empty effective profile selection missing", () => {
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "claude-cli",
+-        status: "missing",
+-        effectiveProfiles: [],
+-        profiles: [token("ok")],
+-      },
+-      NOW,
+-      true,
+-    );
+-    expect(result).toEqual({ status: "missing" });
+-  });
+-
+-  it("ignores out-of-range OAuth expiry timestamps", () => {
+-    const valid = NOW + 5_000;
+-    const result = aggregateRefreshableAuthStatus(
+-      {
+-        provider: "openai-codex",
+-        status: "ok",
+-        profiles: [oauth("ok", MAX_DATE_TIMESTAMP_MS + 1), oauth("ok", valid)],
+-      },
+-      NOW,
+-    );
+-    expect(result.expiresAt).toBe(valid);
+-    expect(result.remainingMs).toBe(5_000);
+-  });
+-});
+ /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 diff --git a/src/gateway/server-methods/models-auth-status.ts b/src/gateway/server-methods/models-auth-status.ts
 index 99dd548a44a8b5b7bd470d9c8efaf67e81cab8ca..99dc3318ddfc15c6fa5ff1ba85c9ff8d9ffb42df 100644
 --- a/src/gateway/server-methods/models-auth-status.ts
@@ -72609,6 +73668,392 @@ index 304942625e6f6a8c30968f4d2cf3b9699e508ff6..a5b4c90e43ea5355283dc10da457ce8c
  } from "./task-registry.js";
  export type { TaskRecord } from "./task-registry.types.js";
 +export { setTaskRunDeliveryStatusById } from "./task-registry-record-api.js";
+diff --git a/src/tasks/task-registry-delivery.ts b/src/tasks/task-registry-delivery.ts
+index 8184cac14f549eff20cbabb4ee245ade94640542..0fc22357fbbd1c24c1654987fe528dd1ce514991 100644
+--- a/src/tasks/task-registry-delivery.ts
++++ b/src/tasks/task-registry-delivery.ts
+@@ -569,6 +569,14 @@ function prepareTaskStateChangeDelivery(
+   if (!current || !shouldAutoDeliverTaskStateChange(current)) {
+     return { result: current ? cloneTaskRecord(current) : null };
+   }
++  if (
++    current.runtime === "subagent" &&
++    readTaskBackingInstance(current.detail)?.runtime === "subagent"
++  ) {
++    // Native subagents have one factual, coalesced yielded-progress owner.
++    // Generic state changes must not duplicate it or publish private summaries.
++    return { result: cloneTaskRecord(current) };
++  }
+   const deliveryState = getTaskDeliveryState(taskId);
+   if (!latestEvent || (deliveryState?.lastNotifiedEventAt ?? 0) >= latestEvent.at) {
+     return { result: cloneTaskRecord(current) };
+diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867c4545283 100644
+--- a/src/tasks/task-registry-progress.test.ts
++++ b/src/tasks/task-registry-progress.test.ts
+@@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../test/helpers/promise.js";
+ import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
+ import { settleRequesterTurnAfterSessionSpawns } from "../agents/subagents/registry/subagent-registry-requester-yield.js";
+-import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
++import { SubagentLaunchManager } from "../agents/subagents/registry/subagent-registry-run-launch.js";
++import type {
++  RegisterSubagentRunParams,
++  SubagentRunRecord,
++} from "../agents/subagents/registry/subagent-registry.types.js";
+ import { emitAgentEvent, resetAgentEventsForTest } from "../infra/agent-events.js";
+-import { registerAgentRunContext } from "../infra/agent-run-registry.js";
++import { clearAgentRunContext, registerAgentRunContext } from "../infra/agent-run-registry.js";
+ import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
+ import {
+   markGatewayRestartDraining,
+@@ -14,6 +18,7 @@ import {
+   createInMemoryTaskFlowRegistryStore,
+   createInMemoryTaskRegistryStore,
+ } from "../test-utils/task-registry-store.js";
++import { findDetachedTaskRun } from "./detached-task-runtime.js";
+ import { createSubagentTaskBackingDetail } from "./task-backing-authority.js";
+ import * as deliveryRuntime from "./task-registry-runtime-loaders.js";
+ import { resetTaskRegistryListenerState } from "./task-registry-state.js";
+@@ -27,6 +32,7 @@ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
+ import type { TaskNotifyPolicy } from "./task-registry.types.js";
+ import {
+   configureTaskFlowRegistryRuntime,
++  maybeDeliverTaskStateChangeUpdate,
+   resetTaskFlowRegistryForTests,
+   resetTaskRegistryDeliveryRuntimeForTests,
+   resetTaskRegistryForTests,
+@@ -36,8 +42,11 @@ import {
+ vi.mock("../utils/message-channel.js", () => ({
+   isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
+ }));
++vi.mock("../utils/message-channel-normalize.js", () => ({
++  isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
++}));
+ 
+-const PARENT = "agent:main:parent";
++const PARENT = "agent:main:notifychat:channel:requester";
+ const origin = {
+   channel: "notifychat",
+   to: "synthetic-recipient",
+@@ -46,6 +55,60 @@ const origin = {
+ };
+ const sendMessage = vi.fn<deliveryRuntime.TaskRegistryDeliveryRuntime["sendMessage"]>();
+ 
++function registerChild(overrides: Partial<RegisterSubagentRunParams> = {}) {
++  const manager = new SubagentLaunchManager({
++    runs: subagentRuns,
++    getRunsForChildSession: (key) =>
++      [...subagentRuns.values()].filter((entry) => entry.childSessionKey === key),
++    resumedRuns: new Set(),
++    persist: vi.fn(),
++    persistOrThrow: vi.fn(),
++    callGateway: vi.fn(),
++    getRuntimeConfig: () => ({}),
++    ensureListener: vi.fn(),
++    startSweeper: vi.fn(),
++    stopSweeper: vi.fn(),
++    resumeSubagentRun: vi.fn(),
++    clearPendingLifecycleError: vi.fn(),
++    clearPendingLifecycleTimeout: vi.fn(),
++    resolveSubagentWaitTimeoutMs: () => 1_000,
++    scheduleSweep: vi.fn(),
++    resolveSubagentSessionCompletion: () => null,
++    resolveSubagentSessionStartedAt: () => undefined,
++    notifyContextEngineSubagentEnded: async () => {},
++    completeCleanupBookkeeping: vi.fn(),
++    completeSubagentRun: async () => {},
++    resolveSubagentTask: () => ({ lookup: "unavailable" }),
++  });
++  vi.spyOn(manager, "waitForSubagentCompletion").mockResolvedValue();
++  const params: RegisterSubagentRunParams = {
++    runId: "ordinary-child",
++    childSessionKey: "agent:main:subagent:ordinary-child",
++    requesterSessionKey: PARENT,
++    requesterAgentId: "main",
++    requesterDisplayKey: PARENT,
++    requesterTurnRunId: "parent-turn",
++    requesterOrigin: origin,
++    task: "Private child assignment",
++    label: "Prepare the document",
++    cleanup: "keep",
++    expectsCompletionMessage: true,
++    taskRowOwnership: "required",
++    ...overrides,
++  };
++  manager.registerSubagentRun(params);
++  const entry = subagentRuns.get(params.runId)!;
++  const task = findDetachedTaskRun({
++    runtime: "subagent",
++    runId: params.runId,
++    sessionKey: params.childSessionKey,
++    createdAtOrAfter: Date.now(),
++  }).task;
++  expect(task).toBeDefined();
++  entry.requesterTurnYielded = true;
++  return { entry, task: task! };
++}
++
+ function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
+   const entry: SubagentRunRecord = {
+     runId: `run-${name}`,
+@@ -156,6 +219,90 @@ afterEach(() => {
+ });
+ 
+ describe("yielded subagent progress delivery", () => {
++  it("delivers progress from ordinary registration and yield without an explicit notification opt-in", async () => {
++    registerAgentRunContext("parent-turn", {
++      sessionKey: PARENT,
++      isHeartbeat: false,
++      projectSessionActive: true,
++    });
++    const item = registerChild();
++    expect(item.task.notifyPolicy).toBe("state_changes");
++    await maybeDeliverTaskStateChangeUpdate(item.task.taskId, { kind: "running", at: Date.now() });
++    await vi.advanceTimersByTimeAsync(30_000);
++    expect(sendMessage).not.toHaveBeenCalled();
++    tool(item.entry);
++    yieldParent();
++    clearAgentRunContext("parent-turn");
++    await maybeDeliverTaskStateChangeUpdate(item.task.taskId, { kind: "running", at: Date.now() });
++    await maybeDeliverTaskStateChangeUpdate(item.task.taskId, {
++      kind: "progress",
++      at: Date.now(),
++      summary: "private-child-prose",
++    });
++    expect(sendMessage).not.toHaveBeenCalled();
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    expect(sendMessage.mock.calls[0]![0]).toMatchObject({
++      ...origin,
++      content: "Background work is still in progress:\n- Prepare the document: still working.",
++    });
++    expect(sendMessage.mock.calls[0]![0].content).not.toMatch(/read|call|ordinary-child|private/i);
++    expect(getTaskById(item.task.taskId)?.deliveryStatus).toBe("pending");
++  });
++
++  it.each([
++    { name: "cron", requesterSessionKey: "agent:main:cron:job:run:once" },
++    { name: "nested", requesterSessionKey: "agent:main:subagent:parent" },
++    { name: "internal", requesterSessionKey: "agent:main:main" },
++    { name: "heartbeat", isHeartbeat: true },
++    { name: "cron-owned channel", cronOwned: true },
++    { name: "private completion", completionTarget: "parent" as const },
++    { name: "collector", collect: true },
++    { name: "fire and forget", expectsCompletionMessage: false },
++    { name: "missing origin", requesterOrigin: undefined },
++  ])("does not enable external progress for $name", async (scenario) => {
++    const { name: _name, isHeartbeat, cronOwned, ...overrides } = scenario;
++    registerAgentRunContext("parent-turn", {
++      sessionKey: scenario.requesterSessionKey ?? PARENT,
++      isHeartbeat: isHeartbeat ?? false,
++      ...(cronOwned ? { cronRunsByJobId: new Map([["job", { pacingEnabled: false }]]) } : {}),
++    });
++    const item = registerChild(overrides);
++    expect(item.task.notifyPolicy).not.toBe("state_changes");
++    tool(item.entry);
++    clearAgentRunContext("parent-turn");
++    await vi.advanceTimersByTimeAsync(195_000);
++    expect(sendMessage).not.toHaveBeenCalled();
++  });
++
++  it.each(["done_only", "silent"] as const)(
++    "preserves an explicit %s override on an ordinary spawned task",
++    async (notifyPolicy) => {
++      registerAgentRunContext("parent-turn", { sessionKey: PARENT, isHeartbeat: false });
++      const item = registerChild();
++      updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy });
++      yieldParent();
++      clearAgentRunContext("parent-turn");
++      tool(item.entry);
++      await vi.advanceTimersByTimeAsync(195_000);
++      expect(sendMessage).not.toHaveBeenCalled();
++    },
++  );
++
++  it.each(["done_only", "silent"] as const)(
++    "retains the existing %s override when unsupported duplicate registration is rejected",
++    async (notifyPolicy) => {
++      registerAgentRunContext("parent-turn", { sessionKey: PARENT, isHeartbeat: false });
++      const item = registerChild();
++      updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy });
++      expect(() => registerChild()).toThrow("did not establish native task ownership");
++      expect(getTaskById(item.task.taskId)?.notifyPolicy).toBe(notifyPolicy);
++      clearAgentRunContext("parent-turn");
++      await vi.advanceTimersByTimeAsync(195_000);
++      expect(sendMessage).not.toHaveBeenCalled();
++    },
++  );
++
+   it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
+     const first = child("First");
+     vi.setSystemTime(Date.now() + 1);
+@@ -184,7 +331,7 @@ describe("yielded subagent progress delivery", () => {
+       mirror: { sessionKey: PARENT, agentId: "main" },
+     });
+     expect(message.content).toBe(
+-      "Background work is still in progress:\n- First: running read; 1 tool call started.\n- Second: running read; 40 tool calls started.",
++      "Background work is still in progress:\n- First: still working.\n- Second: still working.",
+     );
+     expect(message.content).not.toMatch(/Quiet|private-/);
+     expect(getTaskById(first.task.taskId)).toMatchObject({
+@@ -298,10 +445,47 @@ describe("yielded subagent progress delivery", () => {
+     expect(sendMessage.mock.calls[0]![0].content).toContain(
+       "More task activity is available in Tasks.",
+     );
++    await vi.advanceTimersByTimeAsync(179_999);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    await vi.advanceTimersByTimeAsync(1);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++    expect(sendMessage.mock.calls[1]![0].content).toContain("Worker 1: still working.");
++  });
++
++  it("keeps a slow-tool checkpoint within three minutes without new events and stops after mute", async () => {
++    const item = child("Prepare the document");
++    tool(item.entry);
++    yieldParent();
+     await vi.advanceTimersByTimeAsync(15_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    for (let index = 0; index < 20; index++) {
++      tool(item.entry, index);
++    }
++    await vi.advanceTimersByTimeAsync(179_999);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    await vi.advanceTimersByTimeAsync(1);
+     expect(sendMessage).toHaveBeenCalledTimes(2);
+-    expect(sendMessage.mock.calls[1]![0].content).toContain(
+-      "Worker 1: running read; 1 tool call started.",
++    emitAgentEvent({
++      runId: item.entry.runId,
++      sessionKey: item.entry.childSessionKey,
++      stream: "execution",
++      data: {
++        state: "waiting",
++        wait: {
++          kind: "children",
++          dependencies: [{ runId: "private-nested-run" }],
++          pendingCount: 1,
++        },
++      },
++    });
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(3);
++    expect(sendMessage.mock.calls[2]![0].content).toContain(
++      "waiting for supporting work to finish",
+     );
++    expect(sendMessage.mock.calls[2]![0].content).not.toContain("private-nested-run");
++    updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "silent" });
++    await vi.advanceTimersByTimeAsync(360_000);
++    expect(sendMessage).toHaveBeenCalledTimes(3);
+   });
+ });
+diff --git a/src/tasks/task-registry-progress.ts b/src/tasks/task-registry-progress.ts
+index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404cabf8412b 100644
+--- a/src/tasks/task-registry-progress.ts
++++ b/src/tasks/task-registry-progress.ts
+@@ -21,9 +21,10 @@ import {
+ } from "./task-registry-state.js";
+ import type { TaskProgressBatch } from "./task-registry.process-state.js";
+ import type { TaskRecord } from "./task-registry.types.js";
+-import { formatTaskStatusTitleText, sanitizeTaskStatusText } from "./task-status.js";
++import { formatTaskStatusTitleText } from "./task-status.js";
+ 
+ const YIELDED_PROGRESS_COALESCE_MS = 15_000;
++const YIELDED_PROGRESS_CHECKPOINT_MS = 180_000;
+ const MAX_PROGRESS_BATCHES = 128;
+ const MAX_PROGRESS_BATCH_MEMBERS = 32;
+ const MAX_PROGRESS_DISPLAY_MEMBERS = 8;
+@@ -101,7 +102,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+     batch = {
+       lifecycleGeneration: getAgentRunLifecycleGeneration(),
+       members: new Map(),
+-      revision: 0,
+       overflow: false,
+     };
+     taskProgressBatches.set(progress.key, batch);
+@@ -111,7 +111,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+   } else {
+     batch.overflow = true;
+   }
+-  batch.revision += 1;
+   scheduleProgressBatch(progress.key, batch);
+ }
+ 
+@@ -119,10 +118,13 @@ function scheduleProgressBatch(key: string, batch: TaskProgressBatch) {
+   if (batch.timer || batch.publishing) {
+     return;
+   }
+-  batch.timer = setTimeout(() => {
+-    batch.timer = undefined;
+-    void publishProgressBatch(key, batch);
+-  }, YIELDED_PROGRESS_COALESCE_MS);
++  batch.timer = setTimeout(
++    () => {
++      batch.timer = undefined;
++      void publishProgressBatch(key, batch);
++    },
++    Math.max(YIELDED_PROGRESS_COALESCE_MS, (batch.nextPublishAt ?? 0) - Date.now()),
++  );
+   batch.timer.unref?.();
+ }
+ 
+@@ -156,29 +158,23 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+   }
+   const lines = rows.slice(0, MAX_PROGRESS_DISPLAY_MEMBERS).map(({ task }) => {
+     const observation = getTaskExecutionObservation(task);
+-    const currentTool = sanitizeTaskStatusText(observation.currentTool?.name, { maxChars: 60 });
+     const state =
+       observation?.state === "waiting"
+         ? observation.wait?.kind === "children"
+-          ? `waiting for ${observation.wait.pendingCount} child tasks`
++          ? "waiting for supporting work to finish"
+           : observation.wait?.kind === "approval"
+             ? "waiting for approval"
+             : observation.wait?.kind === "user_input"
+-              ? "waiting for input"
++              ? "waiting for your input"
+               : observation.wait?.kind === "agent_messages"
+-                ? "waiting for agent messages"
++                ? "waiting for a reply"
+                 : "waiting for external work"
+         : observation.state === "unknown"
+           ? "current activity unavailable"
+-          : currentTool
+-            ? `running ${currentTool}`
+-            : observation?.state === "queued"
+-              ? "queued"
+-              : "working";
+-    const calls = task.toolUseCount
+-      ? `; ${task.toolUseCount} tool ${task.toolUseCount === 1 ? "call" : "calls"} started`
+-      : "";
+-    return `- ${formatTaskStatusTitleText(task.label, "Subagent task")}: ${state}${calls}.`;
++          : observation?.state === "queued"
++            ? "waiting to start"
++            : "still working";
++    return `- ${formatTaskStatusTitleText(task.label, "Your request")}: ${state}.`;
+   });
+   if (rows.length > MAX_PROGRESS_DISPLAY_MEMBERS || batch.overflow) {
+     lines.push("- More task activity is available in Tasks.");
+@@ -194,7 +190,7 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+ 
+ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+   batch.publishing = true;
+-  const revision = batch.revision;
++  batch.nextPublishAt = Date.now() + YIELDED_PROGRESS_CHECKPOINT_MS;
+   try {
+     await runWithGatewayIndependentRootWorkContinuation(async () => {
+       if (!prepareProgressBatch(key, batch)) {
+@@ -242,7 +238,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+   } finally {
+     batch.publishing = false;
+     if (taskProgressBatches.get(key) === batch) {
+-      if (batch.revision !== revision) {
++      // Retain this existing presentation batch for slow tools and nested waits
++      // that produce no new event. Every checkpoint revalidates its exact owner.
++      if (prepareProgressBatch(key, batch)) {
+         scheduleProgressBatch(key, batch);
+       } else {
+         taskProgressBatches.delete(key);
 diff --git a/src/tasks/task-registry-record-api.ts b/src/tasks/task-registry-record-api.ts
 index bca18ae884121708de9f2decf6f9210f3da99b8d..76119b4d67996565b3202f03fa9d07b482e5e3d5 100644
 --- a/src/tasks/task-registry-record-api.ts
@@ -72758,6 +74203,21 @@ index bca18ae884121708de9f2decf6f9210f3da99b8d..76119b4d67996565b3202f03fa9d07b4
  export function createTaskRecord(params: CreateTaskRecordParams): TaskRecord | null {
    return withTaskRegistryMutation(
      () => {
+diff --git a/src/tasks/task-registry.process-state.ts b/src/tasks/task-registry.process-state.ts
+index e6d4b75a617f2f95fec9e032c07b6f1a32bcf371..fe41b8f39018fafe78070ca8dd0a6c404d189290 100644
+--- a/src/tasks/task-registry.process-state.ts
++++ b/src/tasks/task-registry.process-state.ts
+@@ -45,9 +45,9 @@ export type TaskActivityOverlayState = {
+ export type TaskProgressBatch = {
+   lifecycleGeneration: string;
+   members: Map<string, { runId: string; generation: number }>;
+-  revision: number;
+   timer?: ReturnType<typeof setTimeout>;
+   publishing?: boolean;
++  nextPublishAt?: number;
+   overflow: boolean;
+ };
+ 
 diff --git a/src/tasks/task-registry.store.sqlite.ts b/src/tasks/task-registry.store.sqlite.ts
 index f46c34bee8386f95e477c7d4e809d1d4c66654ad..e8be1caf5a85b2c46cf7d849ad490a421905901c 100644
 --- a/src/tasks/task-registry.store.sqlite.ts

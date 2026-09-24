@@ -327,8 +327,60 @@ node is connected and now reports Screen Recording granted, but Accessibility is
 still denied. Its frontend appearance was not directly inspected, and its native
 credential-entry acceptance remains pending. All 33 mechanical postflight checks
 passed, with approval-state changes reconciled to usage bookkeeping and unchanged
-policy. Exact-head hosted qualification remains pending. The prior `2c102f590298`
+policy. Hosted qualification of public `25e1d5881e5d` later passed its complete
+build but stopped at the auth-status test growth ratchet, as recorded below. The prior `2c102f590298`
 acceptance keeps its original dated scope.
+
+## Long-running Discord progress checkpoints
+
+Source `c42af6f66b8abd23620aa9a8a110b9813c1bf5de` makes later foreground commentary visible as a new
+Discord post when the existing preview has reached its three-minute checkpoint.
+Updates inside the interval continue editing the same preview. The existing
+controller retains final delivery, preview cleanup and run ownership; uncertain
+sends are not replayed.
+
+Ordinary interactive channel requests now give native child tasks visible progress
+by default. Explicit `done_only` and `silent` task policies remain authoritative.
+Heartbeat, cron, internal, nested and private completion work do not inherit this
+default. Only an exact, pending requester-yield cohort can publish background
+progress. Its first update coalesces for 15 seconds and eligible slow tools or
+nested waits continue at three-minute intervals, without requiring a new tool
+event. Each send rechecks current task and requester authority. Cancellation,
+completion, parent resumption, replacement, muting and lifecycle reset stop stale
+updates. Generic native task state messages are suppressed so a second owner
+cannot duplicate the progress or expose child prose.
+
+These captures use actual serialized REST payloads from the baseline and candidate
+controllers, rendered in the same synthetic message-list fixture. They show the
+messages before fixture cleanup and contain no private task content. They are not
+live Discord screenshots or evidence of successful delivery to a real channel.
+
+| Before | After |
+| --- | --- |
+| ![Later commentary edits the earlier post](assets/discord-progress-20260924/before.png) | ![Later commentary creates a new checkpoint post](assets/discord-progress-20260924/after.png) |
+
+The preceding public revision `25e1d5881e5d` passed its full reconstruction build,
+reference checks and steering suite. Its native checks stopped only at the file
+growth ratchet for `models-auth-status.test.ts`. This source extracts the same auth
+rollup cases into a focused test file; production authentication behavior is
+unchanged by that extraction. The failed run remains recorded, and qualification
+of this successor belongs to its own exact public revision.
+
+This exact source activated on September 24 at `15:49:57.891411Z` as
+`openclaw-2026.9.5-c42af6f66b8a-20260924T1528Z-selfcontained` in one attempt with no rollback.
+The activation receipt SHA-256 is
+`6a0666726f5895087c0111d17ffde2804ca74ab01e0c279ae4b187061a084758`. All 33 mechanical postflight
+checks passed: selected source and processes, health/readiness, configuration,
+account ordering, scheduled-job definitions, terminal sessions and retained native
+companions were verified. Current-process Journal capture was visually inspected
+and enrolled; a later natural scheduled sync is not inferred.
+
+The preceding `5233aa69090d` auth/Inbox activation retains its dated receipts.
+Native companions and private workers remain `f29bb229c5c8`, build `2609000594`;
+this central change does not rebuild or install them. MacBook native credential
+acceptance remains separate. Actual Discord progress delivery is pending at this
+publication checkpoint; its subsequent result and hosted qualification are recorded
+separately against the exact public revision in PR checks and artifacts.
 
 ## Reproduction and verification boundaries
 
