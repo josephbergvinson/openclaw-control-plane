@@ -54,7 +54,7 @@ producer change does not require another native build.
 
 ## September 23 qualified source
 
-The reconstructible source is `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`.
+The source qualified at this checkpoint is `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`.
 Its [complete reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835806)
 and [Steering regression](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835793)
 passed at public commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4` on September 23.
@@ -197,13 +197,82 @@ Earlier native source `c4bee4279fdf` retains its original 18-test and four-case
 synthetic qualification; those results alone did not qualify the subsequent
 compatibility reader.
 
-In the manifest, `source.referenceCommit` and `source.normalizedTree` identify what
-CI reconstructs. `source.deployed*` now binds the verified `5b5942def95c` Gateway
-activation, `candidateOnly` is false and `source.referenceDeploymentStatus` is
-`activated`. The companion's current record binds signed build `2609000593` and
-its verified Mini and MacBook installations and connections while retaining
-separate credential-entry and authentication checks. The prior `085711` Gateway and `1fb`/`2609000592` Mini records, plus
+At this September 23 checkpoint, `source.referenceCommit` and
+`source.normalizedTree` matched the verified `5b5942def95c` Gateway activation.
+The companion record bound signed build `2609000593` and its verified Mini and
+MacBook installations and connections, with credential entry and authentication
+still separate. The September 24 successor below changes the reconstructible
+companion source without changing the recorded Gateway deployment. The prior `085711` Gateway and `1fb`/`2609000592` Mini records, plus
 earlier acceptance, retain their dated historical scopes.
+
+## September 24 native prompt successor
+
+The reconstructible source is now `f29bb229c5c8f033fd3a7966dbc8ecf1f6cab572`,
+normalized tree `b8d24593af90951eb74769c1849a2b09d0c1cd2b`. Its only delta from
+`5b5942def95c` is the native credential prompt owner and its regression tests.
+The Gateway remains on `5b5942def95c`; no Gateway activation is needed for this
+Mac-only correction. The signed companion and bundled worker use source
+`f29bb229c5c8`, build `2609000594`. They are installed and connected on both
+the originating Mini and MacBook.
+
+A real macOS authentication agent presented a valid native password prompt but
+had no AppKit `launchDate`, so the previous matcher rejected it. The repair pins
+the kernel process incarnation: PID, user ID, start seconds and start
+microseconds. It rechecks that identity before entry. Missing, truncated or
+inconsistent kernel metadata refuses admission, and a reused PID cannot inherit
+an older prompt's authority. The existing Apple code-signature, foreground app,
+focused window, secure field, account evidence and single-use execution-bound
+reference checks remain in place.
+
+Thirty focused native tests pass, including identity changes, invalid kernel
+metadata and replacement while credential resolution is awaited. An independent
+standalone reconstruction compared all 44,895 tracked entries and modes against
+the committed source; only the two established fixture-label substitutions differ.
+The normal signed package owner completed successfully with matching native app
+and private-worker identities. On September 24 at 00:53:35 UTC, the installed
+originating Mini passed actual native credential acceptance: the real Apple
+LocalAuthentication prompt had no AppKit launch date, the opaque `type_secret`
+route entered the enrolled credential, and macOS reported successful
+authentication. No secret was passed through ordinary tool arguments, no account
+password changed, the QA process exited and its execution scope closed.
+
+The installed bundle's content, permissions, signature and links matched the
+qualified package; only an OS-created app-root metadata attribute required
+explicit reconciliation. Its native node was connected with Accessibility and
+Screen Recording granted. The installation acceptance receipt SHA-256 is
+`b8f56e1e9d5a779cc343685454f0f994068cdd4769b484e289400b63915056ba`; native entry and
+authentication acceptance SHA-256 is
+`3879cbbfe36e1054f74e99c670abbff321dc0dd63b848387772b219627809169`.
+The package receipt SHA-256 is
+`a0eaa0d7ac9d6c832b75b037c3ec197c03ab3b27486a2ca203288f68cee94574`.
+
+The MacBook installation and postflight passed on September 24 at 01:29:42 UTC.
+All 43,919 bundle entries matched except the same explicitly reconciled OS-added
+app-root attribute. App and CLI signatures, actual process/source identities,
+node connection and preservation of the existing host credential bindings were
+verified. Its actual fresh process still reported Accessibility and Screen
+Recording denied. MacBook native interaction and credential entry remain
+unproven until those OS permissions are granted and the route is checked; the
+Mini's success does not substitute for that host's result. The MacBook receipt
+SHA-256 is
+`1f2a6e12c286e64b730e0aa1cc1851ba2754349ac6d4a1d6236554cbb846da99`.
+The earlier bounded admission attempt stopped before signaling or replacing the
+app while scheduled work was active; the successful continuation reused verified
+stage and rollback copies, preserved the first failure and released its exact
+native exclusion lease. The Gateway remains at source `5b5942def95c` with its
+process and configuration unchanged. The successor's hosted checks are tracked
+on this public revision. Prior installation and test records retain their dated
+scopes. Visible Reminders banner delivery is a nonblocking, unverified effect
+limit; iPhone work is excluded from this goal.
+
+### Current source qualification
+
+The preceding complete [September 23 source qualification](#september-23-source-qualification)
+remains scoped to `5b5942def95c`. The `f29bb229c5c8` patch checksum is
+`0e449135dd38e55132041a0f8d1689920fb7c1fb23e15310f77d13173b6ff340`.
+Hosted checks must reconstruct the successor tree from the updated manifest.
+The native Swift regression and package evidence remain separate from the Linux
+reference workflow and from each host's actual authentication result.
 
 ## Active-child follow-up correction
 
@@ -392,7 +461,7 @@ build to succeed. Command plans, actual command outcomes and build logs are reta
 as workflow artifacts; environment values are not recorded in the plan. A cancelled
 run or partial command log does not qualify the reference.
 
-### Current source qualification
+### September 23 source qualification
 
 Source `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8`, normalized tree
 `56a9bcae6a403eadf5aa48949cfe4a9c767a4ed8`, passed
@@ -405,8 +474,9 @@ continuation regression suites also passed. The
 [Steering workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/35891835793)
 passed all ten steering cases and its ownership tests.
 
-The hosted reconstructed tree matches the manifest's normalized source; the patch
-SHA-256 is `4f007edf5de1d7cf4c93593c12eff245cc84a0b09e949cbc54a36f9dfdeee28c`.
+The hosted reconstructed tree matched that September 23 checkpoint's normalized
+source; its patch SHA-256 was
+`4f007edf5de1d7cf4c93593c12eff245cc84a0b09e949cbc54a36f9dfdeee28c`.
 An independent standalone reconstruction also matched all 44,895 entries and modes,
 with only the two documented fixture-label substitutions. Failed or cancelled
 predecessor runs remain historical and are not counted as passing qualification.

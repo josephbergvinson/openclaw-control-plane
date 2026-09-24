@@ -49,8 +49,8 @@ final-delivery authority. Delayed progress writes recheck that authority and sto
 on cancellation or replacement. Seven owning test files pass 90 focused cases;
 hosted qualification and live acceptance remain separate.
 
-The current reconstructible source `5b5942def95c` passed
-[hosted qualification](../runtime/README.md#current-source-qualification) at public
+The September 23 source `5b5942def95c` passed
+[hosted qualification](../runtime/README.md#september-23-source-qualification) at public
 commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`. It retains those repairs and adds
 separate interactive and autonomous model routing. The example policy uses Astra
 Max for conversation, optional `/think ultra` orchestration and Sol High for
@@ -92,6 +92,20 @@ distinguishes these results from actual credential entry and authentication.
 Time-correlated OS logs for an existing Reminders fixture show alarm firing and
 muted Notification Center delivery during screen sharing; visible banner and
 iPhone delivery remain unverified, and CLI permission is still pending.
+
+The [September 24 companion successor](../runtime/README.md#september-24-native-prompt-successor),
+`f29bb229c5c8`, repairs valid native authentication agents that have no AppKit
+launch date. Native prompt custody now uses the kernel PID, user ID and precise
+process start time, with revalidation before entry. PID reuse, malformed identity
+reads, changed field/account evidence and a replaced prompt still refuse entry.
+The 30 focused native tests and exact source reconstruction pass. Signed build
+`2609000594` and its matching worker are installed and connected on both Macs. On
+the Mini, a real prompt with absent AppKit launch metadata passed opaque native
+entry and macOS authentication; the QA process and execution scope closed
+afterward. The MacBook installation and existing credential bindings are
+verified, but its fresh process reports Accessibility and Screen Recording
+denied. Native interaction on that host remains pending actual OS grants and
+verification. The Gateway remains at `5b5942def95c`.
 
 | Change family | Source behavior and acceptance boundary |
 |---|---|
