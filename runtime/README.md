@@ -884,3 +884,22 @@ normal scheduler behavior. Configuration and schedule were unchanged, with no
 forced run, checkpoint mutation, business replay or failure-history reset.
 This verifies the reported trigger incident, not every automation. Hosted
 qualification remains separate and binds the exact public revision.
+
+## SDK contract qualification reference
+
+Source reference `db4ae8b2e6e0cbb6fdd14d4dd4ebb9e99b0c2f6c` is a qualification-only successor to the
+installed runtime `205ba711eb3d`. Only SDK contract documentation, direct SDK tests
+and exact hand-maintained export counts differ; every production blob and mode
+is unchanged. The runtime and native companions were not rebuilt or reactivated.
+The installed runtime's accepted activation and natural scheduled delivery remain
+recorded above and in the manifest.
+
+The preceding public `24dcc596e2ef` passed its complete reconstruction build and
+owned regressions but failed native command 19's SDK surface inventory check.
+The existing canonical sanitizer contributes two qualified public/callable exports
+through `channel-outbound` and its compatibility barrel, plus one deprecated
+`channel-message` projection. The exact inventory is documented and tested without
+changing guard evaluation or unrelated allowances. See the
+[qualification explanation](../docs/20-runtime-source-changes.md#sdk-contract-qualification-reference).
+Hosted checks and artifacts determine qualification of this exact reference;
+no preceding source result substitutes for it.

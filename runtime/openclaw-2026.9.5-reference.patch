@@ -3516,6 +3516,32 @@ index a4ebb90d5493cd4e630e3041ee23bcdb45c31429..30db4d2203d339f62b081b825145f9da
  
  ## Desktop availability and keeping awake
  
+diff --git a/docs/plugins/sdk-channel-outbound.md b/docs/plugins/sdk-channel-outbound.md
+index b3b92c11d4e48a6cbcea1aed84bc1d39533d217d..bb7b3a88e79f7cc41e607346cce0788aba242428 100644
+--- a/docs/plugins/sdk-channel-outbound.md
++++ b/docs/plugins/sdk-channel-outbound.md
+@@ -275,6 +275,21 @@ channel-specific post-send effects and callback-only transport targets.
+ for queued sends, `afterCommit` runs after queue acknowledgment. Keep effects
+ at the boundary they require rather than leaving them only in a legacy dispatcher.
+ 
++## Progress status text
++
++Use `sanitizeProgressStatusText(text)` from `openclaw/plugin-sdk/channel-outbound`
++before deciding whether authored progress warrants a new visible checkpoint.
++It uses the same normalization as the shared progress compositor: remove inline
++delivery directives, trim outer whitespace, and return an empty string for empty
++or token-only `NO_REPLY` content, including case-insensitive Markdown-wrapped
++forms such as `**NO_REPLY**`, `` `NO_REPLY` `` and `~~NO_REPLY~~`.
++It preserves substantive text, internal line breaks and formatting; it does not
++strip private reasoning or apply channel-specific presentation.
++
++An empty result must not seal or rotate the current checkpoint. Let the existing
++compositor handle any same-item retraction. This keeps channel-owned message
++lifecycle decisions consistent with the text the shared compositor can display.
++
+ ## Durable sends
+ 
+ Runtime send helpers also live on `channel-outbound`:
 diff --git a/docs/plugins/sdk-channel-plugins/message-adapter.md b/docs/plugins/sdk-channel-plugins/message-adapter.md
 index ae13cac267948b6cdff02f7a40e2924757b0c891..21cb44173488d61d2ce6e0e6f663af400adc1771 100644
 --- a/docs/plugins/sdk-channel-plugins/message-adapter.md
@@ -19287,6 +19313,40 @@ index a2fe4c4a488b5b4798d7a64279d243bb90296196..d4bd714dfc82d939d18ed154ee33fbd2
    verify_snapshot_swift_lock
    arch_peekaboo_commit="$(compiled_peekaboo_commit "$PEEKABOO_SNAPSHOT_MOUNT" "$PEEKABOO_LOCKED_SOURCE_COMMIT")"
    printf '%s\n' "$arch_peekaboo_commit" > "$SWIFT_WORK_ROOT/peekaboo-commit"
+diff --git a/scripts/plugin-sdk-surface-report.mts b/scripts/plugin-sdk-surface-report.mts
+index 914ca6a08a4f39ed96d0c7aa408bb74d5c7852e2..513283ce1633c37633f5aa1b1feea8de7fdb5120 100644
+--- a/scripts/plugin-sdk-surface-report.mts
++++ b/scripts/plugin-sdk-surface-report.mts
+@@ -160,7 +160,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
+   // +1: shared ingress retention defaults projected through the deprecated message barrel.
+   // +1: WhatsApp ack-policy bridge counted via channel-message's wildcard re-export.
+   // Rendering helpers also flow through this shipped wildcard compatibility barrel.
+-  "channel-message": 136,
++  // +1: canonical progress-status sanitizer projected through the same barrel.
++  "channel-message": 137,
+   // +2: Slack progress-draft render bridge (function + mode type).
+   "channel-outbound": 2,
+   // +2: WhatsApp ack-policy bridge (function + mode type).
+@@ -376,7 +377,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
+       // +13: runtime-neutral WebSocket client/server, stream, data, and option contracts.
+       // +2: approved process-diagnostics predicate and lightweight subsystem logger.
+       // +1: approved shared native-command argument-menu applicability predicate.
+-      4482,
++      // +2: canonical progress-status sanitizer on channel-outbound and its shipped barrel.
++      4484,
+       env,
+     ),
+     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
+@@ -516,7 +518,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
+       // +4: runtime-neutral WebSocket client/server and stream constructors.
+       // +2: approved process-diagnostics predicate and lightweight subsystem logger.
+       // +1: approved shared native-command argument-menu applicability predicate.
+-      2646,
++      // +2: canonical progress-status sanitizer on channel-outbound and its shipped barrel.
++      2648,
+       env,
+     ),
+     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
 diff --git a/src/agents/accepted-session-spawn.ts b/src/agents/accepted-session-spawn.ts
 index 2bf76c3e65c0e7cccd8b72838f794eb8e0fc39d2..30b66d03f21ee5273db2f2e24ceb6774fff31e5c 100644
 --- a/src/agents/accepted-session-spawn.ts
@@ -71742,6 +71802,43 @@ index 8d27b29f2d582de7ef425ab608b1f978d6c7c45c..24651dbc7f9f21b138670f10f8b042fc
  } from "../channels/message-access/admission-evidence.js";
  export { registerChannelIngressHostOwner } from "../channels/message-access/ingress-host-owner.js";
  export {
+diff --git a/src/plugin-sdk/channel-outbound.streaming.test.ts b/src/plugin-sdk/channel-outbound.streaming.test.ts
+index 2adb62d40b88e31d97a0f646495a94feb11f62a8..e67e0992c2482ed0a1ea63140934b8521cf2fe91 100644
+--- a/src/plugin-sdk/channel-outbound.streaming.test.ts
++++ b/src/plugin-sdk/channel-outbound.streaming.test.ts
+@@ -1,5 +1,31 @@
+ import { describe, expect, it } from "vitest";
+-import { resolveChannelStreamingPreviewToolProgress } from "./channel-outbound.js";
++import {
++  resolveChannelStreamingPreviewToolProgress,
++  sanitizeProgressStatusText,
++} from "./channel-outbound.js";
++
++describe("channel-outbound progress status contract", () => {
++  it.each([
++    ["", ""],
++    [" \n ", ""],
++    ["NO_REPLY", ""],
++    ["**NO_REPLY**", ""],
++    ["_no_reply_", ""],
++    ["`NO_REPLY`", ""],
++    ["~~NO_REPLY~~", ""],
++    [" \n***`NO_REPLY`***\n ", ""],
++    ["[[reply_to_current]] **NO_REPLY**", ""],
++    ["[[reply_to_current]] Checking the original record.", "Checking the original record."],
++    [
++      "  Checking the record.\nThen verifying the result.  ",
++      "Checking the record.\nThen verifying the result.",
++    ],
++    ["The record contains NO_REPLY.", "The record contains NO_REPLY."],
++    ["**Checking the original record.**", "**Checking the original record.**"],
++  ])("prepares %j before channel checkpoint side effects", (input, expected) => {
++    expect(sanitizeProgressStatusText(input)).toBe(expected);
++  });
++});
+ 
+ describe("channel-outbound tool-progress SDK defaults", () => {
+   it("preserves the v2026.9.1 default when the second argument is omitted", () => {
 diff --git a/src/plugin-sdk/channel-outbound.ts b/src/plugin-sdk/channel-outbound.ts
 index 872d5591ef8d7a67f79f9d7225862b5760302ad8..bf9c8b3ceb20e80d5f3047faf73db76359fcf21e 100644
 --- a/src/plugin-sdk/channel-outbound.ts
