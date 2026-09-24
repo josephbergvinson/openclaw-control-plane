@@ -8966,10 +8966,10 @@ index 5aeb5a03418aebb9354331e4ead389b4e1397343..26b3bafe398cbef9d4ae6af5fa6f7c5f
        } catch {}
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..f0218d8932492d4e529ebf0734dede2e1cdc7c86
+index 0000000000000000000000000000000000000000..ce4029546dec3ce3a9115f9cb435368f02a3671e
 --- /dev/null
 +++ b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,323 @@
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { RequestClient } from "../internal/discord.js";
@@ -9147,6 +9147,45 @@ index 0000000000000000000000000000000000000000..f0218d8932492d4e529ebf0734dede2e
 +    await h.controller.cleanup();
 +  });
 +
++  it.each([
++    "NO_REPLY",
++    "_NO_REPLY_",
++    "**NO_REPLY**",
++    "`NO_REPLY`",
++    "~~NO_REPLY~~",
++    "[[reply_to_current]] _NO_REPLY_ [[audio_as_voice]]",
++  ])("keeps the active card editable after due-age silent commentary %s", async (text) => {
++    const h = createHarness();
++    await h.preamble("first", "I’m checking the records.");
++    const messageId = h.controller.draftStream?.messageId();
++    expect(messageId).toBe("1");
++    await vi.advanceTimersByTimeAsync(180_000);
++
++    expect(
++      await h.controller.pushPreambleItemEvent({
++        itemId: "silent",
++        progressText: text,
++        phase: "end",
++      }),
++    ).toBe(false);
++    await h.controller.flush();
++    expect(h.controller.draftStream?.messageId()).toBe(messageId);
++    expect(h.requests).toHaveLength(1);
++
++    await h.preamble("first", "The original records confirm the corrected date.");
++    expect(h.requests.at(-1)).toMatchObject({
++      method: "PATCH",
++      id: messageId,
++      text: "The original records confirm the corrected date.",
++    });
++    expect(h.controller.draftStream?.messageId()).toBe(messageId);
++    h.controller.markFinalReplyStarted();
++    h.controller.markFinalReplyDelivered(false);
++    await h.controller.cleanup();
++    expect(h.requests.at(-1)).toMatchObject({ method: "DELETE", id: messageId });
++    expect(h.visible.size).toBe(0);
++  });
++
 +  it.each(["final", "queued"] as const)(
 +    "cancels an in-flight rotation at the %s boundary",
 +    async (boundary) => {
@@ -9286,10 +9325,18 @@ index dc8076bc7eabd2c00919a8b89f2e1efa13f66318..dd7b2c67f83b639b5c2e90cde3044b5d
        expect(withActivity).toContain("Exec");
        expect(withActivity).not.toContain("private detail");
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.ts b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c08a085006 100644
+index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..d3766ad212f33adeb7b753446880e14e7d5b691f 100644
 --- a/extensions/discord/src/monitor/message-handler.draft-preview.ts
 +++ b/extensions/discord/src/monitor/message-handler.draft-preview.ts
-@@ -19,6 +19,7 @@ import { resolveDiscordDraftStreamingChunking } from "../draft-chunking.js";
+@@ -5,6 +5,7 @@ import {
+   resolveChannelStreamingBlockEnabled,
+   resolveChannelStreamingPreviewCommandText,
+   resolveChannelStreamingProgressNarration,
++  sanitizeProgressStatusText,
+ } from "openclaw/plugin-sdk/channel-outbound";
+ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+ import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
+@@ -19,6 +20,7 @@ import { resolveDiscordDraftStreamingChunking } from "../draft-chunking.js";
  import { createDiscordDraftStream } from "../draft-stream.js";
  import type { RequestClient } from "../internal/discord.js";
  import { resolveDiscordPreviewStreamMode } from "../preview-streaming.js";
@@ -9297,7 +9344,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
  
  type DraftReplyReference = {
    peek: () => string | undefined;
-@@ -40,6 +41,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -40,6 +42,7 @@ export function createDiscordDraftPreviewController(params: {
    maxLinesPerMessage: number | undefined;
    chunkMode: Parameters<typeof chunkDiscordTextWithMode>[1]["chunkMode"];
    log: (message: string) => void;
@@ -9305,7 +9352,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
  }) {
    const discordStreamMode = resolveDiscordPreviewStreamMode(params.discordConfig);
    // Provider drafts are visible before outbound modifiers run. Keep them off whenever a hook
-@@ -66,10 +68,12 @@ export function createDiscordDraftPreviewController(params: {
+@@ -66,10 +69,12 @@ export function createDiscordDraftPreviewController(params: {
    const draftStream = canStreamDraft
      ? createDiscordDraftStream({
          rest: params.deliveryRest,
@@ -9318,7 +9365,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
          suppressEmbeds: params.discordConfig?.suppressEmbeds ?? true,
          throttleMs: 1200,
          log: params.log,
-@@ -108,11 +112,9 @@ export function createDiscordDraftPreviewController(params: {
+@@ -108,11 +113,9 @@ export function createDiscordDraftPreviewController(params: {
      mode: discordStreamMode,
      active: Boolean(draftStream),
      seed: progressSeed,
@@ -9331,7 +9378,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
          return false;
        }
        lastPartialText = previewText;
-@@ -142,6 +144,36 @@ export function createDiscordDraftPreviewController(params: {
+@@ -142,6 +145,36 @@ export function createDiscordDraftPreviewController(params: {
      draftChunker?.reset();
    };
  
@@ -9357,18 +9404,18 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
 +  });
 +
 +  const publicProgressText = (text?: string) => {
-+    const cleaned = stripInlineDirectiveTagsForDelivery(
++    const cleaned = sanitizeProgressStatusText(
 +      stripReasoningTagsFromText(text ?? "", { mode: "strict", trim: "both" }),
 +    )
-+      .text.replace(/\s+/g, " ")
++      .replace(/\s+/g, " ")
 +      .trim();
-+    return /^NO_REPLY$/i.test(cleaned) || cleaned.startsWith("Reasoning:") ? "" : cleaned;
++    return cleaned.startsWith("Reasoning:") ? "" : cleaned;
 +  };
 +
    const forceNewMessageIfNeeded = () => {
      if (shouldSplitPreviewMessages && hasStreamedAssistantText) {
        params.log("discord: calling forceNewMessage() for draft stream");
-@@ -156,6 +188,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -156,6 +189,7 @@ export function createDiscordDraftPreviewController(params: {
        progressDraft.beginAssistantMessage();
      }
      if (beganNewTurn) {
@@ -9376,7 +9423,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
        progressDraftCollapsed = false;
        progressDraftStartedBeforeFinal = false;
        finalReplyError = undefined;
-@@ -203,11 +236,13 @@ export function createDiscordDraftPreviewController(params: {
+@@ -203,11 +237,13 @@ export function createDiscordDraftPreviewController(params: {
        progressNarratorLifecycle = lifecycle;
      },
      markFinalReplyStarted() {
@@ -9390,7 +9437,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
        finalReplyError = isError;
        progressDraft.markFinalReplyDelivered();
      },
-@@ -218,6 +253,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -218,6 +254,7 @@ export function createDiscordDraftPreviewController(params: {
        await draftStream?.retarget(channelId);
      },
      async finalizeProgressDraft() {
@@ -9398,7 +9445,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
        if (!draftStream || discordStreamMode !== "progress") {
          return false;
        }
-@@ -236,25 +272,53 @@ export function createDiscordDraftPreviewController(params: {
+@@ -236,25 +273,53 @@ export function createDiscordDraftPreviewController(params: {
        return true;
      },
      disableBlockStreamingForDraft: draftStream ? true : undefined,
@@ -9471,7 +9518,7 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..6bfc4cc8eb6c7a61d5d876833a6102c0
      },
      resolvePreviewFinalText(text?: string) {
        if (typeof text !== "string") {
-@@ -373,6 +437,7 @@ export function createDiscordDraftPreviewController(params: {
+@@ -373,6 +438,7 @@ export function createDiscordDraftPreviewController(params: {
      },
      async cleanup({ finalDeliveryFailed = false }: { finalDeliveryFailed?: boolean } = {}) {
        try {
@@ -63897,6 +63944,230 @@ index df22c6c240332eaf22ecce71222c01d33cb104d9..580ca104168a5c1581d4d59754bf8203
    attachJobNames(entries, options.jobNameById);
    const nextOffset = boundedOffset + entries.length;
    return {
+diff --git a/src/cron/trigger-script.refresh-scope.test.ts b/src/cron/trigger-script.refresh-scope.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..48c9654c6acf01d6463f631e1080ee0c2a7ba0fa
+--- /dev/null
++++ b/src/cron/trigger-script.refresh-scope.test.ts
+@@ -0,0 +1,179 @@
++import { describe, expect, it, vi } from "vitest";
++import {
++  captureAgentPluginRuntimeRefresh,
++  createAgentPluginRuntimeRefresh,
++} from "../agents/plugin-runtime-refresh.js";
++import { jsonResult, type AnyAgentTool } from "../agents/tools/common.js";
++import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
++import { createCronScriptRuntimeFixture } from "./trigger-script.test-helpers.js";
++
++type RefreshControl = ReturnType<typeof captureAgentPluginRuntimeRefresh>;
++type Runtime = ReturnType<typeof createCronScriptRuntimeFixture>;
++type Mode = "trigger" | "payload";
++const request = {
++  jobId: "refresh-scope",
++  script: "return { fire: false, state: await probe({}) };",
++  state: null,
++};
++
++async function invoke(runtime: Runtime, mode: Mode, params = request) {
++  return await (mode === "trigger"
++    ? runtime.evaluateTrigger(params)
++    : runtime.executePayload(params));
++}
++
++function probe(execute: AnyAgentTool["execute"]): AnyAgentTool {
++  return {
++    name: "probe",
++    label: "Probe",
++    description: "Synthetic invocation scope probe",
++    parameters: { type: "object", properties: {} },
++    execute,
++  };
++}
++
++async function inheritedTimer<T>(state: "closed" | "requested", run: () => Promise<T>) {
++  const ambient = createAgentPluginRuntimeRefresh();
++  let control: RefreshControl | undefined;
++  const pending = ambient.run(() => {
++    control = captureAgentPluginRuntimeRefresh();
++    control.bindConsumer(() => true);
++    if (state === "requested") {
++      expect(control.request()).toBe(true);
++    }
++    // Match the scheduler: leaving root work does not leave agent refresh ALS.
++    return new Promise<T>((resolve, reject) => {
++      setTimeout(() => {
++        void runOutsideGatewayRootWorkAdmission(run).then(resolve, reject);
++      }, 0);
++    });
++  });
++  if (state === "closed") {
++    ambient.close();
++  }
++  try {
++    const result = await pending;
++    expect(() => control!.assertCurrent()).toThrow("Plugin runtime changed");
++    expect(control!.isRequested()).toBe(state === "requested");
++    return result;
++  } finally {
++    ambient.close();
++  }
++}
++
++describe("cron invocation plugin refresh ownership", () => {
++  it.each([
++    ["trigger", "closed"],
++    ["trigger", "requested"],
++    ["payload", "closed"],
++    ["payload", "requested"],
++  ] as const)("isolates cold and warm %s from a %s ambient timer scope", async (mode, state) => {
++    const config = {};
++    const controls: RefreshControl[] = [];
++    const effects = vi.fn(async () => {
++      captureAgentPluginRuntimeRefresh().assertCurrent();
++      return jsonResult({ ok: true });
++    });
++    const createTools = vi.fn(() => {
++      const control = captureAgentPluginRuntimeRefresh();
++      control.assertCurrent();
++      controls.push(control);
++      return [probe(effects)];
++    });
++    const prepareRuntime = vi.fn(async () => ({
++      context: { config, agentId: "main", sessionKey: "agent:main:cron:refresh" },
++      createTools,
++    }));
++    const runtime = createCronScriptRuntimeFixture({ config, prepareRuntime });
++    for (let index = 0; index < 2; index += 1) {
++      await expect(inheritedTimer(state, () => invoke(runtime, mode))).resolves.toMatchObject({
++        kind: mode === "trigger" ? "evaluated" : "completed",
++        state: { ok: true },
++      });
++      expect(effects).toHaveBeenCalledTimes(index + 1);
++      expect(() => controls[index]!.assertCurrent()).toThrow("Plugin runtime changed");
++    }
++    expect(prepareRuntime).toHaveBeenCalledOnce();
++    expect(createTools).toHaveBeenCalledTimes(2);
++  });
++
++  it.each(["trigger", "payload"] as const)(
++    "closes %s refresh authority when preparation fails",
++    async (mode) => {
++      let retained: RefreshControl | undefined;
++      const prepareRuntime = vi.fn(async () => {
++        retained = captureAgentPluginRuntimeRefresh();
++        retained.assertCurrent();
++        throw new Error("synthetic preparation failure");
++      });
++      const runtime = createCronScriptRuntimeFixture({ config: {}, prepareRuntime });
++      await expect(invoke(runtime, mode)).resolves.toMatchObject({
++        kind: "error",
++        error: expect.stringContaining("synthetic preparation failure"),
++      });
++      expect(prepareRuntime).toHaveBeenCalledOnce();
++      expect(() => retained!.assertCurrent()).toThrow("Plugin runtime changed");
++    },
++  );
++
++  it.each(["trigger", "payload"] as const)(
++    "does not replay or retain %s authority after script failure following an effect",
++    async (mode) => {
++      let retained: RefreshControl | undefined;
++      const effects = vi.fn(async () => {
++        retained = captureAgentPluginRuntimeRefresh();
++        return jsonResult({ ok: true });
++      });
++      const prepareRuntime = vi.fn(async () => ({
++        context: { config: {}, agentId: "main", sessionKey: "agent:main:cron:refresh" },
++        createTools: () => [probe(effects)],
++      }));
++      const runtime = createCronScriptRuntimeFixture({ config: {}, prepareRuntime });
++      await expect(
++        invoke(runtime, mode, {
++          ...request,
++          script: "await probe({}); throw new Error('synthetic failure after effect');",
++        }),
++      ).resolves.toMatchObject({
++        kind: "error",
++        error: expect.stringContaining("synthetic failure after effect"),
++      });
++      expect(effects).toHaveBeenCalledOnce();
++      expect(prepareRuntime).toHaveBeenCalledOnce();
++      expect(() => retained!.assertCurrent()).toThrow("Plugin runtime changed");
++    },
++  );
++
++  it.each(["refresh", "abort"] as const)(
++    "preserves invocation %s fencing after the first effect without replay",
++    async (reason) => {
++      const abort = new AbortController();
++      let retained: RefreshControl | undefined;
++      const effects = vi.fn(async () => {
++        retained = captureAgentPluginRuntimeRefresh();
++        if (reason === "refresh") {
++          retained.bindConsumer(() => true);
++          expect(retained.request()).toBe(true);
++        } else {
++          abort.abort();
++        }
++        return jsonResult({ ok: true });
++      });
++      const prepareRuntime = vi.fn(async () => ({
++        context: { config: {}, agentId: "main", sessionKey: "agent:main:cron:refresh" },
++        createTools: () => [probe(effects)],
++      }));
++      const runtime = createCronScriptRuntimeFixture({ config: {}, prepareRuntime });
++      await expect(
++        runtime.executePayload({
++          ...request,
++          script: "await probe({}); await probe({}); return { state: true };",
++          abortSignal: abort.signal,
++        }),
++      ).resolves.toMatchObject({ kind: "error" });
++      expect(effects).toHaveBeenCalledOnce();
++      expect(prepareRuntime).toHaveBeenCalledOnce();
++      expect(() => retained!.assertCurrent()).toThrow("Plugin runtime changed");
++    },
++  );
++});
+diff --git a/src/cron/trigger-script.ts b/src/cron/trigger-script.ts
+index 46241de0cbc3153230c83eb573a13bb600d1b227..3db146a6cc566353a3ed3ac866437b5e97c49e10 100644
+--- a/src/cron/trigger-script.ts
++++ b/src/cron/trigger-script.ts
+@@ -38,6 +38,7 @@ import {
+   applyEmbeddedAttemptToolsAllow,
+   resolveEmbeddedAttemptToolConstructionPlan,
+ } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
++import { createAgentPluginRuntimeRefresh } from "../agents/plugin-runtime-refresh.js";
+ import { loadAgentRuntimePluginRegistryHandle } from "../agents/runtime-plugins.js";
+ import { resolveSandboxContext } from "../agents/sandbox.js";
+ import {
+@@ -358,7 +359,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
+     return await scope.wait(entry.promise);
+   };
+ 
+-  return async function runCronCodeModeScript(
++  async function runCronCodeModeScript(
+     params: CronScriptInvocation & {
+       wallClockMs: number;
+       maxToolCalls: number;
+@@ -545,6 +546,17 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
+       clearToolSearchCatalog({ catalogRef });
+       evaluationScope.cleanup();
+     }
++  }
++
++  return async (params: Parameters<typeof runCronCodeModeScript>[0]) => {
++    // Scheduled timers can inherit a closed/requested agent refresh scope. This
++    // invocation owns its catalog; never reuse the scheduling caller's refresh authority.
++    const refresh = createAgentPluginRuntimeRefresh();
++    try {
++      return await refresh.run(() => runCronCodeModeScript(params));
++    } finally {
++      refresh.close();
++    }
+   };
+ }
+ 
 diff --git a/src/cron/types.ts b/src/cron/types.ts
 index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca18a93be61 100644
 --- a/src/cron/types.ts
@@ -71471,6 +71742,18 @@ index 8d27b29f2d582de7ef425ab608b1f978d6c7c45c..24651dbc7f9f21b138670f10f8b042fc
  } from "../channels/message-access/admission-evidence.js";
  export { registerChannelIngressHostOwner } from "../channels/message-access/ingress-host-owner.js";
  export {
+diff --git a/src/plugin-sdk/channel-outbound.ts b/src/plugin-sdk/channel-outbound.ts
+index 872d5591ef8d7a67f79f9d7225862b5760302ad8..bf9c8b3ceb20e80d5f3047faf73db76359fcf21e 100644
+--- a/src/plugin-sdk/channel-outbound.ts
++++ b/src/plugin-sdk/channel-outbound.ts
+@@ -136,6 +136,7 @@ export {
+   createChannelProgressWorkCounter,
+ } from "../channels/progress-draft-compositor.js";
+ export { formatChannelProgressDraftDiffStat } from "../channels/progress-draft-diffstat.js";
++export { sanitizeProgressStatusText } from "../channels/progress-draft-status-text.js";
+ 
+ /** @deprecated The streaming.progress.render key was retired (#122927). */
+ export type ChannelProgressDraftRenderMode = "rich" | "text";
 diff --git a/src/plugin-sdk/session-store-runtime-internal.ts b/src/plugin-sdk/session-store-runtime-internal.ts
 index 949d417353bb8e6efc8086b87f2fa0151b419903..4d2723842c6ce7e13a8609fb878a5d2dc83995e0 100644
 --- a/src/plugin-sdk/session-store-runtime-internal.ts
@@ -73668,27 +73951,109 @@ index 304942625e6f6a8c30968f4d2cf3b9699e508ff6..a5b4c90e43ea5355283dc10da457ce8c
  } from "./task-registry.js";
  export type { TaskRecord } from "./task-registry.types.js";
 +export { setTaskRunDeliveryStatusById } from "./task-registry-record-api.js";
+diff --git a/src/tasks/task-native-progress-owner.ts b/src/tasks/task-native-progress-owner.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8cac73ff3e4dec72555c70d06bca60cc3f9d0f41
+--- /dev/null
++++ b/src/tasks/task-native-progress-owner.ts
+@@ -0,0 +1,70 @@
++import {
++  getSubagentRunsForChildSession,
++  subagentRuns,
++} from "../agents/subagents/registry/subagent-registry-memory.js";
++import { getAgentRunContext, hasLiveAgentRunContext } from "../infra/agent-run-registry.js";
++import { hasAuthoritativeTaskBacking, readTaskBackingInstance } from "./task-backing-authority.js";
++import { shouldAutoDeliverTaskStateChange } from "./task-executor-policy.js";
++import type { TaskRecord } from "./task-registry.types.js";
++import { resolveTaskSessionAgentId } from "./task-session-identity.js";
++
++/** Structural ownership only; callers separately verify the current delivery route. */
++export function resolveNativeTaskProgressOwner(task: TaskRecord, runId?: string) {
++  if (task.runtime !== "subagent" || !shouldAutoDeliverTaskStateChange(task)) {
++    return undefined;
++  }
++  const backing = readTaskBackingInstance(task.detail);
++  if (backing?.runtime !== "subagent") {
++    return undefined;
++  }
++  const entry = runId
++    ? subagentRuns.get(runId)
++    : [...getSubagentRunsForChildSession(task.childSessionKey ?? "")].find(
++        (candidate) =>
++          candidate.generation === backing.generation &&
++          (candidate.taskRunId ?? candidate.runId) === task.runId,
++      );
++  if (
++    !entry ||
++    entry.generation !== backing.generation ||
++    (entry.taskRunId ?? entry.runId) !== task.runId ||
++    entry.childSessionKey !== task.childSessionKey ||
++    entry.requesterSessionKey !== task.ownerKey ||
++    (entry.requesterAgentId !== undefined && entry.requesterAgentId !== task.requesterAgentId) ||
++    entry.killIntent ||
++    entry.killReconciliation ||
++    entry.execution.suppressSessionEffects ||
++    entry.suppressAnnounceReason ||
++    entry.collect === true ||
++    (entry.execution.status === "terminal" && entry.pauseReason !== "sessions_yield") ||
++    !hasAuthoritativeTaskBacking(task)
++  ) {
++    return undefined;
++  }
++  if (entry.requesterTurnRunId) {
++    const requester = getAgentRunContext(entry.requesterTurnRunId);
++    const agentId = resolveTaskSessionAgentId(task.ownerKey, task.requesterAgentId);
++    if (
++      requester?.sessionKey === task.ownerKey &&
++      agentId !== undefined &&
++      resolveTaskSessionAgentId(requester.sessionKey, requester.agentId) === agentId &&
++      requester.isHeartbeat !== true &&
++      !requester.cronRunsByJobId?.size &&
++      requester.projectSessionMessages !== false &&
++      hasLiveAgentRunContext(entry.requesterTurnRunId)
++    ) {
++      return { kind: "foreground" as const, entry, generation: backing.generation };
++    }
++    return undefined;
++  }
++  const wake = entry.requesterSettleWake;
++  if (
++    wake?.requesterYieldBatch !== true ||
++    wake.status !== "pending" ||
++    wake.rearmGeneration === undefined ||
++    !wake.batchRunIds?.includes(entry.runId)
++  ) {
++    return undefined;
++  }
++  return { kind: "yielded" as const, entry, wake, generation: backing.generation };
++}
 diff --git a/src/tasks/task-registry-delivery.ts b/src/tasks/task-registry-delivery.ts
-index 8184cac14f549eff20cbabb4ee245ade94640542..0fc22357fbbd1c24c1654987fe528dd1ce514991 100644
+index 8184cac14f549eff20cbabb4ee245ade94640542..c0ac189b9583aa51eca25aaf1f36139ee543f67e 100644
 --- a/src/tasks/task-registry-delivery.ts
 +++ b/src/tasks/task-registry-delivery.ts
-@@ -569,6 +569,14 @@ function prepareTaskStateChangeDelivery(
-   if (!current || !shouldAutoDeliverTaskStateChange(current)) {
-     return { result: current ? cloneTaskRecord(current) : null };
-   }
-+  if (
-+    current.runtime === "subagent" &&
-+    readTaskBackingInstance(current.detail)?.runtime === "subagent"
-+  ) {
-+    // Native subagents have one factual, coalesced yielded-progress owner.
-+    // Generic state changes must not duplicate it or publish private summaries.
-+    return { result: cloneTaskRecord(current) };
-+  }
-   const deliveryState = getTaskDeliveryState(taskId);
-   if (!latestEvent || (deliveryState?.lastNotifiedEventAt ?? 0) >= latestEvent.at) {
-     return { result: cloneTaskRecord(current) };
+@@ -22,6 +22,7 @@ import {
+   shouldUseParentReviewTaskTerminalMessage,
+ } from "./task-executor-policy.js";
+ import { getTaskFlowById } from "./task-flow-runtime-internal.js";
++import { resolveNativeTaskProgressOwner } from "./task-native-progress-owner.js";
+ import {
+   getTaskDeliveryState,
+   updateTask,
+@@ -580,6 +581,12 @@ function prepareTaskStateChangeDelivery(
+   try {
+     const owner = resolveTaskDeliveryOwner(current);
+     const ownerSessionKey = owner.sessionKey?.trim();
++    const progressOwner = resolveNativeTaskProgressOwner(current);
++    if (progressOwner && ownerSessionKey && canDeliverToRequesterOrigin(owner.requesterOrigin)) {
++      // Suppress duplicates only while a matching foreground or yielded owner can report.
++      // Native tasks without that replacement retain their explicit notification policy.
++      return { result: cloneTaskRecord(current) };
++    }
+     if (!ownerSessionKey) {
+       return {
+         result: updateTask(taskId, {
 diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
-index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867c4545283 100644
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e139229774bbf 100644
 --- a/src/tasks/task-registry-progress.test.ts
 +++ b/src/tasks/task-registry-progress.test.ts
 @@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73791,16 +74156,115 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867
 +  }).task;
 +  expect(task).toBeDefined();
 +  entry.requesterTurnYielded = true;
-+  return { entry, task: task! };
++  return { entry, task: task!, manager };
 +}
 +
  function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
    const entry: SubagentRunRecord = {
      runId: `run-${name}`,
-@@ -156,6 +219,90 @@ afterEach(() => {
+@@ -156,6 +219,190 @@ afterEach(() => {
  });
  
  describe("yielded subagent progress delivery", () => {
++  it.each(["channel", "direct"] as const)(
++    "delivers a real queued native start with explicit state_changes and no yield to its %s route",
++    async (route) => {
++      const requesterSessionKey =
++        route === "channel" ? PARENT : "agent:main:notifychat:direct:requester";
++      const item = registerChild({
++        queued: true,
++        requesterTurnRunId: undefined,
++        requesterSessionKey,
++      });
++      delete item.entry.requesterTurnYielded;
++      updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "state_changes" });
++      vi.setSystemTime(Date.now() + 1);
++      expect(item.manager.startQueuedSubagentRun(item.entry.runId)).toBe(true);
++      await vi.advanceTimersByTimeAsync(195_000);
++      if (route === "channel") {
++        expect(sendMessage).not.toHaveBeenCalled();
++        expect(peekSystemEvents(requesterSessionKey)).toEqual([
++          "Background task started: Prepare the document.",
++        ]);
++      } else {
++        expect(sendMessage).toHaveBeenCalledOnce();
++        expect(sendMessage.mock.calls[0]![0].content).toBe(
++          "Background task started: Prepare the document.",
++        );
++      }
++      expect(getTaskById(item.task.taskId)?.status).toBe("running");
++    },
++  );
++
++  it("keeps one yielded progress owner for a real queued native start", async () => {
++    const item = registerChild({ queued: true });
++    updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "state_changes" });
++    yieldParent();
++    vi.setSystemTime(Date.now() + 1);
++    expect(item.manager.startQueuedSubagentRun(item.entry.runId)).toBe(true);
++    await maybeDeliverTaskStateChangeUpdate(item.task.taskId, {
++      kind: "progress",
++      at: Date.now() + 1,
++      summary: "private-child-prose",
++    });
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    expect(sendMessage.mock.calls[0]![0].content).toBe(
++      "Background work is still in progress:\n- Prepare the document: still working.",
++    );
++    expect(peekSystemEvents(PARENT)).toEqual([]);
++  });
++
++  it.each(["generation", "requester", "agent", "batch"] as const)(
++    "does not suppress the queued start when yielded %s ownership differs",
++    async (mismatch) => {
++      const item = registerChild({ queued: true });
++      updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "state_changes" });
++      yieldParent();
++      if (mismatch === "generation") {
++        item.entry.generation = 2;
++      } else if (mismatch === "requester") {
++        item.entry.requesterSessionKey = "agent:main:notifychat:channel:other";
++      } else if (mismatch === "agent") {
++        item.entry.requesterAgentId = "other";
++      } else {
++        item.entry.requesterSettleWake!.batchRunIds = ["other-run"];
++      }
++      vi.setSystemTime(Date.now() + 1);
++      expect(item.manager.startQueuedSubagentRun(item.entry.runId)).toBe(true);
++      await vi.advanceTimersByTimeAsync(195_000);
++      expect(sendMessage).not.toHaveBeenCalled();
++      expect(peekSystemEvents(PARENT)).toEqual(["Background task started: Prepare the document."]);
++    },
++  );
++
++  it.each(["inactive", "different run", "different session", "different agent"] as const)(
++    "preserves explicit notifications when the captured requester is %s",
++    async (mismatch) => {
++      const contextRunId = mismatch === "different run" ? "other-parent-turn" : "parent-turn";
++      registerAgentRunContext(contextRunId, {
++        sessionKey: mismatch === "different session" ? "agent:main:other" : PARENT,
++        agentId: mismatch === "different agent" ? "other" : "main",
++        isHeartbeat: false,
++        projectSessionActive: mismatch !== "inactive",
++      });
++      try {
++        const item = registerChild({ queued: true });
++        delete item.entry.requesterTurnYielded;
++        updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "state_changes" });
++        vi.setSystemTime(Date.now() + 1);
++        expect(item.manager.startQueuedSubagentRun(item.entry.runId)).toBe(true);
++        await vi.advanceTimersByTimeAsync(195_000);
++        expect(sendMessage).not.toHaveBeenCalled();
++        expect(peekSystemEvents(PARENT)).toEqual([
++          "Background task started: Prepare the document.",
++        ]);
++      } finally {
++        clearAgentRunContext(contextRunId);
++      }
++    },
++  );
++
 +  it("delivers progress from ordinary registration and yield without an explicit notification opt-in", async () => {
 +    registerAgentRunContext("parent-turn", {
 +      sessionKey: PARENT,
@@ -73812,6 +74276,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867
 +    await maybeDeliverTaskStateChangeUpdate(item.task.taskId, { kind: "running", at: Date.now() });
 +    await vi.advanceTimersByTimeAsync(30_000);
 +    expect(sendMessage).not.toHaveBeenCalled();
++    expect(peekSystemEvents(PARENT)).toEqual([]);
 +    tool(item.entry);
 +    yieldParent();
 +    clearAgentRunContext("parent-turn");
@@ -73888,7 +74353,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867
    it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
      const first = child("First");
      vi.setSystemTime(Date.now() + 1);
-@@ -184,7 +331,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -184,7 +431,7 @@ describe("yielded subagent progress delivery", () => {
        mirror: { sessionKey: PARENT, agentId: "main" },
      });
      expect(message.content).toBe(
@@ -73897,7 +74362,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867
      );
      expect(message.content).not.toMatch(/Quiet|private-/);
      expect(getTaskById(first.task.taskId)).toMatchObject({
-@@ -298,10 +445,47 @@ describe("yielded subagent progress delivery", () => {
+@@ -298,10 +545,47 @@ describe("yielded subagent progress delivery", () => {
      expect(sendMessage.mock.calls[0]![0].content).toContain(
        "More task activity is available in Tasks.",
      );
@@ -73948,10 +74413,27 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..3a03130a49ed2914ed961be572859867
    });
  });
 diff --git a/src/tasks/task-registry-progress.ts b/src/tasks/task-registry-progress.ts
-index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404cabf8412b 100644
+index d5caebed36fa2b1f42158fc78cbd8c87829084e0..9ca0490923b8a4dfbe1a13aab6cffff70aac9d80 100644
 --- a/src/tasks/task-registry-progress.ts
 +++ b/src/tasks/task-registry-progress.ts
-@@ -21,9 +21,10 @@ import {
+@@ -1,5 +1,4 @@
+ import { createHash } from "node:crypto";
+-import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
+ import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
+ import type { AgentEventPayload } from "../infra/agent-events.js";
+ import {
+@@ -7,9 +6,8 @@ import {
+   resolveProjectedAgentRunProgressState,
+ } from "../infra/agent-run-registry.js";
+ import { runWithGatewayIndependentRootWorkContinuation } from "../process/gateway-work-admission.js";
+-import { hasAuthoritativeTaskBacking, readTaskBackingInstance } from "./task-backing-authority.js";
+ import { getTaskExecutionObservation } from "./task-execution-observation.js";
+-import { shouldAutoDeliverTaskStateChange } from "./task-executor-policy.js";
++import { resolveNativeTaskProgressOwner } from "./task-native-progress-owner.js";
+ import { canDeliverToRequesterOrigin, resolveTaskDeliveryOwner } from "./task-registry-delivery.js";
+ import { loadTaskRegistryDeliveryRuntime } from "./task-registry-runtime-loaders.js";
+ import {
+@@ -21,43 +19,20 @@ import {
  } from "./task-registry-state.js";
  import type { TaskProgressBatch } from "./task-registry.process-state.js";
  import type { TaskRecord } from "./task-registry.types.js";
@@ -73963,7 +74445,53 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
  const MAX_PROGRESS_BATCHES = 128;
  const MAX_PROGRESS_BATCH_MEMBERS = 32;
  const MAX_PROGRESS_DISPLAY_MEMBERS = 8;
-@@ -101,7 +102,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+ 
+ function resolveYieldedTaskProgress(task: TaskRecord, runId: string) {
+-  if (task.runtime !== "subagent" || !shouldAutoDeliverTaskStateChange(task)) {
+-    return undefined;
+-  }
+-  const backing = readTaskBackingInstance(task.detail);
+-  const entry = subagentRuns.get(runId);
+-  const wake = entry?.requesterSettleWake;
+-  if (
+-    backing?.runtime !== "subagent" ||
+-    !entry ||
+-    entry.generation !== backing.generation ||
+-    (entry.taskRunId ?? entry.runId) !== task.runId ||
+-    entry.childSessionKey !== task.childSessionKey ||
+-    entry.requesterSessionKey !== task.ownerKey ||
+-    (entry.requesterAgentId !== undefined && entry.requesterAgentId !== task.requesterAgentId) ||
+-    entry.killIntent ||
+-    entry.killReconciliation ||
+-    entry.execution.suppressSessionEffects ||
+-    entry.suppressAnnounceReason ||
+-    entry.requesterTurnRunId ||
+-    entry.collect === true ||
+-    (entry.execution.status === "terminal" && entry.pauseReason !== "sessions_yield") ||
+-    wake?.requesterYieldBatch !== true ||
+-    wake.status !== "pending" ||
+-    wake.rearmGeneration === undefined ||
+-    !wake.batchRunIds?.includes(runId) ||
+-    !hasAuthoritativeTaskBacking(task)
+-  ) {
++  const nativeOwner = resolveNativeTaskProgressOwner(task, runId);
++  if (nativeOwner?.kind !== "yielded") {
+     return undefined;
+   }
++  const { entry, wake, generation } = nativeOwner;
+   const owner = resolveTaskDeliveryOwner(task);
+   if (!owner.sessionKey || !canDeliverToRequesterOrigin(owner.requesterOrigin)) {
+     return undefined;
+@@ -69,7 +44,7 @@ function resolveYieldedTaskProgress(task: TaskRecord, runId: string) {
+     wake.rearmGeneration,
+     wake.batchRunIds,
+   ]);
+-  return { task, entry, owner, key, generation: backing.generation };
++  return { task, entry, owner, key, generation };
+ }
+ 
+ /** Enqueue only host-observed activity, never private child prose or tool results. */
+@@ -101,7 +76,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
      batch = {
        lifecycleGeneration: getAgentRunLifecycleGeneration(),
        members: new Map(),
@@ -73971,7 +74499,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
        overflow: false,
      };
      taskProgressBatches.set(progress.key, batch);
-@@ -111,7 +111,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+@@ -111,7 +85,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
    } else {
      batch.overflow = true;
    }
@@ -73979,7 +74507,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
    scheduleProgressBatch(progress.key, batch);
  }
  
-@@ -119,10 +118,13 @@ function scheduleProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -119,10 +92,13 @@ function scheduleProgressBatch(key: string, batch: TaskProgressBatch) {
    if (batch.timer || batch.publishing) {
      return;
    }
@@ -73997,7 +74525,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
    batch.timer.unref?.();
  }
  
-@@ -156,29 +158,23 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -156,29 +132,23 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
    }
    const lines = rows.slice(0, MAX_PROGRESS_DISPLAY_MEMBERS).map(({ task }) => {
      const observation = getTaskExecutionObservation(task);
@@ -74034,7 +74562,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
    });
    if (rows.length > MAX_PROGRESS_DISPLAY_MEMBERS || batch.overflow) {
      lines.push("- More task activity is available in Tasks.");
-@@ -194,7 +190,7 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -194,7 +164,7 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
  
  async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
    batch.publishing = true;
@@ -74043,7 +74571,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..0ffefcab6f4d0923481bcdf5ca92404c
    try {
      await runWithGatewayIndependentRootWorkContinuation(async () => {
        if (!prepareProgressBatch(key, batch)) {
-@@ -242,7 +238,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -242,7 +212,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
    } finally {
      batch.publishing = false;
      if (taskProgressBatches.get(key) === batch) {
