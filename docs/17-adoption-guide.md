@@ -13,13 +13,16 @@ The examples below use explicit paths; replace them with the intended local path
 
 Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.5`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `56a9bcae6a403eadf5aa48949cfe4a9c767a4ed8`.
+expected tree is `b8d24593af90951eb74769c1849a2b09d0c1cd2b`.
 
-The source pinned to `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8` passed
-[hosted qualification](../runtime/README.md#current-source-qualification) at public
+The preceding source `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8` passed
+[hosted qualification](../runtime/README.md#september-23-source-qualification) at public
 commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`, including the complete native
 plan, reconstructed build and owned regression suites. Deployment records and
-bounded live results are recorded separately. Match the workflow's source and
+bounded live results are recorded separately. The current `f29bb229c5c8` reference
+adds only the [native prompt correction](../runtime/README.md#september-24-native-prompt-successor);
+its own hosted qualification and signed companion acceptance must be checked.
+Match the workflow's source and
 patch identities to the manifest being adopted; neither a source test nor the
 originating host's live result qualifies your installation.
 

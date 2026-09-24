@@ -415,12 +415,13 @@ index 0000000000000000000000000000000000000000..6bb0893be8b800c403a2d18d07950712
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..98d687d94393af7ce01757f82569ea1f6aed5094
+index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450587a860c
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,353 @@
 +import AppKit
 +import ApplicationServices
++import Darwin
 +import Foundation
 +import OpenClawKit
 +import Security
@@ -615,13 +616,43 @@ index 0000000000000000000000000000000000000000..98d687d94393af7ce01757f82569ea1f
 +    }
 +}
 +
++/// Authentication agents may have no AppKit launchDate. Pin the kernel's
++/// process incarnation instead, so missing Launch Services metadata does not
++/// reject their prompts and PID reuse still invalidates an admission.
++struct NativeCredentialProcessIdentity: Equatable {
++    let pid: pid_t
++    let userID: uid_t
++    let startedSeconds: UInt64
++    let startedMicroseconds: UInt64
++
++    static func capture(
++        _ pid: pid_t,
++        read: (pid_t, inout proc_bsdinfo, Int32) -> Int32 = {
++            proc_pidinfo($0, PROC_PIDTBSDINFO, 0, &$1, $2)
++        }) throws -> Self
++    {
++        var info = proc_bsdinfo()
++        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
++        guard pid > 0, read(pid, &info, size) == size,
++              info.pbi_pid == UInt32(pid), info.pbi_start_tvsec > 0,
++              info.pbi_start_tvusec < 1_000_000
++        else { throw NativeCredentialError.refused }
++        return Self(
++            pid: pid,
++            userID: info.pbi_uid,
++            startedSeconds: info.pbi_start_tvsec,
++            startedMicroseconds: info.pbi_start_tvusec)
++    }
++}
++
 +@MainActor
 +private enum NativeCredentialAX {
 +    static func prompts() throws -> [NativeCredentialEntryService.Prompt] {
 +        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
-+              let bundleID = app.bundleIdentifier, let launched = app.launchDate,
++              let bundleID = app.bundleIdentifier,
 +              !["com.apple.loginwindow", "com.apple.ScreenSaver.Engine", "com.apple.SetupAssistant"].contains(bundleID)
 +        else { throw NativeCredentialError.refused }
++        let identity = try NativeCredentialProcessIdentity.capture(app.processIdentifier)
 +        try self.checkAppleCode(pid: app.processIdentifier, bundleID: bundleID)
 +        let application = AXUIElementCreateApplication(app.processIdentifier)
 +        AXUIElementSetMessagingTimeout(application, 1)
@@ -638,7 +669,8 @@ index 0000000000000000000000000000000000000000..98d687d94393af7ce01757f82569ea1f
 +            guard AXUIElementGetPid(window, &windowPID) == .success, windowPID == app.processIdentifier,
 +                  AXUIElementGetPid(field, &fieldPID) == .success, fieldPID == app.processIdentifier,
 +                  let current = NSRunningApplication(processIdentifier: app.processIdentifier),
-+                  current.launchDate == launched, current.bundleIdentifier == bundleID,
++                  (try? NativeCredentialProcessIdentity.capture(app.processIdentifier)) == identity,
++                  current.bundleIdentifier == bundleID,
 +                  NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
 +                  let currentWindow = self.element(application, kAXFocusedWindowAttribute),
 +                  CFEqual(currentWindow, window),
@@ -1971,10 +2003,11 @@ index 9b2f9edc7b8c87dbb4080df96c4b73a3e25d4c73..467a5fc107864939aee24e00ab8ce653
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..4472555cbe9cff866ef3fc385048775fc33afe2e
+index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac86037158f
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,290 @@
++import Darwin
 +import Foundation
 +import OpenClawKit
 +import Testing
@@ -1984,6 +2017,43 @@ index 0000000000000000000000000000000000000000..4472555cbe9cff866ef3fc385048775f
 +/// No live AX, Keychain, AppDefaults, app launch, or Gateway calls.
 +@MainActor
 +struct NativeCredentialEntryTests {
++    @Test func `native process identity uses kernel incarnation without Launch Services metadata`() throws {
++        let identity = try NativeCredentialProcessIdentity.capture(42) { pid, info, size in
++            info.pbi_pid = UInt32(pid)
++            info.pbi_uid = 501
++            info.pbi_start_tvsec = 100
++            info.pbi_start_tvusec = 123
++            return size
++        }
++        #expect(identity.pid == 42)
++        #expect(identity.userID == 501)
++        #expect(identity.startedSeconds == 100)
++        #expect(identity.startedMicroseconds == 123)
++        for change in 0..<4 {
++            let replacement = try NativeCredentialProcessIdentity.capture(change == 0 ? 43 : 42) { pid, info, size in
++                info.pbi_pid = UInt32(pid)
++                info.pbi_uid = change == 1 ? 502 : 501
++                info.pbi_start_tvsec = change == 2 ? 101 : 100
++                info.pbi_start_tvusec = change == 3 ? 124 : 123
++                return size
++            }
++            #expect(replacement != identity)
++        }
++    }
++
++    @Test func `missing truncated or inconsistent kernel identity refuses native credential discovery`() {
++        for change in 0..<5 {
++            #expect(throws: NativeCredentialError.refused) {
++                try NativeCredentialProcessIdentity.capture(42) { pid, info, size in
++                    info.pbi_pid = change == 2 ? 43 : UInt32(pid)
++                    info.pbi_start_tvsec = change == 3 ? 0 : 100
++                    info.pbi_start_tvusec = change == 4 ? 1_000_000 : 123
++                    return change == 0 ? 0 : (change == 1 ? size - 1 : size)
++                }
++            }
++        }
++    }
++
 +    @MainActor
 +    private final class Harness {
 +        let scope = UUID()
