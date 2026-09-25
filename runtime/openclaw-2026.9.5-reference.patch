@@ -40357,19 +40357,19 @@ index 0000000000000000000000000000000000000000..ef3f0cd87363d0304236585fdb3f5100
 +    expect(description).toContain("do not retrieve a password");
 +  });
 +});
-diff --git a/src/agents/tools/cron-tool.test.ts b/src/agents/tools/cron-tool.test.ts
-index dfe7764aeaabc4e5df43321375f6ea0765bd2828..55751d96b528be2dca3d2b502173dfd2dee2643c 100644
---- a/src/agents/tools/cron-tool.test.ts
-+++ b/src/agents/tools/cron-tool.test.ts
-@@ -920,10 +920,17 @@ describe("cron tool", () => {
-     });
-   });
- 
--  it("documents deferred follow-up guidance in the tool description", () => {
+diff --git a/src/agents/tools/cron-tool.description.test.ts b/src/agents/tools/cron-tool.description.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6498e7f546282d9170bee9d89f149467946c4eed
+--- /dev/null
++++ b/src/agents/tools/cron-tool.description.test.ts
+@@ -0,0 +1,29 @@
++import { describe, expect, it } from "vitest";
++import { createCronTool } from "./cron-tool.js";
++
++describe("cron tool description", () => {
 +  it("distinguishes detached scheduling from bounded active-worker waits", () => {
-     const tool = createTestCronTool();
-     expect(tool.description).toContain("reminders, delayed self-wakeups, loops, recurring work");
--    expect(tool.description).toContain("Never exec sleep/poll as timer.");
++    const tool = createCronTool();
++    expect(tool.description).toContain("reminders, delayed self-wakeups, loops, recurring work");
 +    expect(tool.description).toContain(
 +      "For detached reminders or future follow-ups, use this scheduler instead of exec sleep/poll loops.",
 +    );
@@ -40378,9 +40378,49 @@ index dfe7764aeaabc4e5df43321375f6ea0765bd2828..55751d96b528be2dca3d2b502173dfd2
 +    );
 +    expect(tool.description).toContain("does not require a separate automation");
 +    expect(tool.description).not.toContain("Never exec sleep/poll as timer.");
-     expect(tool.description).toContain(
-       "Inherited configured MCP authority includes only model-callable tools; interactive app-view-only capabilities are excluded from headless jobs.",
-     );
++    expect(tool.description).toContain(
++      "Inherited configured MCP authority includes only model-callable tools; interactive app-view-only capabilities are excluded from headless jobs.",
++    );
++    expect(tool.description).toContain(
++      "the run stays detached, reads bounded chat context, then commits its final visible assistant result to this conversation's durable history",
++    );
++    expect(tool.description).toContain(
++      "current=>canonical session commit, plus one normal channel send for external chats",
++    );
++    expect(tool.description).toContain(
++      "WebChat observes that commit live and after reconnect without another user message",
++    );
++  });
++});
+diff --git a/src/agents/tools/cron-tool.test.ts b/src/agents/tools/cron-tool.test.ts
+index dfe7764aeaabc4e5df43321375f6ea0765bd2828..3fe2280209cde9a2c9645932185dcda2772525b9 100644
+--- a/src/agents/tools/cron-tool.test.ts
++++ b/src/agents/tools/cron-tool.test.ts
+@@ -920,24 +920,6 @@ describe("cron tool", () => {
+     });
+   });
+ 
+-  it("documents deferred follow-up guidance in the tool description", () => {
+-    const tool = createTestCronTool();
+-    expect(tool.description).toContain("reminders, delayed self-wakeups, loops, recurring work");
+-    expect(tool.description).toContain("Never exec sleep/poll as timer.");
+-    expect(tool.description).toContain(
+-      "Inherited configured MCP authority includes only model-callable tools; interactive app-view-only capabilities are excluded from headless jobs.",
+-    );
+-    expect(tool.description).toContain(
+-      "the run stays detached, reads bounded chat context, then commits its final visible assistant result to this conversation's durable history",
+-    );
+-    expect(tool.description).toContain(
+-      "current=>canonical session commit, plus one normal channel send for external chats",
+-    );
+-    expect(tool.description).toContain(
+-      "WebChat observes that commit live and after reconnect without another user message",
+-    );
+-  });
+-
+   it.each([true, false])(
+     "warns against replacing known jobs after scoped failures (triggers=%s)",
+     (triggersEnabled) => {
 diff --git a/src/agents/tools/cron-tool.ts b/src/agents/tools/cron-tool.ts
 index 9211919282ce3fccdf51d2ed63ef69b4d986f97b..e40f618eb109df3b6aa6f35fb40c0ad902a53dac 100644
 --- a/src/agents/tools/cron-tool.ts
