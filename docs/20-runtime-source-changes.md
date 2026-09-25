@@ -622,3 +622,29 @@ The included OpenClaw source remains MIT licensed under its existing
 [third-party notices](../runtime/THIRD_PARTY_NOTICES.md). Preserve these notices when
 copying substantial source. The consolidated patch avoids exporting private Git
 history or author metadata; it does not replace upstream attribution.
+
+### Observed progress status
+
+Reference `490a24de638ac28f94bd136a6653116d9de56e26` replaces utility-model progress inference with fixed status
+text derived from observed tool names and lifecycle outcomes. An unrelated failed
+command cannot produce a claim that a worker never started. A completed launch
+request does not establish completion of the worker's task. No request text, tool
+arguments, paths, results or private child content enters generated status.
+
+Authored preambles retain priority. Existing visibility, 12-second coalescing,
+unchanged-text suppression, turn cancellation and explicit quiet settings remain.
+The retired narration model module is removed; utility-model routing for titles
+and recaps remains unchanged. Qualification includes 39 cases across the owner,
+requester continuation and Discord transport, followed by 28 owning cases after a
+mechanical closure-binding correction and a production typecheck. These counts
+are overlapping qualification runs, not a unique-test total.
+
+The public pair under `docs/assets/discord-narrator-20260925/` is explicitly a
+synthetic rendering of the owner regression: a mocked baseline utility response
+versus the repaired latest activity. It is not captured live model text or a live
+Discord screenshot. The same source was activated once on September 25 at
+15:50:25 UTC, without rollback. All 33 mechanical postflight checks passed,
+including current-process capture and preservation of configuration, auth
+ordering, jobs, terminals and companion processes. Exact-head hosted checks and
+live Discord canaries remain pending. MacBook opaque credential-entry acceptance
+remains a separate pending check; dated native receipts retain their host scope.

@@ -3431,11 +3431,90 @@ index 5caa8c4602211c8b676d2c244665769c75a7d94c..340d5735137fd29c76af07459ca00112
  
  The embedded runtime's existing session setting `retry.provider.maxRetries` overrides its recovery retry budget. `0` disables retries, and rate limits remain capped at 10 total attempts. It is not an `openclaw.json` key and does not change a native harness's internal request retries. Native harnesses may finish their own request retries before OpenClaw starts continuation recovery. The reply runner does not add another whole-turn replay loop. See [Retry policy](/concepts/retry) for pacing and exclusions.
  
+diff --git a/docs/concepts/models.md b/docs/concepts/models.md
+index 5c07bd2ede6ce440828c860194ca04d676785664..07ec27df5eb29e26895b4e062abdbf8ce48b83e3 100644
+--- a/docs/concepts/models.md
++++ b/docs/concepts/models.md
+@@ -58,7 +58,7 @@ Related model-config surfaces:
+ - `agents.defaults.models` stores aliases and per-model settings. After legacy-policy migration, adding an entry does not restrict model overrides.
+ - `agents.defaults.modelSelectionScope` chooses the scope of chat commands and Gateway session model updates without an explicit scope. The default is the current session. See [Model selection scope](/gateway/config-agents/models#agentsdefaultsmodelselectionscope).
+ - `agents.defaults.modelPolicy.allow` is the optional override allowlist. Use exact refs or trailing prefix wildcards such as `provider/*` and `provider/namespace/*`. Omit it or set `[]` to allow any model. Per-agent `agents.entries.*.modelPolicy.allow` replaces the default policy for that agent.
+-- `agents.defaults.utilityModel` is an optional lower-cost model for short internal tasks. Those tasks include generated dashboard session titles, supported channel thread or topic titles, progress narration, and rolling [Activity recaps](/web/control-ui/settings#activity-tab). Per-agent `agents.entries.*.utilityModel` overrides it. When unset, OpenClaw uses the primary provider's declared small-model default when one exists (OpenAI → `gpt-5.6-luna`, Anthropic → `claude-haiku-4-5`), otherwise the agent's primary model. Set it to an empty string to disable utility routing. Generated titles retry once with the primary model when a distinct utility model fails. For dashboard titles, automatic utility derivation and the regular fallback follow the effective session provider and auth profile. An explicit utility model keeps its configured provider and auth. An empty utility model skips only the alternate small-model route, not dashboard title generation. Utility tasks are separate model calls and may send bounded task content to the selected model provider. Activity recaps use bounded transcript excerpts and the previous recap, preserve cached text on failure, and do not fall back to the primary model.
++- `agents.defaults.utilityModel` is an optional lower-cost model for short internal tasks. Those tasks include generated dashboard session titles, supported channel thread or topic titles, rolling [Activity recaps](/web/control-ui/settings#activity-tab). Per-agent `agents.entries.*.utilityModel` overrides it. When unset, OpenClaw uses the primary provider's declared small-model default when one exists (OpenAI → `gpt-5.6-luna`, Anthropic → `claude-haiku-4-5`), otherwise the agent's primary model. Set it to an empty string to disable utility routing. Generated titles retry once with the primary model when a distinct utility model fails. For dashboard titles, automatic utility derivation and the regular fallback follow the effective session provider and auth profile. An explicit utility model keeps its configured provider and auth. An empty utility model skips only the alternate small-model route, not dashboard title generation. Utility tasks are separate model calls and may send bounded task content to the selected model provider. Activity recaps use bounded transcript excerpts and the previous recap, preserve cached text on failure, and do not fall back to the primary model.
+ - `agents.defaults.imageModel` is used only when the primary model cannot accept images.
+ - `agents.defaults.pdfModel` is used by the `pdf` tool. If unset, the tool falls back to `imageModel`, then the resolved session/default model.
+ - `agents.defaults.mediaModels.{image,music,video}` backs the shared media-generation tools. If unset, each tool infers an auth-backed provider default: current default provider first, then the remaining registered providers for that capability in provider-id order. Cross-provider fallback is the fixed default behavior.
 diff --git a/docs/concepts/progress-drafts.md b/docs/concepts/progress-drafts.md
-index 21ab087320ed414772f2b3f28896c23ecc0c7eaf..9433fa37466280d3371c9f59c7c17431cd12f884 100644
+index 21ab087320ed414772f2b3f28896c23ecc0c7eaf..7354afeb72cdef21c2686dbf51253f8f08ed0167 100644
 --- a/docs/concepts/progress-drafts.md
 +++ b/docs/concepts/progress-drafts.md
-@@ -455,6 +455,15 @@ The fallback is intentional: sending a fresh final answer beats losing text,
+@@ -294,27 +294,16 @@ by default and does not bypass the normal activity gate for short turns;
+ enabling `streaming.progress.commentary` hands preambles to the interleaved
+ commentary lane instead.
+ 
+-On Discord, when a utility model resolves for the agent — an explicit
+-[`utilityModel`](/gateway/config-agents/models#agents-defaults-model), or the primary
+-provider's declared small-model default (OpenAI → `gpt-5.6-luna`,
+-Anthropic → `claude-haiku-4-5`) — it supplies a short plain-language filler
+-when the model emits no preamble or has been quiet for about 20 seconds
+-(Telegram's headline is preamble-only today):
++On Discord, a short activity status fills gaps when the model emits no preamble
++or has been quiet for about 20 seconds (Telegram's headline is preamble-only
++today). It uses observed tool names and lifecycle outcomes, not a separate model
++request. For example, a successful file-read step can show `Read a file.` A
++completed worker-launch tool shows `Submitted a worker request.`; it does not
++claim that the worker's task finished.
+ 
+-```text
+-Updating the default model in your config, then restarting the gateway to pick
+-it up. One agent listing call failed and is being retried.
+-```
+-
+-Utility narration is on by default (`streaming.progress.narration`, default
+-`true`) and never falls back to the primary model: it runs only with an explicit
+-`utilityModel` or a provider-declared default for the agent's primary
+-provider. Set `utilityModel: ""` to disable utility routing entirely. When
+-`progress.toolProgress` is enabled, tool lines keep accumulating underneath. Draft
+-edits still wait for the normal activity gate and an actual
+-text change, which avoids flashes on fast turns and reduces edit churn in busy
+-channels. Set `narration: false` to disable only the utility-model filler; model
+-preamble headlines remain enabled:
++Activity status is on by default (`streaming.progress.narration`, default
++`true`). The existing option name is retained. Set `narration: false` to disable
++only this filler; authored preamble headlines remain enabled:
+ 
+ ```json5
+ {
+@@ -331,16 +320,19 @@ preamble headlines remain enabled:
+ }
+ ```
+ 
+-Narration input is bounded and redacted: the utility model receives the
+-inbound request text plus the same compact, redacted tool summaries the draft
+-would render — never raw command output or tool results. With
+-`commandText: "status"`, narration input also omits exec/bash command text,
+-matching what the draft shows.
++No inbound request, command arguments, file paths, tool results, or private
++worker content enters the activity status. A failed step never implies that the
++whole task failed or that another worker has not started. New activity replaces
++earlier status, and command outcomes use exit metadata. Updates coalesce at
++12-second intervals, unchanged text is suppressed, and the normal visible-draft
++and authored-preamble gates still apply. `progress.toolProgress` separately
++controls the underlying tool rows.
+ 
+-Narration belongs to the current turn. Ending or replacing that turn cancels its
+-pending utility-model request and prevents late results from updating the draft.
+-Tool activity that accumulates during a narration request is reconsidered when
+-that request finishes, so an eligible status update needs no additional event.
++Ending, aborting, or replacing a turn cancels its buffered activity updates.
++There are no pending utility-model completions that can overwrite newer facts.
++Existing `utilityModel` settings still control other utility tasks; no config
++rewrite is needed. An explicit `utilityModel: ""` retains its historical activity
++filler opt-out. Other utility-model selections no longer affect this status.
+ 
+ ### Line limits
+ 
+@@ -455,6 +447,15 @@ The fallback is intentional: sending a fresh final answer beats losing text,
  mis-threading a reply, or overwriting a draft with a payload the channel
  cannot represent safely.
  
@@ -3547,6 +3626,45 @@ index dadbe4690bb6385daabdc250186a0fed13147089..92e394001c0431565b86c01209fbb70b
    naming a new requester continue to create their own delivery obligation.
  - **Deterministic batches.** Frozen run IDs are sorted. Findings use creation
    time, completion time, and child session identity as tie-breakers. Superseded
+diff --git a/docs/gateway/cli-backends.md b/docs/gateway/cli-backends.md
+index 6247722da4851d9c4c4244d7dd52e2b922eca843..0b2bfdb6b7591e053038e76110a662361550d8c5 100644
+--- a/docs/gateway/cli-backends.md
++++ b/docs/gateway/cli-backends.md
+@@ -38,7 +38,7 @@ mechanics in `openclaw.json`.
+ OpenClaw auto-loads an owning bundled plugin when model selection or a
+ model-scoped `agentRuntime.id` references its backend.
+ 
+-Utility completions for session digests, progress narration, and tool-call titles use the selected model's runtime too. Claude CLI runs a fresh, tool-free completion with its own authentication. This includes canonical `anthropic/*` refs configured with `agentRuntime.id: "claude-cli"`.
++Utility completions for session digests and tool-call titles use the selected model's runtime too. Claude CLI runs a fresh, tool-free completion with its own authentication. This includes canonical `anthropic/*` refs configured with `agentRuntime.id: "claude-cli"`.
+ 
+ ## Using it as a fallback
+ 
+diff --git a/docs/gateway/config-agents/models.md b/docs/gateway/config-agents/models.md
+index dd9a54de3ca3c7f29e52eda1936d96ed8879319c..cbedd5f622f6c866ce88934e4d8f8af282c374a9 100644
+--- a/docs/gateway/config-agents/models.md
++++ b/docs/gateway/config-agents/models.md
+@@ -62,7 +62,7 @@ title: "Configuration — agent models"
+ - `model`: accepts either a string (`"provider/model"`) or an object (`{ primary, fallbacks }`).
+   - String form sets only the primary model.
+   - Object form sets primary plus ordered failover models.
+-- `utilityModel`: optional `provider/model` ref or alias for short internal tasks. It currently powers generated Control UI session titles, Telegram DM topic titles, Discord auto-thread titles, rolling [Activity recaps](/web/control-ui/settings#activity-tab), and [progress-draft narration](/concepts/progress-drafts#status-headline). When unset, OpenClaw derives the primary provider's declared small-model default when one exists (OpenAI → `gpt-5.6-luna`, Anthropic → `claude-haiku-4-5`); title tasks otherwise use the agent's primary model, and narration stays off. If a distinct utility model cannot prepare or complete a generated title, OpenClaw retries that title once with the primary model. For dashboard titles, automatic utility derivation and the regular fallback use the effective session provider and auth profile; an explicit utility model keeps its configured provider/auth. Set `utilityModel: ""` to skip the alternate utility route; dashboard title generation still proceeds directly to the regular session model. `agents.entries.*.utilityModel` overrides the default, and an operation-specific model override wins over both. Utility tasks make separate model calls and send task-specific content to the selected model provider. Dashboard title generation sends at most the first 1,000 characters of the first non-command message; narration sends the inbound request plus compact redacted tool summaries. Activity recaps send the previous recap and bounded excerpts of new transcript messages. Recaps stay on the utility route, retain cached text when it is unavailable, and stop generating when utility routing is disabled. Choose a provider that matches your cost and data-handling requirements.
++- `utilityModel`: optional `provider/model` ref or alias for short internal tasks. It currently powers generated Control UI session titles, Telegram DM topic titles, Discord auto-thread titles, and rolling [Activity recaps](/web/control-ui/settings#activity-tab). When unset, OpenClaw derives the primary provider's declared small-model default when one exists (OpenAI → `gpt-5.6-luna`, Anthropic → `claude-haiku-4-5`); title tasks otherwise use the agent's primary model. If a distinct utility model cannot prepare or complete a generated title, OpenClaw retries that title once with the primary model. For dashboard titles, automatic utility derivation and the regular fallback use the effective session provider and auth profile; an explicit utility model keeps its configured provider/auth. Set `utilityModel: ""` to skip the alternate utility route; dashboard title generation still proceeds directly to the regular session model. `agents.entries.*.utilityModel` overrides the default, and an operation-specific model override wins over both. Utility tasks make separate model calls and send task-specific content to the selected model provider. Dashboard title generation sends at most the first 1,000 characters of the first non-command message. Activity recaps send the previous recap and bounded excerpts of new transcript messages. Recaps stay on the utility route, retain cached text when it is unavailable, and stop generating when utility routing is disabled. Choose a provider that matches your cost and data-handling requirements.
+   During fresh setup, an explicit nonempty `utilityModel` can power the OpenClaw
+   setup assistant before a regular primary model is configured. Selecting the
+   utility role leaves regular agent chat unconfigured. Automatic provider-derived utility
+diff --git a/docs/gateway/config-agents/runtime-and-cli-backends.md b/docs/gateway/config-agents/runtime-and-cli-backends.md
+index 565cf3f1483da0482f88f66cd6bf696a05a9bf08..8adf54d1617a2e60cd044f38c037804075aa60af 100644
+--- a/docs/gateway/config-agents/runtime-and-cli-backends.md
++++ b/docs/gateway/config-agents/runtime-and-cli-backends.md
+@@ -43,7 +43,7 @@ Runtime policy decides which harness executes a model run. It lives on providers
+ - Whole-agent runtime keys are legacy. `agents.defaults.agentRuntime`, `agents.entries.*.agentRuntime`, session runtime pins, and `OPENCLAW_AGENT_RUNTIME` are ignored by runtime selection. Run `openclaw doctor --fix` to remove stale values.
+ - Eligible exact official HTTPS OpenAI Responses/ChatGPT routes with no authored request override may use the Codex harness implicitly. Provider/model `agentRuntime.id: "codex"` makes Codex a fail-closed requirement but does not make an incompatible route compatible.
+ - For Claude CLI deployments, prefer `model: "anthropic/claude-opus-5"` plus model-scoped `agentRuntime.id: "claude-cli"`. Legacy `claude-cli/<model>` refs still work for compatibility, but new config should keep provider/model selection canonical and put the execution backend in provider/model runtime policy.
+-- This controls text agent turns and tool-free utility completions, including session digests, progress narration, and tool-call titles. Media generation, vision, PDF, music, video, and TTS still use their provider/model settings.
++- This controls text agent turns and tool-free utility completions, including session digests and tool-call titles. Media generation, vision, PDF, music, video, and TTS still use their provider/model settings.
+ 
+ **Built-in alias shorthands** (only apply when the model is in `agents.defaults.models`):
+ 
 diff --git a/docs/gateway/heartbeat.md b/docs/gateway/heartbeat.md
 index 07350a9a9ff338300a6d7b636591d9a49089ff22..6a9d95b72fe82c660219052e619055d2b3f3a76c 100644
 --- a/docs/gateway/heartbeat.md
@@ -3808,6 +3926,46 @@ index a4ebb90d5493cd4e630e3041ee23bcdb45c31429..30db4d2203d339f62b081b825145f9da
  
  ## Desktop availability and keeping awake
  
+diff --git a/docs/plugins/apple-fm.md b/docs/plugins/apple-fm.md
+index 2ebe82170ae9befd343b0924526d67d8b26d50b3..655ae43d107cbaa47ead003008b233526086e0cd 100644
+--- a/docs/plugins/apple-fm.md
++++ b/docs/plugins/apple-fm.md
+@@ -87,8 +87,8 @@ OpenClaw's normal execution and approval flow. The helper is started for model
+ requests; no HTTP server, launch agent, or separate model daemon is installed.
+ OpenClaw retains ownership of tool execution and its normal approval checks.
+ 
+-Utility calls power short internal tasks such as session titles and progress
+-narration through OpenClaw's existing utility-model routing. Apple is not selected
++Utility calls power short internal tasks such as session titles and activity
++recaps through OpenClaw's existing utility-model routing. Apple is not selected
+ as the ordinary agent's primary model by onboarding.
+ 
+ The model shares its context window across instructions, tool definitions,
+diff --git a/docs/plugins/manifest/models.md b/docs/plugins/manifest/models.md
+index 1b48778db9f7f9d52c8199a6324bc6cdef6b0b55..cddf5b0e07cab130baedc5eff658e363e2b97adf 100644
+--- a/docs/plugins/manifest/models.md
++++ b/docs/plugins/manifest/models.md
+@@ -116,13 +116,13 @@ This field is publication-time authoring metadata, not a Gateway discovery hook.
+ 
+ Provider fields:
+ 
+-| Field                 | Type                     | What it means                                                                                                                                                                                                     |
+-| --------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `baseUrl`             | `string`                 | Optional default base URL for models in this provider catalog.                                                                                                                                                    |
+-| `api`                 | `ModelApi`               | Optional default API adapter for models in this provider catalog.                                                                                                                                                 |
+-| `headers`             | `Record<string, string>` | Optional static headers that apply to this provider catalog.                                                                                                                                                      |
+-| `defaultUtilityModel` | `string`                 | Optional provider-recommended small model id for short internal utility tasks (titles, progress narration). Used when `agents.defaults.utilityModel` is unset and this provider serves the agent's primary model. |
+-| `models`              | `object[]`               | Required model rows. Rows without an `id` are ignored.                                                                                                                                                            |
++| Field                 | Type                     | What it means                                                                                                                                                                                            |
++| --------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `baseUrl`             | `string`                 | Optional default base URL for models in this provider catalog.                                                                                                                                           |
++| `api`                 | `ModelApi`               | Optional default API adapter for models in this provider catalog.                                                                                                                                        |
++| `headers`             | `Record<string, string>` | Optional static headers that apply to this provider catalog.                                                                                                                                             |
++| `defaultUtilityModel` | `string`                 | Optional provider-recommended small model id for short internal utility tasks (titles and recaps). Used when `agents.defaults.utilityModel` is unset and this provider serves the agent's primary model. |
++| `models`              | `object[]`               | Required model rows. Rows without an `id` are ignored.                                                                                                                                                   |
+ 
+ Model fields:
+ 
 diff --git a/docs/plugins/sdk-channel-outbound.md b/docs/plugins/sdk-channel-outbound.md
 index b3b92c11d4e48a6cbcea1aed84bc1d39533d217d..bb7b3a88e79f7cc41e607346cce0788aba242428 100644
 --- a/docs/plugins/sdk-channel-outbound.md
@@ -3835,7 +3993,7 @@ index b3b92c11d4e48a6cbcea1aed84bc1d39533d217d..bb7b3a88e79f7cc41e607346cce0788a
  
  Runtime send helpers also live on `channel-outbound`:
 diff --git a/docs/plugins/sdk-channel-plugins/message-adapter.md b/docs/plugins/sdk-channel-plugins/message-adapter.md
-index ae13cac267948b6cdff02f7a40e2924757b0c891..21cb44173488d61d2ce6e0e6f663af400adc1771 100644
+index ae13cac267948b6cdff02f7a40e2924757b0c891..a031c138ca0049c15f4eee14212e651fc39cd6e8 100644
 --- a/docs/plugins/sdk-channel-plugins/message-adapter.md
 +++ b/docs/plugins/sdk-channel-plugins/message-adapter.md
 @@ -107,6 +107,21 @@ during a send in the next throttle window. Explicit `flush()` still bypasses
@@ -3851,8 +4009,8 @@ index ae13cac267948b6cdff02f7a40e2924757b0c891..21cb44173488d61d2ce6e0e6f663af40
 +delayed coalesced writes, and stop pending updates during cleanup.
 +
 +Return the existing tool, item, command-output, and narration callbacks through
-+`replyOptions`, plus `finish` and `cleanup`. Core retains the configured activity
-+narrator; private worker completion prompts are not narration input. `finish`
++`replyOptions`, plus `finish` and `cleanup`. Core derives activity status from
++observed tool metadata; private worker completion prompts are not status input. `finish`
 +seals progress only. It must not publish a final answer or change final-delivery
 +custody. Return `undefined` when the channel or selected streaming mode does not
 +support this adapter; the existing continuation presentation remains available.
@@ -24382,10 +24540,10 @@ index ab3cd36b20f3c3be508332de77fd2e1cc6f0af9a..2ebcbbc016e443f5ce12863772b03150
      onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
 diff --git a/src/agents/command/continuation-presentation.test.ts b/src/agents/command/continuation-presentation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..30679ea2238797ce58862d6f91141877e90bb497
+index 0000000000000000000000000000000000000000..728950bd24163b76f3fb65ba8808f7f8975ea353
 --- /dev/null
 +++ b/src/agents/command/continuation-presentation.test.ts
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,215 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import type { GetReplyOptions } from "../../auto-reply/get-reply-options.types.js";
 +import type { CliDeps } from "../../cli/deps.types.js";
@@ -24396,17 +24554,10 @@ index 0000000000000000000000000000000000000000..30679ea2238797ce58862d6f91141877
 +  plugin: vi.fn(),
 +  preflight: vi.fn(),
 +  typing: vi.fn(),
-+  prepare: vi.fn(),
-+  narrate: vi.fn(),
 +}));
 +vi.mock("../../channels/plugins/index.js", () => ({ getChannelPlugin: mocks.plugin }));
 +vi.mock("./session-helpers.js", () => ({ prepareCurrentRunDelivery: mocks.preflight }));
 +vi.mock("./run-embedded-attempt.js", () => ({ runEmbeddedAgentAttempt: vi.fn() }));
-+vi.mock("../../auto-reply/reply/progress-narrator-model.js", async (importOriginal) => ({
-+  ...(await importOriginal<typeof import("../../auto-reply/reply/progress-narrator-model.js")>()),
-+  prepareNarrationModel: mocks.prepare,
-+  generateNarrationWithUtilityModel: mocks.narrate,
-+}));
 +import { createAgentCommandContinuationPresentation } from "./continuation-presentation.js";
 +
 +const source = { channel: "discord", to: "channel:123", accountId: "default" };
@@ -24515,11 +24666,6 @@ index 0000000000000000000000000000000000000000..30679ea2238797ce58862d6f91141877
 +    vi.useFakeTimers();
 +    vi.setSystemTime(100_000);
 +    vi.clearAllMocks();
-+    mocks.prepare.mockResolvedValue({ provider: "openai", model: "gpt-5.5-mini" });
-+    let narration = 0;
-+    mocks.narrate.mockImplementation(async () => ({
-+      text: `Checking the calendar details, step ${++narration}.`,
-+    }));
 +  });
 +  afterEach(() => {
 +    vi.useRealTimers();
@@ -24558,7 +24704,7 @@ index 0000000000000000000000000000000000000000..30679ea2238797ce58862d6f91141877
 +    expect(mocks.typing).toHaveBeenCalled();
 +    expect(h.opts.deliver).toBe(false);
 +    expect(JSON.stringify(h.updates)).not.toContain("PRIVATE CHILD RESULT");
-+    expect(JSON.stringify(mocks.narrate.mock.calls)).not.toContain("PRIVATE CHILD RESULT");
++    expect(h.updates.some((update) => update.text === "Reading a file.")).toBe(true);
 +    await presentation!.finish();
 +    const count = h.updates.length;
 +    await presentation!.onAgentEvent(
@@ -42792,6 +42938,18 @@ index ac0b43f60ceb3d16d5347b8b80ddc5b078bd6339..2a9376e68fdd6bccb2b9de8e65545710
 +    ...(thinkLevel !== undefined ? { thinkLevel } : {}),
    };
  }
+diff --git a/src/agents/utility-model.ts b/src/agents/utility-model.ts
+index 59f215652d1b7c9a118f82cc656ed01ef8ac7d4c..e951a05aea816d35218f7ada5441d29c1ecd8038 100644
+--- a/src/agents/utility-model.ts
++++ b/src/agents/utility-model.ts
+@@ -1,5 +1,5 @@
+-// Resolves the utility model used for short internal tasks (titles, progress
+-// narration). Unset config derives the provider-declared small model from the
++// Resolves the utility model used for short internal tasks (titles and recaps).
++// Unset config derives the provider-declared small model from the
+ // agent's primary provider; an explicit empty string disables utility routing.
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import {
 diff --git a/src/auto-reply/command-auth.ts b/src/auto-reply/command-auth.ts
 index ef7092a90198f8d2780cb3948e64ee15c7ecf0bc..d7e319fe0d3da12305db914a67d363f204e14000 100644
 --- a/src/auto-reply/command-auth.ts
@@ -42853,7 +43011,7 @@ index 6441e8531f8c36cd702aeed3fbb48238e29c43fb..c50f4c11f5052f01558f4647ffd340e8
  
  type ResolvedFallbackTransition = {
 diff --git a/src/auto-reply/get-reply-options.types.ts b/src/auto-reply/get-reply-options.types.ts
-index f2adbe96a09ee14d9c05d5838828254c4454a6ef..5f5170f0a506fb97ab78858d23ff1a81f75b536a 100644
+index f2adbe96a09ee14d9c05d5838828254c4454a6ef..1e359d52176d04276d8a68aa0f671e656aed6b8b 100644
 --- a/src/auto-reply/get-reply-options.types.ts
 +++ b/src/auto-reply/get-reply-options.types.ts
 @@ -188,7 +188,7 @@ export type GetReplyOptions = {
@@ -42865,6 +43023,36 @@ index f2adbe96a09ee14d9c05d5838828254c4454a6ef..5f5170f0a506fb97ab78858d23ff1a81
    heartbeatModelOverride?: string;
    /** One-shot thinking level override for this run; does not persist to the session. */
    thinkingLevelOverride?: string;
+@@ -281,10 +281,9 @@ export type GetReplyOptions = {
+     suppressDurableProgress?: true;
+   }) => Promise<ProgressCallbackResult> | ProgressCallbackResult;
+   /**
+-   * Called when the utility-model narration of the in-progress turn changes.
+-   * Providing this callback opts the channel into progress narration; core
+-   * only generates narration when a utility model resolves (explicit
+-   * config or the provider-declared default; utilityModel: "" disables).
++   * Called when the metadata-only activity status of the in-progress turn changes.
++   * Providing this callback opts the channel into deterministic progress status.
++   * The existing explicit utilityModel: "" opt-out remains supported.
+    * An empty text clears narration; a retained model preamble still wins before
+    * the channel falls back to raw tool progress.
+    */
+@@ -294,12 +293,11 @@ export type GetReplyOptions = {
+     beginTurn: () => void;
+     stopTurn: () => void;
+   }) => void;
+-  /** False while utility-model narration has no visible progress draft. */
++  /** False while activity status has no visible progress draft. */
+   isProgressDraftVisible?: () => boolean;
+   /**
+-   * Omit exec/bash command text from narration model input, mirroring the
+-   * channel's `streaming.progress.commandText: "status"` display policy so
+-   * narration never receives more command detail than the draft shows.
++   * Retained for channel SDK compatibility. Activity status always excludes
++   * command text and tool contents, regardless of this former model-input policy.
+    */
+   narrationHideCommandText?: boolean;
+   /** In progress mode, classify Claude pre-tool text; true also renders it as commentary. */
 diff --git a/src/auto-reply/reply-payload.ts b/src/auto-reply/reply-payload.ts
 index a7b6518d9e8481366e96fa0c2a455f2e774fdde7..d6859599a54d3c573c15b68519ab9d3ae2b337d1 100644
 --- a/src/auto-reply/reply-payload.ts
@@ -52698,7 +52886,7 @@ index a1890751b2702209a1ca452f58957d28d0449788..c4e29ba5a1683e3e841cb47f211ff3d9
    vi.doMock("./get-reply-directives.js", () => ({
      resolveReplyDirectives: (...args: unknown[]) => handles.resolveReplyDirectives(...args),
 diff --git a/src/auto-reply/reply/get-reply.ts b/src/auto-reply/reply/get-reply.ts
-index c513942fe94a9b85d60967d2f030e8442e225fc7..82886c7248bd237f85afc9237ec00e62d9738480 100644
+index c513942fe94a9b85d60967d2f030e8442e225fc7..dc9790880f3afe00832b53259f8e4810c6dad1ae 100644
 --- a/src/auto-reply/reply/get-reply.ts
 +++ b/src/auto-reply/reply/get-reply.ts
 @@ -14,7 +14,6 @@ import {
@@ -52776,7 +52964,7 @@ index c513942fe94a9b85d60967d2f030e8442e225fc7..82886c7248bd237f85afc9237ec00e62
          }),
        };
      });
-@@ -737,17 +723,25 @@ export async function getReplyFromConfig(
+@@ -737,21 +723,28 @@ export async function getReplyFromConfig(
      hasResolvedHeartbeatModelOverride = false;
      heartbeatAuthProfile = undefined;
    }
@@ -52805,6 +52993,10 @@ index c513942fe94a9b85d60967d2f030e8442e225fc7..82886c7248bd237f85afc9237ec00e62
    const resolvedOpts = attachProgressNarratorToReplyOptions({
      cfg,
      agentId,
+-    userMessage: finalized.agentText,
+     opts: optsWithSessionSkillOverrides,
+     disabled: sessionModelSelectionLocked,
+   });
 diff --git a/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts b/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts
 index e6d71282e595f9add5097667c944885a4d81b1f8..89a6e5217d5136f5f04f2c6205d064e2f11e428b 100644
 --- a/src/auto-reply/reply/get-reply.turn-model-selection-differential.test.ts
@@ -52967,6 +53159,1680 @@ index 0000000000000000000000000000000000000000..f979c1124ee055b2d31e7c44b781ef16
 +    ? `${truncateUtf16Safe(message, MAX_FLUSH_ERROR_LENGTH - 1)}…`
 +    : message;
 +}
+diff --git a/src/auto-reply/reply/progress-narrator-model.test.ts b/src/auto-reply/reply/progress-narrator-model.test.ts
+deleted file mode 100644
+index f22d74fd8f109f6b1b10913e64d889c8eb968e35..0000000000000000000000000000000000000000
+--- a/src/auto-reply/reply/progress-narrator-model.test.ts
++++ /dev/null
+@@ -1,63 +0,0 @@
+-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+-import { generateNarrationWithUtilityModel } from "./progress-narrator-model.js";
+-
+-const complete = vi.hoisted(() => vi.fn());
+-vi.mock("../../agents/isolated-completion.js", () => ({
+-  runIsolatedCompletion: complete,
+-}));
+-vi.mock("../../agents/utility-completion.js", () => ({
+-  prepareUtilityCompletionForAgent: vi.fn(),
+-}));
+-
+-const prepared: Parameters<typeof generateNarrationWithUtilityModel>[0]["prepared"] = {
+-  config: {},
+-  provider: "openai",
+-  model: "gpt-test",
+-  authProfileId: undefined,
+-  outputTextPolicy: "strict-visible",
+-  agentId: "main",
+-  agentDir: "/unused-narration-test",
+-};
+-
+-beforeEach(() => {
+-  vi.useFakeTimers();
+-  complete.mockReset();
+-  complete.mockResolvedValue({
+-    text: "Working on the request.",
+-    provider: "openai",
+-    model: "gpt-test",
+-    owner: { kind: "harness", id: "openclaw" },
+-  });
+-});
+-
+-afterEach(() => {
+-  vi.useRealTimers();
+-  vi.restoreAllMocks();
+-});
+-
+-describe("progress narration completion cancellation", () => {
+-  it.each([false, true])(
+-    "does not dispatch an already aborted request: aborted=%s",
+-    async (aborted) => {
+-      const controller = new AbortController();
+-      if (aborted) {
+-        controller.abort();
+-      }
+-
+-      const result = await generateNarrationWithUtilityModel({
+-        cfg: {},
+-        prepared,
+-        input: {
+-          userMessage: "Inspect the fixture",
+-          activityNotes: ["Tool read"],
+-          previousText: "",
+-        },
+-        abortSignal: controller.signal,
+-      });
+-
+-      expect(complete).toHaveBeenCalledTimes(aborted ? 0 : 1);
+-      expect(result.text).toBe(aborted ? null : "Working on the request.");
+-      expect(vi.getTimerCount()).toBe(0);
+-    },
+-  );
+-});
+diff --git a/src/auto-reply/reply/progress-narrator-model.ts b/src/auto-reply/reply/progress-narrator-model.ts
+deleted file mode 100644
+index c4c632598db287a86489d16aceb511b698180691..0000000000000000000000000000000000000000
+--- a/src/auto-reply/reply/progress-narrator-model.ts
++++ /dev/null
+@@ -1,104 +0,0 @@
+-// Utility-model preparation and completion for progress narration.
+-import { runIsolatedCompletion } from "../../agents/isolated-completion.js";
+-import { prepareUtilityCompletionForAgent } from "../../agents/utility-completion.js";
+-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import { logVerbose } from "../../globals.js";
+-
+-const NARRATION_TIMEOUT_MS = 10_000;
+-const NOTES_IN_PROMPT = 15;
+-const USER_MESSAGE_PROMPT_CHARS = 500;
+-// Reasoning-capable utility models spend output tokens before the short
+-// visible text; a tiny cap can leave no text (same budget as label generation).
+-const NARRATION_MAX_TOKENS = 4_096;
+-
+-const NARRATION_SYSTEM_PROMPT = [
+-  "You write the live status line for an AI assistant that is working on a chat request.",
+-  "Describe what the assistant is doing right now in one or two short plain sentences, under 200 characters total.",
+-  "Use simple present tense and plain language a non-technical reader understands.",
+-  "No emoji, no markdown, no lists, no tool or API jargon, no quotation marks.",
+-  "If something failed, mention it briefly.",
+-  "Reply with the status text only.",
+-].join(" ");
+-
+-export type ProgressNarrationInput = {
+-  userMessage: string;
+-  activityNotes: readonly string[];
+-  previousText: string;
+-};
+-
+-export function truncateAtWordBoundary(text: string, maxChars: number): string {
+-  const chars = Array.from(text);
+-  if (chars.length <= maxChars) {
+-    return text;
+-  }
+-  const head = chars
+-    .slice(0, maxChars - 1)
+-    .join("")
+-    .trimEnd();
+-  const boundary = head.search(/\s+\S*$/u);
+-  if (boundary > Math.floor(maxChars * 0.6)) {
+-    return `${head.slice(0, boundary).trimEnd()}…`;
+-  }
+-  return `${head}…`;
+-}
+-
+-function buildNarrationUserPrompt(input: ProgressNarrationInput): string {
+-  const request = truncateAtWordBoundary(
+-    input.userMessage.replace(/\s+/g, " ").trim(),
+-    USER_MESSAGE_PROMPT_CHARS,
+-  );
+-  const notes = input.activityNotes.slice(-NOTES_IN_PROMPT);
+-  return [
+-    `Request:\n${request || "(none)"}`,
+-    `Recent activity (oldest first):\n${notes.map((note) => `- ${note}`).join("\n") || "- (none yet)"}`,
+-    `Previous status: ${input.previousText || "(none)"}`,
+-  ].join("\n\n");
+-}
+-
+-export async function prepareNarrationModel(params: { cfg: OpenClawConfig; agentId: string }) {
+-  try {
+-    return await prepareUtilityCompletionForAgent({
+-      cfg: params.cfg,
+-      agentId: params.agentId,
+-      useUtilityModel: true,
+-    });
+-  } catch (err) {
+-    logVerbose(`progress-narrator: model preparation failed: ${String(err)}`);
+-    return null;
+-  }
+-}
+-
+-export async function generateNarrationWithUtilityModel(params: {
+-  cfg: OpenClawConfig;
+-  prepared: NonNullable<Awaited<ReturnType<typeof prepareNarrationModel>>>;
+-  input: ProgressNarrationInput;
+-  abortSignal?: AbortSignal;
+-}): Promise<{ text: string | null; error?: string }> {
+-  const controller = new AbortController();
+-  const timeout = setTimeout(() => controller.abort(), NARRATION_TIMEOUT_MS);
+-  const signal = params.abortSignal
+-    ? AbortSignal.any([params.abortSignal, controller.signal])
+-    : controller.signal;
+-  try {
+-    signal.throwIfAborted();
+-    const result = await runIsolatedCompletion({
+-      ...params.prepared,
+-      config: params.cfg,
+-      systemPrompt: NARRATION_SYSTEM_PROMPT,
+-      prompt: buildNarrationUserPrompt(params.input),
+-      timeoutMs: NARRATION_TIMEOUT_MS,
+-      abortSignal: signal,
+-      streamParams: {
+-        maxTokens: NARRATION_MAX_TOKENS,
+-        temperature: 0.3,
+-      },
+-    });
+-    const text = result.text.trim();
+-    return { text: text || null };
+-  } catch (err) {
+-    logVerbose(`progress-narrator: completion failed: ${String(err)}`);
+-    return { text: null, error: String(err) };
+-  } finally {
+-    clearTimeout(timeout);
+-  }
+-}
+diff --git a/src/auto-reply/reply/progress-narrator.test.ts b/src/auto-reply/reply/progress-narrator.test.ts
+index 846906af9c317581e935b45ef32a81145cd4aae2..6cfd9a325b3eb924b789f0bca73dbc752cefab6c 100644
+--- a/src/auto-reply/reply/progress-narrator.test.ts
++++ b/src/auto-reply/reply/progress-narrator.test.ts
+@@ -1,677 +1,271 @@
+-// Progress narrator tests cover trigger policy, gating, and reply-option wiring.
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { PROGRESS_STATUS_PREAMBLE_FRESH_MS } from "../../channels/progress-draft-compositor.js";
+-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import type { GetReplyOptions } from "../get-reply-options.types.js";
+ import type { InternalGetReplyOptions } from "./get-reply.types.js";
+-import type { ProgressNarrationInput } from "./progress-narrator-model.js";
+-
+-const narratorWarnSpy = vi.hoisted(() => vi.fn());
+-const narrationModelMocks = vi.hoisted(() => ({
+-  prepared: {
+-    provider: "openai",
+-    model: "gpt-5.5-mini",
+-  },
+-  prepare: vi.fn(),
+-  generate: vi.fn(),
+-}));
+-vi.mock("../../logging/subsystem.js", async (importOriginal) => {
+-  const actual = await importOriginal<typeof import("../../logging/subsystem.js")>();
+-  return {
+-    ...actual,
+-    createSubsystemLogger: (subsystem: string) => ({
+-      ...actual.createSubsystemLogger(subsystem),
+-      warn: narratorWarnSpy,
+-    }),
+-  };
+-});
+-
+-vi.mock("./progress-narrator-model.js", async (importOriginal) => {
+-  const actual = await importOriginal<typeof import("./progress-narrator-model.js")>();
+-  return {
+-    ...actual,
+-    prepareNarrationModel: narrationModelMocks.prepare,
+-    generateNarrationWithUtilityModel: vi.fn(
+-      async ({
+-        input,
+-        abortSignal,
+-      }: {
+-        input: ProgressNarrationInput;
+-        abortSignal?: AbortSignal;
+-      }) => ({
+-        text: await narrationModelMocks.generate(input, abortSignal),
+-      }),
+-    ),
+-  };
+-});
+-
+ import { attachProgressNarratorToReplyOptions } from "./progress-narrator.js";
+ 
+-const cfg = {} as OpenClawConfig;
+-const narratorCfg = {
+-  agents: { defaults: { utilityModel: "openai/gpt-5.5-mini" } },
+-} as OpenClawConfig;
+-
+-// The narrator runs generations on a detached promise; drain microtasks so
+-// onUpdate assertions observe the settled state.
+-async function flushNarrations() {
+-  for (let i = 0; i < 8; i += 1) {
+-    await Promise.resolve();
+-  }
+-}
+-
+-function createNarratorHarness(params?: {
+-  texts?: Array<string | null>;
+-  generate?: (input: ProgressNarrationInput, signal?: AbortSignal) => Promise<string | null>;
+-  abortSignal?: AbortSignal;
+-  now?: () => number;
+-  hideCommandText?: boolean;
+-  isProgressDraftVisible?: () => boolean;
+-}) {
+-  const inputs: ProgressNarrationInput[] = [];
+-  const texts = params?.texts ?? ["Working on the request."];
+-  const generate = vi.fn(async (input: ProgressNarrationInput, signal?: AbortSignal) => {
+-    inputs.push(input);
+-    return params?.generate
+-      ? await params.generate(input, signal)
+-      : (texts[Math.min(inputs.length - 1, texts.length - 1)] ?? null);
+-  });
+-  const onUpdate = vi.fn();
+-  if (params?.now) {
+-    vi.spyOn(Date, "now").mockImplementation(params.now);
+-  }
+-  const lifecycleRef: {
+-    current?: Parameters<NonNullable<InternalGetReplyOptions["onProgressNarratorLifecycle"]>>[0];
+-  } = {};
+-  narrationModelMocks.generate.mockImplementation(generate);
+-  const wrapped = attachProgressNarratorToReplyOptions({
+-    cfg: narratorCfg,
+-    agentId: "main",
+-    userMessage: "change the default model",
+-    opts: {
+-      onNarrationUpdate: onUpdate,
+-      abortSignal: params?.abortSignal,
+-      onToolStart: vi.fn(),
+-      onCommandOutput: vi.fn(),
+-      onItemEvent: vi.fn(),
+-      onProgressNarratorLifecycle: (value) => {
+-        lifecycleRef.current = value;
+-      },
+-      isProgressDraftVisible: params?.isProgressDraftVisible,
+-      narrationHideCommandText: params?.hideCommandText,
+-    },
+-  });
+-  if (!wrapped || !lifecycleRef.current) {
+-    throw new Error("expected attached progress narrator");
+-  }
+-  const controls = lifecycleRef.current;
+-  const narrator = {
+-    beginTurn: () => controls.beginTurn(),
+-    stopTurn: () => controls.stopTurn(),
+-    noteToolStart: (
+-      payload: Parameters<NonNullable<InternalGetReplyOptions["onToolStart"]>>[0],
+-    ) => {
+-      void wrapped.onToolStart?.(payload);
+-    },
+-    noteCommandOutput: (
+-      payload: Parameters<NonNullable<InternalGetReplyOptions["onCommandOutput"]>>[0],
+-    ) => {
+-      void wrapped.onCommandOutput?.(payload);
+-    },
+-    noteItemEvent: (
+-      payload: Parameters<NonNullable<InternalGetReplyOptions["onItemEvent"]>>[0],
+-    ) => {
+-      void wrapped.onItemEvent?.(payload);
++const complete = vi.hoisted(() => vi.fn());
++vi.mock("../../agents/isolated-completion.js", () => ({ runIsolatedCompletion: complete }));
++
++function setup(options: Partial<InternalGetReplyOptions> = {}) {
++  const updates = vi.fn();
++  let lifecycle:
++    | Parameters<NonNullable<GetReplyOptions["onProgressNarratorLifecycle"]>>[0]
++    | undefined;
++  const original: InternalGetReplyOptions = {
++    onToolStart: vi.fn(() => false),
++    onItemEvent: vi.fn(() => false),
++    onCommandOutput: vi.fn(() => false),
++    onNarrationUpdate: updates,
++    onProgressNarratorLifecycle: (value) => {
++      lifecycle = value;
+     },
++    ...options,
+   };
+-  return { narrator, generate, onUpdate, inputs };
++  const opts = attachProgressNarratorToReplyOptions({ cfg: {}, agentId: "main", opts: original });
++  if (!opts || !lifecycle) {
++    throw new Error("expected activity projection");
++  }
++  return { opts, original, updates, lifecycle };
+ }
++const toolEnd = (name: string, toolCallId?: string) => ({
++  name,
++  toolCallId,
++  kind: "tool",
++  phase: "end",
++  status: "completed",
++});
+ 
+ beforeEach(() => {
+-  narrationModelMocks.prepare.mockResolvedValue(narrationModelMocks.prepared);
++  vi.useFakeTimers();
++  vi.setSystemTime(100_000);
++  complete.mockReset();
++  complete.mockResolvedValue({ text: "The first worker has not started after a command failed." });
+ });
+-
+ afterEach(() => {
+-  vi.restoreAllMocks();
+-  narrationModelMocks.prepare.mockReset();
+-  narrationModelMocks.generate.mockReset();
++  vi.useRealTimers();
+ });
+ 
+-describe("progress narration through reply options", () => {
+-  it("narrates after the first work tool event", async () => {
+-    const { narrator, generate, onUpdate, inputs } = createNarratorHarness();
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "ls" } });
+-    await flushNarrations();
+-
+-    expect(generate).toHaveBeenCalledTimes(1);
+-    expect(onUpdate).toHaveBeenCalledWith({ text: "Working on the request." });
+-    expect(inputs[0]?.userMessage).toBe("change the default model");
+-    expect(inputs[0]?.activityNotes).toContain('Tool exec: {"command":"ls"}');
+-  });
+-
+-  it("ignores non-work tools and non-start phases", async () => {
+-    const { narrator, generate } = createNarratorHarness();
+-
+-    narrator.noteToolStart({ name: "message", phase: "start" });
+-    narrator.noteToolStart({ name: "exec", phase: "end" });
+-    await flushNarrations();
+-
+-    expect(generate).not.toHaveBeenCalled();
+-  });
+-
+-  it("retries buffered notes after visibility flips without a new note", async () => {
+-    vi.useFakeTimers();
+-    try {
+-      let visible = false;
+-      const { narrator, generate, inputs } = createNarratorHarness({
+-        isProgressDraftVisible: () => visible,
+-      });
+-
+-      narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "first" } });
+-      narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "second" } });
+-      await vi.advanceTimersByTimeAsync(1_000);
+-      expect(generate).not.toHaveBeenCalled();
+-
+-      visible = true;
+-      await vi.advanceTimersByTimeAsync(1_000);
+-      await flushNarrations();
+-
+-      expect(generate).toHaveBeenCalledTimes(1);
+-      expect(inputs[0]?.activityNotes.join("\n")).toContain("first");
+-      expect(inputs[0]?.activityNotes.join("\n")).toContain("second");
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it("bounds hidden-draft retries and re-arms them after new activity", async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const { narrator, generate } = createNarratorHarness({
+-        isProgressDraftVisible: () => false,
+-      });
+-
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-      expect(vi.getTimerCount()).toBe(1);
+-      await vi.advanceTimersByTimeAsync(30_000);
+-
+-      expect(generate).not.toHaveBeenCalled();
+-      expect(vi.getTimerCount()).toBe(0);
+-
+-      narrator.noteToolStart({ name: "read", phase: "start" });
+-      expect(vi.getTimerCount()).toBe(1);
+-      vi.clearAllTimers();
+-    } finally {
+-      vi.useRealTimers();
+-    }
++describe("observed progress activity through reply options", () => {
++  it("projects observed activity without inventing worker state after an unrelated failure", async () => {
++    const h = setup();
++    await h.opts.onToolStart?.({ name: "sessions_spawn", phase: "start", toolCallId: "worker" });
++    await h.opts.onItemEvent?.(toolEnd("sessions_spawn", "worker"));
++    await h.opts.onToolStart?.({ name: "exec", phase: "start", toolCallId: "lookup" });
++    await h.opts.onCommandOutput?.({
++      name: "exec",
++      phase: "end",
++      exitCode: 2,
++      toolCallId: "lookup",
++    });
++    await h.opts.onToolStart?.({ name: "read", phase: "start", toolCallId: "reference" });
++    await h.opts.onItemEvent?.(toolEnd("read", "reference"));
++    await vi.advanceTimersByTimeAsync(12_001);
++
++    expect(complete).not.toHaveBeenCalled();
++    expect(h.updates.mock.calls).toEqual([
++      [{ text: "Starting a worker request." }],
++      [{ text: "Read a file." }],
++    ]);
+   });
+ 
+-  it.each([false, true])(
+-    "preserves an immediate hidden-draft retry with active generation=%s",
+-    async (inFlight) => {
+-      vi.useFakeTimers();
+-      try {
+-        let visible = true;
+-        const firstGeneration = createDeferred<string>();
+-        let generationCount = 0;
+-        const { narrator, generate, onUpdate } = createNarratorHarness({
+-          generate: async () =>
+-            ++generationCount === 1 ? await firstGeneration.promise : "The command failed.",
+-          isProgressDraftVisible: () => visible,
+-        });
+-
+-        narrator.noteToolStart({ name: "exec", phase: "start" });
+-        await flushNarrations();
+-        expect(generate).toHaveBeenCalledTimes(1);
+-        if (!inFlight) {
+-          firstGeneration.resolve("Running a command.");
+-          await flushNarrations();
+-        }
+-
+-        visible = false;
+-        narrator.noteCommandOutput({ name: "exec", phase: "end", exitCode: 1 });
+-        visible = true;
+-        firstGeneration.resolve("Running a command.");
+-        await flushNarrations();
+-        await vi.advanceTimersByTimeAsync(1_000);
+-
+-        expect(generate).toHaveBeenCalledTimes(2);
+-        expect(onUpdate).toHaveBeenLastCalledWith({ text: "The command failed." });
+-        expect(vi.getTimerCount()).toBe(0);
+-      } finally {
+-        vi.useRealTimers();
+-      }
+-    },
+-  );
+-
+-  it("cancels retries at final and resets preamble freshness for a queued turn", async () => {
+-    vi.useFakeTimers();
+-    try {
+-      let visible = false;
+-      const { narrator, generate, inputs } = createNarratorHarness({
+-        isProgressDraftVisible: () => visible,
+-      });
+-
+-      narrator.noteItemEvent({ kind: "preamble", progressText: "Primary turn work." });
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-      expect(vi.getTimerCount()).toBe(1);
+-
+-      narrator.stopTurn();
+-      expect(vi.getTimerCount()).toBe(0);
+-      narrator.beginTurn();
+-      visible = true;
+-      narrator.noteToolStart({ name: "read", phase: "start" });
+-      await flushNarrations();
+-
+-      expect(generate).toHaveBeenCalledTimes(1);
+-      expect(inputs[0]?.userMessage).toBe("");
+-    } finally {
+-      vi.useRealTimers();
+-    }
++  it("reports a completed launch request without claiming the worker completed", async () => {
++    const h = setup();
++    await h.opts.onItemEvent?.(toolEnd("sessions_spawn"));
++    expect(h.updates).toHaveBeenCalledWith({ text: "Submitted a worker request." });
+   });
+ 
+-  it("drops a utility-model result that settles after the turn stops", async () => {
+-    const started = createDeferred();
+-    const generation = createDeferred<string>();
+-    const { narrator, onUpdate } = createNarratorHarness({
+-      generate: () => {
+-        started.resolve();
+-        return generation.promise;
+-      },
++  it("takes command outcomes from exit metadata rather than a successful tool envelope", async () => {
++    const h = setup();
++    await h.opts.onCommandOutput?.({
++      name: "exec",
++      phase: "end",
++      status: "completed",
++      exitCode: 2,
+     });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await started.promise;
+-    narrator.stopTurn();
+-    generation.resolve("Stale status.");
+-    await flushNarrations();
+-
+-    expect(onUpdate).not.toHaveBeenCalled();
+-  });
+-
+-  it.each([false, true])(
+-    "does not start a stopped turn after preparation with replacement=%s",
+-    async (replaceBeforePrepared) => {
+-      const preparation = createDeferred<typeof narrationModelMocks.prepared>();
+-      narrationModelMocks.prepare.mockReturnValueOnce(preparation.promise);
+-      const { narrator, generate, onUpdate, inputs } = createNarratorHarness();
+-      const beginReplacement = () => {
+-        narrator.beginTurn();
+-        narrator.noteToolStart({ name: "read", phase: "start" });
+-      };
+-
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-      expect(narrationModelMocks.prepare).toHaveBeenCalledOnce();
+-      narrator.stopTurn();
+-      if (replaceBeforePrepared) {
+-        beginReplacement();
+-      }
+-      preparation.resolve(narrationModelMocks.prepared);
+-      await flushNarrations();
+-
+-      if (!replaceBeforePrepared) {
+-        expect(generate).not.toHaveBeenCalled();
+-        expect(onUpdate).not.toHaveBeenCalled();
+-        beginReplacement();
+-        await flushNarrations();
+-      }
+-      expect(narrationModelMocks.prepare).toHaveBeenCalledOnce();
+-      expect(generate).toHaveBeenCalledOnce();
+-      expect(inputs[0]?.userMessage).toBe("");
+-      expect(inputs[0]?.activityNotes).toEqual(["Tool read"]);
+-      expect(onUpdate).toHaveBeenCalledOnce();
+-    },
+-  );
+-
+-  it("cancels active narration at final without aborting its caller", async () => {
+-    const outer = new AbortController();
+-    const started = createDeferred<AbortSignal | undefined>();
+-    const generation = createDeferred<string>();
+-    const { narrator, onUpdate } = createNarratorHarness({
+-      abortSignal: outer.signal,
+-      generate: (_input, signal) => {
+-        started.resolve(signal);
+-        return generation.promise;
+-      },
++    await h.opts.onItemEvent?.(toolEnd("exec"));
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "A command failed." });
++    await h.opts.onCommandOutput?.({
++      name: "exec",
++      phase: "end",
++      status: "completed",
++      exitCode: 0,
+     });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    const signal = await started.promise;
+-    try {
+-      expect(signal?.aborted).toBe(false);
+-      narrator.stopTurn();
+-      expect(signal?.aborted).toBe(true);
+-      expect(outer.signal.aborted).toBe(false);
+-    } finally {
+-      generation.resolve("Stale status.");
+-      await flushNarrations();
+-    }
+-    expect(onUpdate).not.toHaveBeenCalled();
+-  });
+-
+-  it("retries narration after preamble freshness expires without a new note", async () => {
+-    vi.useFakeTimers();
+-    try {
+-      let nowMs = 0;
+-      const { narrator, generate, inputs } = createNarratorHarness({
+-        now: () => nowMs,
+-      });
+-
+-      narrator.noteItemEvent({
+-        kind: "preamble",
+-        progressText: "Checking   the current configuration.",
+-      });
+-      narrator.noteToolStart({ name: "read", phase: "start" });
+-      await flushNarrations();
+-      expect(generate).not.toHaveBeenCalled();
+-
+-      nowMs = PROGRESS_STATUS_PREAMBLE_FRESH_MS + 1;
+-      await vi.advanceTimersByTimeAsync(PROGRESS_STATUS_PREAMBLE_FRESH_MS + 1);
+-      await flushNarrations();
+-
+-      expect(generate).toHaveBeenCalledTimes(1);
+-      expect(inputs[0]?.activityNotes).toContain("Assistant: Checking the current configuration.");
+-    } finally {
+-      vi.useRealTimers();
+-    }
++    await vi.advanceTimersByTimeAsync(12_001);
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "A command finished." });
+   });
+ 
+-  it("does not let silent or directive-only preambles suppress narration", async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const { narrator, generate, inputs } = createNarratorHarness();
+-
+-      narrator.noteItemEvent({ kind: "preamble", progressText: "[[reply_to_current]]" });
+-      narrator.noteItemEvent({
+-        kind: "preamble",
+-        progressText: "[[audio_as_voice]] _NO_REPLY_",
+-      });
+-      narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "ls" } });
+-      await flushNarrations();
+-
+-      expect(generate).toHaveBeenCalledTimes(1);
+-      expect(inputs[0]?.activityNotes.some((note) => note.startsWith("model:"))).toBe(false);
+-    } finally {
+-      vi.useRealTimers();
+-    }
++  it("supersedes a command failure when the next observed step starts", async () => {
++    const h = setup();
++    await h.opts.onCommandOutput?.({ name: "exec", phase: "end", exitCode: 2 });
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "A command failed." });
++    await h.opts.onToolStart?.({ name: "browser", phase: "start" });
++    await vi.advanceTimersByTimeAsync(12_001);
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "Working in the browser." });
+   });
+ 
+-  it("batches follow-up events until the event threshold", async () => {
+-    const nowMs = 0;
+-    const { narrator, generate } = createNarratorHarness({ now: () => nowMs });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    expect(generate).toHaveBeenCalledTimes(1);
+-
+-    for (let i = 0; i < 3; i += 1) {
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-    }
+-    await flushNarrations();
+-    expect(generate).toHaveBeenCalledTimes(1);
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    expect(generate).toHaveBeenCalledTimes(2);
+-  });
+-
+-  it("narrates a tool burst buffered during an active generation without another event", async () => {
+-    const started = createDeferred();
+-    const firstGeneration = createDeferred<string>();
+-    let generationCount = 0;
+-    const { narrator, generate, onUpdate, inputs } = createNarratorHarness({
+-      generate: async () => {
+-        if (++generationCount === 1) {
+-          started.resolve();
+-          return await firstGeneration.promise;
+-        }
+-        return "Checking the later files.";
+-      },
+-    });
+-
+-    narrator.noteToolStart({ name: "read", phase: "start", args: { path: "first.txt" } });
+-    await started.promise;
+-    for (let index = 0; index < 4; index += 1) {
+-      narrator.noteToolStart({
++  it.each([true, false])(
++    "never projects private tool contents, command-detail policy=%s",
++    async (hide) => {
++      const h = setup({ narrationHideCommandText: hide });
++      await h.opts.onToolStart?.({
+         name: "read",
+         phase: "start",
+-        args: { path: `later-${index}.txt` },
++        args: { path: "PRIVATE_PATH", task: "PRIVATE_TASK" },
+       });
+-    }
+-    expect(generate).toHaveBeenCalledOnce();
+-
+-    firstGeneration.resolve("Inspecting the first file.");
+-    await flushNarrations();
++      await h.opts.onItemEvent?.({
++        ...toolEnd("read"),
++        title: "PRIVATE_TITLE",
++        summary: "PRIVATE_RESULT",
++        meta: "PRIVATE_META",
++      });
++      await h.opts.onCommandOutput?.({
++        phase: "end",
++        name: "exec",
++        exitCode: 0,
++        output: "PRIVATE_OUTPUT",
++        title: "PRIVATE_COMMAND",
++      });
++      await vi.advanceTimersByTimeAsync(12_001);
++      expect(JSON.stringify(h.updates.mock.calls)).not.toContain("PRIVATE");
++      expect(complete).not.toHaveBeenCalled();
++    },
++  );
+ 
+-    expect(generate).toHaveBeenCalledTimes(2);
+-    expect(inputs[1]?.activityNotes).toContain('Tool read: {"path":"later-3.txt"}');
+-    await vi.waitFor(() =>
+-      expect(onUpdate).toHaveBeenLastCalledWith({ text: "Checking the later files." }),
+-    );
++  it("ignores non-work tools, unknown outcomes, and non-tool item prose", async () => {
++    const h = setup();
++    await h.opts.onToolStart?.({ name: "message", phase: "start" });
++    await h.opts.onToolStart?.({ name: "read", phase: "end" });
++    await h.opts.onItemEvent?.({ ...toolEnd("message"), status: "failed" });
++    await h.opts.onItemEvent?.({ kind: "reasoning", status: "failed", title: "private reasoning" });
++    await h.opts.onCommandOutput?.({ name: "exec", phase: "end" });
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(h.updates).not.toHaveBeenCalled();
+   });
+ 
+-  it("re-narrates after the interval with a single new event", async () => {
+-    let nowMs = 0;
+-    const { narrator, generate } = createNarratorHarness({ now: () => nowMs });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    expect(generate).toHaveBeenCalledTimes(1);
+-
+-    nowMs += 13_000;
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    expect(generate).toHaveBeenCalledTimes(2);
++  it("uses generic text for unknown tool names instead of echoing names or titles", async () => {
++    const h = setup();
++    await h.opts.onToolStart?.({ name: "private_account_tool", phase: "start" });
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "Working on the request." });
+   });
+ 
+-  it("narrates metadata-only command failures immediately", async () => {
+-    const { narrator, generate, onUpdate, inputs } = createNarratorHarness({
+-      texts: ["Running a command.", "The command failed, retrying."],
+-    });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    narrator.noteCommandOutput({
+-      name: "exec",
+-      title: "pnpm test",
+-      phase: "end",
+-      exitCode: 1,
+-      output: "private command output must not reach narration",
+-    });
+-    await flushNarrations();
+-
+-    expect(generate).toHaveBeenCalledTimes(2);
+-    const notes = inputs[1]?.activityNotes.join("\n") ?? "";
+-    expect(notes).toContain("pnpm test: failed (exit 1)");
+-    expect(notes).not.toContain("private command output");
+-    expect(onUpdate).toHaveBeenLastCalledWith({ text: "The command failed, retrying." });
++  it("retains a fresh authored preamble and flushes the latest activity after it expires", async () => {
++    const h = setup();
++    await h.opts.onItemEvent?.({ kind: "preamble", progressText: "I’ll inspect the evidence." });
++    await h.opts.onToolStart?.({ name: "read", phase: "start" });
++    await h.opts.onItemEvent?.(toolEnd("read"));
++    await vi.advanceTimersByTimeAsync(PROGRESS_STATUS_PREAMBLE_FRESH_MS);
++    expect(h.updates).not.toHaveBeenCalled();
++    await vi.advanceTimersByTimeAsync(1);
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "Read a file." });
+   });
+ 
+-  it("drops duplicate narration text", async () => {
+-    let nowMs = 0;
+-    const { narrator, onUpdate } = createNarratorHarness({
+-      texts: ["Same status."],
+-      now: () => nowMs,
+-    });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-    nowMs += 13_000;
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-
+-    expect(onUpdate).toHaveBeenCalledTimes(1);
++  it("does not let silent preambles delay observed activity", async () => {
++    const h = setup();
++    await h.opts.onItemEvent?.({ kind: "preamble", progressText: "NO_REPLY" });
++    await h.opts.onToolStart?.({ name: "read", phase: "start" });
++    expect(h.updates).toHaveBeenCalledWith({ text: "Reading a file." });
+   });
+ 
+-  it("disables after consecutive failed generations and warns once", async () => {
+-    narratorWarnSpy.mockClear();
+-    let nowMs = 0;
+-    const { narrator, generate, onUpdate } = createNarratorHarness({
+-      texts: [null],
+-      now: () => nowMs,
+-    });
+-
+-    for (let i = 0; i < 4; i += 1) {
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-      await flushNarrations();
+-      nowMs += 13_000;
++  it("coalesces bursts and suppresses unchanged status instead of publishing every tool", async () => {
++    const h = setup();
++    for (let i = 0; i < 30; i++) {
++      await h.opts.onToolStart?.({ name: "read", phase: "start", toolCallId: `read-${i}` });
+     }
+-
+-    expect(generate).toHaveBeenCalledTimes(2);
+-    expect(onUpdate).not.toHaveBeenCalled();
+-    expect(narratorWarnSpy).toHaveBeenCalledTimes(1);
+-    expect(String(narratorWarnSpy.mock.calls[0]?.[0])).toContain(
+-      "narration disabled after 2 consecutive failures",
+-    );
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(h.updates).toHaveBeenCalledTimes(1);
++    await h.opts.onItemEvent?.(toolEnd("read"));
++    expect(h.updates).toHaveBeenCalledTimes(2);
+   });
+ 
+-  it("clears rendered narration when it disables after failures", async () => {
+-    let nowMs = 0;
+-    const { narrator, onUpdate } = createNarratorHarness({
+-      texts: ["Status one.", null, null],
+-      now: () => nowMs,
+-    });
+-
+-    for (let i = 0; i < 3; i += 1) {
+-      narrator.noteToolStart({ name: "exec", phase: "start" });
+-      await flushNarrations();
+-      nowMs += 13_000;
+-    }
+-
+-    // Success, then two failed generations: the disable path must clear the
+-    // stale narration so the draft falls back to raw tool lines.
+-    expect(onUpdate).toHaveBeenNthCalledWith(1, { text: "Status one." });
+-    expect(onUpdate).toHaveBeenLastCalledWith({ text: "" });
++  it("rechecks hidden drafts without a new event and retains only the latest activity", async () => {
++    let visible = false;
++    const h = setup({ isProgressDraftVisible: () => visible });
++    await h.opts.onToolStart?.({ name: "read", phase: "start" });
++    await h.opts.onItemEvent?.(toolEnd("read"));
++    await vi.advanceTimersByTimeAsync(1_000);
++    expect(h.updates).not.toHaveBeenCalled();
++    visible = true;
++    await vi.advanceTimersByTimeAsync(1_000);
++    expect(h.updates).toHaveBeenLastCalledWith({ text: "Read a file." });
+   });
+ 
+-  it("omits exec command text and failure titles when the channel hides command text", async () => {
+-    const { narrator, inputs } = createNarratorHarness({ hideCommandText: true });
+-
+-    narrator.noteToolStart({
+-      name: "exec",
+-      phase: "start",
+-      args: { command: "cat /etc/hosts" },
+-    });
+-    narrator.noteToolStart({
+-      name: "shell",
+-      phase: "start",
+-      args: { command: "cat /etc/hosts" },
+-    });
+-    narrator.noteToolStart({
+-      name: "server.exec",
+-      phase: "start",
+-      args: { command: "cat /etc/hosts" },
+-    });
+-    await flushNarrations();
+-    narrator.noteCommandOutput({
+-      name: "exec",
+-      title: "cat /etc/hosts",
+-      phase: "end",
+-      exitCode: 1,
+-    });
+-    await flushNarrations();
+-
+-    const notes = inputs.at(-1)?.activityNotes.join("\n") ?? "";
+-    expect(notes).not.toContain("/etc/hosts");
+-    expect(notes).toContain("exec: failed (exit 1)");
++  it("bounds hidden retries and re-arms only on new activity", async () => {
++    const h = setup({ isProgressDraftVisible: () => false });
++    await h.opts.onToolStart?.({ name: "read", phase: "start" });
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(vi.getTimerCount()).toBe(0);
++    expect(h.updates).not.toHaveBeenCalled();
++    await h.opts.onItemEvent?.(toolEnd("read"));
++    expect(vi.getTimerCount()).toBe(1);
++    h.lifecycle.stopTurn();
++    expect(vi.getTimerCount()).toBe(0);
+   });
+ 
+-  it("normalizes narration text to one bounded plain line", async () => {
+-    const long = `"${Array.from({ length: 80 }, (_v, i) => `word${i}`).join(" ")}\nsecond line"`;
+-    const { narrator, onUpdate } = createNarratorHarness({ texts: [long] });
+-
+-    narrator.noteToolStart({ name: "exec", phase: "start" });
+-    await flushNarrations();
+-
+-    const text = onUpdate.mock.calls[0]?.[0]?.text as string;
+-    expect(text).not.toContain("\n");
+-    expect(text.startsWith('"')).toBe(false);
+-    expect(Array.from(text).length).toBeLessThanOrEqual(280);
+-    expect(text.endsWith("…")).toBe(true);
+-  });
+-});
+-
+-describe("attachProgressNarratorToReplyOptions", () => {
+-  const utilityCfg = {
+-    agents: { defaults: { utilityModel: "openai/gpt-5.5-mini" } },
+-  } as OpenClawConfig;
+-
+-  it("returns options unchanged without a narration callback", () => {
+-    const opts: GetReplyOptions = { onToolStart: vi.fn() };
+-    expect(attachProgressNarratorToReplyOptions({ cfg: utilityCfg, agentId: "main", opts })).toBe(
+-      opts,
+-    );
+-  });
+-
+-  it("returns options unchanged without a resolvable utility model", () => {
+-    // Bare config: no explicit utilityModel and no plugin metadata snapshot to
+-    // derive a provider default from.
+-    const opts: GetReplyOptions = { onNarrationUpdate: vi.fn(), onToolStart: vi.fn() };
+-    expect(attachProgressNarratorToReplyOptions({ cfg, agentId: "main", opts })).toBe(opts);
+-  });
+-
+-  it("returns options unchanged when utility routing is explicitly disabled", () => {
+-    const disabledCfg = {
+-      agents: { defaults: { utilityModel: "" } },
+-    } as OpenClawConfig;
+-    const opts: GetReplyOptions = { onNarrationUpdate: vi.fn(), onToolStart: vi.fn() };
+-    expect(attachProgressNarratorToReplyOptions({ cfg: disabledCfg, agentId: "main", opts })).toBe(
+-      opts,
+-    );
+-  });
++  it.each(["stop", "abort", "replace"] as const)(
++    "fences buffered activity after %s",
++    async (action) => {
++      const controller = new AbortController();
++      const h = setup({ abortSignal: controller.signal });
++      await h.opts.onItemEvent?.({ kind: "preamble", progressText: "Checking." });
++      await h.opts.onToolStart?.({ name: "read", phase: "start" });
++      if (action === "abort") {
++        controller.abort();
++      } else if (action === "stop") {
++        h.lifecycle.stopTurn();
++      } else {
++        h.lifecycle.beginTurn();
++      }
++      await vi.advanceTimersByTimeAsync(60_000);
++      expect(h.updates).not.toHaveBeenCalled();
++      if (action === "replace") {
++        await h.opts.onToolStart?.({ name: "browser", phase: "start" });
++        expect(h.updates).toHaveBeenCalledWith({ text: "Working in the browser." });
++      }
++    },
++  );
+ 
+-  it("returns options unchanged for model-locked native sessions", () => {
+-    const opts: GetReplyOptions = { onNarrationUpdate: vi.fn(), onToolStart: vi.fn() };
+-    expect(
+-      attachProgressNarratorToReplyOptions({
+-        cfg: utilityCfg,
+-        agentId: "main",
+-        opts,
+-        disabled: true,
+-      }),
+-    ).toBe(opts);
++  it("does not let an old asynchronous publication settle the replacement turn", async () => {
++    const old = createDeferred<void>();
++    const onUpdate = vi.fn().mockImplementationOnce(() => old.promise);
++    const h = setup({ onNarrationUpdate: onUpdate });
++    await h.opts.onToolStart?.({ name: "read", phase: "start" });
++    h.lifecycle.beginTurn();
++    await h.opts.onToolStart?.({ name: "browser", phase: "start" });
++    old.resolve();
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(onUpdate.mock.calls).toEqual([
++      [{ text: "Reading a file." }],
++      [{ text: "Working in the browser." }],
++    ]);
+   });
+-  it("tees tool events while preserving the channel callback results", async () => {
+-    const onToolStart = vi.fn(async () => {});
+-    const onItemEvent = vi.fn(() => false as const);
+-    const opts: InternalGetReplyOptions = {
+-      onNarrationUpdate: vi.fn(),
+-      onToolStart,
+-      onItemEvent,
+-    };
+ 
+-    const wrapped = attachProgressNarratorToReplyOptions({
+-      cfg: utilityCfg,
+-      agentId: "main",
+-      userMessage: "hi",
+-      opts,
+-    });
+-
+-    expect(wrapped).not.toBe(opts);
+-    // Non-work tool: the narrator ignores it, the channel still hears it.
+-    await wrapped?.onToolStart?.({ name: "message", phase: "start" });
+-    expect(onToolStart).toHaveBeenCalledWith({ name: "message", phase: "start" });
+-    await expect(
+-      Promise.resolve(wrapped?.onItemEvent?.({ itemId: "i1", status: "completed" })),
+-    ).resolves.toBe(false);
+-    expect(onItemEvent).toHaveBeenCalledWith({ itemId: "i1", status: "completed" });
++  it("preserves the channel callback return values", async () => {
++    const h = setup();
++    expect(await h.opts.onToolStart?.({ name: "read", phase: "start" })).toBe(false);
++    expect(await h.opts.onItemEvent?.(toolEnd("read"))).toBe(false);
++    expect(await h.opts.onCommandOutput?.({ name: "exec", phase: "end", exitCode: 0 })).toBe(false);
++    expect(h.original.onToolStart).toHaveBeenCalledOnce();
++    expect(h.original.onItemEvent).toHaveBeenCalledOnce();
++    expect(h.original.onCommandOutput).toHaveBeenCalledOnce();
+   });
+ 
+-  it("exposes turn lifecycle controls to the channel", () => {
+-    const onProgressNarratorLifecycle = vi.fn();
+-    const opts: InternalGetReplyOptions = {
+-      onNarrationUpdate: vi.fn(),
+-      onProgressNarratorLifecycle,
+-    };
+-
+-    attachProgressNarratorToReplyOptions({ cfg: utilityCfg, agentId: "main", opts });
+-
+-    expect(onProgressNarratorLifecycle).toHaveBeenCalledOnce();
+-    expect(onProgressNarratorLifecycle.mock.calls[0]?.[0]).toEqual({
+-      beginTurn: expect.any(Function),
+-      stopTurn: expect.any(Function),
+-    });
+-  });
++  it.each(["callback", "disabled", "utility-opt-out"] as const)(
++    "preserves the %s opt-out",
++    (kind) => {
++      const opts: InternalGetReplyOptions = { onNarrationUpdate: vi.fn(), onToolStart: vi.fn() };
++      if (kind === "callback") {
++        delete opts.onNarrationUpdate;
++      }
++      expect(
++        attachProgressNarratorToReplyOptions({
++          cfg: kind === "utility-opt-out" ? { agents: { defaults: { utilityModel: "" } } } : {},
++          agentId: "main",
++          opts,
++          disabled: kind === "disabled",
++        }),
++      ).toBe(opts);
++    },
++  );
+ });
+diff --git a/src/auto-reply/reply/progress-narrator.ts b/src/auto-reply/reply/progress-narrator.ts
+index 2fd0bba9313e2bb83e63f08408ebe3e916396ed9..ec825cb4195e91dc6b2f7e414a13a6c68a599100 100644
+--- a/src/auto-reply/reply/progress-narrator.ts
++++ b/src/auto-reply/reply/progress-narrator.ts
+@@ -1,416 +1,180 @@
+-// Utility-model narration for channel progress drafts.
+-import {
+-  createSessionActivityNoteState,
+-  flushSessionActivityAssistantNote,
+-  noteSessionActivityEvent,
+-} from "../../agents/session-activity-notes.js";
+-import { isCommandBearingToolCall } from "../../agents/tool-display.js";
+-import { resolveUtilityModelRefForAgent } from "../../agents/utility-model.js";
++// Channel status is observed activity, never an inferred task result.
++import { readUtilityModelSetting } from "../../agents/utility-model-setting.js";
+ import { PROGRESS_STATUS_PREAMBLE_FRESH_MS } from "../../channels/progress-draft-compositor.js";
+ import { sanitizeProgressStatusText } from "../../channels/progress-draft-status-text.js";
+ import { isChannelProgressDraftWorkToolName } from "../../channels/streaming.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import { logVerbose } from "../../globals.js";
+-import type { AgentEventPayload, AgentEventStream } from "../../infra/agent-events.js";
+-import { createSubsystemLogger } from "../../logging/subsystem.js";
+ import type { InternalGetReplyOptions } from "./get-reply.types.js";
+-import {
+-  generateNarrationWithUtilityModel,
+-  prepareNarrationModel,
+-  type ProgressNarrationInput,
+-  truncateAtWordBoundary,
+-} from "./progress-narrator-model.js";
+ 
+-const narratorLog = createSubsystemLogger("auto-reply/progress-narrator");
+-
+-const MIN_EVENTS_PER_NARRATION = 4;
+ const MIN_INTERVAL_MS = 12_000;
+-const NARRATION_MAX_CHARS = 280;
+-const NARRATION_NOTE_MAX_CHARS = 160;
+ const VISIBILITY_RETRY_MS = 1_000;
+-// Keep hidden-draft polling bounded even when a channel never exposes the draft.
+ const MAX_VISIBILITY_RETRIES = 30;
+-const PREAMBLE_RETRY_EPSILON_MS = 1;
+-const MAX_NARRATIONS_PER_TURN = 30;
+-const MAX_CONSECUTIVE_FAILURES = 2;
+-type ToolStartPayload = Parameters<NonNullable<InternalGetReplyOptions["onToolStart"]>>[0];
+-type CommandOutputPayload = Parameters<NonNullable<InternalGetReplyOptions["onCommandOutput"]>>[0];
+-type ItemEventPayload = Parameters<NonNullable<InternalGetReplyOptions["onItemEvent"]>>[0];
++type ActivityStatus = "running" | "completed" | "failed" | "blocked";
+ 
+-function normalizeNarrationText(raw: string): string {
+-  const collapsed = raw
+-    .replace(/\s+/g, " ")
+-    .trim()
+-    .replace(/^["'`“”]+|["'`“”]+$/gu, "")
+-    .trim();
+-  return truncateAtWordBoundary(collapsed, NARRATION_MAX_CHARS);
++function toolActivityText(name: string | undefined, status: ActivityStatus): string {
++  if (status === "failed") {
++    return name === "exec" || name === "bash" ? "A command failed." : "A step failed.";
++  }
++  if (status === "blocked") {
++    return name === "exec" || name === "bash" ? "A command is blocked." : "A step is blocked.";
++  }
++  const completed = status === "completed";
++  switch (name) {
++    case "read":
++      return completed ? "Read a file." : "Reading a file.";
++    case "write":
++    case "edit":
++    case "apply_patch":
++      return completed ? "Updated a file." : "Updating a file.";
++    case "exec":
++    case "bash":
++      return completed ? "A command finished." : "Running a command.";
++    case "process":
++      return completed ? "Checked a running command." : "Checking a running command.";
++    case "browser":
++      return completed ? "Finished a browser step." : "Working in the browser.";
++    case "web_search":
++      return completed ? "Finished a web search." : "Searching the web.";
++    case "web_fetch":
++      return completed ? "Read a web page." : "Reading a web page.";
++    case "sessions_spawn":
++      // Completion is of the launch tool, not the worker's task.
++      return completed ? "Submitted a worker request." : "Starting a worker request.";
++    case "sessions_send":
++      return completed ? "Sent a session update." : "Sending a session update.";
++    case "sessions_yield":
++      return completed ? "Waiting for the next update." : "Preparing to wait for an update.";
++    default:
++      return completed ? "Finished a step." : "Working on the request.";
++  }
+ }
+ 
+-function createProgressNarrator(params: {
++/** Retains the callback/config surface without sending request or tool contents to a model. */
++export function attachProgressNarratorToReplyOptions(params: {
+   cfg: OpenClawConfig;
+   agentId: string;
+-  userMessage?: string;
+-  onUpdate: (payload: { text: string }) => Promise<void> | void;
+-  isProgressDraftVisible?: () => boolean;
+-  abortSignal?: AbortSignal;
+-  /** Mirror of the channel's commandText: "status" policy for narration input. */
+-  hideCommandText?: boolean;
+-}) {
+-  let activity = createSessionActivityNoteState();
+-  let disabled = false;
+-  let inFlight = false;
+-  let pendingImmediate = false;
+-  let noteSequenceAtLastRun = -1;
+-  let lastRunAt = 0;
+-  let narrationCount = 0;
+-  let consecutiveFailures = 0;
++  opts?: InternalGetReplyOptions;
++  disabled?: boolean;
++}): InternalGetReplyOptions | undefined {
++  const suppliedOpts = params.opts;
++  const suppliedOnUpdate = suppliedOpts?.onNarrationUpdate;
++  if (
++    !suppliedOpts ||
++    !suppliedOnUpdate ||
++    params.disabled === true ||
++    // Existing installations used an empty utilityModel to opt out of this filler.
++    // Preserve that explicit opt-out without resolving or invoking a utility model.
++    readUtilityModelSetting(params.cfg, params.agentId).kind === "disabled"
++  ) {
++    return suppliedOpts;
++  }
++  const opts = suppliedOpts;
++  const onUpdate = suppliedOnUpdate;
++
++  let accepting = true;
++  let generation = 0;
++  let pendingText = "";
+   let lastText = "";
+-  let preparedPromise: ReturnType<typeof prepareNarrationModel> | undefined;
+-  let utilityModelLabel: string | undefined;
++  let lastPublishedAt: number | undefined;
+   let lastPreambleAt: number | undefined;
+-  let visibilityRetryCount = 0;
+-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+-  let retryImmediate = false;
+-  // Each turn owns cancellation; replacing it fences old continuations without
+-  // discarding the model selection shared by queued turns.
+-  let turnController = new AbortController();
+-  let userMessage = params.userMessage ?? "";
++  let visibilityRetries = 0;
++  let publishing = false;
++  let timer: ReturnType<typeof setTimeout> | undefined;
+ 
+-  const clearRetryTimer = () => {
+-    if (retryTimer !== undefined) {
+-      clearTimeout(retryTimer);
+-      retryTimer = undefined;
++  const clearTimer = () => {
++    if (timer !== undefined) {
++      clearTimeout(timer);
++      timer = undefined;
+     }
+-    retryImmediate = false;
+   };
+-
++  const isCurrent = () => accepting && !opts.abortSignal?.aborted;
+   const stopTurn = () => {
+-    turnController.abort();
+-    inFlight = false;
+-    pendingImmediate = false;
+-    clearRetryTimer();
+-  };
+-
+-  const resetTurnState = () => {
+-    stopTurn();
+-    turnController = new AbortController();
+-    // Queued turns reuse the narrator lifecycle but not the primary request.
+-    // Empty context is safer than describing follow-up work with stale intent.
+-    userMessage = "";
+-    activity = createSessionActivityNoteState();
+-    disabled = false;
+-    noteSequenceAtLastRun = -1;
+-    lastRunAt = 0;
+-    narrationCount = 0;
+-    consecutiveFailures = 0;
+-    lastText = "";
+-    lastPreambleAt = undefined;
+-    visibilityRetryCount = 0;
+-  };
+-
+-  // Stopping mid-turn must clear any rendered narration so the channel draft
+-  // falls back to raw tool lines instead of pinning stale status text.
+-  function disableNarration() {
+-    clearRetryTimer();
+-    if (disabled) {
+-      return;
+-    }
+-    disabled = true;
+-    if (!lastText || params.abortSignal?.aborted) {
+-      return;
+-    }
+-    lastText = "";
+-    void Promise.resolve(params.onUpdate({ text: "" })).catch((err: unknown) => {
+-      logVerbose(`progress-narrator: narration clear failed: ${String(err)}`);
+-    });
+-  }
+-
+-  const generate = async (input: ProgressNarrationInput, abortSignal: AbortSignal) => {
+-    preparedPromise ??= prepareNarrationModel({ cfg: params.cfg, agentId: params.agentId });
+-    const prepared = await preparedPromise;
+-    if (abortSignal.aborted) {
+-      return null;
+-    }
+-    if (!prepared) {
+-      disableNarration();
+-      return null;
+-    }
+-    const { provider, model, authProfileId } = prepared;
+-    utilityModelLabel = `${provider}/${model}${authProfileId ? ` via ${authProfileId}` : ""}`;
+-    return await generateNarrationWithUtilityModel({
+-      cfg: params.cfg,
+-      prepared,
+-      input,
+-      abortSignal,
+-    });
+-  };
+-
+-  const recordEvent = (
+-    stream: AgentEventStream,
+-    data: Record<string, unknown>,
+-    options?: { immediate?: boolean; flushAssistant?: boolean },
+-  ): void => {
+-    if (turnController.signal.aborted || disabled || params.abortSignal?.aborted) {
+-      return;
+-    }
+-    visibilityRetryCount = 0;
+-    const sequenceBefore = activity.noteSequence;
+-    const event: AgentEventPayload = {
+-      runId: "progress-narrator",
+-      seq: sequenceBefore + 1,
+-      stream,
+-      ts: Date.now(),
+-      data,
+-    };
+-    noteSessionActivityEvent(activity, event, NARRATION_NOTE_MAX_CHARS);
+-    if (options?.flushAssistant) {
+-      flushSessionActivityAssistantNote(activity, NARRATION_NOTE_MAX_CHARS);
+-    }
+-    const added = activity.noteSequence > sequenceBefore;
+-    if (added) {
+-      maybeRun(options?.immediate === true);
+-    }
++    accepting = false;
++    generation += 1;
++    clearTimer();
+   };
+-
+-  const shouldRunNow = (immediate: boolean): boolean => {
+-    const newNotes = activity.noteSequence - Math.max(0, noteSequenceAtLastRun);
+-    if (newNotes <= 0) {
+-      return false;
+-    }
+-    if (immediate || noteSequenceAtLastRun < 0) {
+-      return true;
+-    }
+-    if (newNotes >= MIN_EVENTS_PER_NARRATION) {
+-      return true;
+-    }
+-    return Date.now() - lastRunAt >= MIN_INTERVAL_MS;
+-  };
+-
+-  // Skips retain note bookkeeping; one replaceable timer rechecks the active gate.
+-  const scheduleRetry = (delayMs: number, immediate: boolean) => {
+-    retryImmediate ||= immediate;
+-    if (retryTimer !== undefined) {
+-      clearTimeout(retryTimer);
+-      retryTimer = undefined;
+-    }
+-    if (turnController.signal.aborted || disabled || params.abortSignal?.aborted) {
+-      retryImmediate = false;
+-      return;
+-    }
+-    retryTimer = setTimeout(
++  const schedule = (delay: number) => {
++    clearTimer();
++    timer = setTimeout(
+       () => {
+-        retryTimer = undefined;
+-        const rerunImmediate = retryImmediate;
+-        retryImmediate = false;
+-        maybeRun(rerunImmediate);
++        timer = undefined;
++        publish();
+       },
+-      Math.max(1, delayMs),
++      Math.max(1, delay),
+     );
+   };
+-
+-  function maybeRun(immediate: boolean) {
+-    if (turnController.signal.aborted || disabled || params.abortSignal?.aborted) {
+-      clearRetryTimer();
++  function publish() {
++    if (!isCurrent() || publishing || !pendingText || pendingText === lastText) {
+       return;
+     }
+-    if (params.isProgressDraftVisible?.() === false) {
+-      if (visibilityRetryCount < MAX_VISIBILITY_RETRIES) {
+-        visibilityRetryCount += 1;
+-        scheduleRetry(VISIBILITY_RETRY_MS, immediate);
++    if (opts.isProgressDraftVisible?.() === false) {
++      if (visibilityRetries++ < MAX_VISIBILITY_RETRIES) {
++        schedule(VISIBILITY_RETRY_MS);
+       }
+       return;
+     }
+-    const preambleAge = lastPreambleAt === undefined ? undefined : Date.now() - lastPreambleAt;
+-    if (preambleAge !== undefined && preambleAge < PROGRESS_STATUS_PREAMBLE_FRESH_MS) {
+-      scheduleRetry(
+-        PROGRESS_STATUS_PREAMBLE_FRESH_MS - preambleAge + PREAMBLE_RETRY_EPSILON_MS,
+-        immediate,
+-      );
+-      return;
+-    }
+-    // An event or completion wakeup inherits urgency from the timer it replaces.
+-    const runImmediately = immediate || retryImmediate;
+-    clearRetryTimer();
+-    if (inFlight) {
+-      pendingImmediate ||= runImmediately;
+-      return;
+-    }
+-    if (!shouldRunNow(runImmediately)) {
++    const now = Date.now();
++    const preambleWait =
++      lastPreambleAt === undefined ? 0 : PROGRESS_STATUS_PREAMBLE_FRESH_MS - (now - lastPreambleAt);
++    const intervalWait =
++      lastPublishedAt === undefined ? 0 : MIN_INTERVAL_MS - (now - lastPublishedAt);
++    if (Math.max(preambleWait, intervalWait) > 0) {
++      schedule(Math.max(preambleWait, intervalWait) + 1);
+       return;
+     }
+-    if (narrationCount >= MAX_NARRATIONS_PER_TURN) {
+-      disableNarration();
+-      return;
+-    }
+-    visibilityRetryCount = 0;
+-    inFlight = true;
+-    const runSignal = turnController.signal;
+-    narrationCount += 1;
+-    noteSequenceAtLastRun = activity.noteSequence;
+-    lastRunAt = Date.now();
+-    const input: ProgressNarrationInput = {
+-      userMessage,
+-      activityNotes: activity.notes.map((note) => note.text),
+-      previousText: lastText,
+-    };
++    clearTimer();
++    const currentGeneration = generation;
++    const text = pendingText;
++    publishing = true;
++    lastText = text;
++    lastPublishedAt = now;
+     void (async () => {
+       try {
+-        const outcome = await generate(input, runSignal);
+-        if (runSignal.aborted) {
+-          return;
+-        }
+-        const text = outcome?.text ? normalizeNarrationText(outcome.text) : "";
+-        if (!text) {
+-          consecutiveFailures += 1;
+-          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+-            // A dead utility-model credential otherwise degrades silently to raw
+-            // tool lines; per-attempt detail is verbose-only, so emit one warn
+-            // per turn naming the model/profile operators must repair.
+-            narratorLog.warn(
+-              `narration disabled after ${consecutiveFailures} consecutive failures` +
+-                (utilityModelLabel ? ` (${utilityModelLabel})` : "") +
+-                (outcome?.error ? `: ${outcome.error}` : ""),
+-            );
+-            disableNarration();
+-          }
+-          return;
++        if (isCurrent() && currentGeneration === generation) {
++          await onUpdate({ text });
+         }
+-        consecutiveFailures = 0;
+-        if (text === lastText || params.abortSignal?.aborted) {
+-          return;
+-        }
+-        lastText = text;
+-        await params.onUpdate({ text });
+-      } catch (err) {
+-        logVerbose(`progress-narrator: update failed: ${String(err)}`);
++      } catch (error) {
++        logVerbose(`progress-narrator: activity update failed: ${String(error)}`);
+       } finally {
+-        if (!runSignal.aborted) {
+-          inFlight = false;
+-          const rerunImmediate = pendingImmediate;
+-          pendingImmediate = false;
+-          // Tool notes received during the request must not wait for another event.
+-          maybeRun(rerunImmediate);
++        if (currentGeneration === generation) {
++          publishing = false;
++          publish();
+         }
+       }
+     })();
+   }
+-
+-  params.abortSignal?.addEventListener("abort", stopTurn, { once: true });
+-
+-  return {
+-    beginTurn: resetTurnState,
+-    stopTurn,
+-    noteToolStart(payload: ToolStartPayload) {
+-      if (payload.phase !== "start" || !isChannelProgressDraftWorkToolName(payload.name)) {
+-        return;
+-      }
+-      const hideDetail =
+-        params.hideCommandText === true && isCommandBearingToolCall(payload.name, payload.args);
+-      recordEvent("tool", {
+-        phase: "start",
+-        name: payload.name,
+-        ...(hideDetail ? {} : { args: payload.args }),
+-      });
+-    },
+-    noteCommandOutput(payload: CommandOutputPayload) {
+-      if (payload.phase !== "end") {
+-        return;
+-      }
+-      const failed =
+-        payload.status === "failed" ||
+-        (typeof payload.exitCode === "number" && payload.exitCode !== 0);
+-      if (!failed) {
+-        return;
+-      }
+-      // Command-output titles usually carry the raw command text; honor the
+-      // channel's commandText: "status" policy for the failure note too.
+-      const title = params.hideCommandText
+-        ? payload.name || "command"
+-        : payload.title || payload.name || "command";
+-      recordEvent(
+-        "command_output",
+-        {
+-          phase: "end",
+-          title,
+-          name: payload.name,
+-          status: "failed",
+-          exitCode: payload.exitCode,
+-        },
+-        { immediate: true },
+-      );
+-    },
+-    noteItemEvent(payload: ItemEventPayload) {
+-      if (payload.kind === "preamble") {
+-        const preambleText = sanitizeProgressStatusText(payload.progressText ?? "")
+-          .replace(/\s+/g, " ")
+-          .trim();
+-        if (!preambleText) {
+-          return;
+-        }
+-        lastPreambleAt = Date.now();
+-        recordEvent("assistant", { text: preambleText }, { flushAssistant: true });
+-        return;
+-      }
+-      if (payload.status !== "failed") {
+-        return;
+-      }
+-      const title = payload.title || payload.name || "step";
+-      recordEvent(
+-        "item",
+-        {
+-          itemId: payload.itemId || title,
+-          title,
+-          status: "failed",
+-        },
+-        { immediate: true },
+-      );
+-    },
++  const record = (name: string | undefined, status: ActivityStatus) => {
++    if (!isCurrent()) {
++      return;
++    }
++    pendingText = toolActivityText(name?.trim().toLowerCase(), status);
++    visibilityRetries = 0;
++    publish();
+   };
+-}
+-
+-/**
+- * Wraps reply options with a progress narrator when the channel opted in via
+- * onNarrationUpdate and a utility model resolves (explicit config or the
+- * primary provider's declared default; utilityModel: "" disables).
+- * Returns the options unchanged otherwise.
+- */
+-export function attachProgressNarratorToReplyOptions(params: {
+-  cfg: OpenClawConfig;
+-  agentId: string;
+-  userMessage?: string;
+-  opts?: InternalGetReplyOptions;
+-  /** Model-locked native sessions must never invoke the utility model. */
+-  disabled?: boolean;
+-}): InternalGetReplyOptions | undefined {
+-  const opts = params.opts;
+-  const onNarrationUpdate = opts?.onNarrationUpdate;
+-  if (!opts || !onNarrationUpdate || params.disabled === true) {
+-    return opts;
+-  }
+-  // Explicit config or a provider-declared default both enable narration;
+-  // utilityModel: "" and providers without a default keep it off.
+-  if (!resolveUtilityModelRefForAgent({ cfg: params.cfg, agentId: params.agentId })) {
+-    return opts;
+-  }
+-  const narrator = createProgressNarrator({
+-    cfg: params.cfg,
+-    agentId: params.agentId,
+-    userMessage: params.userMessage,
+-    onUpdate: onNarrationUpdate,
+-    isProgressDraftVisible: opts.isProgressDraftVisible,
+-    abortSignal: opts.abortSignal,
+-    hideCommandText: opts.narrationHideCommandText === true,
+-  });
+   opts.onProgressNarratorLifecycle?.({
+-    beginTurn: () => narrator.beginTurn(),
+-    stopTurn: () => narrator.stopTurn(),
++    beginTurn: () => {
++      stopTurn();
++      accepting = true;
++      publishing = false;
++      pendingText = "";
++      lastText = "";
++      lastPublishedAt = undefined;
++      lastPreambleAt = undefined;
++      visibilityRetries = 0;
++    },
++    stopTurn,
+   });
++  opts.abortSignal?.addEventListener("abort", stopTurn, { once: true });
++
+   return {
+     ...opts,
+     ...(opts.onToolStart
+       ? {
+           onToolStart: async (payload) => {
+-            narrator.noteToolStart(payload);
++            if (payload.phase === "start" && isChannelProgressDraftWorkToolName(payload.name)) {
++              record(payload.name, "running");
++            }
+             return await opts.onToolStart?.(payload);
+           },
+         }
+@@ -418,7 +182,14 @@ export function attachProgressNarratorToReplyOptions(params: {
+     ...(opts.onCommandOutput
+       ? {
+           onCommandOutput: async (payload) => {
+-            narrator.noteCommandOutput(payload);
++            if (payload.phase === "end") {
++              const failed =
++                payload.status === "failed" ||
++                (typeof payload.exitCode === "number" && payload.exitCode !== 0);
++              if (failed || payload.status === "completed" || payload.exitCode === 0) {
++                record("exec", failed ? "failed" : "completed");
++              }
++            }
+             return await opts.onCommandOutput?.(payload);
+           },
+         }
+@@ -426,7 +197,26 @@ export function attachProgressNarratorToReplyOptions(params: {
+     ...(opts.onItemEvent
+       ? {
+           onItemEvent: async (payload) => {
+-            narrator.noteItemEvent(payload);
++            if (isCurrent() && payload.kind === "preamble") {
++              if (sanitizeProgressStatusText(payload.progressText ?? "")) {
++                lastPreambleAt = Date.now();
++                publish();
++              }
++            } else if (
++              (payload.kind === "tool" || payload.kind === "command") &&
++              isChannelProgressDraftWorkToolName(payload.name) &&
++              payload.suppressDurableProgress !== true &&
++              // Exec's tool completion can succeed with a nonzero exit.
++              // Its command-output event owns the actual command outcome.
++              payload.name !== "exec" &&
++              payload.name !== "bash" &&
++              (payload.status === "running" ||
++                payload.status === "completed" ||
++                payload.status === "failed" ||
++                payload.status === "blocked")
++            ) {
++              record(payload.name, payload.status);
++            }
+             return await opts.onItemEvent?.(payload);
+           },
+         }
 diff --git a/src/auto-reply/reply/queue-policy.test.ts b/src/auto-reply/reply/queue-policy.test.ts
 index c67fb15cf784af60706223d17fb5e4b0d7838fd9..e8e3e83a8990fe91e7b78fc910e2f598828d494d 100644
 --- a/src/auto-reply/reply/queue-policy.test.ts
@@ -55701,9 +57567,18 @@ index bf5147c73a7772c553a7c32508d1281cb322849d..311f9f4265060e887ee9bb11c4d04e56
    );
  
 diff --git a/src/channels/progress-draft-compositor.ts b/src/channels/progress-draft-compositor.ts
-index 13d2afa5dfddcb68783ea94aae45902b4945d624..9c2ba1a001869602947f2f170df7ae016ddd8959 100644
+index 13d2afa5dfddcb68783ea94aae45902b4945d624..1f443f46bccd01a357430ce6fa8c5804f8e09b03 100644
 --- a/src/channels/progress-draft-compositor.ts
 +++ b/src/channels/progress-draft-compositor.ts
+@@ -37,7 +37,7 @@ import {
+ 
+ export { createChannelProgressWorkCounter } from "./progress-work-counter.js";
+ 
+-// A recent model preamble remains the primary status; utility narration fills
++// A recent model preamble remains the primary status; observed activity fills
+ // the slot only after the model has been quiet for this interval. Exported for
+ // the narrator, deliberately not re-exported through the SDK barrels.
+ export const PROGRESS_STATUS_PREAMBLE_FRESH_MS = 20_000;
 @@ -107,6 +107,8 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
      canStage: () =>
        params.active &&
@@ -57269,6 +59144,19 @@ index 8f446013fcb5711f617a53c39a95d385618befa8..8f72967afac316f130f3c6b0f99c67a4
  
      for (const resource of params.pluginResources) {
        const anchors = resource.scope === "state" ? [{ sourcePath: stateDir }] : agentRoots;
+diff --git a/src/config/schema.help.agents.ts b/src/config/schema.help.agents.ts
+index 18a615475d0ad9d0e480f37507e8b76a7c77f1f8..7a43f6233303b3cb29ee9fc12a3485e812bf3bb0 100644
+--- a/src/config/schema.help.agents.ts
++++ b/src/config/schema.help.agents.ts
+@@ -78,7 +78,7 @@ export const AGENT_FIELD_HELP: Record<string, string> = {
+   "agents.defaults.embeddedAgent.cyberFailover.cooloffMs":
+     "How long an unavailable escalation target is skipped for the current session.",
+   "agents.defaults.utilityModel":
+-    "Optional lower-cost model (provider/model or alias) for short internal tasks such as generated titles and progress narration. Unset derives the primary provider's declared small model when available (otherwise the primary model); set to an empty string to disable utility routing.",
++    "Optional lower-cost model (provider/model or alias) for short internal tasks such as generated titles and activity recaps. Unset derives the primary provider's declared small model when available (otherwise the primary model); set to an empty string to disable utility routing.",
+   "agents.entries.*.utilityModel":
+     "Optional per-agent utility model override for short internal tasks. Overrides agents.defaults.utilityModel.",
+   "agents.entries.*.models": "Per-agent model catalog overrides keyed by full provider/model IDs.",
 diff --git a/src/config/schema.help.core.ts b/src/config/schema.help.core.ts
 index 797b3ddcee3e33e76753181a4a6d0cc36d02cff1..86a7a75cbe40bce86054bbe5e530d68e1706f0b1 100644
 --- a/src/config/schema.help.core.ts
@@ -57820,10 +59708,10 @@ index d4800f6c75a0111b64f69c1fe8ed4f35cf57797b..888838aaa90c641438a420f03b1b7bb5
    cliHistoryBoundary?: import("./cli-history-boundary.js").CliHistoryBoundary;
    /** Explicit world-readable publication, bound to one transcript generation. */
 diff --git a/src/config/types.base.ts b/src/config/types.base.ts
-index d22925ba747f4ed438b8cf08321feef8abed87f8..3d8fd2ea97db5fece97b50483a391c615b3fd67e 100644
+index d22925ba747f4ed438b8cf08321feef8abed87f8..a0edd6e2b91d61a6055e6a1b528986f03cd3521a 100644
 --- a/src/config/types.base.ts
 +++ b/src/config/types.base.ts
-@@ -65,7 +65,7 @@ export type ChannelStreamingProgressConfig = {
+@@ -65,16 +65,15 @@ export type ChannelStreamingProgressConfig = {
    maxLines?: number;
    /** Maximum characters per compact progress line before truncation. Default: 120. */
    maxLineChars?: number;
@@ -57832,6 +59720,17 @@ index d22925ba747f4ed438b8cf08321feef8abed87f8..3d8fd2ea97db5fece97b50483a391c61
    toolProgress?: boolean;
    /** Command/exec progress detail in the draft. "raw" opts into command text; "status" shows only the tool label. Default: "status". */
    commandText?: ChannelStreamingCommandTextMode;
+   /** Include assistant commentary/preamble text in the progress draft. Default: false. */
+   commentary?: boolean;
+   /**
+-   * Replace tool lines with a short utility-model narration of what the agent
+-   * is doing. Runs when a utility model resolves (explicit `utilityModel` or
+-   * the primary provider's declared default). Default: true.
++   * Show a short status derived from tool activity metadata without a model call.
++   * Authored preambles retain priority. Default: true.
+    */
+   narration?: boolean;
+ };
 diff --git a/src/config/zod-schema.agent-defaults-base.ts b/src/config/zod-schema.agent-defaults-base.ts
 index 0b92b7e1b69db128f1c6619d7c39143219238915..dbaf687aa1aa9d224e7508cc11d3bef459a78c82 100644
 --- a/src/config/zod-schema.agent-defaults-base.ts
