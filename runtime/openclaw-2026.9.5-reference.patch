@@ -1,3 +1,16 @@
+diff --git a/apps/.i18n/native-source.json b/apps/.i18n/native-source.json
+index e182868ed7cf40a530d29d5bc2940b87af608051..be5fbbdb709721973630087594c6ab7e8823a3b1 100644
+--- a/apps/.i18n/native-source.json
++++ b/apps/.i18n/native-source.json
+@@ -2767,7 +2767,7 @@
+     {"id":"native.apple.89e5302cc420c198","source":"Minimal","surface":"apple","sites":[{"kind":"ui-localized-call","path":"apps/macos/Sources/OpenClaw/StatusMenuSessions.swift"}]},
+     {"id":"native.apple.7e8616e8b61e3ab7","source":"Missing %@","surface":"apple","sites":[{"kind":"ui-localized-call","path":"apps/ios/Sources/Voice/TalkGatewayPermissionState.swift"},{"kind":"ui-localized-call","path":"apps/ios/WatchApp/Sources/WatchInboxMessages.swift"}]},
+     {"id":"native.apple.5db0676e2456f785","source":"Missing dependencies.","surface":"apple","sites":[{"kind":"ui-localized-call","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+ComposerCapabilities.swift"}]},
+-    {"id":"native.apple.3533848cf5abc6fd","source":"Missing: \\(buckets.map(\\.displayName).joined(separator: \", \")). Grant access in System Settings → Privacy & Security, then reopen OpenClaw.","surface":"apple","sites":[{"kind":"conditional-branch","path":"apps/macos/Sources/OpenClaw/ComputerActionService.swift"}]},
++    {"id":"native.apple.984a462127c3c432","source":"Missing: \\(buckets.map(\\.displayName).joined(separator: \", \")). Check the running OpenClaw app in System Settings → Privacy & Security, then verify its permissions again.","surface":"apple","sites":[{"kind":"conditional-branch","path":"apps/macos/Sources/OpenClaw/ComputerActionService.swift"}]},
+     {"id":"native.apple.2601e0fe3d38e8d0","source":"Mobile setup codes, QR, and node approval.","surface":"apple","sites":[{"kind":"ui-named-argument","path":"apps/ios/Sources/Design/OpenClawDocsScreen.swift"}]},
+     {"id":"native.apple.d399edeffed0ac89","source":"Mode","surface":"apple","sites":[{"kind":"ui-call","path":"apps/ios/Sources/Onboarding/OnboardingWizardView.swift"}]},
+     {"id":"native.apple.4238f1cc6d590fc1","source":"Model","surface":"apple","sites":[{"kind":"ui-named-argument","path":"apps/ios/Sources/Design/ChatModelControlsMenu.swift"},{"kind":"ui-call","path":"apps/ios/Sources/Design/SettingsProTabSections.swift"},{"kind":"ui-call","path":"apps/macos/Sources/OpenClaw/PairingApprovalPanelView.swift"},{"kind":"ui-localized-call","path":"apps/macos/Sources/OpenClaw/QuickChatModelMenu.swift"},{"kind":"ui-modifier","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatComposer+CleanControls.swift"},{"kind":"ui-modifier","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatComposer+Controls.swift"},{"kind":"ui-call","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSessionManagementViews.swift"}]},
 diff --git a/apps/macos/Package.swift b/apps/macos/Package.swift
 index 8ea69dbf4802667b47124e6ef131217e3df5c035..f4c1764399e3f89cd79aad09662627ced1f22b1a 100644
 --- a/apps/macos/Package.swift
@@ -415,16 +428,80 @@ index 0000000000000000000000000000000000000000..6bb0893be8b800c403a2d18d07950712
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450587a860c
+index 0000000000000000000000000000000000000000..cada3fbd6443ea0e11bd73825bc6be639cda5a63
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
-@@ -0,0 +1,353 @@
+@@ -0,0 +1,471 @@
 +import AppKit
 +import ApplicationServices
 +import Darwin
 +import Foundation
 +import OpenClawKit
 +import Security
++
++/// Reasons describe this bounded observation, never authentication or permission.
++/// Only enums and counts leave the owner; native text and fields remain private.
++struct NativeCredentialDiscoveryDiagnostics {
++    enum Reason: String {
++        case focusedWindowUnavailable = "focused_window_unavailable"
++        case axMetadataUnavailable = "ax_metadata_unavailable"
++        case secureFieldNotObserved = "secure_field_not_observed"
++        case secureFieldAmbiguous = "secure_field_ambiguous"
++        case formContextMissing = "form_context_missing"
++        case bindingAbsent = "binding_absent"
++        case bindingUnmatched = "binding_unmatched"
++        case eligible
++    }
++
++    enum BindingRejection: String {
++        case invalidBinding = "invalid_binding"
++        case hostMismatch = "host_mismatch"
++        case ownerNotBound = "owner_not_bound"
++        case accountEvidenceUnmatched = "account_evidence_unmatched"
++    }
++
++    var reason: Reason
++    var observedSecureFieldCount: Int?
++    var axReadFailureCount = 0
++    var bindingCandidateCount = 0
++    var bindingRejections: [BindingRejection: Int] = [:]
++
++    mutating func recordAXRead(_ result: AXError) {
++        // Optional AX attributes can legitimately have no value/support. Other
++        // failures must not become evidence that a password field is absent.
++        if result != .success, result != .noValue, result != .attributeUnsupported {
++            self.axReadFailureCount += 1
++        }
++    }
++
++    var payload: [String: Any] {
++        var result: [String: Any] = [
++            "reason": self.reason.rawValue,
++            "axReadFailureCount": self.axReadFailureCount,
++            "bindingCandidateCount": self.bindingCandidateCount,
++            "bindingRejections": Dictionary(uniqueKeysWithValues: self.bindingRejections.map { (
++                $0.key.rawValue,
++                $0.value) }),
++        ]
++        if let count = self.observedSecureFieldCount { result["observedSecureFieldCount"] = count }
++        return result
++    }
++
++    mutating func recordRejectedBinding(_ binding: NativeCredentialBinding, host: String, bundleID: String) {
++        // Called only after the unchanged authorizes decision rejected a binding.
++        // This classification is not an alternative admission rule.
++        let reason: BindingRejection = if (try? binding.validate()) == nil {
++            .invalidBinding
++        } else if binding.hostID.caseInsensitiveCompare(host) != .orderedSame {
++            .hostMismatch
++        } else if !binding.bundleIDs.contains(bundleID) {
++            .ownerNotBound
++        } else {
++            .accountEvidenceUnmatched
++        }
++        self.bindingRejections[reason, default: 0] += 1
++    }
++}
 +
 +/// Separate from Peekaboo/CUA observation state: no password is sent to a driver,
 +/// clipboard, trajectory recorder, tool response, or ordinary type. The private
@@ -438,10 +515,15 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +        let setSecret: @MainActor (String) throws -> Void
 +    }
 +
++    struct Discovery {
++        let prompts: [Prompt]
++        var diagnostics: NativeCredentialDiscoveryDiagnostics
++    }
++
 +    struct Environment {
 +        var hostID: @MainActor () throws -> String
 +        var bindings: @MainActor () throws -> [NativeCredentialBinding]
-+        var prompts: @MainActor () throws -> [Prompt]
++        var prompts: @MainActor () throws -> Discovery
 +        var withSecret: @MainActor (NativeCredentialBinding, @MainActor (String) throws -> Void) async throws -> Void
 +        var now: @MainActor () -> Date
 +
@@ -498,16 +580,22 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +            self.admissions = self.admissions.filter { $0.value.scope != scope }
 +            let host = try self.environment.hostID()
 +            let bindings = try self.environment.bindings()
-+            let prompts = try self.environment.prompts()
++            let discovery = try self.environment.prompts()
++            var diagnostics = discovery.diagnostics
 +            try checkAllowed()
 +            var rows: [[String: String]] = []
-+            for prompt in prompts.prefix(16) {
++            for prompt in discovery.prompts.prefix(16) {
 +                try prompt.validate()
 +                for binding in bindings where params.alias == nil || binding.alias == params.alias {
++                    diagnostics.bindingCandidateCount += 1
 +                    guard binding.authorizes(
 +                        hostID: host,
 +                        bundleID: prompt.bundleID,
-+                        accountEvidence: prompt.accountEvidence) else { continue }
++                        accountEvidence: prompt.accountEvidence)
++                    else {
++                        diagnostics.recordRejectedBinding(binding, host: host, bundleID: prompt.bundleID)
++                        continue
++                    }
 +                    let ref = "native-credential:v1:" + UUID().uuidString.lowercased()
 +                    self.admissions[ref] = Admission(
 +                        prompt: prompt,
@@ -528,7 +616,17 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +            if self.admissions.count > 128 { self.admissions.removeAll()
 +                throw NativeCredentialError.stalePrompt
 +            }
-+            return OpenClawComputerActResult(ok: true, details: ["credentialPrompts": AnyCodable(rows)])
++            if !rows.isEmpty {
++                diagnostics.reason = .eligible
++            } else if !discovery.prompts.isEmpty {
++                diagnostics.reason = diagnostics.axReadFailureCount > 0
++                    ? .axMetadataUnavailable
++                    : (diagnostics.bindingCandidateCount == 0 ? .bindingAbsent : .bindingUnmatched)
++            }
++            return OpenClawComputerActResult(ok: true, details: [
++                "credentialPrompts": AnyCodable(rows),
++                "credentialPromptDiagnostics": AnyCodable(diagnostics.payload),
++            ])
 +        case .typeSecret:
 +            guard params.text == nil, params.value == nil, params.windowRef == nil, params.elementRef == nil,
 +                  let ref = params.promptRef, let alias = params.alias,
@@ -579,6 +677,22 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +        var isDialog: Bool {
 +            self.role == kAXSheetRole || self.subrole == kAXDialogSubrole
 +        }
++    }
++
++    static func diagnostics(
++        _ nodes: [Node], resolved: Bool, axReadFailureCount: Int) -> NativeCredentialDiscoveryDiagnostics
++    {
++        let count = nodes.filter(\.isSecureField).count
++        let reason: NativeCredentialDiscoveryDiagnostics.Reason = if axReadFailureCount > 0 {
++            .axMetadataUnavailable
++        } else if count == 0 {
++            .secureFieldNotObserved
++        } else if count > 1 {
++            .secureFieldAmbiguous
++        } else {
++            resolved ? .bindingUnmatched : .formContextMissing
++        }
++        return .init(reason: reason, observedSecureFieldCount: count, axReadFailureCount: axReadFailureCount)
 +    }
 +
 +    static func resolve(_ nodes: [Node], bundleID: String) -> (field: Int, context: Int, evidence: [String])? {
@@ -647,7 +761,7 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +
 +@MainActor
 +private enum NativeCredentialAX {
-+    static func prompts() throws -> [NativeCredentialEntryService.Prompt] {
++    static func prompts() throws -> NativeCredentialEntryService.Discovery {
 +        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
 +              let bundleID = app.bundleIdentifier,
 +              !["com.apple.loginwindow", "com.apple.ScreenSaver.Engine", "com.apple.SetupAssistant"].contains(bundleID)
@@ -656,9 +770,18 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +        try self.checkAppleCode(pid: app.processIdentifier, bundleID: bundleID)
 +        let application = AXUIElementCreateApplication(app.processIdentifier)
 +        AXUIElementSetMessagingTimeout(application, 1)
-+        guard let window = self.element(application, kAXFocusedWindowAttribute) else { return [] }
++        var windowDiagnostics = NativeCredentialDiscoveryDiagnostics(reason: .focusedWindowUnavailable)
++        guard let window = self.element(application, kAXFocusedWindowAttribute, onRead: {
++            windowDiagnostics.recordAXRead($0)
++        }) else {
++            if windowDiagnostics.axReadFailureCount > 0 { windowDiagnostics.reason = .axMetadataUnavailable }
++            return .init(prompts: [], diagnostics: windowDiagnostics)
++        }
 +        let initial = try self.snapshot(window)
-+        guard let prompt = NativeCredentialPromptContext.resolve(initial.nodes, bundleID: bundleID) else { return [] }
++        let resolved = NativeCredentialPromptContext.resolve(initial.nodes, bundleID: bundleID)
++        let diagnostics = NativeCredentialPromptContext.diagnostics(
++            initial.nodes, resolved: resolved != nil, axReadFailureCount: initial.axReadFailureCount)
++        guard let prompt = resolved else { return .init(prompts: [], diagnostics: diagnostics) }
 +        let field = initial.elements[prompt.field]
 +        let context = initial.elements[prompt.context]
 +        let evidence = prompt.evidence
@@ -686,7 +809,7 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +            else { throw NativeCredentialError.refused }
 +        }
 +        try validate()
-+        return [.init(
++        return .init(prompts: [.init(
 +            bundleID: bundleID,
 +            accountEvidence: evidence,
 +            validate: validate,
@@ -697,7 +820,7 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +                    kAXValueAttribute as CFString,
 +                    secret as CFString) == .success
 +                else { throw NativeCredentialError.entryFailed }
-+            })]
++            })], diagnostics: diagnostics)
 +    }
 +
 +    private static func checkAppleCode(pid: pid_t, bundleID: String) throws {
@@ -715,23 +838,31 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +              SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { throw NativeCredentialError.refused }
 +    }
 +
-+    private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
++    private static func attribute(
++        _ element: AXUIElement, _ name: String, onRead: ((AXError) -> Void)? = nil) -> CFTypeRef?
++    {
 +        var value: CFTypeRef?
-+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
++        let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
++        onRead?(result)
++        guard result == .success else { return nil }
 +        return value
 +    }
 +
-+    private static func element(_ parent: AXUIElement, _ name: String) -> AXUIElement? {
-+        guard let value = self.attribute(parent, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
++    private static func element(
++        _ parent: AXUIElement, _ name: String, onRead: ((AXError) -> Void)? = nil) -> AXUIElement?
++    {
++        guard let value = self.attribute(parent, name, onRead: onRead), CFGetTypeID(value) == AXUIElementGetTypeID()
++        else { return nil }
 +        return unsafeDowncast(value, to: AXUIElement.self)
 +    }
 +
 +    private static func snapshot(_ root: AXUIElement) throws -> (
-+        elements: [AXUIElement], nodes: [NativeCredentialPromptContext.Node])
++        elements: [AXUIElement], nodes: [NativeCredentialPromptContext.Node], axReadFailureCount: Int)
 +    {
 +        let deadline = ProcessInfo.processInfo.systemUptime + 2
 +        var elements: [AXUIElement] = []
 +        var nodes: [NativeCredentialPromptContext.Node] = []
++        var diagnostics = NativeCredentialDiscoveryDiagnostics(reason: .axMetadataUnavailable)
 +        var queue: [(element: AXUIElement, parent: Int?)] = [(root, nil)]
 +        var index = 0
 +        while index < queue.count, nodes.count < 512 {
@@ -742,7 +873,7 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +                let remaining = deadline - ProcessInfo.processInfo.systemUptime
 +                guard remaining > 0 else { throw NativeCredentialError.unavailable }
 +                AXUIElementSetMessagingTimeout(next, Float(min(remaining, 0.25)))
-+                return self.attribute(next, name)
++                return self.attribute(next, name, onRead: { diagnostics.recordAXRead($0) })
 +            }
 +            // Web content belongs to browser origin policy, even inside an
 +            // Apple-signed app. This route enters native secure fields only.
@@ -769,7 +900,7 @@ index 0000000000000000000000000000000000000000..dbb364e98874523207636bff62f1d450
 +            }
 +        }
 +        guard index == queue.count else { throw NativeCredentialError.refused }
-+        return (elements, nodes)
++        return (elements, nodes, diagnostics.axReadFailureCount)
 +    }
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialResolver.swift b/apps/macos/Sources/OpenClaw/NativeCredentialResolver.swift
@@ -2003,10 +2134,10 @@ index 9b2f9edc7b8c87dbb4080df96c4b73a3e25d4c73..467a5fc107864939aee24e00ab8ce653
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac86037158f
+index 0000000000000000000000000000000000000000..e25617f6cd9b3ecbf3ca5dd00835ee6f92ba637c
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,422 @@
 +import Darwin
 +import Foundation
 +import OpenClawKit
@@ -2061,6 +2192,12 @@ index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac8
 +        var host = "11111111-1111-4111-8111-111111111111"
 +        var allowed = true
 +        var promptCurrent = true
++        var promptsPresent = true
++        var promptBundleID = "com.apple.systempreferences"
++        var accountEvidence = ["Sign in as operator@example.invalid"]
++        var discoveryDiagnostics = NativeCredentialDiscoveryDiagnostics(
++            reason: .bindingUnmatched, observedSecureFieldCount: 1)
++        var discoveryCalls = 0
 +        var secretReads = 0
 +        var entries: [String] = []
 +        var duringResolution: (() async -> Void)?
@@ -2071,11 +2208,14 @@ index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac8
 +            NativeCredentialEntryService(environment: .init(
 +                hostID: { self.host },
 +                bindings: { self.bindings },
-+                prompts: { [.init(
-+                    bundleID: "com.apple.systempreferences",
-+                    accountEvidence: ["Sign in as operator@example.invalid"],
-+                    validate: { if !self.promptCurrent { throw NativeCredentialError.stalePrompt } },
-+                    setSecret: { self.entries.append($0) })] },
++                prompts: {
++                    self.discoveryCalls += 1
++                    return .init(prompts: self.promptsPresent ? [.init(
++                        bundleID: self.promptBundleID,
++                        accountEvidence: self.accountEvidence,
++                        validate: { if !self.promptCurrent { throw NativeCredentialError.stalePrompt } },
++                        setSecret: { self.entries.append($0) })] : [], diagnostics: self.discoveryDiagnostics)
++                },
 +                withSecret: { _, consume in
 +                    self.secretReads += 1
 +                    await self.duringResolution?()
@@ -2175,6 +2315,128 @@ index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac8
 +        #expect(harness.secretReads == 1)
 +    }
 +
++    @Test func `discovery reports observation reasons without reading or entering a secret`() async throws {
++        let reasons: [NativeCredentialDiscoveryDiagnostics.Reason] = [
++            .focusedWindowUnavailable, .axMetadataUnavailable, .secureFieldNotObserved,
++            .secureFieldAmbiguous, .formContextMissing,
++        ]
++        for reason in reasons {
++            let harness = try Harness()
++            harness.promptsPresent = false
++            harness.discoveryDiagnostics = .init(reason: reason)
++            let result = try await harness.call(.init(action: .credentialPrompts))
++            let rows = try #require(result.details?["credentialPrompts"]?.value as? [[String: String]])
++            let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
++            #expect(rows.isEmpty)
++            #expect(diagnostics["reason"] as? String == reason.rawValue)
++            #expect(diagnostics["observedSecureFieldCount"] == nil)
++            #expect(harness.discoveryCalls == 1)
++            #expect(harness.secretReads == 0)
++            #expect(harness.entries.isEmpty)
++        }
++    }
++
++    @Test func `form diagnostics distinguish observed fields from failed AX metadata`() {
++        let window = NativeCredentialPromptContext.Node(parent: nil, role: "AXWindow", subrole: nil, text: [])
++        let field = NativeCredentialPromptContext.Node(
++            parent: 0, role: "AXTextField", subrole: "AXSecureTextField", text: [])
++        let cases: [([NativeCredentialPromptContext.Node], Bool, NativeCredentialDiscoveryDiagnostics.Reason)] = [
++            ([window], false, .secureFieldNotObserved),
++            ([window, field], false, .formContextMissing),
++            ([window, field, field], false, .secureFieldAmbiguous),
++            ([window, field], true, .bindingUnmatched),
++        ]
++        for (nodes, resolved, reason) in cases {
++            let observed = NativeCredentialPromptContext.diagnostics(nodes, resolved: resolved, axReadFailureCount: 0)
++            #expect(observed.reason == reason)
++            #expect(observed.observedSecureFieldCount == nodes.count - 1)
++            let incomplete = NativeCredentialPromptContext.diagnostics(nodes, resolved: resolved, axReadFailureCount: 1)
++            #expect(incomplete.reason == .axMetadataUnavailable)
++            #expect(incomplete.axReadFailureCount == 1)
++        }
++        var reads = NativeCredentialDiscoveryDiagnostics(reason: .focusedWindowUnavailable)
++        reads.recordAXRead(.success)
++        reads.recordAXRead(.noValue)
++        reads.recordAXRead(.attributeUnsupported)
++        #expect(reads.axReadFailureCount == 0)
++        reads.recordAXRead(.cannotComplete)
++        reads.recordAXRead(.invalidUIElement)
++        reads.recordAXRead(.apiDisabled)
++        #expect(reads.axReadFailureCount == 3)
++    }
++
++    @Test func `binding diagnostics explain rejection without changing admission`() async throws {
++        for change in 0..<4 {
++            let harness = try Harness()
++            let rejection: String?
++            switch change {
++            case 0:
++                harness.bindings = []
++                rejection = nil
++            case 1:
++                harness.host = "22222222-2222-4222-8222-222222222222"
++                rejection = "host_mismatch"
++            case 2:
++                harness.promptBundleID = "com.apple.LocalAuthentication.UIAgent"
++                rejection = "owner_not_bound"
++            default:
++                harness.accountEvidence = ["otheroperator@example.invalid", "operator@example.invalid.evil"]
++                rejection = "account_evidence_unmatched"
++            }
++            let result = try await harness.call(.init(action: .credentialPrompts))
++            let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
++            #expect(diagnostics["reason"] as? String == (change == 0 ? "binding_absent" : "binding_unmatched"))
++            #expect(diagnostics["bindingCandidateCount"] as? Int == (change == 0 ? 0 : 1))
++            let rejections = try #require(diagnostics["bindingRejections"] as? [String: Int])
++            #expect(rejections == (rejection.map { [$0: 1] } ?? [:]))
++            #expect((result.details?["credentialPrompts"]?.value as? [[String: String]])?.isEmpty == true)
++            #expect(harness.secretReads == 0)
++        }
++        let harness = try Harness()
++        let result = try await harness.call(.init(action: .credentialPrompts, alias: "missing.fixture"))
++        let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
++        #expect(diagnostics["reason"] as? String == "binding_absent")
++        #expect(harness.secretReads == 0)
++    }
++
++    @Test func `eligible discovery keeps prompt rows and single use entry unchanged`() async throws {
++        let harness = try Harness()
++        harness.discoveryDiagnostics.axReadFailureCount = 1
++        let result = try await harness.call(.init(action: .credentialPrompts))
++        let rows = try #require(result.details?["credentialPrompts"]?.value as? [[String: String]])
++        let row = try #require(rows.first)
++        #expect(rows.count == 1)
++        #expect(Set(row.keys) == ["promptRef", "alias", "account", "kind", "bundleId"])
++        let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
++        #expect(diagnostics["reason"] as? String == "eligible")
++        #expect(diagnostics["axReadFailureCount"] as? Int == 1)
++        #expect(harness.discoveryCalls == 1)
++        #expect(harness.secretReads == 0)
++        let ref = try #require(row["promptRef"])
++        _ = try await harness.fill(ref)
++        #expect(harness.entries == ["fixture-password"])
++        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(ref) }
++    }
++
++    @Test func `discovery diagnostic serialization contains only closed reasons and counts`() async throws {
++        let harness = try Harness()
++        harness.accountEvidence = ["private-native-title", "private-account@example.invalid"]
++        harness.discoveryDiagnostics.axReadFailureCount = 2
++        let result = try await harness.call(.init(action: .credentialPrompts))
++        let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
++        #expect(Set(diagnostics.keys) == [
++            "reason", "axReadFailureCount", "bindingCandidateCount", "bindingRejections", "observedSecureFieldCount",
++        ])
++        #expect(diagnostics["reason"] as? String == "ax_metadata_unavailable")
++        let encoded = try #require(String(data: JSONEncoder().encode(result), encoding: .utf8))
++        for privateValue in harness.accountEvidence + ["fixture-password", harness.host, "operator@example.invalid"] {
++            #expect(!encoded.contains(privateValue))
++        }
++        #expect(harness.discoveryCalls == 1)
++        #expect(harness.secretReads == 0)
++        #expect(harness.entries.isEmpty)
++    }
++
 +    @Test func `scope generation expiry and superseded discovery reject before reading`() async throws {
 +        for change in 0..<4 {
 +            let harness = try Harness()
@@ -2189,7 +2451,8 @@ index 0000000000000000000000000000000000000000..e494ef04c83a60440a37f7c2ee5b0ac8
 +        }
 +    }
 +
-+    @Test func `changed host binding prompt expiry and cancellation refuse entry after secret resolution`() async throws {
++    @Test func `changed host binding prompt expiry and cancellation refuse entry after secret resolution`() async throws
++    {
 +        for change in 0..<5 {
 +            let harness = try Harness()
 +            let ref = try await harness.observe()
@@ -3357,10 +3620,10 @@ index 4420c7359e697e6b5da351e48011e9a1ac1e935a..87161ec22b85bada407cb508fee6b5e9
  Node plugins still validate their own settings before publishing commands, and
 diff --git a/docs/platforms/mac/native-credentials.md b/docs/platforms/mac/native-credentials.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..c270b58e0e848068ffbf2824788d3ee3549d2f05
+index 0000000000000000000000000000000000000000..7dfb59e5e8977bd60853db080b18a63591659c4d
 --- /dev/null
 +++ b/docs/platforms/mac/native-credentials.md
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,164 @@
 +---
 +summary: "Enter stored credentials into account-bound native macOS authentication prompts"
 +read_when:
@@ -3450,6 +3713,35 @@ index 0000000000000000000000000000000000000000..c270b58e0e848068ffbf2824788d3ee3
 +Entry reports `credentialEntry: "entered"` and
 +`authenticationVerified: false`. It does not submit the dialog or establish that
 +sign-in succeeded. A stale reference requires fresh discovery, not a blind retry.
++
++### Discovery diagnostics
++
++Discovery preserves the `credentialPrompts` rows and adds
++`credentialPromptDiagnostics` alongside them. Its closed `reason` values are:
++
++| Reason                       | Meaning                                                                                 |
++| ---------------------------- | --------------------------------------------------------------------------------------- |
++| `focused_window_unavailable` | No focused native window was available to inspect.                                      |
++| `ax_metadata_unavailable`    | AX reads failed; missing metadata cannot establish that a password field is absent.     |
++| `secure_field_not_observed`  | The bounded snapshot did not identify a secure password field.                          |
++| `secure_field_ambiguous`     | More than one secure field was observed.                                                |
++| `form_context_missing`       | A secure field lacked a supported dialog, sheet or dedicated-owner window context.      |
++| `binding_absent`             | No binding matched the requested alias, or no bindings were available.                  |
++| `binding_unmatched`          | Existing bindings did not authorize the observed form.                                  |
++| `eligible`                   | At least one prompt reference passed the existing checks; authentication is not proven. |
++
++Counts report observed secure fields, AX read failures and examined prompt/binding
++pairs. `observedSecureFieldCount` is omitted when no snapshot was available.
++`bindingRejections` contains only counts keyed by `invalid_binding`,
++`host_mismatch`, `owner_not_bound` or `account_evidence_unmatched`.
++Expected unsupported or valueless optional AX attributes are not read failures.
++
++These diagnostics use the same discovery pass and contain no native text or
++credential values. Discovery reads binding metadata without resolving a secret;
++secure-field values are never read. Counts describe that bounded observation,
++not every window or authentication method. An empty result does not establish
++Touch ID use, a wrong password, or failed authentication. Existing authorization
++errors and entry checks remain unchanged.
 +
 +## Authority and failure handling
 +
