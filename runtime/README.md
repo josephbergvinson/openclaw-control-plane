@@ -1029,3 +1029,29 @@ This test-only reference requires no rebuild or redeployment. The deployed
 Gateway remains `490a24` at publication; activation of the already built `d83fa84`
 candidate, live Discord acceptance and native credential entry remain separately
 tracked. The ten existing synthetic screenshot assets are unchanged.
+
+### Guild admission, queued configuration and paused workers
+
+Reference `513be0562e914cd940cc216255232f8099cc5cfa` corrects three reproduced owner failures. Ordinary guild
+messages use inbound admission; configured member restrictions and actual command
+authorization remain enforced. A paused worker is reported as unfinished, with
+its existing continuation identity, while completed siblings keep their results.
+Queued runs that belonged to the live runtime refresh their configuration before
+secret resolution and policy admission. Explicit scoped configurations stay pinned;
+the exact catalog guard remains enforced and no completed work is retried.
+
+Qualification includes 77 paused-wake tests, 30 guild ingress tests, 104 existing
+Discord preflight controls and 47 queued-admission/secret-resolution tests. The
+strengthened five-case queued regression was also rerun after final mechanical
+changes; it is included in the 47, not an additional unique suite count. It
+reproduces the actual catalog-generation rejection through queued admission and
+checks the repaired model-input read. Current exact-head hosted CI, activation and
+live behavior remain separate gates. Ten earlier synthetic images are unchanged.
+
+The manifest's `490a24` deployment fields retain their dated publication-time
+receipt. A later accepted activation installed `d83fa84` on September 25 at
+17:18:59 UTC with all 33 mechanical checks accepted. This new source successor is
+not yet activated at this preparation checkpoint. Its actual deployment and live
+results will be recorded after acceptance. The queued reader does not replace a
+retired plugin-record Gateway resolver or claim to repair that separate boundary.
+MacBook opaque native credential entry remains unproven.

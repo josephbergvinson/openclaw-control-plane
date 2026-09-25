@@ -9458,6 +9458,119 @@ index ff3fcd5f5fbd3d59d3b3f4b5d80369f1c9b4b79b..9f615ff95a7964a424c2bb6338f9c037
    } catch (err) {
      logError(`${params.label}: failed to acknowledge interaction: ${String(err)}`);
    }
+diff --git a/extensions/discord/src/monitor/dm-command-auth.test.ts b/extensions/discord/src/monitor/dm-command-auth.test.ts
+index fe6ad9e3441d4dc511e4af7983e7c979a7c57247..d4502b8f3b56c6c91de17479718af38c6bc6500f 100644
+--- a/extensions/discord/src/monitor/dm-command-auth.test.ts
++++ b/extensions/discord/src/monitor/dm-command-auth.test.ts
+@@ -58,6 +58,82 @@ describe("resolveDiscordTextCommandAccess", () => {
+     tag: "alice#0001",
+   };
+ 
++  it.each([
++    {
++      memberAccessConfigured: false,
++      memberAllowed: false,
++      hasControlCommand: false,
++      admission: "dispatch",
++      authorized: false,
++      blocked: false,
++    },
++    {
++      memberAccessConfigured: true,
++      memberAllowed: true,
++      hasControlCommand: false,
++      admission: "dispatch",
++      authorized: true,
++      blocked: false,
++    },
++    {
++      memberAccessConfigured: true,
++      memberAllowed: false,
++      hasControlCommand: false,
++      admission: "drop",
++      authorized: false,
++      blocked: false,
++    },
++    {
++      memberAccessConfigured: false,
++      memberAllowed: false,
++      hasControlCommand: true,
++      admission: "drop",
++      authorized: false,
++      blocked: true,
++    },
++    {
++      memberAccessConfigured: true,
++      memberAllowed: false,
++      hasControlCommand: true,
++      admission: "drop",
++      authorized: false,
++      blocked: true,
++    },
++    {
++      memberAccessConfigured: true,
++      memberAllowed: true,
++      hasControlCommand: true,
++      admission: "dispatch",
++      authorized: true,
++      blocked: false,
++    },
++  ])(
++    "keeps ordinary guild admission separate from command authority: $memberAccessConfigured/$memberAllowed/$hasControlCommand",
++    async ({
++      memberAccessConfigured,
++      memberAllowed,
++      hasControlCommand,
++      admission,
++      authorized,
++      blocked,
++    }) => {
++      const result = await resolveDiscordTextCommandAccess({
++        accountId: "default",
++        sender,
++        ownerAllowFrom: [],
++        memberAccessConfigured,
++        memberAllowed,
++        allowNameMatching: false,
++        allowTextCommands: true,
++        hasControlCommand,
++      });
++
++      expect(result.ingress.admission).toBe(admission);
++      expect(result.commandAccess.authorized).toBe(authorized);
++      expect(result.commandAccess.shouldBlockControlCommand).toBe(blocked);
++    },
++  );
++
+   it("authorizes guild text commands from owner allowlists", async () => {
+     const result = await resolveDiscordTextCommandAccess({
+       accountId: "default",
+diff --git a/extensions/discord/src/monitor/dm-command-auth.ts b/extensions/discord/src/monitor/dm-command-auth.ts
+index d5f079297490db91b1afe8704b8792cbbec6918b..6d00da7a93d68f06df2e60c8a458f2bbb3bd71cf 100644
+--- a/extensions/discord/src/monitor/dm-command-auth.ts
++++ b/extensions/discord/src/monitor/dm-command-auth.ts
+@@ -203,7 +203,7 @@ export async function resolveDiscordTextCommandAccess(params: {
+     cfg: params.cfg,
+     token: params.token,
+     rest: params.rest,
+-  }).command({
++  }).message({
+     subject: createDiscordDmIngressSubject(params.sender),
+     conversation: {
+       kind: "channel",
+@@ -212,9 +212,11 @@ export async function resolveDiscordTextCommandAccess(params: {
+       threadId: params.conversationThreadId,
+     },
+     ...(params.contextBinding ? { contextBinding: params.contextBinding } : {}),
++    // Ordinary guild messages keep their member policy without requiring command authority.
++    event: { authMode: params.hasControlCommand ? "command" : "inbound", mayPair: false },
+     accessGroupMembership,
+     dmPolicy: "allowlist",
+-    groupPolicy: "allowlist",
++    groupPolicy: params.hasControlCommand || params.memberAccessConfigured ? "allowlist" : "open",
+     policy: {
+       mutableIdentifierMatching: params.allowNameMatching ? "enabled" : "disabled",
+       ...(params.minIdentifierAuthentication
 diff --git a/extensions/discord/src/monitor/exec-approvals.test.ts b/extensions/discord/src/monitor/exec-approvals.test.ts
 index e2953ce5261b20f890d10b446fbe1be97392ee78..f2b4f669b7fdcab29ef47f34c27754824b100956 100644
 --- a/extensions/discord/src/monitor/exec-approvals.test.ts
@@ -10086,10 +10199,10 @@ index 4485e820d7a7c5075f94974fe4d2aa13ddd9b526..d3766ad212f33adeb7b753446880e14e
            await draftStream?.discardPending();
 diff --git a/extensions/discord/src/monitor/message-handler.preflight-context.test.ts b/extensions/discord/src/monitor/message-handler.preflight-context.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2ac9591fb
+index 0000000000000000000000000000000000000000..cb09ccd158f1f39858e02440c1c45c0fc1ff832c
 --- /dev/null
 +++ b/extensions/discord/src/monitor/message-handler.preflight-context.test.ts
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,140 @@
 +import path from "node:path";
 +import {
 +  buildChannelInboundEventContext,
@@ -10138,12 +10251,18 @@ index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2
 +}
 +
 +describe("Discord preflight host ownership", () => {
-+  it.each(["host", "raw", "retired"] as const)(
-+    "preserves only the %s builder's valid Gateway binding through ordinary message processing",
-+    async (builderKind) => {
++  it.each([
++    { builderKind: "host", unrestricted: false },
++    { builderKind: "raw", unrestricted: false },
++    { builderKind: "retired", unrestricted: false },
++    { builderKind: "host", unrestricted: true },
++  ] as const)(
++    "preserves only the $builderKind builder's valid Gateway binding through ordinary message processing (unrestricted=$unrestricted)",
++    async ({ builderKind, unrestricted }) => {
 +      await withTempDir("discord-preflight-owner-", async (dir) => {
 +        const channelId = "channel-host-boundary";
 +        const guildId = "guild-host-boundary";
++        const agentId = unrestricted ? "coordination" : "main";
 +        const senderId = "123456789012345678";
 +        const gateway = {} as GatewayContext;
 +        let live = builderKind !== "retired";
@@ -10158,7 +10277,7 @@ index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2
 +        try {
 +          const guildEntries = {
 +            [guildId]: {
-+              users: [senderId],
++              ...(unrestricted ? {} : { users: [senderId] }),
 +              requireMention: false,
 +              channels: { [channelId]: { enabled: true } },
 +            },
@@ -10174,6 +10293,12 @@ index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2
 +          const preflight = await preflightDiscordMessage({
 +            ...createDiscordPreflightArgs({
 +              cfg: {
++                ...(unrestricted
++                  ? {
++                      agents: { entries: { main: {}, coordination: { workspace: dir } } },
++                      bindings: [{ agentId, match: { channel: "discord", guildId } }],
++                    }
++                  : {}),
 +                session: { store: path.join(dir, "sessions.json") },
 +                channels: { discord: discordConfig },
 +              },
@@ -10199,6 +10324,11 @@ index 0000000000000000000000000000000000000000..13ba9ff35450754bce61ccd78cbe46c2
 +            throw new Error("Expected the ordinary Discord message context");
 +          }
 +          const resolver = readChannelContextGatewayContextResolver(processed.ctxPayload);
++          expect(processed.ctxPayload.AgentId).toBe(agentId);
++          expect(processed.ctxPayload.SessionKey).toBe(
++            `agent:${agentId}:discord:channel:${channelId}`,
++          );
++          expect(processed.ctxPayload.CommandAuthorized).toBe(!unrestricted);
 +          if (builderKind === "host") {
 +            expect(resolver?.()).toBe(gateway);
 +            live = false;
@@ -35683,6 +35813,194 @@ index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa
    it("preserves the final attempt when its Gateway closes during runtime loading", async () => {
      const retired = settledChild();
      retired.requesterSettleWake!.attemptCount = 2;
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
+index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..4bc2d627bc927ab6192872d0ff0cf390e92d0a30 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
+@@ -1,5 +1,6 @@
+ import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+ import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
++import { wrapPromptDataBlock } from "../../sanitize-for-prompt.js";
+ import { SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION } from "../completion/subagent-completion-instructions.js";
+ import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+ 
+@@ -10,9 +11,11 @@ export function buildRequesterSettleWakeMessage(params: {
+   findings?: string;
+   requireVisibleReply: boolean;
+   parentOnly?: boolean;
++  pausedChildSessionKeys?: readonly string[];
+   children: readonly Pick<SubagentRunRecord, "completion">[];
+   preserveModelRouteNotice: boolean;
+ }): string {
++  const hasPausedChildren = Boolean(params.pausedChildSessionKeys?.length);
+   // The scheduling row need not be the rerouted child. Keep every current
+   // child's producer-owned notice, with stable bytes and one batch-wide cap.
+   const routeNotices = [
+@@ -32,13 +35,24 @@ export function buildRequesterSettleWakeMessage(params: {
+       ? `${truncateUtf16Safe(routeNotices, REQUESTER_SETTLE_WAKE_ROUTE_NOTICE_MAX_CHARS - ROUTE_NOTICE_TRUNCATION.length)}${ROUTE_NOTICE_TRUNCATION}`
+       : routeNotices;
+   return [
+-    "[Subagent Context] Every subagent spawned from this session has now settled — none are still running or awaiting completion delivery.",
+-    "[Subagent Context] Do not keep waiting or call sessions_yield again for this batch; no further completion events will arrive.",
+-    "[Subagent Context] Child settlement ends this batch, not necessarily the original user request. Review the results against the requested outcome and continue any remaining in-scope work before replying.",
++    ...(hasPausedChildren
++      ? [
++          "[Subagent Context] Interim child status: one or more child runs are paused awaiting continuation; no completion result was submitted by those children. They remain unfinished.",
++          "[Subagent Context] Review the paused child's current assignment and evidence. Continue the same child session when more work is needed; do not keep waiting for a completion that requires your continuation. This status does not complete the original user request.",
++        ]
++      : [
++          "[Subagent Context] Every subagent spawned from this session has now settled — none are still running or awaiting completion delivery.",
++          "[Subagent Context] Do not keep waiting or call sessions_yield again for this batch; no further completion events will arrive.",
++          "[Subagent Context] Child settlement ends this batch, not necessarily the original user request. Review the results against the requested outcome and continue any remaining in-scope work before replying.",
++        ]),
+     params.parentOnly
+-      ? `[Subagent Context] ${SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION}`
++      ? hasPausedChildren
++        ? `[Subagent Context] Process this status privately. Your final reply stays internal. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Reply ONLY: ${SILENT_REPLY_TOKEN} when no further work or user-facing update is owed, or after sending that update.`
++        : `[Subagent Context] ${SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION}`
+       : params.requireVisibleReply
+-        ? "[Subagent Context] Child completion delivery is internal; the original user request still requires your visible final answer only after the requested outcome is complete or genuinely blocked."
++        ? hasPausedChildren
++          ? "[Subagent Context] Child status delivery is internal; the original user request still requires your visible final answer only after the requested outcome is complete or genuinely blocked."
++          : "[Subagent Context] Child completion delivery is internal; the original user request still requires your visible final answer only after the requested outcome is complete or genuinely blocked."
+         : `[Subagent Context] Reply ONLY: ${SILENT_REPLY_TOKEN} only if you already delivered the consolidated final answer for this batch.`,
+     ...(modelRouteChange
+       ? [
+@@ -49,7 +63,12 @@ export function buildRequesterSettleWakeMessage(params: {
+         ]
+       : []),
+     "",
++    ...(params.pausedChildSessionKeys ?? []).map((sessionKey) =>
++      wrapPromptDataBlock({ label: "Paused child session", text: sessionKey }),
++    ),
+     params.findings ??
+-      "(each child result was announced individually in earlier completion events)",
++      (hasPausedChildren
++        ? "(no completed child results in this update)"
++        : "(each child result was announced individually in earlier completion events)"),
+   ].join("\n");
+ }
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
+index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..ca81e0245493e3e5666fc4013ef9cdbb855b0183 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
+@@ -1,5 +1,6 @@
+-import { describe, expect, it } from "vitest";
++import { afterEach, describe, expect, it, vi } from "vitest";
+ import { buildAgentRunTerminalReplySnapshot } from "../../agent-run-terminal-reply.js";
++import { markSubagentRunPausedAfterYield } from "../registry/subagent-registry-run-pause.js";
+ import {
+   sessionStore,
+   registryRuntimeMock,
+@@ -15,8 +16,108 @@ import {
+ 
+ const { maybeWakeRequesterAfterAllChildrenSettled } =
+   await import("./subagent-announce.requester-settle-wake.js");
++const announceOutput = await import("./subagent-announce-output.js");
+ 
+ describe("maybeWakeRequesterAfterAllChildrenSettled results", () => {
++  afterEach(() => vi.restoreAllMocks());
++
++  it.each([false, true])(
++    "reports a yielded child as interim, then delivers its same-session completion (completed sibling: %s)",
++    async (withSibling) => {
++      const readFindings = vi.spyOn(announceOutput, "readChildCompletionFindings");
++      const child = makeSettledChild({
++        runId: "run-b",
++        completionTarget: "parent",
++        completionRequesterSessionId: "sess-main",
++        completion: { required: true, resultText: "private checkpoint acknowledgment" },
++        requesterSettleWake: {
++          status: "pending",
++          attemptCount: 0,
++          requesterYieldBatch: true,
++          rearmGeneration: 1,
++        },
++      });
++      markSubagentRunPausedAfterYield({ entry: child, endedAt: 3_000 });
++      sessionStore[child.childSessionKey] = { sessionId: "paused-child-session" };
++      const sibling = makeSettledChild({
++        runId: "run-a",
++        outcome: { status: "ok" },
++        completion: { required: true, resultText: "completed sibling result" },
++        requesterSettleWake: { ...child.requesterSettleWake! },
++      });
++      registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue(
++        withSibling ? [sibling, child] : [child],
++      );
++
++      expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(true);
++      expect(deliverSpy).toHaveBeenCalledOnce();
++      const interim = String(deliveredCallArg().triggerMessage);
++      expect(interim).toContain("Interim child status");
++      expect(interim).toContain(child.childSessionKey);
++      expect(interim).toContain("paused awaiting continuation");
++      expect(interim).toContain("no completion result was submitted");
++      expect(interim).toContain("Your final reply stays internal");
++      expect(interim).not.toMatch(/Every subagent.*settled|status: unknown|\(no output\)/);
++      expect(interim).not.toContain("This completion ends one child run");
++      expect(interim).not.toContain("private checkpoint acknowledgment");
++      expect(interim.includes("completed sibling result")).toBe(withSibling);
++      expect(findTranscriptEventMock).not.toHaveBeenCalled();
++      expect(readFindings).toHaveBeenCalledExactlyOnceWith(withSibling ? [sibling] : []);
++      expect(child.pauseReason).toBe("sessions_yield");
++      expect(child.execution.outcome).toBeUndefined();
++      expect(child.cleanupCompletedAt).toBeUndefined();
++      expect(child.completion?.resultText).toBeUndefined();
++      expect(child.requesterSettleWake).toBeUndefined();
++      expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);
++      expect(deliverSpy).toHaveBeenCalledOnce();
++
++      // The kept child continues in its existing session; no terminal result exists yet.
++      child.pauseReason = undefined;
++      child.execution = { status: "running", startedAt: 4_000 };
++      child.requesterSettleWake = {
++        status: "pending",
++        attemptCount: 0,
++        requesterYieldBatch: true,
++        rearmGeneration: 2,
++      };
++      registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
++      expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);
++      expect(deliverSpy).toHaveBeenCalledOnce();
++      child.execution = {
++        status: "terminal",
++        startedAt: 4_000,
++        endedAt: 5_000,
++        outcome: { status: "ok" },
++      };
++      child.completion = { required: true, resultText: "same child verified cleanup" };
++      expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(true);
++      expect(deliverSpy).toHaveBeenCalledTimes(2);
++      const final = String(deliverSpy.mock.calls[1]?.[0].triggerMessage);
++      expect(final).toContain("same child verified cleanup");
++      expect(final).toContain("Every subagent spawned from this session has now settled");
++      expect(final).not.toContain("Interim child status");
++      expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);
++      expect(deliverSpy).toHaveBeenCalledTimes(2);
++    },
++  );
++
++  it("revokes a queued interim status when the paused child's execution changes", async () => {
++    const child = makeSettledChild({ runId: "run-b" });
++    markSubagentRunPausedAfterYield({ entry: child, endedAt: 3_000 });
++    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
++    deliverSpy.mockImplementationOnce(async (params) => {
++      const isCurrent = params.isSourceSessionEffectsAllowed as () => boolean;
++      expect(isCurrent()).toBe(true);
++      child.execution = { status: "running", startedAt: 4_000 };
++      expect(isCurrent()).toBe(false);
++      return { delivered: false, path: "none", disposition: "intentional_non_delivery" };
++    });
++    expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);
++    expect(deliverSpy).toHaveBeenCalledOnce();
++    expect(child.execution.status).toBe("running");
++    expect(child.cleanupCompletedAt).toBeUndefined();
++  });
++
+   it("delivers the complete final source reply after a same-run silent terminal", async () => {
+     const text = `${"<source-reply>".repeat(400)}required source reply tail`;
+     const child = makeSettledChild({
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts
 index 6f39d2dba0008c9b86805ce2b1d67a8fe382cdb6..fcaaa7c18253542dce8dc9322a4275d24ee4bb30 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts
@@ -35807,7 +36125,7 @@ index 6f39d2dba0008c9b86805ce2b1d67a8fe382cdb6..fcaaa7c18253542dce8dc9322a4275d2
      const woke = await maybeWakeRequesterAfterAllChildrenSettled(
        wakeParams({ requesterSessionKey: "agent:main:cron:daily-report" }),
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
-index 63f576a01723851c80a08d35c4d9b506cc04961c..71a6438a2698b110ecb8a67df0efaf47cc714d9b 100644
+index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946efa4108f6 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 @@ -212,8 +212,12 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
@@ -35825,7 +36143,49 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..71a6438a2698b110ecb8a67df0efaf47
      return false;
    }
  
-@@ -598,6 +602,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -429,7 +433,22 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+     finalizeRequesterAttachment(batchRunIds, selectedState);
+     return false;
+   }
+-  const preparedFindings = await readChildCompletionFindings(completionRows);
++  // A yielded turn has ended, but its task remains paused. Wake the requester
++  // with lifecycle metadata without reading or presenting a completion result.
++  const pausedChildren = completionRows
++    .filter((entry) => entry.pauseReason === "sessions_yield")
++    .map((entry) => ({ entry, generation: entry.generation, execution: entry.execution }));
++  const completedChildren = completionRows.filter(
++    (entry) => entry.pauseReason !== "sessions_yield",
++  );
++  const preparedFindings = await readChildCompletionFindings(completedChildren);
++  const isPausedStatusCurrent = () =>
++    pausedChildren.every(
++      ({ entry, generation, execution }) =>
++        entry.pauseReason === "sessions_yield" &&
++        entry.generation === generation &&
++        entry.execution === execution,
++    );
+   const requesterSessionOrigin = normalizeDeliveryContext(params.requesterOrigin);
+   const directOrigin = resolveAnnounceOrigin(requesterEntry, requesterSessionOrigin);
+   const completionChannel = normalizeMessageChannel(directOrigin?.channel);
+@@ -437,7 +456,8 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+     findings: preparedFindings.text,
+     requireVisibleReply: requesterYieldedAfterDelivery,
+     parentOnly,
+-    children: completionRows,
++    children: completedChildren,
++    pausedChildSessionKeys: pausedChildren.map(({ entry }) => entry.childSessionKey),
+     preserveModelRouteNotice: !completionChannel || !isDeliverableMessageChannel(completionChannel),
+   });
+   const wakeKeyBase = [
+@@ -557,6 +577,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+     const isSourceSessionEffectsAllowed = () =>
+       !params.signal?.aborted &&
+       preparedFindings.isCurrent() &&
++      isPausedStatusCurrent() &&
+       !isGatewayClosed() &&
+       isBatchCurrent() &&
+       isRequesterCurrent() &&
+@@ -598,6 +619,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
            deliverSubagentAnnouncement({
              requesterSessionKey,
              requesterAgentId,
@@ -51935,8 +52295,225 @@ index 288562d5548ba4214416d6377e020a5a52ee44e6..e11b4c36b21b14e125950594b8b5f069
            isError: true,
          },
        ],
+diff --git a/src/auto-reply/reply/followup-turn-admission.runtime-config.test.ts b/src/auto-reply/reply/followup-turn-admission.runtime-config.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..038121572550d938dcc846ac47a0ed549d11bcc5
+--- /dev/null
++++ b/src/auto-reply/reply/followup-turn-admission.runtime-config.test.ts
+@@ -0,0 +1,211 @@
++// Preserve model-runtime harness setup before modules that consume it.
++// oxfmt-ignore
++import {
++  cleanupPreparedModelRuntimeHarness,
++  getPreparedModelRuntimeMocks,
++  resetPreparedModelRuntimeHarness,
++} from "../../agents/prepared-model-runtime.test-harness.js";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { PreparedModelCatalogConfigReplacedError } from "../../agents/prepared-model-catalog.errors.js";
++import { loadPreparedModelCatalogOwnerSnapshot } from "../../agents/prepared-model-catalog.js";
++import {
++  advancePreparedModelRuntimeConfig,
++  refreshPreparedModelRuntimeSnapshots,
++} from "../../agents/prepared-model-runtime.js";
++import {
++  clearRuntimeConfigSnapshot,
++  createRuntimeConfigReader,
++  setRuntimeConfigSnapshot,
++} from "../../config/runtime-snapshot.js";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import {
++  createOpenClawTestState,
++  type OpenClawTestState,
++} from "../../test-utils/openclaw-test-state.js";
++import { resolveRunModelHasVision } from "./agent-runner-run-params.js";
++import { admitFollowupTurn } from "./followup-turn-admission.js";
++import type { FollowupRun } from "./queue.js";
++
++const mocks = vi.hoisted(() => ({
++  admitReply: vi.fn(),
++  preflight: vi.fn(),
++  resolveSecrets: vi.fn(),
++  sendPolicy: vi.fn(),
++}));
++vi.mock("../../cli/command-secret-gateway.js", () => ({
++  resolveCommandSecretRefsViaGateway: (...args: unknown[]) => mocks.resolveSecrets(...args),
++}));
++vi.mock("./reply-turn-admission.js", () => ({
++  admitReplyTurn: (...args: unknown[]) => mocks.admitReply(...args),
++}));
++vi.mock("./agent-runner-memory.js", () => ({
++  runSessionCompactionIfNeeded: (...args: unknown[]) => mocks.preflight(...args),
++}));
++vi.mock("./agent-runner-auto-fallback.js", () => ({
++  resolveRunAfterAutoFallbackPrimaryProbeRecheck: ({ run }: { run: FollowupRun["run"] }) => run,
++}));
++vi.mock("../../sessions/send-policy.js", () => ({
++  resolveSendPolicy: (...args: unknown[]) => mocks.sendPolicy(...args),
++}));
++vi.mock("./inbound-meta.js", () => ({
++  refreshActiveGoalContext: (context: unknown) => context,
++}));
++vi.mock("./compaction-notice.js", () => ({
++  shouldNotifyUserAboutCompaction: () => false,
++}));
++
++let state: OpenClawTestState;
++const defaults = { typing: {} as never, typingMode: "never" as const, defaultModel: "test-model" };
++function createConfig(enabled: boolean): OpenClawConfig {
++  return { hooks: { internal: { entries: { "session-memory": { enabled } } } } };
++}
++function createQueued(config: OpenClawConfig): FollowupRun {
++  return {
++    prompt: "queued prompt",
++    enqueuedAt: 1,
++    originatingChannel: "discord",
++    originatingAccountId: "source-account",
++    run: {
++      agentId: "default",
++      agentDir: state.agentDir("default"),
++      sessionId: "queued-session",
++      sessionFile: state.path("session.jsonl"),
++      workspaceDir: state.path("workspace"),
++      config,
++      readRuntimeConfig: createRuntimeConfigReader(config),
++      provider: "custom",
++      model: "test-model",
++      timeoutMs: 1_000,
++      blockReplyBreak: "message_end",
++    },
++  };
++}
++async function replaceRuntime(retained: OpenClawConfig, replacement: OpenClawConfig) {
++  await refreshPreparedModelRuntimeSnapshots(retained, {
++    gatewayLifecycle: true,
++    catalogMode: "static",
++  });
++  advancePreparedModelRuntimeConfig(replacement);
++  setRuntimeConfigSnapshot(replacement, replacement);
++}
++async function admitted(queued: FollowupRun) {
++  const result = await admitFollowupTurn({ queued, defaults });
++  expect(result.kind).toBe("admitted");
++  if (result.kind !== "admitted") {
++    throw new Error("Expected queued admission");
++  }
++  return result.turn;
++}
++function catalog(run: FollowupRun["run"]) {
++  return loadPreparedModelCatalogOwnerSnapshot({
++    config: run.config,
++    agentId: run.agentId,
++    agentDir: run.agentDir,
++  });
++}
++
++beforeEach(async () => {
++  state = await createOpenClawTestState({ label: "queued-runtime-config" });
++  await resetPreparedModelRuntimeHarness(state);
++  getPreparedModelRuntimeMocks().configuredAgentIds = ["default"];
++  vi.clearAllMocks();
++  mocks.resolveSecrets.mockImplementation(async ({ config }) => ({ resolvedConfig: config }));
++  mocks.preflight.mockImplementation(async ({ sessionEntry }) => sessionEntry);
++  mocks.sendPolicy.mockReturnValue("allow");
++  mocks.admitReply.mockImplementation(async () => ({
++    status: "owned",
++    operation: {
++      sessionId: "queued-session",
++      abortSignal: new AbortController().signal,
++      retainFailureUntilComplete: vi.fn(),
++      complete: vi.fn(),
++      setPhase: vi.fn(),
++      updateSessionId: vi.fn(),
++    },
++  }));
++});
++afterEach(async ({ task }) => {
++  clearRuntimeConfigSnapshot();
++  await cleanupPreparedModelRuntimeHarness(state, task.result?.state === "fail");
++});
++
++describe("queued admission across runtime publication", () => {
++  it.each(["runtime", "source clone"])(
++    "refreshes a retained %s before catalog and policy reads",
++    async (kind) => {
++      const retained = createConfig(true);
++      const replacement = createConfig(false);
++      setRuntimeConfigSnapshot(retained, retained);
++      const input = kind === "runtime" ? retained : structuredClone(retained);
++      const item = createQueued(input);
++      await replaceRuntime(retained, replacement);
++
++      // The strict catalog owner correctly rejects the previous config generation.
++      await expect(catalog(item.run)).rejects.toBeInstanceOf(
++        PreparedModelCatalogConfigReplacedError,
++      );
++      const turn = await admitted(item);
++      await expect(catalog(turn.queued.run)).resolves.toMatchObject({ config: replacement });
++      await expect(
++        resolveRunModelHasVision({ run: turn.queued.run, provider: "custom", model: "test-model" }),
++      ).resolves.toBe(false);
++      expect(turn.config).toBe(replacement);
++      expect(mocks.resolveSecrets.mock.calls[0]?.[0].config).toBe(replacement);
++      expect(mocks.sendPolicy).toHaveBeenCalledWith(
++        expect.objectContaining({ cfg: replacement, channel: "discord" }),
++      );
++      expect(mocks.admitReply).toHaveBeenCalledOnce();
++      expect(mocks.preflight).toHaveBeenCalledOnce();
++      expect(item.run.config).toBe(input);
++    },
++  );
++
++  it("keeps explicit scoped config and its strict catalog mismatch after reload", async () => {
++    const retained = createConfig(true);
++    const replacement = createConfig(false);
++    const scoped: OpenClawConfig = { ...retained, tools: { allow: ["read"] } };
++    setRuntimeConfigSnapshot(retained, retained);
++    const item = createQueued(scoped);
++    await replaceRuntime(retained, replacement);
++    const turn = await admitted(item);
++    expect(turn.config).toBe(scoped);
++    expect(mocks.resolveSecrets.mock.calls[0]?.[0].config).toBe(scoped);
++    await expect(catalog(turn.queued.run)).rejects.toBeInstanceOf(
++      PreparedModelCatalogConfigReplacedError,
++    );
++  });
++
++  it("preserves command-resolved config and does not refresh after admission", async () => {
++    const retained = createConfig(true);
++    const replacement = createConfig(false);
++    const resolved: OpenClawConfig = { ...replacement, tools: { allow: ["read"] } };
++    setRuntimeConfigSnapshot(retained, retained);
++    const item = createQueued(retained);
++    await replaceRuntime(retained, replacement);
++    mocks.resolveSecrets.mockImplementation(async () => ({ resolvedConfig: resolved }));
++    const readRuntimeConfig = vi.fn(item.run.readRuntimeConfig);
++    item.run.readRuntimeConfig = readRuntimeConfig;
++    const turn = await admitted(item);
++    expect(readRuntimeConfig).toHaveBeenCalledOnce();
++    expect(mocks.resolveSecrets.mock.calls[0]?.[0].config).toBe(replacement);
++    expect(turn.config).toBe(resolved);
++    expect(turn.queued.run.config).toBe(resolved);
++    setRuntimeConfigSnapshot(retained, retained);
++    expect(turn.queued.run.config).toBe(resolved);
++    expect(mocks.admitReply).toHaveBeenCalledOnce();
++  });
++
++  it("does not retry admission or run work when secret resolution fails", async () => {
++    const retained = createConfig(true);
++    const replacement = createConfig(false);
++    setRuntimeConfigSnapshot(retained, retained);
++    const item = createQueued(retained);
++    await replaceRuntime(retained, replacement);
++    const failure = new Error("secret resolution unavailable");
++    mocks.resolveSecrets.mockRejectedValue(failure);
++    await expect(admitFollowupTurn({ queued: item, defaults })).rejects.toBe(failure);
++    expect(mocks.resolveSecrets).toHaveBeenCalledOnce();
++    expect(mocks.admitReply).not.toHaveBeenCalled();
++    expect(mocks.preflight).not.toHaveBeenCalled();
++  });
++});
 diff --git a/src/auto-reply/reply/followup-turn-admission.ts b/src/auto-reply/reply/followup-turn-admission.ts
-index 39ed19a39649d2fa5ab4c3498cae403019525fb9..f8dc7fd061b061f00f397d040f8a14f1f1106b9a 100644
+index 39ed19a39649d2fa5ab4c3498cae403019525fb9..cd107bce0eaed3be4cd40c2e3268556005a4e693 100644
 --- a/src/auto-reply/reply/followup-turn-admission.ts
 +++ b/src/auto-reply/reply/followup-turn-admission.ts
 @@ -34,6 +34,7 @@ import {
@@ -51947,7 +52524,17 @@ index 39ed19a39649d2fa5ab4c3498cae403019525fb9..f8dc7fd061b061f00f397d040f8a14f1
  import { admitReplyTurn } from "./reply-turn-admission.js";
  import {
    createReplySessionEntryHandle,
-@@ -170,6 +171,9 @@ export async function admitFollowupTurn(params: {
+@@ -119,7 +120,8 @@ export async function admitFollowupTurn(params: {
+   defaults: FollowupRunnerParams;
+   onCompactionNoticePayload?: (payload: ReplyPayload, turn: AdmittedFollowupTurn) => Promise<void>;
+ }): Promise<FollowupAdmissionResult> {
+-  const resolvedConfig = await resolveQueuedReplyExecutionConfig(params.queued.run.config, {
++  const admissionConfig = params.queued.run.readRuntimeConfig?.() ?? params.queued.run.config;
++  const resolvedConfig = await resolveQueuedReplyExecutionConfig(admissionConfig, {
+     originatingChannel: params.queued.originatingChannel,
+     messageProvider: params.queued.run.messageProvider,
+     originatingAccountId: params.queued.originatingAccountId,
+@@ -170,6 +172,9 @@ export async function admitFollowupTurn(params: {
        return { kind: "skipped", reason: "aborted", operation };
      }
  
@@ -52252,7 +52839,7 @@ index c74c01d027808fc01aa22f45076172500b5385e7..d0947b288d8fc099c60ba059db0db485
      authProfileId,
      authProfileIdSource,
 diff --git a/src/auto-reply/reply/get-reply-run-execute.ts b/src/auto-reply/reply/get-reply-run-execute.ts
-index 11124fae1303b3df1551a642b46b0a6a48366e52..5f41ce867f44683a531c3299720be78a077ae3a3 100644
+index 11124fae1303b3df1551a642b46b0a6a48366e52..ea4aec8435f74ca7080e149d1d75c8e00163485d 100644
 --- a/src/auto-reply/reply/get-reply-run-execute.ts
 +++ b/src/auto-reply/reply/get-reply-run-execute.ts
 @@ -13,6 +13,7 @@ import {
@@ -52263,7 +52850,15 @@ index 11124fae1303b3df1551a642b46b0a6a48366e52..5f41ce867f44683a531c3299720be78a
  import { revokeRequesterCronAuthority } from "../../agents/subagents/requester-cron-authority.js";
  import {
    attachToolAllowlistIntersection,
-@@ -86,6 +87,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+@@ -20,6 +21,7 @@ import {
+ } from "../../agents/tool-policy.js";
+ import { readChannelContextAdmissionEvidence } from "../../channels/message-access/admission-evidence.js";
+ import { getRuntimeConfig } from "../../config/config.js";
++import { createRuntimeConfigReader } from "../../config/runtime-snapshot.js";
+ import { conversationIdentityFromMsgContext } from "../../config/sessions/conversation-identity.js";
+ import { resolveGroupSessionKey } from "../../config/sessions/group.js";
+ import { normalizeMediaFacts } from "../../media/media-facts.js";
+@@ -86,6 +88,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
      shouldSteer,
      shouldFollowup,
      queueAdmissionState,
@@ -52271,7 +52866,17 @@ index 11124fae1303b3df1551a642b46b0a6a48366e52..5f41ce867f44683a531c3299720be78a
      isActive,
      authProfileId,
      authProfileIdSource,
-@@ -474,7 +476,14 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+@@ -146,6 +149,9 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+     elevatedAllowed,
+   } = params;
+ 
++  // Capture runtime ownership before asynchronous preparation or queue retention.
++  const readRuntimeConfig = createRuntimeConfigReader(cfg);
++
+   const runHasStoredSessionModelOverride = Boolean(
+     preparedSessionState.sessionEntry?.modelOverrideSource !== "default" &&
+     (normalizeOptionalString(preparedSessionState.sessionEntry?.modelOverride) ||
+@@ -474,9 +480,17 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
          normalizeOptionalString(state.sessionEntry?.spawnedCwd) ?? resolveAgentRunCwd(cfg, agentId),
        permissionMode: admittedSessionSettings
          ? admittedSessionSettings.permissionMode
@@ -52286,8 +52891,11 @@ index 11124fae1303b3df1551a642b46b0a6a48366e52..5f41ce867f44683a531c3299720be78a
 +          }),
        sessionRoot: normalizeOptionalString(preparedSessionState.sessionEntry?.sessionRoot),
        config: cfg,
++      readRuntimeConfig,
        toolOverrides: admittedSessionSettings
-@@ -629,6 +638,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+         ? admittedSessionSettings.toolOverrides
+         : preparedSessionState.sessionEntry?.toolOverrides,
+@@ -629,6 +643,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
        shouldSteer,
        shouldFollowup,
        queueAdmissionState,
@@ -55210,6 +55818,19 @@ index 707aa4d957b6f465f80f0ac1cf8fe23562a89a96..02c80f858b3958f10cc388ad90de7ff2
  export function hasPendingFollowupQueueWork(keys: Iterable<string | undefined>): boolean {
    const seen = new Set<string>();
    for (const key of keys) {
+diff --git a/src/auto-reply/reply/queue/types.ts b/src/auto-reply/reply/queue/types.ts
+index f698d3adb7dc4fd209d6c00c06c56aafe9b2a6c1..0ca44854d814eeb5a66398419792e5308f4a248a 100644
+--- a/src/auto-reply/reply/queue/types.ts
++++ b/src/auto-reply/reply/queue/types.ts
+@@ -225,6 +225,8 @@ export type FollowupRun = {
+     permissionMode?: SessionEntry["permissionMode"];
+     sessionRoot?: string;
+     config: OpenClawConfig;
++    /** Host-owned reader captured before queueing; explicit scoped configs remain pinned. */
++    readRuntimeConfig?: () => OpenClawConfig;
+     toolOverrides?: SessionToolOverrides;
+     skillsSnapshot?: SkillSnapshot;
+     provider: string;
 diff --git a/src/auto-reply/reply/reply-operation-abort.ts b/src/auto-reply/reply/reply-operation-abort.ts
 index fc11484bb95880595fe1bc27eb9de1c19f746c51..f81ee54eca1ad948f5d981ba1175104464b05b0d 100644
 --- a/src/auto-reply/reply/reply-operation-abort.ts
