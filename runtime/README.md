@@ -1133,3 +1133,28 @@ credential entry remain pending. The failed `5e059c5` quoted check and earlier
 `513be05` ordinary worker acceptance retain their dated scopes. All ten verified
 images and native acceptance records remain unchanged; this backend correction
 adds no public screenshot gate.
+
+### Assertion documentation and operator progress preference
+
+Reference `fd4adc694059151a46ec75e7d4ccea4d90bd7315` adds one required `SAFETY` invariant comment above the
+existing internal steering-context assertion. It changes no executable statement,
+type, test, dependency or ratchet baseline. Removing that comment reproduces the
+exact deployed source file. The failed assertion ratchet and 24 subsequent scoped
+static checks passed; the original failed hosted result is retained. Matching
+hosted qualification for this comment-only reference remains pending.
+
+The deployed runtime remains `faf116b9fbf17a09a0fd78d14368a8285dac7915`, with its
+accepted build, activation, 33 mechanical checks and bounded live quoted follow-up
+above. No rebuild or deployment was needed for the comment. Native credential
+entry retains its separate unresolved scope.
+
+The operator also disabled generic narration through the existing
+`channels.discord.streaming.progress.narration: false` setting after active tasks
+finished naturally at 21:41:17.978 UTC. Authored commentary remains enabled,
+`toolProgress` remains disabled, and the editable progress card retains its
+`progress` mode. One fresh next-turn check preserved meaningful authored progress
+and one final response, verified temporary-note cleanup, and showed no generic
+narration in the exact destination readback and visible interface. This was a
+configuration-only presentation change, with no runtime source or build change.
+The ten existing images retain their dated UI coverage; the narrator pair shows
+the prior enabled-narration behavior.
