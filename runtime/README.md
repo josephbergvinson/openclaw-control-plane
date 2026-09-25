@@ -926,3 +926,44 @@ actual password entry require their own receipts. The installed Gateway remains
 four-file successor. Existing native companion and channel acceptance retain their
 dated scope. No successful MacBook credential entry is claimed here. The public
 successor receives qualification through the existing reference workflows.
+
+## Discord source replies and authentication blockers
+
+Reference `70601fb9c5e4f9173c73ab36662b0f60c973e810` keeps ordinary task updates, blockers and requests for
+human action in the originating conversation through the shared messaging
+instructions. A user's private-delivery request applies to that item; it does
+not make subsequent authentication notices private. Short-lived codes and
+verification URLs retain their existing private handling. Both automatic reply
+mode and message-tool-only mode receive the same source-conversation guidance.
+This changes prompt guidance, not destination identifiers or transport rules.
+
+The shared credential prompt also requires a fresh check of the authorized
+service's session and current challenge before repeating a sign-in blocker.
+Available authorized native credential tools must be inspected when browser
+controls cannot handle the visible challenge. The tool reference explains how
+an offered password fallback can use an enrolled host-local alias without
+exposing its value; actual OS/provider human presence remains a boundary.
+
+Quiet progress now excludes file-change counts from draft staging, so a write
+before any meaningful progress cannot create a standalone file-count message
+or retain that draft on yield. Later human-readable checkpoints still render.
+The same contract applies to ordinary output and native draft snapshots.
+
+Resumed requester turns also register the existing heartbeat lifecycle flag.
+This lets a new ordinary child retain factual progress in its source conversation
+after requester settlement. The existing cron, heartbeat, nested-requester and
+explicit `done_only` or `silent` exclusions remain. A regression uses actual
+command preparation, native registration and yield to verify updates at 15 and
+195 seconds without child-authored prose or new tool events. The 46-case owning
+suite and core typecheck passed. The Gateway is activated and its 33 mechanical
+postflight checks passed; actual channel acceptance remains separate and pending.
+
+The local qualification reported 75 prompt cases and 81 progress/Discord cases
+passing. The source export preserves every production blob and mode; only the
+established two private test labels are normalized. This Gateway source was
+activated once on September 25 at 14:47:26 UTC, with no rollback. All 33 mechanical
+postflight checks passed, including current-process capture and preservation of
+configuration, auth ordering, jobs, terminals and companion processes. Hosted
+qualification and live Discord canaries remain pending. MacBook opaque credential
+entry is a separate pending acceptance; existing native receipts retain their
+dated source and host scope.

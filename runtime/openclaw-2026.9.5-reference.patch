@@ -8576,6 +8576,50 @@ index f0ef8f143d3d3840e0b541ca61007a45e4769098..dde74f3f8271c84f38ca9b8c3154dcd8
    responsesapiClientMetadata?: Record<string, string> | null;
    additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }>;
    cwd?: string;
+diff --git a/extensions/codex/src/app-server/thread-prompt.test.ts b/extensions/codex/src/app-server/thread-prompt.test.ts
+index 158c9a91458d45d20b0254ed97c4a566993fdc36..7207ab6b47405bc0c61c769de387f1860080dc71 100644
+--- a/extensions/codex/src/app-server/thread-prompt.test.ts
++++ b/extensions/codex/src/app-server/thread-prompt.test.ts
+@@ -145,6 +145,9 @@ describe("buildDeveloperInstructions credential routing", () => {
+     });
+ 
+     expect(instructions.includes("openclaw channels add <channel>")).toBe(terminalSetup);
++    expect(instructions).toContain("recheck the authorized service's current session and prompt");
++    expect(instructions).toContain("inspect available authorized native credential tools");
++    expect(instructions).toContain("Never expose secrets or bypass required human presence");
+     expect(instructions.includes("openclaw configure")).toBe(terminalSetup);
+     expect(instructions).toContain("only to the requesting user in private");
+     expect(instructions).toContain("then acknowledge in the group without them");
+diff --git a/extensions/codex/src/app-server/turn-params.test.ts b/extensions/codex/src/app-server/turn-params.test.ts
+index 3ab0ec8d81bfdcb35edd76e3762d10c1e1a7bc60..0bf8ebf30f8f0716f39d093172a58c956673af53 100644
+--- a/extensions/codex/src/app-server/turn-params.test.ts
++++ b/extensions/codex/src/app-server/turn-params.test.ts
+@@ -219,6 +219,15 @@ describe("buildTurnStartParams source-delivery context", () => {
+           value: "Permission changed.",
+         });
+         expect(turn.additionalContext?.openclaw_source_delivery?.kind).toBe("application");
++        expect(turn.additionalContext?.openclaw_source_delivery?.value).toContain(
++          "Keep task updates, blockers, and requests for human action in the originating conversation unless the user asks otherwise.",
++        );
++        expect(turn.additionalContext?.openclaw_source_delivery?.value).toContain(
++          "Private delivery requested for one item applies only to that item",
++        );
++        expect(turn.additionalContext?.openclaw_source_delivery?.value).toContain(
++          "an authentication blocker alone is not a reason to switch to DM",
++        );
+         expect(
+           Buffer.byteLength(turn.additionalContext!.openclaw_source_delivery!.value, "utf8"),
+         ).toBeLessThan(1_000);
+@@ -233,6 +242,9 @@ describe("buildTurnStartParams source-delivery context", () => {
+       expect(required.additionalContext?.openclaw_source_delivery?.value).toContain(
+         "target required this turn",
+       );
++      expect(required.additionalContext?.openclaw_source_delivery?.value).toContain(
++        "an authentication blocker alone is not a reason to switch to DM",
++      );
+       const unavailable = buildTurnStartParams(
+         { ...params, sourceReplyDeliveryMode: "message_tool_only" },
+         { ...options, messageToolAvailable: false, requireExplicitMessageTarget: true },
 diff --git a/extensions/codex/src/node-exec-server.readiness.test.ts b/extensions/codex/src/node-exec-server.readiness.test.ts
 index 7175bdc04ee2dff4469394041e941e6afd7191c0..0bb6d4096bd26aef3fc6c3cb91a285b69187acf3 100644
 --- a/extensions/codex/src/node-exec-server.readiness.test.ts
@@ -9284,10 +9328,10 @@ index 5aeb5a03418aebb9354331e4ead389b4e1397343..26b3bafe398cbef9d4ae6af5fa6f7c5f
        } catch {}
 diff --git a/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..ce4029546dec3ce3a9115f9cb435368f02a3671e
+index 0000000000000000000000000000000000000000..a35953b495d8771734a632d1e93347b79d5bfb84
 --- /dev/null
 +++ b/extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,361 @@
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { RequestClient } from "../internal/discord.js";
@@ -9421,6 +9465,44 @@ index 0000000000000000000000000000000000000000..ce4029546dec3ce3a9115f9cb435368f
 +    expect(h.requests.filter((r) => r.method === "POST")).toHaveLength(1);
 +    expect([...h.visible.values()][0]?.text).toBe("I’m checking the original documents.");
 +    await h.controller.cleanup();
++  });
++
++  it("does not publish a file-change summary before meaningful progress or retain one on yield", async () => {
++    const h = createHarness();
++    const write = async (toolCallId: string) => {
++      await h.controller.pushToolEvent({
++        toolCallId,
++        name: "write",
++        phase: "start",
++        args: { path: "notes.md", content: "line\n".repeat(29) },
++      });
++      await h.controller.pushItemEvent({
++        toolCallId,
++        kind: "tool",
++        phase: "end",
++        status: "completed",
++      });
++      await vi.advanceTimersByTimeAsync(1_500);
++      await h.controller.flush();
++    };
++
++    await write("write-first");
++    expect(h.requests).toEqual([]);
++    expect(await h.controller.finalizeProgressDraft()).toBe(false);
++
++    h.controller.handleQueuedFollowupAdmitted();
++    await h.preamble("first", "I checked the documents and prepared the requested changes.");
++    await vi.advanceTimersByTimeAsync(180_000);
++    await h.preamble("second", "The checks passed; I’m preparing the final result.");
++    await write("write-after-checkpoint");
++    expect([...h.visible.values()].map((entry) => entry.text)).toEqual([
++      "I checked the documents and prepared the requested changes.",
++      "The checks passed; I’m preparing the final result.",
++    ]);
++    expect(await h.controller.finalizeProgressDraft()).toBe(true);
++    await h.controller.cleanup();
++    expect(h.requests.some((request) => request.text?.includes("files +"))).toBe(false);
++    expect(h.visible.size).toBe(2);
 +  });
 +
 +  it("keeps one streaming item in its original message when completion crosses the interval", async () => {
@@ -25113,6 +25195,26 @@ index 068c84e1d2dfd3cfced11fb76f1090837a506b80..72a80990ab7d01d38fb2e8501609d072
    trackInternalModelRunTarget: (target: AgentRunSessionTarget | undefined) => void;
 +  presentation?: AgentAttemptPresentationCallbacks;
  };
+diff --git a/src/agents/command/session-preparation.ts b/src/agents/command/session-preparation.ts
+index f9331b00a41c84407a2b4568a8b3fdb6dfb4ed42..ae1f139e4c95b9bf5f9704b6acd900775d7891b4 100644
+--- a/src/agents/command/session-preparation.ts
++++ b/src/agents/command/session-preparation.ts
+@@ -8,6 +8,7 @@ import { isSubagentCoordinationInputProvenance } from "../../sessions/input-prov
+ import { applyVerboseOverride } from "../../sessions/level-overrides.js";
+ import { recordSessionHumanDirectMessage } from "../../sessions/session-state-events.js";
+ import { resolveEffectiveAgentSkillFilter } from "../../skills/discovery/agent-filter.js";
++import { isHeartbeatLifecycleRunKind } from "../bootstrap-mode.js";
+ import { persistAgentSession } from "./attempt-execution.shared.js";
+ import { resolveAgentRunContext } from "./run-context.js";
+ import { loadExecDefaultsRuntime, loadSkillsRuntime } from "./runtime-loaders.js";
+@@ -51,6 +52,7 @@ export async function prepareEmbeddedSessionState(params: {
+       agentId: params.sessionAgentId,
+       lifecycleGeneration: params.lifecycleGeneration,
+       verboseLevel: resolvedVerboseLevel,
++      isHeartbeat: isHeartbeatLifecycleRunKind(params.opts.bootstrapContextRunKind),
+       isControlUiVisible: !params.suppressVisibleSessionEffects && !coordination,
+       ...(coordination ? { projectSessionMessages: false } : {}),
+       // Node and local command ingress may not have a separate chat activity owner.
 diff --git a/src/agents/command/types.ts b/src/agents/command/types.ts
 index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113a12a9b32 100644
 --- a/src/agents/command/types.ts
@@ -25134,6 +25236,40 @@ index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113
    /** Override delivery target (separate from session routing). */
    replyTo?: string;
    /** Override delivery channel (separate from session routing). */
+diff --git a/src/agents/credential-safety-prompt.test.ts b/src/agents/credential-safety-prompt.test.ts
+index 4e582ebf91ca2a4ed75a55ecaef4fbb7f653fc25..54b09abc2ccb099832c30cc10c1edeb442ec0ad6 100644
+--- a/src/agents/credential-safety-prompt.test.ts
++++ b/src/agents/credential-safety-prompt.test.ts
+@@ -12,10 +12,14 @@ describe("buildCredentialSafetyPrompt", () => {
+     const prompt = buildCredentialSafetyPrompt(input);
+     const lines = prompt.split("\n");
+ 
+-    expect(lines).toHaveLength(terminalSetup ? 2 : 1);
++    expect(lines).toHaveLength(terminalSetup ? 3 : 2);
+     expect(lines[0]).toContain("For user-requested login or pairing in a group");
+     expect(lines[0]).toContain("only to the requesting user in private");
+     expect(lines[0]).toContain("then acknowledge in the group without them");
++    expect(prompt).toContain("recheck the authorized service's current session and prompt");
++    expect(prompt).toContain("do not rely on an earlier snapshot");
++    expect(prompt).toContain("inspect available authorized native credential tools");
++    expect(prompt).toContain("Never expose secrets or bypass required human presence");
+     expect(prompt.includes("openclaw channels add <channel>")).toBe(terminalSetup);
+     expect(prompt.includes("openclaw configure")).toBe(terminalSetup);
+     expect(prompt).not.toContain("legacy-secrets-tool");
+diff --git a/src/agents/credential-safety-prompt.ts b/src/agents/credential-safety-prompt.ts
+index 684a6cae1a506e7b8e6d5fd3f34b4d3da4d741bc..b28073245b81b06e33aa810c041bf05d8bdb7e1e 100644
+--- a/src/agents/credential-safety-prompt.ts
++++ b/src/agents/credential-safety-prompt.ts
+@@ -8,7 +8,8 @@ export function buildCredentialSafetyPrompt(
+   input?: string | CredentialSafetyPromptOptions,
+ ): string {
+   return [
+-    "For user-requested login or pairing in a group, deliver short-lived codes and verification URLs only to the requesting user in private, then acknowledge in the group without them.",
++    "For user-requested login or pairing in a group, deliver short-lived codes and verification URLs only to the requesting user in private, then acknowledge in the group without them. This private handoff covers only those sensitive items; non-sensitive authentication notices stay in the originating conversation.",
++    "Before repeating an authentication blocker or asking the user to sign in, recheck the authorized service's current session and prompt; do not rely on an earlier snapshot. If browser controls cannot handle the visible challenge, inspect available authorized native credential tools before declaring it human-only. Never expose secrets or bypass required human presence.",
+     ...(typeof input !== "string" && input?.controlToolsAvailable === false
+       ? [
+           "Channel, provider, and credential setup: use terminal `openclaw channels add <channel>` or `openclaw configure`; prompts mask secrets. Never collect tokens, API keys, or passwords in chat.",
 diff --git a/src/agents/delegation-guidance.test.ts b/src/agents/delegation-guidance.test.ts
 index d5b16aa19627ade30d53e94ced2691d35cb1994a..265dadce60fff992f45c65b7db30fe1f50a05fd1 100644
 --- a/src/agents/delegation-guidance.test.ts
@@ -39641,10 +39777,10 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..a3fc8d08edb572267711cacdbeae7f82
            await terminateAcceptedCollectorRun({
              childSessionKey,
 diff --git a/src/agents/system-prompt-messaging.test.ts b/src/agents/system-prompt-messaging.test.ts
-index 8507d2c2099d4b836d3877602366b9e0b2ffa9d1..416312e135539716fe705df484c3c64b0fa9d34a 100644
+index 8507d2c2099d4b836d3877602366b9e0b2ffa9d1..a70284666c1a00dc90245905fede58fd13b5f063 100644
 --- a/src/agents/system-prompt-messaging.test.ts
 +++ b/src/agents/system-prompt-messaging.test.ts
-@@ -17,7 +17,7 @@ describe("system prompt messaging routing", () => {
+@@ -17,15 +17,81 @@ describe("system prompt messaging routing", () => {
        });
  
        expect(prompt).toContain(
@@ -39652,8 +39788,18 @@ index 8507d2c2099d4b836d3877602366b9e0b2ffa9d1..416312e135539716fe705df484c3c64b
 +        "OpenClaw message delivery, message/channel mutations, and cross-session coordination: use available messaging tools, never shell commands, the CLI, curl, or direct RPC.",
        );
        expect(prompt).toContain("Missing messaging tools are not permission to use another route.");
++      if (promptMode === "full" && messageAvailable) {
++        expect(prompt).toContain("- `send`: `target` + `message`.");
++        expect(prompt).toContain(
++          "Keep task updates, blockers, and requests for human action in the originating conversation unless the user asks otherwise.",
++        );
++        expect(prompt).toContain(
++          "Private delivery requested for one item applies only to that item",
++        );
++        expect(prompt).toContain("an authentication blocker alone is not a reason to switch to DM");
++      }
        expect(prompt).toContain("Subagents return results through their accepted completion path");
-@@ -25,7 +25,55 @@ describe("system prompt messaging routing", () => {
+       expect(prompt).toContain(
          "Other services (e.g. email): user-authorized CLI/API use is allowed",
        );
        expect(prompt).toContain("normal tool permissions and approvals still apply");
@@ -39704,16 +39850,35 @@ index 8507d2c2099d4b836d3877602366b9e0b2ffa9d1..416312e135539716fe705df484c3c64b
 +      expect(prompt).toContain("Current source visible reply MUST use `message(action=send)`");
 +      expect(prompt).toContain("final text is private");
 +      expect(prompt).toContain("Set `final=false` for progress");
++      expect(prompt).toContain(
++        "Keep task updates, blockers, and requests for human action in the originating conversation unless the user asks otherwise.",
++      );
++      expect(prompt).toContain("Private delivery requested for one item applies only to that item");
++      expect(prompt).toContain("an authentication blocker alone is not a reason to switch to DM");
++      expect(prompt).toContain(
++        "This private handoff covers only those sensitive items; non-sensitive authentication notices stay in the originating conversation.",
++      );
 +      expect(prompt).toContain("This includes read-only OpenClaw source retrieval");
 +      expect(prompt).toContain("Missing messaging tools are not permission to use another route.");
 +    },
 +  );
  });
 diff --git a/src/agents/system-prompt-messaging.ts b/src/agents/system-prompt-messaging.ts
-index f9eafabf803423743020a8761db7c5f66d524fa6..83449b365d0fea341ecee581218b207ce5698e97 100644
+index f9eafabf803423743020a8761db7c5f66d524fa6..f33a9a67e90b5138277fb721ca9c9b250a51e5b4 100644
 --- a/src/agents/system-prompt-messaging.ts
 +++ b/src/agents/system-prompt-messaging.ts
-@@ -27,9 +27,14 @@ export function buildMessagingSection(params: {
+@@ -1,6 +1,9 @@
+ /** Messaging and child-completion guidance shared by full and minimal prompts. */
+ import type { SourceReplyDeliveryMode } from "../auto-reply/get-reply-options.types.js";
+-import { buildMessageToolTargetGuidance } from "../auto-reply/source-reply-delivery-mode.js";
++import {
++  buildMessageToolTargetGuidance,
++  SOURCE_CONVERSATION_REPLY_GUIDANCE,
++} from "../auto-reply/source-reply-delivery-mode.js";
+ import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+ import type { ChatType } from "../channels/chat-type.js";
+ import type { SilentReplyPromptMode } from "./system-prompt.types.js";
+@@ -27,9 +30,14 @@ export function buildMessagingSection(params: {
      : `- Current-session final text normally routes to source.${messageToolAvailable ? " If turn says final private, visible output uses `message(action=send)`." : ""}`;
    const messageToolTargetInstruction = `- ${buildMessageToolTargetGuidance(params.requireExplicitMessageTarget === true)}`;
    const routingGuidance = [
@@ -39729,6 +39894,17 @@ index f9eafabf803423743020a8761db7c5f66d524fa6..83449b365d0fea341ecee581218b207c
    ];
    if (params.isMinimal) {
      // Restricted delivery turns still need their sole visible-reply contract;
+@@ -91,7 +99,9 @@ export function buildMessagingSection(params: {
+           groupMessageToolOnly
+             ? "- Group/channel: stale/joke/light ack/low-value chatter => reaction or silence. Needed reply => `message(action=send)`; final text private."
+             : "",
+-          messageToolOnly ? messageToolTargetInstruction : "- `send`: `target` + `message`.",
++          messageToolOnly
++            ? messageToolTargetInstruction
++            : `- \`send\`: \`target\` + \`message\`. ${SOURCE_CONVERSATION_REPLY_GUIDANCE}`,
+           params.messageChannelOptions
+             ? `- No source default: proactive send needs \`channel\`; ids: ${params.messageChannelOptions}.`
+             : "- Set `channel` only outside current/default source.",
 diff --git a/src/agents/system-prompt.test.ts b/src/agents/system-prompt.test.ts
 index 00c25ab18050ecaa08d92da6d02f1f916cdbdc07..47467d284d801e170672f94941445b1d4da4adca 100644
 --- a/src/agents/system-prompt.test.ts
@@ -54677,6 +54853,26 @@ index 52000659300480499ca23885fc625ca48c04ad29..825ceee717b0d27f6342c438a44dd3ef
  export async function initSessionState(params: InitSessionStateParams): Promise<SessionInitResult> {
    prepareChannelParticipantObservation(params.ctx);
    return await runWithSessionInitConflictRetry(
+diff --git a/src/auto-reply/source-reply-delivery-mode.ts b/src/auto-reply/source-reply-delivery-mode.ts
+index fd022f576c12bee012e6ca2296280f79a8582964..6c6b266f124334499296be2e870f8fff7c834751 100644
+--- a/src/auto-reply/source-reply-delivery-mode.ts
++++ b/src/auto-reply/source-reply-delivery-mode.ts
+@@ -15,10 +15,14 @@ export function messageToolOwnsVisibleReply(params: {
+   return params.forceMessageTool === true || params.sourceReplyDeliveryMode === "message_tool_only";
+ }
+ 
++export const SOURCE_CONVERSATION_REPLY_GUIDANCE =
++  "Keep task updates, blockers, and requests for human action in the originating conversation unless the user asks otherwise. Private delivery requested for one item applies only to that item; an authentication blocker alone is not a reason to switch to DM.";
++
+ export function buildMessageToolTargetGuidance(requireExplicitMessageTarget: boolean): string {
+-  return requireExplicitMessageTarget
++  const targetGuidance = requireExplicitMessageTarget
+     ? "`send`: `target` + `message`; target required this turn."
+     : "`send`: `message`; current source is default target. Set `target` only elsewhere.";
++  return `${targetGuidance} ${SOURCE_CONVERSATION_REPLY_GUIDANCE}`;
+ }
+ 
+ export function buildHarnessVisibleReplyGuidance(params: {
 diff --git a/src/auto-reply/status.test.ts b/src/auto-reply/status.test.ts
 index 9eef6471442789b1ef8514dcec10bb49c69431c3..f0ca6d17bdf4e262f0dff3a781762ccbf69f9870 100644
 --- a/src/auto-reply/status.test.ts
@@ -55426,7 +55622,7 @@ index 684ae5cbe639cc22a14bfbf2aa38fd71321e5d90..3b7785f567eec824cd0cbbbf14d02947
    });
  
 diff --git a/src/channels/progress-draft-compositor.test.ts b/src/channels/progress-draft-compositor.test.ts
-index bf5147c73a7772c553a7c32508d1281cb322849d..9e5d5daa40f0292276abce3d383bed2e37136402 100644
+index bf5147c73a7772c553a7c32508d1281cb322849d..311f9f4265060e887ee9bb11c4d04e561c2ae36d 100644
 --- a/src/channels/progress-draft-compositor.test.ts
 +++ b/src/channels/progress-draft-compositor.test.ts
 @@ -792,7 +792,7 @@ describe("createChannelProgressDraftCompositor", () => {
@@ -55438,20 +55634,86 @@ index bf5147c73a7772c553a7c32508d1281cb322849d..9e5d5daa40f0292276abce3d383bed2e
        expect.anything(),
      );
    });
-@@ -1023,7 +1023,7 @@ describe("createChannelProgressDraftCompositor", () => {
+@@ -995,13 +995,49 @@ describe("createChannelProgressDraftCompositor", () => {
+     expect(progress.getSnapshot().diffStat).toBeUndefined();
+   });
+ 
++  it.each([false, undefined])(
++    "keeps completed edits out of quiet drafts (%s)",
++    async (toolProgress) => {
++      const update = vi.fn();
++      const deleteCurrent = vi.fn();
++      const progress = createTestProgressDraftCompositor({
++        entry: { streaming: { mode: "progress", progress: { toolProgress, label: false } } },
++        update,
++        deleteCurrent,
++        updateOnLineChange: true,
++      });
++
++      await progress.pushPlanProgress([{ step: "Check the result", status: "in_progress" }]);
++      await progress.pushToolEvent({
++        toolCallId: "write-1",
++        name: "write",
++        phase: "start",
++        args: { path: "notes.md", content: "one\ntwo\n" },
++      });
++      await progress.pushItemEvent({
++        toolCallId: "write-1",
++        kind: "tool",
++        phase: "end",
++        status: "completed",
++      });
++
++      expect(update.mock.calls.every(([text]) => text === "In progress: Check the result")).toBe(
++        true,
++      );
++      expect(progress.getSnapshot().diffStat).toBeUndefined();
++      await progress.pushPlanProgress([]);
++      expect(deleteCurrent).toHaveBeenCalledOnce();
++      expect(progress.isVisible).toBe(false);
++    },
++  );
++
+   it.each([false, undefined, "Custom progress"])(
+-    "retains completed edits when clearing a quiet plan with label %s",
++    "retains opted-in completed edits when clearing a plan with label %s",
+     async (label) => {
+       const update = vi.fn();
+       const progress = createTestProgressDraftCompositor({
+         entry: {
+-          streaming: { mode: "progress", progress: { toolProgress: false, label } },
++          streaming: { mode: "progress", progress: { toolProgress: true, label } },
+         },
+         update,
+         updateOnLineChange: true,
+@@ -1023,9 +1059,11 @@ describe("createChannelProgressDraftCompositor", () => {
        });
        expect(progress.getSnapshot().diffStat).toEqual({ files: 1, added: 2, removed: 0 });
        expect(await progress.pushPlanProgress([])).toBe(true);
 -      expect(update.mock.lastCall?.[0]).toContain("📝 1 files +2");
 +      expect(update.mock.lastCall?.[0]).toContain("1 files +2");
        expect(update.mock.lastCall?.[0]).not.toContain("Stale plan");
-       expect(progress.getSnapshot().lines).toEqual([]);
+-      expect(progress.getSnapshot().lines).toEqual([]);
++      expect(progress.getSnapshot().lines).toContainEqual(
++        expect.objectContaining({ toolName: "write" }),
++      );
      },
+   );
+ 
 diff --git a/src/channels/progress-draft-compositor.ts b/src/channels/progress-draft-compositor.ts
-index 13d2afa5dfddcb68783ea94aae45902b4945d624..e44407e4863a45e652bf59e24202691323c49ae3 100644
+index 13d2afa5dfddcb68783ea94aae45902b4945d624..9c2ba1a001869602947f2f170df7ae016ddd8959 100644
 --- a/src/channels/progress-draft-compositor.ts
 +++ b/src/channels/progress-draft-compositor.ts
-@@ -588,7 +588,7 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
+@@ -107,6 +107,8 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
+     canStage: () =>
+       params.active &&
+       params.mode === "progress" &&
++      // File-change counts are tool telemetry, including in native draft snapshots.
++      !quietProgress &&
+       !progressSuppressed &&
+       !finalReplyStarted &&
+       !finalReplyDelivered,
+@@ -588,7 +590,7 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
          return false;
        }
        // The opt-in commentary lane already renders every preamble as an
@@ -55460,7 +55722,7 @@ index 13d2afa5dfddcb68783ea94aae45902b4945d624..e44407e4863a45e652bf59e242026913
        // replace those documented lines with a duplicate status paragraph.
        // Deliberate: the headline itself is default-on presentation of the
        // typed preamble (owner decision, #105872); `commentary` only picks the
-@@ -739,8 +739,8 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
+@@ -739,8 +741,8 @@ export function createChannelProgressDraftCompositor(params: ChannelProgressDraf
        }
        const line: ChannelProgressDraftLine = {
          id: lineId,
@@ -74442,11 +74704,13 @@ index 8184cac14f549eff20cbabb4ee245ade94640542..c0ac189b9583aa51eca25aaf1f36139e
        return {
          result: updateTask(taskId, {
 diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
-index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e139229774bbf 100644
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2a274901f 100644
 --- a/src/tasks/task-registry-progress.test.ts
 +++ b/src/tasks/task-registry-progress.test.ts
-@@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+@@ -1,10 +1,19 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  import { createDeferred } from "../../test/helpers/promise.js";
++import { prepareEmbeddedSessionState } from "../agents/command/session-preparation.js";
  import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
  import { settleRequesterTurnAfterSessionSpawns } from "../agents/subagents/registry/subagent-registry-requester-yield.js";
 -import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
@@ -74457,11 +74721,15 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
 +} from "../agents/subagents/registry/subagent-registry.types.js";
  import { emitAgentEvent, resetAgentEventsForTest } from "../infra/agent-events.js";
 -import { registerAgentRunContext } from "../infra/agent-run-registry.js";
-+import { clearAgentRunContext, registerAgentRunContext } from "../infra/agent-run-registry.js";
++import {
++  clearAgentRunContext,
++  getAgentRunLifecycleGeneration,
++  registerAgentRunContext,
++} from "../infra/agent-run-registry.js";
  import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
  import {
    markGatewayRestartDraining,
-@@ -14,6 +18,7 @@ import {
+@@ -14,6 +23,7 @@ import {
    createInMemoryTaskFlowRegistryStore,
    createInMemoryTaskRegistryStore,
  } from "../test-utils/task-registry-store.js";
@@ -74469,7 +74737,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
  import { createSubagentTaskBackingDetail } from "./task-backing-authority.js";
  import * as deliveryRuntime from "./task-registry-runtime-loaders.js";
  import { resetTaskRegistryListenerState } from "./task-registry-state.js";
-@@ -27,6 +32,7 @@ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
+@@ -27,6 +37,7 @@ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
  import type { TaskNotifyPolicy } from "./task-registry.types.js";
  import {
    configureTaskFlowRegistryRuntime,
@@ -74477,20 +74745,37 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
    resetTaskFlowRegistryForTests,
    resetTaskRegistryDeliveryRuntimeForTests,
    resetTaskRegistryForTests,
-@@ -36,8 +42,11 @@ import {
+@@ -34,10 +45,27 @@ import {
+ } from "./task-runtime.test-helpers.js";
+ 
  vi.mock("../utils/message-channel.js", () => ({
-   isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
- }));
-+vi.mock("../utils/message-channel-normalize.js", () => ({
-+  isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
+-  isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
++  isDeliverableMessageChannel: (channel: string) => ["notifychat", "discord"].includes(channel),
 +}));
++vi.mock("../utils/message-channel-normalize.js", () => ({
++  isDeliverableMessageChannel: (channel: string) => ["notifychat", "discord"].includes(channel),
++}));
++vi.mock("../sessions/session-state-events.js", () => ({
++  recordSessionHumanDirectMessage: vi.fn(),
++}));
++vi.mock("../agents/command/attempt-execution.shared.js", () => ({ persistAgentSession: vi.fn() }));
++vi.mock("../agents/command/run-context.js", () => ({ resolveAgentRunContext: () => ({}) }));
++vi.mock("../agents/command/runtime-loaders.js", () => ({
++  loadSkillsRuntime: async () => ({
++    getRemoteSkillEligibility: () => ({}),
++    resolveReusableWorkspaceSkillSnapshot: () => ({ snapshot: undefined, shouldRefresh: false }),
++  }),
++  loadExecDefaultsRuntime: async () => ({
++    resolveNodeExecEligibility: () => ({ canExec: false }),
++  }),
+ }));
  
 -const PARENT = "agent:main:parent";
 +const PARENT = "agent:main:notifychat:channel:requester";
  const origin = {
    channel: "notifychat",
    to: "synthetic-recipient",
-@@ -46,6 +55,60 @@ const origin = {
+@@ -46,6 +74,60 @@ const origin = {
  };
  const sendMessage = vi.fn<deliveryRuntime.TaskRegistryDeliveryRuntime["sendMessage"]>();
  
@@ -74551,10 +74836,91 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
  function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
    const entry: SubagentRunRecord = {
      runId: `run-${name}`,
-@@ -156,6 +219,190 @@ afterEach(() => {
+@@ -87,12 +169,12 @@ function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
+   return { entry, task };
+ }
+ 
+-function yieldParent() {
++function yieldParent(requesterSessionKey = PARENT, requesterTurnRunId = "parent-turn") {
+   const entries = [...subagentRuns.values()];
+   expect(
+     settleRequesterTurnAfterSessionSpawns({
+-      requesterSessionKey: PARENT,
+-      requesterTurnRunId: "parent-turn",
++      requesterSessionKey,
++      requesterTurnRunId,
+       requesterYielded: true,
+       acceptedSessionSpawns: entries.map((entry) => ({
+         runId: entry.runId,
+@@ -156,6 +238,255 @@ afterEach(() => {
  });
  
  describe("yielded subagent progress delivery", () => {
++  it.each([
++    { heartbeat: false, override: undefined, expected: "state_changes" },
++    { heartbeat: true, override: undefined, expected: "done_only" },
++    { heartbeat: false, override: "done_only", expected: "done_only" },
++    { heartbeat: false, override: "silent", expected: "silent" },
++  ] as const)(
++    "preserves command-settle progress policy (heartbeat=$heartbeat, override=$override)",
++    async ({ heartbeat, override, expected }) => {
++      const requesterSessionKey = "agent:main:discord:channel:source";
++      const requesterTurnRunId = "announce:requester-settle:synthetic";
++      const requesterOrigin = { channel: "discord", to: "channel:source", threadId: "source" };
++      try {
++        await prepareEmbeddedSessionState({
++          cfg: {},
++          opts: {
++            message: "Review the child result and continue the requested work.",
++            ...(heartbeat ? { bootstrapContextRunKind: "heartbeat" as const } : {}),
++            inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
++          },
++          sessionKey: requesterSessionKey,
++          sessionId: "source-session",
++          storePath: "/unused/command.sqlite",
++          sessionAgentId: "main",
++          lifecycleGeneration: getAgentRunLifecycleGeneration(),
++          runId: requesterTurnRunId,
++          workspaceDir: "/workspace",
++          executionWorkspaceDir: "/workspace",
++          watchSkills: false,
++          isNewSession: false,
++          isSubagentLaneTurn: false,
++          suppressVisibleSessionEffects: false,
++          sessionStateActor: { actorType: "agent" },
++        });
++        const item = registerChild({
++          requesterSessionKey,
++          requesterTurnRunId,
++          requesterOrigin,
++        });
++        if (override) {
++          updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: override });
++        }
++        expect(getTaskById(item.task.taskId)?.notifyPolicy).toBe(expected);
++        yieldParent(requesterSessionKey, requesterTurnRunId);
++        clearAgentRunContext(requesterTurnRunId);
++        // The handoff must cover a long-running tool even without child commentary or new events.
++        await vi.advanceTimersByTimeAsync(195_000);
++        if (expected === "state_changes") {
++          expect(sendMessage).toHaveBeenCalledTimes(2);
++          for (const [message] of sendMessage.mock.calls) {
++            expect(message).toMatchObject({
++              ...requesterOrigin,
++              content:
++                "Background work is still in progress:\n- Prepare the document: still working.",
++            });
++          }
++          expect(getTaskById(item.task.taskId)?.status).toBe("running");
++        } else {
++          expect(sendMessage).not.toHaveBeenCalled();
++        }
++      } finally {
++        clearAgentRunContext(requesterTurnRunId);
++      }
++    },
++  );
++
 +  it.each(["channel", "direct"] as const)(
 +    "delivers a real queued native start with explicit state_changes and no yield to its %s route",
 +    async (route) => {
@@ -74742,7 +75108,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
    it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
      const first = child("First");
      vi.setSystemTime(Date.now() + 1);
-@@ -184,7 +431,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -184,7 +515,7 @@ describe("yielded subagent progress delivery", () => {
        mirror: { sessionKey: PARENT, agentId: "main" },
      });
      expect(message.content).toBe(
@@ -74751,7 +75117,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..2ca73d7debffdd0698fa214eb93e1392
      );
      expect(message.content).not.toMatch(/Quiet|private-/);
      expect(getTaskById(first.task.taskId)).toMatchObject({
-@@ -298,10 +545,47 @@ describe("yielded subagent progress delivery", () => {
+@@ -298,10 +629,47 @@ describe("yielded subagent progress delivery", () => {
      expect(sendMessage.mock.calls[0]![0].content).toContain(
        "More task activity is available in Tasks.",
      );
