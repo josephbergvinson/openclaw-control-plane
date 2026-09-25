@@ -1015,3 +1015,17 @@ The new source's activation, exact-head hosted qualification and live Discord
 acceptance remain separate and pending. Native credential-entry acceptance retains
 its independent host-specific scope. All ten existing synthetic image assets are
 unchanged; these tool-description changes add no new rendered UI.
+
+### Cron description test layout qualification
+
+Reference `c4467dff8d3483c9ee8e38e662a2e331ce48288f` moves the complete cron description regression into a
+coherent sibling test file. All 200 cron cases pass, and both line-cap growth
+checks pass against the official release base without a limit exception. The
+original `c2c0d99` hosted failure remains recorded; its passing jobs do not
+substitute for the successor's complete exact-head CI qualification.
+
+All production files and modes are byte-identical to the built `d83fa84` runtime.
+This test-only reference requires no rebuild or redeployment. The deployed
+Gateway remains `490a24` at publication; activation of the already built `d83fa84`
+candidate, live Discord acceptance and native credential entry remain separately
+tracked. The ten existing synthetic screenshot assets are unchanged.
