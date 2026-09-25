@@ -993,3 +993,25 @@ including current-process capture and preservation of configuration, auth
 ordering, jobs, terminals and companion processes. Exact-head hosted checks and
 live Discord canaries remain pending. MacBook opaque credential-entry acceptance
 remains a separate pending check; dated native receipts retain their host scope.
+
+### Bounded waits in active worker tasks
+
+Reference `d83fa84b316c2bb162060ba0ea035425e185ade0` clarifies the existing exec, process and cron descriptions:
+a bounded wait between steps of an active worker task stays within that worker's
+tracked tool call or session. Detached reminders and future follow-ups still use
+the scheduler. This changes model-facing guidance only; scheduler execution,
+authorization and explicit notification modes remain unchanged. The complete
+owning tool-description and cron suites passed 213 cases, including finalized
+available-tool descriptions.
+
+This reference also refreshes the canonical generated config-doc hash for the
+previously reviewed utility-model help wording. The exact owning check passed;
+schema fields, count budgets and executable code are unaffected by that generated
+metadata correction. The original public `ac60b68` check retains its failed stale
+baseline receipt rather than treating its passing build as complete qualification.
+
+The deployed Gateway remains `490a24de638ac28f94bd136a6653116d9de56e26` at this publication.
+The new source's activation, exact-head hosted qualification and live Discord
+acceptance remain separate and pending. Native credential-entry acceptance retains
+its independent host-specific scope. All ten existing synthetic image assets are
+unchanged; these tool-description changes add no new rendered UI.

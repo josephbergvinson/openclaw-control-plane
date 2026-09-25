@@ -3268,14 +3268,14 @@ index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..221d8e4ead2364d38ac1acbee3be741f
 +  "plugin": 4238
  }
 diff --git a/docs/.generated/config-baseline.sha256 b/docs/.generated/config-baseline.sha256
-index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..06495d6c36127a27d81791f93733f7f3db52363b 100644
+index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..18a2e70a0c38bfae2a7edb4503bc7028c8a0aaa8 100644
 --- a/docs/.generated/config-baseline.sha256
 +++ b/docs/.generated/config-baseline.sha256
 @@ -1,4 +1,4 @@
 -e5439a58c999507588ef9150bd94b7019d09ab52eec604c8412e92e07f0a4f1f  config-baseline.json
 -58ecbfff559bdeb12c9c6d3459ccb009106e13d736383319074c84a7675df425  config-baseline.core.json
-+37e23f62027f0dae9a04961c3e3271a100506372803e17fc6cf5e5d65c982029  config-baseline.json
-+11c50cf527bcd285806359d3415d2b4fe428cb6663af5950a3d86bb07bec94c5  config-baseline.core.json
++373ac68bdca26ed6f98d85d51cf8d5131964d2ee135e8e27bfe53ff996815055  config-baseline.json
++f03f2eca9c9fc30b7676a4a74ad48829f1244e90f19e23c1f2a6f4c166a1b98d  config-baseline.core.json
  51c84b118b136dfff84993e3cee0ff76ee06b614842b125d0fde110635fc10b8  config-baseline.channel.json
 -77b840d74238b0d797785d7575fd155629a2aa27213f33a3bd9eb6fa22537aed  config-baseline.plugin.json
 +3ab31563c822efe41544615a0361d18bdc62c3bad76de2852e59c87744387beb  config-baseline.plugin.json
@@ -24174,6 +24174,88 @@ index 41c7c8fab3b60354034e3216c7139be8000e59a5..490d6968391ee4700d88e8a3b129111a
        previousStats = freshStore.usageStats?.[profileId];
        const currentWhamResult =
          whamResult &&
+diff --git a/src/agents/bash-tools.descriptions.test.ts b/src/agents/bash-tools.descriptions.test.ts
+index 38e5f58de57bce784c780be21f5ac66a2282a687..08ebceb9262cf4940ed7ffd58e8dbcd9a9a32776 100644
+--- a/src/agents/bash-tools.descriptions.test.ts
++++ b/src/agents/bash-tools.descriptions.test.ts
+@@ -81,10 +81,10 @@ describe("tool descriptions", () => {
+     expect(processWithCron.description).toContain("completion without auto-wake");
+     expect(processWithCron.description).toContain("write, send-keys, submit, paste, kill");
+     expect(execWithCron.description).toContain(
+-      "No sleep loops for reminders/follow-ups; use automations.",
++      "For detached reminders or future follow-ups, use automations instead of sleep loops.",
+     );
+     expect(processWithCron.description).toContain(
+-      "No polling as timer/reminder; scheduled follow-up uses automations.",
++      "For detached reminders or future follow-ups, use automations instead of polling as a timer.",
+     );
+     expect(execTool.description).not.toContain("use cron instead");
+     expect(processTool.description).not.toContain("scheduled follow-ups");
+@@ -93,6 +93,37 @@ describe("tool descriptions", () => {
+     expect(processTool.description).toContain("write, send-keys, submit, paste, kill");
+   });
+ 
++  it.each([true, false])(
++    "keeps bounded active-worker waits available when finalization filters scheduler/process (scheduler=%s)",
++    (hasCronTool) => {
++      for (const createTool of [createExecTool, createLazyExecTool]) {
++        const tool = createTool({ ...execDefaults, hasCronTool });
++        const [finalized] = finalizeAgentTools({
++          tools: [tool],
++          hookContext: {},
++          wrapBeforeToolCallHook: false,
++        });
++        const description = expectDefined(finalized, "finalized exec tool").description;
++        expect(description).toContain("A bounded wait between steps of an active worker task");
++        expect(description).toContain("within the tool call or its tracked session");
++        expect(description).toContain("never a detached shell job");
++        expect(tool.description.includes("use automations instead of sleep loops")).toBe(
++          hasCronTool,
++        );
++        expect(description).not.toContain("use automations");
++        expect(description).not.toContain("Use process");
++      }
++      const process = createProcessTool({ hasCronTool });
++      expect(process.description).toContain(
++        "Use bounded waits for an active worker's tracked exec session",
++      );
++      expect(process.description).toContain("avoid rapid polling");
++      expect(process.description.includes("use automations instead of polling as a timer")).toBe(
++        hasCronTool,
++      );
++    },
++  );
++
+   it.each(["darwin", "linux", "win32"] as const)(
+     "limits shell-quoting guidance to Unix hosts: %s",
+     (platform) => {
+diff --git a/src/agents/bash-tools.descriptions.ts b/src/agents/bash-tools.descriptions.ts
+index 0fade5f7a82e839086a4fdf4523bd93f112524a1..d02a1f6ade81169bd4ea0af9b0568fab791f8004 100644
+--- a/src/agents/bash-tools.descriptions.ts
++++ b/src/agents/bash-tools.descriptions.ts
+@@ -17,7 +17,10 @@ export function describeExecTool(params?: {
+         ];
+   const base = [
+     ...continuation,
+-    params?.hasCronTool ? "No sleep loops for reminders/follow-ups; use automations." : undefined,
++    "A bounded wait between steps of an active worker task may stay within the tool call or its tracked session, never a detached shell job.",
++    params?.hasCronTool
++      ? "For detached reminders or future follow-ups, use automations instead of sleep loops."
++      : undefined,
+     "TTY CLI/UI/coding agent: pty=true.",
+   ]
+     .filter(Boolean)
+@@ -34,8 +37,9 @@ export function describeProcessTool(params?: { hasCronTool?: boolean }): string
+   return [
+     "Control existing exec: list, poll, log, write, send-keys, submit, paste, kill.",
+     "poll/log: status, output, quiet success, completion without auto-wake, input hints. Others: input/intervention.",
++    "Use bounded waits for an active worker's tracked exec session; avoid rapid polling.",
+     params?.hasCronTool
+-      ? "No polling as timer/reminder; scheduled follow-up uses automations."
++      ? "For detached reminders or future follow-ups, use automations instead of polling as a timer."
+       : undefined,
+   ]
+     .filter(Boolean)
 diff --git a/src/agents/cli-runner/prepare-session-context.ts b/src/agents/cli-runner/prepare-session-context.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..598710cf4f52a959e424f43d4f3457df913d1c51
@@ -40275,6 +40357,43 @@ index 0000000000000000000000000000000000000000..ef3f0cd87363d0304236585fdb3f5100
 +    expect(description).toContain("do not retrieve a password");
 +  });
 +});
+diff --git a/src/agents/tools/cron-tool.test.ts b/src/agents/tools/cron-tool.test.ts
+index dfe7764aeaabc4e5df43321375f6ea0765bd2828..55751d96b528be2dca3d2b502173dfd2dee2643c 100644
+--- a/src/agents/tools/cron-tool.test.ts
++++ b/src/agents/tools/cron-tool.test.ts
+@@ -920,10 +920,17 @@ describe("cron tool", () => {
+     });
+   });
+ 
+-  it("documents deferred follow-up guidance in the tool description", () => {
++  it("distinguishes detached scheduling from bounded active-worker waits", () => {
+     const tool = createTestCronTool();
+     expect(tool.description).toContain("reminders, delayed self-wakeups, loops, recurring work");
+-    expect(tool.description).toContain("Never exec sleep/poll as timer.");
++    expect(tool.description).toContain(
++      "For detached reminders or future follow-ups, use this scheduler instead of exec sleep/poll loops.",
++    );
++    expect(tool.description).toContain(
++      "A bounded wait between steps of an active worker task belongs in that worker",
++    );
++    expect(tool.description).toContain("does not require a separate automation");
++    expect(tool.description).not.toContain("Never exec sleep/poll as timer.");
+     expect(tool.description).toContain(
+       "Inherited configured MCP authority includes only model-callable tools; interactive app-view-only capabilities are excluded from headless jobs.",
+     );
+diff --git a/src/agents/tools/cron-tool.ts b/src/agents/tools/cron-tool.ts
+index 9211919282ce3fccdf51d2ed63ef69b4d986f97b..e40f618eb109df3b6aa6f35fb40c0ad902a53dac 100644
+--- a/src/agents/tools/cron-tool.ts
++++ b/src/agents/tools/cron-tool.ts
+@@ -190,7 +190,7 @@ function buildCronToolDescription(params: { triggersEnabled: boolean }): string
+     ? `TRIGGER (condition watcher on every/cron): {script,once?}; available unless cron.triggers.enabled=false — if off, say so; never model-poll instead. Quiet headless check, no model; 30s/5 tool calls/16KB state. Read frozen trigger.state, return json({fire,message?,state?}) with NEW state; dedupe via state, never memory. fire:false saves state only. fire:true runs payload; message is that run's entire context — self-contained. Fire on failures/timeouts too; success-only watchers look healthy when broken. Script stays read-only; actions belong in payload. once:true disables after first fire. Code Mode: await exec({command:"..."}).`
+     : `TRIGGERS DISABLED (cron.triggers.enabled=false): condition triggers, script payloads, and stream schedules are unavailable here. Omit trigger; use plain time-based schedules. If the user asks for a conditional watcher, say it is unsupported — never model-poll instead, and never silently create an unconditional job in its place.`;
+   const silentWatcherCue = params.triggersEnabled ? ' Silent watcher=>mode:"none".' : "";
+-  return `Gateway scheduler: reminders, delayed self-wakeups, loops, recurring work${params.triggersEnabled ? ", event watchers" : ""}. Never exec sleep/poll as timer.
++  return `Gateway scheduler: reminders, delayed self-wakeups, loops, recurring work${params.triggersEnabled ? ", event watchers" : ""}. For detached reminders or future follow-ups, use this scheduler instead of exec sleep/poll loops. A bounded wait between steps of an active worker task belongs in that worker and does not require a separate automation.
+ 
+ ACTIONS: status | list [includeDisabled,limit?,offset?] (compact summaries with timing; use nextOffset for the next page) | get jobId (full schedule, payload, and delivery details) | add job | update jobId job (partial: only supplied fields change; null clears) | remove jobId | run jobId (runMode "force"=now) | runs jobId = history | next_check in:"30m" (own paced run only) | wake text mode?:"now"|"next-heartbeat"(default) nudges a caller-owned lane (sessionKey/agentId to pick another).
+ 
 diff --git a/src/agents/tools/goal-tool-set.ts b/src/agents/tools/goal-tool-set.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..5deff5d3cbbc97cf25e9ccbcbb691ac6a7e90b72
