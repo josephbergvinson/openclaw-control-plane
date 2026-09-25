@@ -903,3 +903,26 @@ changing guard evaluation or unrelated allowances. See the
 [qualification explanation](../docs/20-runtime-source-changes.md#sdk-contract-qualification-reference).
 Hosted checks and artifacts determine qualification of this exact reference;
 no preceding source result substitutes for it.
+
+## Native credential discovery diagnostics
+
+Reference `bbc4d8d806a56c706ca1813862e62e89a0c192d8` adds diagnostic reason codes to the existing native
+`credential_prompts` action. The result now distinguishes an unavailable focused
+window, incomplete Accessibility metadata, an unobserved or ambiguous secure
+field, an unsupported form context, and absent or unmatched local bindings.
+Counts and closed codes use the same bounded discovery pass; native text and
+credential values are not returned. Account matching, prompt custody, secret
+resolution and entry checks remain unchanged.
+
+The source compiled and passed all 17 isolated native credential-owner tests,
+focused Swift lint and formatting, documentation formatting, native schema and
+localization verification. The generated localization inventory also synchronizes
+one inherited permission-description row with text already present in source;
+it introduces no additional permission behavior or new settings interface.
+
+This is a companion diagnostic source candidate. Packaging, installation and
+actual password entry require their own receipts. The installed Gateway remains
+`205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80`; its executable source and deployment were not changed by this
+four-file successor. Existing native companion and channel acceptance retain their
+dated scope. No successful MacBook credential entry is claimed here. The public
+successor receives qualification through the existing reference workflows.
