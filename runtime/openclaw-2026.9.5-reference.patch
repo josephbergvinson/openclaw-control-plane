@@ -32458,10 +32458,10 @@ index 7eaf2b4d94921c274971353778fb1985edeafea4..ec5299b6aa5bdaaf60e6172112a0044e
        request.workspace.sessionId !== attempt.sessionId
      ) {
 diff --git a/src/agents/internal-runtime-context.ts b/src/agents/internal-runtime-context.ts
-index 761077ffe89ff958b33dba08886b73a856e61776..d4c42c2554b377fac06742932a1adf4eb9aceb98 100644
+index 761077ffe89ff958b33dba08886b73a856e61776..1929e1564e41a53396bef0084a63f2ec26f00090 100644
 --- a/src/agents/internal-runtime-context.ts
 +++ b/src/agents/internal-runtime-context.ts
-@@ -25,6 +25,40 @@ export type RuntimeContextFragment = {
+@@ -25,6 +25,41 @@ export type RuntimeContextFragment = {
    text: string;
  };
  
@@ -32480,6 +32480,7 @@ index 761077ffe89ff958b33dba08886b73a856e61776..d4c42c2554b377fac06742932a1adf4e
 +export function readSteeringContextFragments(
 +  message: object,
 +): readonly RuntimeContextFragment[] | undefined {
++  // SAFETY: The symbol stores only typed fragments from attachSteeringContextFragments or is absent.
 +  return Reflect.get(message, STEERING_CONTEXT_FRAGMENTS) as
 +    | readonly RuntimeContextFragment[]
 +    | undefined;
