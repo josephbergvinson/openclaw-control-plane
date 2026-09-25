@@ -126,6 +126,8 @@ jobs:
             src/agents/system-prompt-messaging.test.ts \
             extensions/codex/src/app-server/thread-prompt.test.ts \
             extensions/codex/src/app-server/turn-params.test.ts \
+            extensions/codex/src/app-server/attempt-steering.test.ts \
+            extensions/codex/src/app-server/run-attempt.steering.test.ts \
             extensions/copilot/src/prompt-guidance.test.ts \
             src/agents/subagents/registry/subagent-followup-owner.test.ts \
             src/agents/subagents/registry/subagent-registry-lifecycle.test.ts \
@@ -172,11 +174,14 @@ jobs:
             ${{ runner.temp }}/reference-quota-continuation.log
           if-no-files-found: error
           retention-days: 7
-      - name: Verify terminal warnings during confirmed continuations
+      - name: Verify embedded context and terminal warnings during continuations
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
           set -o pipefail
           pnpm test:serial src/agents/embedded-agent-runner/run/terminal-preparation.test.ts \
+            src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-stream-prepare.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
       - name: Verify resumed requester progress ownership
         id: cadence

@@ -26,6 +26,13 @@ Use ordinary prose. Avoid emoji, internal tool banners, routing dumps and redund
 
 During substantial work, post meaningful milestones and explain real dependencies promptly. Say what has been established and what the next step will resolve. Editing an old message is not always an adequate substitute for a new visible update during a long wait.
 
+To omit generic tool-status narration, set
+`channels.discord.streaming.progress.narration` to `false`. Keep `commentary`
+enabled for authored progress and retain `streaming.mode: "progress"` for the
+existing editable progress card. `toolProgress` is a separate control for tool
+progress updates; keeping it disabled does not disable authored commentary.
+This presentation choice changes neither task execution nor final delivery.
+
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
 Candidate `24e9bfe5431` addresses a later gap in that lifecycle: a worker could

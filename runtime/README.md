@@ -1048,10 +1048,88 @@ reproduces the actual catalog-generation rejection through queued admission and
 checks the repaired model-input read. Current exact-head hosted CI, activation and
 live behavior remain separate gates. Ten earlier synthetic images are unchanged.
 
-The manifest's `490a24` deployment fields retain their dated publication-time
-receipt. A later accepted activation installed `d83fa84` on September 25 at
-17:18:59 UTC with all 33 mechanical checks accepted. This new source successor is
-not yet activated at this preparation checkpoint. Its actual deployment and live
-results will be recorded after acceptance. The queued reader does not replace a
-retired plugin-record Gateway resolver or claim to repair that separate boundary.
-MacBook opaque native credential entry remains unproven.
+At the `513be05` preparation checkpoint, the manifest retained the dated
+`490a24` deployment receipt and recorded the later `d83fa84` activation. The
+`513be05` runtime subsequently activated on September 25 at 18:50:59 UTC with all
+33 mechanical checks accepted. Its ordinary private worker canary completed the
+four-minute recheck, handoff, Discord delivery and cleanup. These are historical
+results, separate from the later quoted-correction failures and repairs below.
+The queued configuration reader does not replace a retired Gateway owner.
+MacBook opaque native credential entry retains its own pending scope.
+
+### Quoted context during an active reply
+
+Reference `5e059c50341c323a01530cb157f50c4f9209acc4` preserves quoted-message and other prepared inbound context
+when new input steers an active Codex reply. Context stays separate from the raw
+user text and media. Producer-classified runtime instructions remain application
+context; conversation data remains untrusted. Existing explicit-mention
+neutralization is reused. Each fragment is bound to its own input batch and
+position, so repeated quotes retain the correct association and a later unquoted
+message carries no earlier quote. Final writes rebuild input and context from the
+same still-authorized items. Unsupported backends retain the complete queued
+follow-up through the existing FIFO path.
+
+The actual Codex steering request regression reproduced the missing context.
+Qualification passed 56 quote/steering tests and 21 narrator tests, plus the
+relevant types, lint and line-cap checks. A final three-case assertion rerun is
+included in the 56. The narrator test change removes one redundant default type
+argument identified by the earlier hosted lint run; it changes no runtime code.
+The existing workflows retain their tests and add the three owning context
+regressions. All ten existing synthetic images and native acceptance records are
+unchanged.
+
+The `5e059c` build and September 25 activation passed all 33 mechanical
+postflight checks; its raw approval-state difference was reconciled to usage
+bookkeeping with policy and other fields unchanged. Those deployment records are
+historical evidence. The subsequent live quoted-correction check failed: the
+queued session clone lost its private Gateway carrier, and the native OpenClaw
+backend lacked the required model-only context projection. The `faf116b9` repair
+below addresses those reproduced boundaries. Revoked Gateway authority remains
+rejected. This intermediate reference was not separately published; the combined
+final source supplies its hosted qualification. The preceding `513be05` worker canary
+remains separate accepted evidence; MacBook opaque credential entry retains its
+own pending scope.
+
+### Queued reply authority and native steering context
+
+Reference `faf116b9fbf17a09a0fd78d14368a8285dac7915` repairs the two boundaries exposed by an ordinary quoted
+correction during an active reply. Session initialization now preserves the
+original private Gateway carrier on its final context clone through the existing
+scope-checking owner. A queued reply can retain its admitted owner after the prior
+reply finishes. Retargeted, unbound and retired contexts remain rejected; unrelated
+ambient authority cannot replace the original owner.
+
+The native OpenClaw backend also preserves prepared context for active steering.
+It keeps the canonical user text and transcript unchanged and projects the quote
+only into the model request after the existing media guard. Image attachments and
+order remain available through their existing metadata owner. Repeated inputs
+retain their own fragments, canceled inputs contribute no context, and authority
+is rechecked before injection. Runs that do not support this contextual path keep
+the existing FIFO fallback.
+
+The corrected four-case session regression fails on the previous producer only
+for the valid bound request, then passes all four cases with the repair. The final
+native regression run passed 20 provider, transcript, media and context-guard
+cases. Earlier owning suites remain recorded separately; their overlapping counts
+are not added. Relevant final types, scoped lint, formatting and both growth
+checks passed. The existing hosted owners add the new session/native regressions
+and the changed stream preparation suite without dropping prior tests.
+
+Gateway `faf116b9` activated on September 25 at 21:14:36 UTC in one attempt,
+without rollback. All 33 mechanical checks passed after the unchanged approval
+policy was reconciled against usage-only bookkeeping; the original 32-of-33
+receipt is retained. Current-process capture passed, and configuration, account
+ordering, job definitions, native companions and existing terminals were preserved.
+The initial-only Discord check and the fresh native active-steering quoted
+follow-up passed. The actual Discord Reply correction was consumed in the original
+Astra Max run; the normal worker-return continuation delivered one final reply,
+with both runs successful and no source-claim or generic-response warning. This
+live check did not exercise FIFO; its authority behavior is covered by the four
+real-host regression cases. Provider quote payload bytes were not retained; the
+SDK/provider composition tests establish context inclusion separately.
+
+Final matching public-head hosted qualification and MacBook opaque native
+credential entry remain pending. The failed `5e059c5` quoted check and earlier
+`513be05` ordinary worker acceptance retain their dated scopes. All ten verified
+images and native acceptance records remain unchanged; this backend correction
+adds no public screenshot gate.
