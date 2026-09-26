@@ -48,6 +48,33 @@ The `filterBootstrapFilesForSession` implementation applies two separate decisio
 
 Do not infer a worker's context from its name or a declared manifest profile. Inspect the actual compiled context when accepting a role-sensitive behavior. The public [bootstrap template](../templates/BOOTSTRAP.example.md) and [advisory manifest](../templates/policy_bootstrap_manifest.example.json) describe these boundaries without pretending to enforce them.
 
+## Shared voice in a separate company workspace
+
+A separate company agent needs an explicit voice policy as well as private-source
+boundaries. It does not inherit the main agent's SOUL, IDENTITY or writing guide
+merely because it uses the same bot name. Inspect the actual injected filenames
+and truncation report before attributing generic replies to the model.
+
+The [company workspace example](../examples/company-workspace/AGENTS.md) retains
+useful team participation and authenticated operator authority. Its
+[SOUL](../examples/company-workspace/SOUL.md) and
+[WRITING](../examples/company-workspace/WRITING.md) preserve analytical voice and
+substantial prose without importing a private USER profile or personal memory.
+Its [TOOLS](../examples/company-workspace/TOOLS.md) describes capability-aware
+retrieval. These are optional examples, not an automatically activated agent.
+Adapt the guild and operator identifiers, source bindings and available tools.
+
+Treat a mention as eligibility for a reply, not an obligation to sustain every
+diversion. Use the surrounding discussion, quoted message and participants to
+interpret intent. Brief banter can fit; repeated irrelevant bait usually needs
+disengagement rather than a sequence of lectures or unrelated assignments.
+Owner directions that restrict one discussion retain that scope. Permission to
+answer colleagues does not grant them access to private records or spending.
+
+Voice guidance shapes tone and argument, not factual accuracy or access control.
+WRITING is still a deliberate read for substantial prose, not a bootstrap filename;
+the company agent must actually have the file-read capability its policy assumes.
+
 ## Loading and retrieval expose different things
 
 Omitting a file from bootstrap does not make every tool incapable of reading it. The agent must still respect the current request, source account and audience when retrieving. A private topic note, a source pointer and a provider record all need a reason to enter the answer. Distinct session keys are separate context boundaries unless the operator explicitly links them.

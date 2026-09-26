@@ -11,21 +11,22 @@ The examples below use explicit paths; replace them with the intended local path
 
 ## 1. Reconstruct and check the runtime
 
-Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.3`,
+Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.5`,
 verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
+expected tree is `b8d24593af90951eb74769c1849a2b09d0c1cd2b`.
 
-The [September 21 repair](../runtime/README.md#september-21-follow-up-repair)
-has passed local source checks, fresh reconstruction, activation and a bounded
-live Discord handoff check. Hosted qualification passed for that earlier source.
-The current patch includes the later
-[active-child correction](../runtime/README.md#active-child-follow-up-correction),
-whose full build, activation and bounded live follow-up and warning-deferral checks
-passed. Hosted qualification remains pending. Use the workflow result for
-the manifest being adopted; the originating host's live result does not qualify
-your installation.
+The preceding source `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8` passed
+[hosted qualification](../runtime/README.md#september-23-source-qualification) at public
+commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`, including the complete native
+plan, reconstructed build and owned regression suites. Deployment records and
+bounded live results are recorded separately. The current `f29bb229c5c8` reference
+adds only the [native prompt correction](../runtime/README.md#september-24-native-prompt-successor);
+its own hosted qualification and signed companion acceptance must be checked.
+Match the workflow's source and
+patch identities to the manifest being adopted; neither a source test nor the
+originating host's live result qualifies your installation.
 
-Use Node.js 24.16.0 and pnpm 12.3.4. Run the documented frozen dependency installation,
+Use Node.js 24.16.0 and pnpm 12.4.0. Run the documented frozen dependency installation,
 native changed-source checks and build from that checkout. The source package
 contains the complete delta from the official release. A new commit hash is expected
 because the adopter supplies its author and timestamp; the tree is the source check.
@@ -244,7 +245,7 @@ applying this first-install recipe over it.
 ### Package and seal the initial release
 
 Choose a new physical `initial_release` directly under `paths.runtime_releases_root`,
-with a name such as `openclaw-2026.9.3-initial`. Set `source_commit` to the complete
+with a name such as `openclaw-2026.9.5-initial`. Set `source_commit` to the complete
 commit recorded after reconstruction, not the original host's commit. This must match
 the build's `dist/build-info.json`. The already completed frozen install and build
 must include the full dependencies and required bundled plugins.
@@ -356,6 +357,23 @@ if len(plists) != 2 or set(links) & set(plists):
 for target in (*links, *plists):
     if os.path.lexists(target):
         raise SystemExit(f'First-install destination already exists: {target}')
+default_profile = c.require_path('paths.host_home') / '.openclaw'
+if default_profile.is_symlink():
+    raise SystemExit('Default app profile must be a physical directory for mount-independent attach-only policy')
+markers = (default_profile / 'disable-launchagent',
+           c.require_path('paths.state_root') / 'disable-launchagent')
+for marker in markers:
+    if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+        raise SystemExit(f'Invalid native attach-only marker: {marker}')
+default_profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+for marker in markers:
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        if marker.is_symlink() or not marker.is_file():
+            raise SystemExit(f'Native attach-only marker changed during preparation: {marker}')
+    else:
+        os.close(fd)
 for target, destination in links.items():
     target.parent.mkdir(parents=True, exist_ok=True)
     target.symlink_to(destination)
@@ -375,6 +393,29 @@ must have `WorkingDirectory=host_home`, `RunAtLoad=true`, `KeepAlive=true` and t
 `gateway --port` vector; the node uses `node run --host 127.0.0.1 --port` with the same
 port. Both use external supervisor/repair mode. Native node authentication resolves
 from the initialized local gateway configuration; do not paste tokens into a plist.
+
+### Keep one app login owner
+
+The staged `runtime-environment` LaunchAgent is the app login owner: it supplies the
+canonical state/config paths and external supervisor/repair flags, then executes the
+app with its supported `--attach-only` option. Do not enable a second `ai.openclaw.mac`
+login owner alongside it. Preserve the user's autostart preference when replacing an
+existing login owner; retiring its future trigger does not authorize terminating an
+active app or Gateway. Inspect both persisted and loaded definitions at cutover.
+
+Keep physical `disable-launchagent` markers in both the default account-home profile
+and canonical state directory before enabling the app. A manual/Finder launch can
+precede login environment setup, and the internal marker must still block native
+Gateway installation when the external volume is absent. These markers express
+lifecycle ownership; they do not create another configuration or account store.
+The loader refuses to create a missing canonical state root or launch against it.
+
+The loader no longer reads Keychain credentials or exports a global Gateway token.
+It clears the obsolete inherited/global variable and uses the native configuration
+auth bridge. Remove the old token-producing login script during migration as well
+as clearing its already-loaded value. Preserve Keychain items and secret references
+used by other consumers. Keep the exact Gateway/node selector definitions above;
+a stock `gateway install --force` rewrite would bypass that external owner.
 
 ### Start and qualify the real predecessor
 

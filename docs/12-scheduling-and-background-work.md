@@ -8,10 +8,12 @@ The reference combines the native OpenClaw scheduler with macOS launchd. Each re
 
 | Layer | Owns | Current authority | Availability boundary |
 | --- | --- | --- | --- |
-| Native OpenClaw scheduler | Recurring commands, agent turns, reminders and runtime-owned background work | Job definitions, runtime state and receipts in the shared SQLite state database | Dispatch depends on the gateway being available |
+| Native OpenClaw scheduler | Recurring commands, agent turns, explicitly requested chat reminders and runtime-owned background work | Job definitions, runtime state and receipts in the shared SQLite state database | Dispatch depends on the gateway being available |
 | macOS launchd | Gateway/node process supervision, independent host helpers and selected project timers | Installed service definition plus loaded job/process state | Depends on the relevant system or user service domain |
 
 The native scheduler is not limited to model calls. Most routine host maintenance uses a `command` payload: a pinned interpreter invokes a checked helper, captures a bounded result and lets the runtime deliver it. An `agentTurn` is appropriate when a task needs reasoning and tools. Runtime-managed recurring work, such as memory consolidation, also has its own lifecycle.
+
+Reminder requests resolve their destination from the operator's durable preferences. This reference defaults to Apple Reminders, including timed one-off alerts; a generic “remind me” does not select the native scheduler. Prefer the supported Apple integration; if its CLI route is unavailable or denied, record that failure and use the authorized native Reminders UI. Read back the saved list, due time and timed-alert setting, and check that local notifications are enabled before confirming creation. Preserve a stable identifier when exposed, or an unambiguous exact target match across a UI write. The native scheduler remains available when the operator explicitly requests a chat reminder or schedules assistant work. Do not silently replace an unavailable Apple route with a different destination.
 
 The [upstream automation guide](https://docs.openclaw.ai/automation/cron-jobs) describes the native interface. This reference adds host-specific launch definitions, wrappers, result checks and operating conventions. Historical JSON files or exported lists do not become a second writable scheduler simply because they remain on disk.
 
@@ -52,6 +54,41 @@ or remove its owner's obligation to observe completion.
 Keep exact time semantics with the job: the civil timezone, period being processed, catch-up policy and whether a late execution may write an earlier period. A timer firing after an outage does not by itself authorize backdating data.
 
 A stored delivery route is part of the already-authorized scheduled task. Use its intended account, destination and message class. Do not choose a different recipient because the preferred route failed, or route a domain alert by guessing from its prose. Routine no-change checks can be silent; explicitly configured daily maintenance reports may report both success and failure.
+
+For an explicitly requested one-shot chat reminder, use the existing job-level `failureAlert: { after: 1 }` and verify its alert destination. The default threshold of two consecutive execution failures cannot report a job that runs only once. This is a per-job creation setting, not a change to recurring maintenance alert policies.
+
+## Model and reasoning ownership
+
+Interactive work defaults to Astra/Max; an explicit Discord `/think ultra` adds
+multi-agent orchestration with underlying Max reasoning. Autonomous inference uses
+`openai/gpt-6-sol` with High reasoning. Native `agentTurn` jobs carry those values in
+`payload.model` and `payload.thinking`, including intentionally disabled jobs when
+their saved policy is updated. Keep their enablement, schedule and delivery intact.
+For system-owned skill review jobs, leave the projected payload with its owner and
+set the supported execution-session preferences through `sessions.patch` using
+`agent:<agent-id>:cron:<job-id>`, `model: "openai/gpt-6-sol"` and
+`thinkingLevel: "high"`. Check the existing job remains disabled when intended;
+changing its model policy is not authorization to enable it.
+
+The [preferences profile](../config/openclaw.preferences.json) configures the same
+Sol/High policy for heartbeat, active memory, all three dreaming phases and utility
+calls. The [configuration guide](../config/README.md#background-model-and-existing-overrides)
+describes provider enrollment and migration of older settings. A model row or a
+successful catalog refresh is not acceptance; verify the effective Sol/High route
+with a read-only request before relying on the scheduled path.
+
+Global child model and thinking pins stay unset. Children inherit the initiating
+turn, so scheduled Sol/High work remains Sol/High and explicitly selected interactive
+Ultra remains available. Admitted user-task continuations retain their conversation
+model and effort when a heartbeat carries the wake. Existing explicit session or
+per-task selections are not bulk rewritten as part of a defaults change.
+
+Classify command work by its implementation. A script that reads receipts, exports
+data or performs deterministic maintenance has no scheduler reasoning setting.
+A script that invokes an LLM must select Sol/High at that internal inference owner.
+Foreground helpers belonging to a user turn do not become autonomous jobs merely
+because they run in another process. Configured background-model failures must not
+silently fall back to the interactive model.
 
 ## Inventory and ownership
 
@@ -105,6 +142,31 @@ non-ancestor result for a failed read. Even an unchanged tree with a replacement
 history retains transition evidence until delivery is confirmed. Missing source
 objects, changed repository mappings, and a newly enrolled source that does not
 descend from its pinned baseline remain unresolved conditions.
+
+Preparation output also needs a byte limit: an upgrade can touch thousands of paths even when commit samples are bounded. Retain the complete evidence in a private, immutable file with its hash, and provide a bounded JSON projection with source refs, category counts and explicit omitted-detail indicators. Do not increase the command retention cap or parse a truncated JSON tail as complete evidence. Prepared coverage remains pending until delivery is confirmed.
+
+A failed trigger can prepare evidence before its output is rejected, leaving an unstaged checkpoint. Releasing it requires explicit reconciliation bound to the exact checkpoint hash, a unique native pre-payload failure, and the same idle trigger/configuration and run identity. Preserve the failed receipt and old pending snapshot; do not advance source coverage, reset delivery records or send a replacement message. The existing natural schedule can then prepare the still-uncovered changes again.
+
+A provider failure after dispatch can also leave an unstaged checkpoint. Its
+explicit recovery requires a reviewed, hash-bound complete canonical transcript
+that proves failure before any tool action or assistant output, the exact failed
+run, and a disabled, idle job with unchanged trigger and delivery ownership. Bind
+the current session identity, terminal leaf and absence of active or pending work
+before releasing the checkpoint. Displayed chat history is only a liveness check:
+its active branch and reset window do not prove that the full raw record contains
+no other work. Retain the complete proof privately and leave the covered frontier
+and previous delivery unchanged. Recovery itself does not resend or re-enable the
+job; those remain separate, explicitly reconciled operations.
+
+For new isolated native runs, the execution owner can persist a positive
+prework-failure diagnostic after the terminal transcript has settled. This proof
+requires the complete, unfenced canonical record for that exact run, with no
+tool action, assistant output, fallback or continuation. The collector may then
+release only an unstaged checkpoint whose failed, not-delivered receipt matches
+that proof and contains no conflicting delivery evidence. The original provider
+error remains visible; coverage and prior delivery do not advance. Incomplete,
+branched, truncated or ambiguous evidence stays held, and this reconciliation
+does not send a message or replay the failed task.
 
 ## Independent safety nets
 

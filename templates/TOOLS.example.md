@@ -2,6 +2,13 @@
 
 This file supplies procedures referenced by `AGENTS.md`. It cannot independently authorize, forbid or override work. Load the relevant sections before applicable operations; it is not automatically injected merely because it exists. Use the versioned runtime and installed adapters declared by the reference. A command named here is not proof that its binary, account or dependency is installed.
 
+## Retrieval before clarification
+- For a material unknown, privately identify the fact needed and its likely authoritative source. Separate established facts, retrievable or derivable facts, conflicting/stale evidence, and genuinely missing input. Use this to finish the deliverable; do not expose an internal coverage checklist as the answer.
+- Split unrelated concepts into focused searches. Open relevant source matches and follow their task-relevant references; search snippets and empty or generic results from one compound query do not establish absence. If indexed recall is degraded, use known file pointers or the registered source-native route. Expand only to other accounts, portfolios or archives relevant to the remaining fact, then stop when sufficient evidence or a concrete limitation is established.
+- Use existing profile and conversation evidence for stable details, company records for ownership facts, and authoritative account/transaction records for balances and derived figures. Do routine calculations when coverage permits, retaining source dates, period, currency and assumptions. Distinguish an estimate from a contractual value, transaction coverage from completeness, and company value from the operator's share. Do not ask the operator to calculate figures that the available records support.
+- Delegation must carry the actual information needs and relevant source/account pointers. Before treating a worker's unknown as a user question, check whether that field was outside its assignment or whether it returned snippets instead of reading the evidence. Resolve those gaps within the authorized task.
+- Ask only the residual questions. Where an existing fact needs freshness confirmation, state the established value/date and ask what changed. Absence of a record does not establish a negative declaration or complete inventory; preserve necessary current attestations, decisions and unresolved conflicts without asking the operator to restate the rest.
+
 ## Tool state and execution posture
 
 Keep tool availability, authenticated authority and actual execution distinct. A callable tool does not authorize its use; an authorized task does not make a missing binary work. A stored readiness result can be stale. Bind the target and account, then use the supported operation and authoritative readback to establish success.
@@ -112,9 +119,17 @@ A `mail.google.com` URL fragment is a browser locator, not necessarily an API me
 
 Draft when asked for a draft. Send when the authenticated instruction names or plainly implies the bound recipient/package. If sending emerges later, prepare the exact sender, recipients, body and attachments and ask one natural question. Before any draft/write, reconcile the intended company, material facts, source freshness and newer contradictory evidence. Keep another company's facts out unless the scope includes them. Read back the actual saved draft or delivery result.
 
+## Work checkpoints
+- For AGENTS.md's existing three-minute checkpoint cadence, use the current originating-thread `message` tool: `action: "send", message: "<brief actual progress>", final: false`. Prefer its current-source destination; specify channel/target/thread only when required by that trusted origin binding. An edited streaming draft is not a newly delivered checkpoint. Use bounded waits so the next tool boundary can carry an update; do not create a background job for this.
+- `final: false` preserves terminal ownership. Finish through the run's admitted delivery mode: ordinary final text for automatic delivery; a final message-tool send (`final: true` or omitted) when the run requires message-tool-only delivery. Do not return `NO_REPLY` merely because a checkpoint was sent. Keep progress narrow and the eventual answer focused on the distinct completed result; repeating the checkpoint can be deduplicated.
+
 ## Calendar
 
 Create or modify events when the authenticated scheduling request names or implies it. Resolve the destination from USER: Apple Calendar/iCloud in this example. An invitation in Gmail or Google Calendar can supply the details without changing the destination.
+
+After selecting the registered Apple Calendar write route, use `python3 scripts/apple_calendar_create_event.py --calendar "CALENDAR" --title "TITLE" --start "LOCAL_START" --end "LOCAL_END" --url "JOIN_URL" --description "JOINING_NOTES"` (optional `--location`). Convert source times to the host's local wall time before supplying ISO start/end; this helper preserves supplied wall-time components. It requires a unique exact calendar name, reuses a unique same-title/start/end entry, and reads the saved UID, times and supplied joining fields back. A mismatch or ambiguous result retains the known UID when available: reconcile that entry before another write. Do not discover or generate another calendar script for this supported create operation.
+
+The Calendar CLI helpers serialize their own operations, launch Calendar in the background only when needed, and report `calendar_cleanup` after the verified operation. They normally quit only their own still-hidden, unchanged app instance; preexisting apps, user activity, unsaved work and incomplete writes are preserved. Do not force-quit a preserved app or bypass a busy helper.
 
 For an existing meeting, look for and inspect the current authoritative invitation, including updates or cancellation, when available. Read the bounded relevant mail/calendar accounts. Source-only workers may read those invitations while one owner performs Calendar writes. Chat confirmations help locate a meeting but do not replace an accessible invitation.
 
@@ -125,6 +140,20 @@ Before writing, verify the target calendar/account and inspect matching destinat
 A supported Apple Calendar adapter may need an event-finder read plus a dedicated URL-property read, depending on its output contract. Verify the returned fields rather than assuming a title/time listing proves the URL. Reuse the installed adapter; do not introduce a second writer or raw database edit merely to obtain a field.
 
 Use one bounded availability-window call through the registered Apple adapter. If it reports blocked, timed out or incomplete, preserve that boundary: do not automatically inspect `Calendar.sqlitedb`, switch automation frameworks or substitute Google Calendar. An explicitly requested alternate route remains subject to its own authority. Keep raw event titles, locations and descriptions private when the requested answer is simply availability.
+
+## Reminders
+
+Resolve the destination from USER: Apple Reminders in this example, including one-time alerts. This explicit preference resolves the bundled skill's generic destination question; do not silently substitute a chat reminder. Project tracking and scheduled assistant work keep their own owners.
+
+Prefer the supported `apple-reminders` skill and `remindctl`. If that route is unavailable or denied, use the authorized native Reminders UI after recording the actual failure; CLI unavailability alone does not make Apple Reminders unavailable. Check capability and Reminders authorization, select the intended account/list, and bind the requested title and due time with timezone. Use the configured default list when none is specified; ask only if the intended destination remains materially ambiguous.
+
+If a bounded CLI authorization request times out without a grant or denial, retain the observed permission state and use an already verified, authorized native UI route while that limitation persists. Do not repeat the same authorization wait for every reminder. Recheck the CLI route when an observed permission-state change justifies it.
+
+Inspect matching reminders before writing. Update the existing identity for the same request or create the missing reminder once. Read back its list, due time and timed-alert setting before saying it is set, and check that local Reminders notifications are enabled. Preserve the stable identifier when the route exposes it; otherwise require an unambiguous exact target match before and after the UI write. Reconcile an uncertain write before retrying; a due date alone does not prove a timed alert. A missing or denied Apple route requires repair or a clear explanation of the actual limitation, not a promise to remind later.
+
+For an explicitly requested chat reminder, verify the native scheduled job and its delivery destination. When diagnosing failure, distinguish dispatch, execution and confirmed delivery; a timer firing is not proof that the operator was notified.
+
+For a one-shot chat reminder, set the existing job-level `failureAlert: { after: 1 }` and verify its intended alert destination. The default two-failure threshold cannot report a job that runs only once. Preserve other jobs' alert policies.
 
 ## Documents, pages and task trackers
 
@@ -157,9 +186,17 @@ Use existing registered signed-in browser state. Reinspect the actual tab, origi
 
 For a password challenge, discover configured aliases with `browser action:"credentialBindings", target:"host"`. On an existing approved Playwright/CDP host profile, use `browser action:"act"` with `request:{kind:"typeSecret", alias:"<binding alias>", targetId:"<observed tab>", ref:"<observed password field>", submit:true}` and an optional observed `submitRef`. The native browser resolves the SecretRef after exact-origin, field and trace checks; supply only the alias and observed controls. Verify the resulting account and requested service. Do not put secret text in generic `type/fill` or invoke a SecretRef provider into tool output.
 
-`typeSecret` is host/CDP-only. The Chrome-MCP existing-session route rejects it, as do node and sandbox targets; a handed-off signed-in Chrome tab remains usable without credential entry. When entry is needed, select an existing supported authenticated or host/CDP route without extracting cookies/passwords or changing global browser state. An OS login dialog or password-manager installation does not by itself establish an opaque automation route.
+`typeSecret` is host/CDP-only. The Chrome-MCP existing-session route rejects it, as do node and sandbox targets; a handed-off signed-in Chrome tab remains usable without credential entry. When entry is needed, select an existing supported authenticated or host/CDP route without extracting cookies/passwords or changing global browser state. Native macOS prompts use the separate computer-tool credential route described below.
 
 If a binding cannot resolve, check its registered Keychain service/account, SecretRef or approved environment-file metadata before concluding that the credential is missing. An expired session, wrong account or unsupported tool route is a different issue. Reuse an existing sanctioned secure input facility to enroll an available existing credential under the registered alias, preserving existing items. Request one-time secure enrollment only for a missing credential; never ask for its value in chat, copy it into arguments/logs, reset it, or reauthorize working OAuth accounts to compensate.
+
+Credential decoding failures require repair of the resolver's [byte-preservation contract](../docs/16-security-and-trust-model.md#preserve-credential-bytes-within-the-resolver); they do not establish that a stored credential is absent or should be replaced. Keep any diagnostic values inside the existing secure resolver boundary.
+
+For a native Apple Account or supported Mac authentication prompt, use `computer action:"credential_prompts"` on the actual target Mac and select the enrolled alias/account from the returned prompt metadata. Then use `computer action:"type_secret"` with that alias and the exact opaque `promptRef` in the same execution. The companion resolves the host-local credential and rechecks the Apple-signed owner, account, host, focused form and secure field. References are single-use and expire; rediscover stale prompts. Entry does not submit or verify authentication: observe the current dialog, submit using its ordinary control when appropriate, and read back the resulting account/service state. Never substitute browser or ordinary computer element references for the credential prompt reference.
+
+A passkey, Touch ID or security-key label on the browser page does not by itself establish a human-presence requirement. Inspect the actual native OS prompt on the browser's host. If a visible `Use Password` or other supported password fallback is offered, select that observed control, rediscover the secure form, and use the enrolled alias for the local account named in that prompt. The Mac login password is distinct from the website password. If discovery returns no prompt, inspect the current form and local binding metadata; do not infer that biometrics are required or use plaintext entry as a fallback. Continue to verify the resulting website account/service; retain any actual OS/provider human-presence boundary.
+
+Enrollment belongs to each target host; a credential on one Mac does not establish its availability on another. Use the supported Mac CLI to bind metadata to an existing Keychain item, preserving the password and ACL. Check local binding/readability when the route fails. Use enrolled credentials proactively for an authorized sign-in; request secure enrollment only when the required credential or custody route is actually absent. Native entry does not bypass a secure login screen, physical biometric requirement or provider-required human presence.
 
 Use state assertions, text/anchors and observable waits rather than blind clicks or fixed delays. Reconfirm app/window/focus after a context change. A click is not evidence of the requested effect; read back the target object or observable UI state. Unexpected layout or account changes require renewed identification, not guessing.
 
@@ -206,6 +243,28 @@ Follow the current runtime-promotion runbook, including its write/network bounda
 Keep source, selector, service definition, loaded process and provider behavior distinct. Verify installed version/status, readiness, scheduler RPC, queue/task state and affected user paths. Native SQLite approval state is authoritative; keep a retired legacy JSON source absent. Preserve Node aliases, TCC identity and untouched acceptance windows.
 
 Invoke the checked activator from its supported independent process boundary. Do not boot out/bootstrap the live gateway from the gateway's own process tree or stack an extra restart around activation. An ambiguous result is contained and reconciled; a rollback outcome means the predecessor recovered, not that the candidate activated.
+
+## Model and reasoning policy
+
+Interactive work defaults to `openai/gpt-6-astra` with Max reasoning. An explicit
+Discord `/think ultra` remains available for automatic multi-agent orchestration;
+the underlying provider effort is Max. Respect existing user/session choices and
+verify the effective runtime behavior rather than treating a selector as proof.
+
+Autonomous LLM jobs, hooks, heartbeat, active memory, dreaming and utility work use
+`openai/gpt-6-sol` with High reasoning. Set native `agentTurn` payload.model and
+payload.thinking explicitly for operator-owned jobs. For system-owned skill review
+jobs, preserve the projected payload and use supported execution-session model and
+thinking preferences. Heartbeat, dreaming and utility effort comes from the
+selected model’s existing `params.thinking`. Pure command jobs have no scheduler model/thinking;
+if an executable invokes an LLM internally, its inference owner follows the same
+background policy. Preserve deliberately disabled jobs and their existing scope.
+
+Leave global subagent model/thinking pins unset so children inherit the initiating
+turn. Explicit user orchestration, including Ultra, keeps its requested settings;
+a background Sol/High parent passes those settings to its children. A user-task
+continuation carried by a heartbeat remains user work. Do not silently use the
+interactive model when a configured background route is unavailable.
 
 ## Schedulers, monitoring and retained state
 

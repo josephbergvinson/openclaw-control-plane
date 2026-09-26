@@ -26,7 +26,36 @@ Use ordinary prose. Avoid emoji, internal tool banners, routing dumps and redund
 
 During substantial work, post meaningful milestones and explain real dependencies promptly. Say what has been established and what the next step will resolve. Editing an old message is not always an adequate substitute for a new visible update during a long wait.
 
+To omit generic tool-status narration, set
+`channels.discord.streaming.progress.narration` to `false`. Keep `commentary`
+enabled for authored progress and retain `streaming.mode: "progress"` for the
+existing editable progress card. `toolProgress` is a separate control for tool
+progress updates; keeping it disabled does not disable authored commentary.
+This presentation choice changes neither task execution nor final delivery.
+
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
+
+Candidate `24e9bfe5431` addresses a later gap in that lifecycle: a worker could
+resume its original requester without the presentation route used for ordinary
+incoming messages. The model kept working while typing, progress and narration
+were absent. The repair carries current run/session/destination authority through
+the internal resume and reuses the channel's configured progress card. Private
+worker completion prompts are excluded from narration. Progress does not acquire
+final-delivery custody; stale, replaced or cancelled owners cannot send delayed
+updates. Ninety focused cases pass across the agent and Discord owners. The
+September 23 source `5b5942def95c` retained this repair and passed its
+[dated hosted qualification](../runtime/README.md#september-23-qualified-source).
+Later runtime and live channel receipts retain their separate scope.
+
+## September 22 native goal delivery repair
+
+A native goal could acknowledge the command and retain a completed model answer without sending the final result to Discord. The direct channel owner claimed the pending final before the native command adapter invoked a second durable sender. That sender rejected the already-claimed record and suppressed delivery before any transport call. A completed goal or clean transcript therefore did not establish publication.
+
+The repair selects the existing core durable route for continuing-goal finals and retains the actual command-target session identity. Private acknowledgements and ordinary slash responses keep their existing interaction hooks. Final preparation drains completed progress first; hooks may rewrite or cancel content, multi-part replies retain their delivery receipts, and an unsupported durable route reports failure without claiming that a message was sent.
+
+The real adapter/channel-turn/queue regression reproduced zero physical final sends before the repair. Eighteen focused cases subsequently passed across custody, dispatch/adoption and goal progress, including hook cancellation, multi-part delivery and ordinary slash responses. Source `1fb1f66cfe29` activated on the originating gateway at 11:22:01.365523 UTC on September 22. Its signed app, build `2609000592`, was verified installed and observed connected on the originating Mini on September 22. A bounded native-goal final subsequently passed with exact Discord readback; that result does not establish longer-work progress or every completion path.
+
+A later owned-handoff check delivered its final into an existing Discord thread, but the backend incorrectly reported missing visible delivery. Existing thread channels lacked canonical thread identity in the provider receipt. Source `085711060c84` records that identity from actual channel metadata in each chunk and the aggregate receipt. It leaves strict source matching, account authority and refusal handling intact. Fourteen producer and composed settlement cases pass, including nonthread, unknown-metadata, account, target, partial, progress-only and dry-run refusals. Transport and model/handoff boundaries are substituted in those tests; the successor activated at 12:37:05.013053 UTC. Its fresh diagnostic reached a provider rate limit before child creation, so actual live settlement remains pending. The qualified native companion is unchanged because this producer runs in the external Gateway.
 
 ## September 21 follow-up delivery incident
 
@@ -96,14 +125,16 @@ A second live check retained a real failed `sessions_send` result through a
 successful yield. The same child completed, the parent resumed automatically, and
 Discord received exactly one final response in 117.275 seconds with no stale failure
 warning. The nonzero shell exit in the first check was not used as tool-error proof.
-Hosted qualification of the corrected source remains pending. The earlier completed-child
-check did not cover this active-child mode mismatch.
+Hosted qualification of that exact historical public revision remained pending
+at this checkpoint; the current source's separate hosted result is recorded in the
+[runtime package](../runtime/README.md#hosted-qualification). The earlier
+completed-child check did not cover this active-child mode mismatch.
 
 ## Additional Discord repair qualification
 
 The additional repair has operator source commit [6e5890826b64df455be0c50756ef917aa6ee1211](https://github.com/josephbergvinson/openclaw-runtime-source/commit/6e5890826b64df455be0c50756ef917aa6ee1211). Local qualification passed 570 behavior tests and the native type, lint, import, state, security and dead-export checks. The aggregate build, release staging, candidate import, source seal and initial activation also passed. A private exact-message fetch passed after activation. The first live Discord retest nevertheless failed delivery acceptance; the deployed successor subsequently passed the bounded live checks described below.
 
-The historical September 15 reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae` retained these repairs and added the native Mac app/private-worker authentication change described in the [source map](20-runtime-source-changes.md). Its gateway remained on source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; its manifest separately identified the companion production delta and scoped acceptance. Its normalized tree was `4afd5efe52ae0ba136f738538477f4256500bc5a`. The current [runtime manifest](../runtime/manifest.json) pins the September 21 reference described above. The Discord results below retain their original revisions and do not qualify that newer source. The compact resolver change remains a workspace helper with its own fixture tests.
+The historical September 15 reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae` retained these repairs and added the native Mac app/private-worker authentication change described in the [source map](20-runtime-source-changes.md). Its gateway remained on source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; its manifest separately identified the companion production delta and scoped acceptance. Its normalized tree was `4afd5efe52ae0ba136f738538477f4256500bc5a`. The current [runtime manifest](../runtime/manifest.json) separately records the September 22 source export and deployed gateway. The Discord results below retain their original revisions and do not qualify that newer source. The compact resolver change remains a workspace helper with its own fixture tests.
 
 The baseline calendar request took 598.812 seconds from submission to its final Discord reply. Its trace contained 42 successful tool calls, no tool errors or timeouts, and no compaction. Broad searches, a full resolver result and an exact-message read that incorrectly returned channel history added large outputs to the context. These observations identify unnecessary input volume; they do not establish how much of the delay each output caused. The repair preserves model and reasoning settings.
 
@@ -146,7 +177,22 @@ A controlled two-worker request retained its acknowledgment after 25.393 seconds
 
 These four checks passed their observed delivery and calendar-state boundaries. The controlled worker test establishes the exercised yield-and-resume path; it does not establish blanket production readiness. The initial failure remains documented above, and the attachment-byte and resumed-typing limits remain explicit.
 
-The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. Actual cleanup behavior and memory savings remain unmeasured.
+The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. That initial policy change alone did not establish actual cleanup behavior or memory savings.
+
+The bundled Calendar helpers now own the app lifecycle around their verified
+operation. A per-user advisory lock serializes helper calls through readback and
+cleanup. A helper launches Calendar hidden in the background only when needed,
+records its process and launch identity, and normally quits only its own unchanged,
+hidden, inactive instance with no visible windows or modified documents. Preexisting
+apps, user takeover, uncertain ownership and incomplete operations are preserved.
+A cleanup failure does not turn a verified event write into an instruction to retry it.
+
+Forty-two focused Calendar tests cover lifecycle and existing read/write behavior.
+The installed public bundle also exercises its lifecycle suite. A real read-only
+probe confirmed that an existing Calendar process stayed open with unchanged
+identity. Actual termination of a newly owned Calendar instance and memory savings
+remain separate live acceptance claims. Browser cleanup likewise preserves existing
+user and control tabs; this repair adds no global app or browser sweeper.
 
 ## Later ownership and access repairs
 
@@ -243,6 +289,23 @@ no second activation or repeated live acceptance is claimed for this test correc
 The manifest records the exact changed test path and both blobs separately from
 the two existing privacy substitutions in another fixture. Consult the hosted
 workflows for the exact reference commit being adopted.
+
+## Replies to a shared bot identity
+
+A bot message may have been posted by a different agent or session. Suppressing
+its quoted body because the author is the bot can leave a first-turn company
+agent with only a message ID and sender, even though the user explicitly replied
+to a deployment request. The Discord context builder uses the existing
+`suppressSelfQuoteBody: false` option to retain that bounded reply text. The shared
+default for other channels is unchanged. Existing visibility filtering still
+applies; quoted text does not become the human's command or acquire authority,
+and self-message attachments are not fetched by this change.
+
+The regression exercises a company agent with no prior history and checks the
+quoted body, current human input, command authority and session routing. These
+source checks do not by themselves establish live delivery or conversational
+quality. Company voice and participation are covered separately in the
+[context policy](08-memory-and-context.md#shared-voice-in-a-separate-company-workspace).
 
 ## Context notices
 

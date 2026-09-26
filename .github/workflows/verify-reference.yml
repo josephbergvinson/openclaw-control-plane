@@ -20,9 +20,12 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Check documentation and examples
         run: python3 -B scripts/validate_repo.py
       - name: Test reconstruction and workspace installers
@@ -38,16 +41,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Install the pinned package manager
-        run: npm install --global pnpm@12.3.4
+        run: npm install --global "pnpm@${{ steps.runtime.outputs.pnpm }}"
       - name: Reconstruct the pinned source in a separate checkout
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
         run: |
-          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
       - name: Install frozen runtime dependencies
@@ -76,16 +82,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Install the pinned package manager
-        run: npm install --global pnpm@12.3.4
+        run: npm install --global "pnpm@${{ steps.runtime.outputs.pnpm }}"
       - name: Reconstruct the pinned source in a separate checkout
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
         run: |
-          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
       - name: Install frozen runtime dependencies
@@ -106,19 +115,114 @@ jobs:
           pnpm test:serial \
             src/agents/tools/sessions.test.ts \
             src/agents/tools/sessions-yield-tool.test.ts \
+            src/tasks/task-registry-progress.test.ts \
+            src/plugin-sdk/channel-outbound.streaming.test.ts \
+            src/channels/progress-draft-compositor.test.ts \
+            src/channels/progress-draft-diffstat.test.ts \
+            src/auto-reply/reply/progress-narrator.test.ts \
+            src/agents/bash-tools.descriptions.test.ts \
+            src/agents/tools/cron-tool.test.ts src/agents/tools/cron-tool.description.test.ts \
+            src/agents/credential-safety-prompt.test.ts \
+            src/agents/system-prompt-messaging.test.ts \
+            extensions/codex/src/app-server/thread-prompt.test.ts \
+            extensions/codex/src/app-server/turn-params.test.ts \
+            extensions/codex/src/app-server/attempt-steering.test.ts \
+            extensions/codex/src/app-server/run-attempt.steering.test.ts \
+            extensions/copilot/src/prompt-guidance.test.ts \
             src/agents/subagents/registry/subagent-followup-owner.test.ts \
             src/agents/subagents/registry/subagent-registry-lifecycle.test.ts \
             src/agents/embedded-agent-runner/run/tool-error-warning.test.ts \
             src/agents/openclaw-tools.registration.test.ts \
             src/gateway/session-subagent-reactivation.test.ts \
+            src/gateway/scheduled-run-gateway-context.test.ts \
+            src/cron/isolated-agent/run-prework-failure.test.ts \
+            src/cron/trigger-script.refresh-scope.test.ts \
+            src/infra/exec-host.test.ts \
             extensions/codex/src/app-server/dynamic-tools.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
-      - name: Verify terminal warnings during confirmed continuations
+      - name: Verify account transport and quota recovery
+        id: quota
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial \
+            packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts \
+            packages/ai/src/providers/openai-chatgpt-responses.cache.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-recovery.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts \
+            src/agents/embedded-agent-runner/run/assistant-failure.test.ts \
+            src/agents/embedded-agent-runner/run/assistant-failure.failover.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-quota-unit.log"
+      - name: Verify quota continuation after a committed effect
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        env:
+          OPENCLAW_E2E_USE_PREBUILT_DIST: "1"
+          OPENCLAW_E2E_WORKERS: "1"
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            src/agents/model-fallback.quota-continuation.e2e.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-quota-continuation.log"
+      - name: Preserve quota recovery qualification evidence
+        if: always() && steps.quota.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-quota-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-quota-unit.log
+            ${{ runner.temp }}/reference-quota-continuation.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify embedded context and terminal warnings during continuations
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
           set -o pipefail
           pnpm test:serial src/agents/embedded-agent-runner/run/terminal-preparation.test.ts \
+            src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-stream-prepare.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
+      - name: Verify resumed requester progress ownership
+        id: cadence
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.agents.config.ts \
+            src/agents/tools/computer-tool.gateway.test.ts \
+            src/agents/tools/computer-tool.native-credentials.test.ts \
+            src/agents/command/continuation-presentation.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-ownership.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-cadence-agents.log"
+      - name: Verify resumed Discord progress transport
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.extension-discord.config.ts \
+            extensions/discord/src/continuation-progress.test.ts \
+            extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts \
+            extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts \
+            extensions/discord/src/monitor/message-handler.draft-preview.visibility.test.ts \
+            extensions/discord/src/monitor/dm-command-auth.test.ts \
+            extensions/discord/src/monitor/message-handler.preflight-context.test.ts \
+            extensions/discord/src/monitor/message-handler.preflight.test.ts \
+            extensions/discord/src/monitor/message-handler.process.session-routing.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-cadence-discord.log"
+      - name: Preserve resumed requester progress evidence
+        if: always() && steps.cadence.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-cadence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-cadence-agents.log
+            ${{ runner.temp }}/reference-cadence-discord.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify embedded follow-up completion receipts
         id: receipts
         working-directory: ${{ runner.temp }}/openclaw-reference

@@ -1,15 +1,143 @@
 # Runtime source changes
 
-This architecture uses a customized OpenClaw **2026.9.3** build. Reproducing its
-behavior requires both the runtime source changes and the surrounding configuration
+This architecture uses the customized OpenClaw build pinned in the runtime
+manifest. Reproducing its behavior requires both the runtime source changes and
+the surrounding configuration
 and operating instructions. Copying workspace Markdown alone cannot add the native
 ownership, persistence and delivery behavior described here.
 
 The [runtime package](../runtime/README.md) contains the full consolidated patch,
-license notices, exact identities and an offline reconstruction helper. It covers
-79 local commits and 603 changed paths from the official release. It includes
+license notices, exact identities and an offline reconstruction helper. Its
+manifest records the complete changed-path and commit counts from the pinned
+official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## September 22 upgrade
+
+The 2026.9.5 port starts from official commit
+`ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`. It retains the target's current owners
+and data contracts while carrying forward the differentiated behavior. The final
+source identity and gateway deployment status belong to the manifest. The
+[September 22 record](../runtime/README.md#september-22-upgrade) distinguishes verified
+gateway activation and the Mini installation from subsequent component and
+credential acceptance. Source `1fb1f66cfe29`, including the native credential
+compatibility reader and native-goal repair, was verified installed as signed build
+`2609000592` on the originating Mini on September 22. A bounded native-goal final has exact Discord
+readback. Gateway source
+`085711060c84` corrects existing Discord thread receipts so visible finals can
+settle their backend delivery obligation. It activated on September 22 at `12:37:05.013053Z`;
+fresh live settlement acceptance remains pending after a provider rate limit
+interrupted the diagnostic before child creation. That day's companion qualification verified its matching `1fb`
+private worker. That checkpoint did not establish MacBook installation or actual
+account entry. The behavior and acceptance boundaries below retain their dated scopes.
+
+Candidate `24e9bfe5431` adds safe quota continuation after settled tool work and
+binds connection reuse to the actual provider account and credential. It keeps
+completed tool results, avoids repeating the original task, respects pinned
+accounts and stops safely when eligible accounts are exhausted. An account switch
+opens a fresh connection without an old response ID or account-bound encrypted
+reasoning. The manifest distinguishes this reconstructible candidate from the
+Gateway recorded in the September 22 activation receipt. Its repairs are retained
+in the current source, whose hosted qualification is recorded below; live
+acceptance remains separate.
+
+The same candidate restores configured typing, progress drafts and activity
+narration when a completed worker resumes the original requester. Presentation
+authority is bound to the current run, session and destination; it does not grant
+final-delivery authority. Delayed progress writes recheck that authority and stop
+on cancellation or replacement. Seven owning test files pass 90 focused cases;
+hosted qualification and live acceptance remain separate.
+
+The September 23 source `5b5942def95c` passed
+[hosted qualification](../runtime/README.md#september-23-source-qualification) at public
+commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`. It retains those repairs and adds
+separate interactive and autonomous model routing. The example policy uses Astra
+Max for conversation, optional `/think ultra` orchestration and Sol High for
+model-backed maintenance. Existing model parameters supply reasoning effort to
+utility completions, autonomous heartbeat and memory dreaming. Isolated completion
+admission also applies selected-model effort when the caller omits it; native
+Codex forwards that effort to the actual turn request while preserving explicit
+choices and the defaults of unrelated bounded operations. User-task
+continuations and delegated children retain their initiating settings. No new
+configuration schema is required by the retained signed companion. See the
+[scheduling policy](12-scheduling-and-background-work.md) for configured owners.
+The [September 23 deployment record](../runtime/README.md#september-23-qualified-source)
+binds this exact source to one successful originating Gateway activation at
+18:59:26.156345 UTC. Postflight preserved configuration, account ordering and job
+definitions and verified current-process capture. The remaining background model
+settings were subsequently acknowledged and read back without a restart. These
+results do not establish every live workflow or another host's installation.
+
+The scheduled-run boundary also releases the creating attempt's transcript context
+before detached cron, heartbeat or hook work begins. A timer armed inside a
+conversation can otherwise retain a disposed writer and fail while recording its
+result before delivery. Real-timer regression tests verify durable completion,
+idempotent replay and continued rejection of writes through the retired caller.
+This source repair does not by itself prove live reminder delivery.
+
+Native execution also derives its response deadline from an explicitly bounded
+command, with response grace, instead of ending every socket wait after 20 seconds.
+An explicit transport override still wins. Authentication, cancellation and
+uncertain-result no-replay behavior remain unchanged. This JavaScript owner runs
+inside the signed companion's private worker, so its deployment requires rebuilding
+and installing that bundle as well as activating the Gateway. Actual socket and
+admission regressions pass. Signed build `2609000593` from this source was installed
+and observed connected on the originating Mini on September 23; a bounded native
+command returned its expected output after 23.01 seconds with `isError: false`.
+The same app and private worker were installed and observed connected on the
+MacBook; full inventory, process identity and app/CLI signature checks passed. The
+[installation record](../runtime/README.md#september-23-qualified-source)
+distinguishes these results from actual credential entry and authentication.
+Time-correlated OS logs for an existing Reminders fixture show alarm firing and
+muted Notification Center delivery during screen sharing; visible banner and
+iPhone delivery remain unverified, and CLI permission is still pending.
+
+The [September 24 companion successor](../runtime/README.md#september-24-native-prompt-successor),
+`f29bb229c5c8`, repairs valid native authentication agents that have no AppKit
+launch date. Native prompt custody now uses the kernel PID, user ID and precise
+process start time, with revalidation before entry. PID reuse, malformed identity
+reads, changed field/account evidence and a replaced prompt still refuse entry.
+The 30 focused native tests and exact source reconstruction pass. Signed build
+`2609000594` and its matching worker are installed and connected on both Macs. On
+the Mini, a real prompt with absent AppKit launch metadata passed opaque native
+entry and macOS authentication; the QA process and execution scope closed
+afterward. The MacBook installation and existing credential bindings are
+verified, but its fresh process reports Accessibility and Screen Recording
+denied. Native interaction on that host remains pending actual OS grants and
+verification. At that companion checkpoint, the Gateway remained at `5b5942def95c`.
+
+The [scheduled-run recovery successor](../runtime/README.md#september-24-scheduled-run-recovery-successor),
+`2c102f590298`, retains the original provider error while proving no-send only for
+a settled, complete canonical prework failure in the exact isolated native run.
+The existing exception owner excludes tool/output activity, fallback and
+continuations; filtered or incomplete evidence stays unknown. The private
+collector can release a matching unstaged checkpoint without advancing coverage
+or replaying delivery. The owning regression checks both native transcript
+settlement and the persisted cron receipt shape. This exact source activated on
+September 24 at 10:03:56.892630 UTC with accepted postflight and current-process
+capture. The signed companion remains unchanged, and exact-final-head hosted CI
+is a separate qualification.
+
+| Change family | Source behavior and acceptance boundary |
+|---|---|
+| Task ownership and steering | Native Codex completion tracking preserves the target's per-assignment run identity, session incarnation and requester custody. Owned child follow-ups retain a stable logical completion identity; an accepted send is not proof that the parent received its result. |
+| OAuth settlement | Durable refresh claims and settlement retain the admitted owner beyond a caller's observation deadline. A stale authentication failure cannot poison a renewed credential generation. Configuration and unit checks do not prove a particular provider sign-in. |
+| Provider recovery after tool progress | A fully settled successful tool batch can begin a fresh transient-outage window without resetting the run's total retry budget. Existing continuation reuses the committed transcript; commentary, duplicate receipts, failed tools and active work do not renew that window. |
+| Quota continuation and account-bound transport | The existing auth controller advances through eligible profiles while the runner retains the admitted task and committed tool history. Aggregate effects prevent original-task fallback after exhaustion. The WebSocket cache binds reuse to endpoint and effective handshake headers; a changed identity receives a new connection and full permitted history. Five production-runner cases verify one physical write per task; owning transport regressions cover identity changes and concurrent leases. This source is activated on the originating Gateway; live quota-recovery acceptance remains separate. |
+| Resumed requester progress | Internal completion dispatch carries presentation authority for the original requester independently of final delivery. The channel's continuation adapter reuses configured progress and narration, excludes private completion prompts, and rechecks ownership before immediate or delayed sends. Cancellation, completed generations and replacement fence stale updates. Source and focused transport tests pass; actual channel acceptance remains pending. |
+| Native credential entry | The Mac companion resolves a host-local enrolled alias into the observed native secure field through a bounded private signed-app child. Direct reads disable legacy Keychain UI. Existing creator-trusted items can use the fixed Apple-signed reader after exact metadata, item, host, unlocked-store and stored-ACL checks; a class-only read materializes a legacy reference without requesting password data. That compatibility reader can briefly prompt on a lock/ACL race, while the parent deadline bounds its process group. The app validates the helper before launch and the child validates its direct app parent. `credential_prompts` returns an opaque execution-bound reference; `type_secret` rechecks account, host, Apple-signed prompt owner, field and execution authority after awaiting resolution. Browser credentials retain their separate origin-bound route. Entry and successful authentication are separate receipts. |
+| Native goal delivery | Continuing-goal finals select the existing durable channel owner once and retain the actual command-target session. Completed progress drains before the final; ordinary private slash replies retain their interaction hooks. Physical sends, cancellation and multipart receipts are tested independently of goal completion. A bounded native-goal final passed on `1fb`; the later existing-thread receipt correction is activated but still needs live backend-settlement acceptance. |
+| Project and source-reading guidance | Existing registered project/worktree delegation may create the visible native task required by that owner. Read-only source CLI routes remain available when selected by the registered capability; outbound messaging and coordination retain their own tool rules. |
+| Native packaging pins | Swift snapshot preparation restores committed dependency pins after temporary dependency editing and uses the existing forced-resolution contract for native compilation. The verified package remains a separate artifact from the live gateway. |
+| Recovery reporting | Existing versioned effect predicates may carry one closed failure cause. The runtime keeps structured/private values out of public notification text, including truncated and split-line output. A producer's current-status projection must correlate a later same-target verified effect; successful no-op execution alone cannot erase a historical failed invocation. |
+| Diagnostic attribution | The local deep probe uses existing identity-bound pinned platform metadata, without widening device admission. An unresolved non-environment SecretRef is reported as an unresolved comparison rather than a proved token mismatch. Read-only metadata inspection preserves source database artifacts. |
+
+Native app signing, host-specific credential enrollment and actual secure entry
+remain separate from gateway source/build checks. Recovery report fixtures do not
+rerun authentication or prove newly delivered scheduler notifications. Historical
+completion reconciliation preserves failures and intentional silence instead of
+bulk-resending old work or converting every terminal task to delivery success.
 
 ## September 21 follow-up repair
 
@@ -167,23 +295,244 @@ revocation or an expired external login impossible. Onboarding, profile ordering
 supported refresh, durable state readback and recovery remain separate checks.
 Never copy another operator's account database into a fresh installation.
 
+## OAuth authentication health and Inbox
+
+Source `5233aa69090d540f73af8258e39718c20495c806` separates access-token expiry from a sign-in
+that actually needs operator action. The Gateway reports refresh eligibility and
+actionable profile status; the Inbox consumes those facts instead of asking for
+sign-in whenever a refreshable access token expires. A genuinely unusable account
+remains visible even while another account keeps the provider pool usable. Its age
+comes from the known credential expiry, and is omitted when no incident time is known.
+Refresh, account order and credential custody retain their existing owners.
+
+These synthetic captures render the actual Inbox component. They contain no real
+accounts or credentials. They prove the presentation boundary, not live token
+refresh, account sign-in or MacBook acceptance.
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Refreshable expired access token | ![False expired-auth warning](assets/auth-inbox-20260924/before-refreshable.png) | ![No sign-in action required](assets/auth-inbox-20260924/after-refreshable.png) |
+| One account needs reconnection beside a healthy pool | ![Account failure hidden](assets/auth-inbox-20260924/before-reconnect.png) | ![Account sign-in warning with expiry age](assets/auth-inbox-20260924/after-reconnect.png) |
+
+The Gateway activated this source on September 24 at `14:24:24.542477Z`.
+Live authentication metadata reports authenticated, refreshable credentials for all
+nine profiles with no required sign-in; capacity and quota remain separate. The
+served UI assets match the activated build. The native Mini Inbox was directly inspected and has no authentication warning. The affected
+profile had already renewed successfully through its existing owner before this
+activation, with shared and agent profile order preserved.
+
+Native companions and private workers remain at `f29bb229c5c8`, build `2609000594`;
+this central auth/UI change does not rebuild, install or restart them. The MacBook
+node is connected and now reports Screen Recording granted, but Accessibility is
+still denied. Its frontend appearance was not directly inspected, and its native
+credential-entry acceptance remains pending. All 33 mechanical postflight checks
+passed, with approval-state changes reconciled to usage bookkeeping and unchanged
+policy. Hosted qualification of public `25e1d5881e5d` later passed its complete
+build but stopped at the auth-status test growth ratchet, as recorded below. The prior `2c102f590298`
+acceptance keeps its original dated scope.
+
+## Long-running Discord progress checkpoints
+
+Source `c42af6f66b8abd23620aa9a8a110b9813c1bf5de` makes later foreground commentary visible as a new
+Discord post when the existing preview has reached its three-minute checkpoint.
+Updates inside the interval continue editing the same preview. The existing
+controller retains final delivery, preview cleanup and run ownership; uncertain
+sends are not replayed.
+
+Ordinary interactive channel requests now give native child tasks visible progress
+by default. Explicit `done_only` and `silent` task policies remain authoritative.
+Heartbeat, cron, internal, nested and private completion work do not inherit this
+default. Only an exact, pending requester-yield cohort can publish background
+progress. Its first update coalesces for 15 seconds and eligible slow tools or
+nested waits continue at three-minute intervals, without requiring a new tool
+event. Each send rechecks current task and requester authority. Cancellation,
+completion, parent resumption, replacement, muting and lifecycle reset stop stale
+updates. Generic native task state messages are suppressed only while the exact
+pending yield has an authoritative progress owner, preventing duplicates or
+disclosure of child prose while preserving explicit queued-task notifications.
+
+These captures use actual serialized REST payloads from the baseline and candidate
+controllers, rendered in the same synthetic message-list fixture. They show the
+messages before fixture cleanup and contain no private task content. They are not
+live Discord screenshots or evidence of successful delivery to a real channel.
+
+| Before | After |
+| --- | --- |
+| ![Later commentary edits the earlier post](assets/discord-progress-20260924/before.png) | ![Later commentary creates a new checkpoint post](assets/discord-progress-20260924/after.png) |
+
+The preceding public revision `25e1d5881e5d` passed its full reconstruction build,
+reference checks and steering suite. Its native checks stopped only at the file
+growth ratchet for `models-auth-status.test.ts`. This source extracts the same auth
+rollup cases into a focused test file; production authentication behavior is
+unchanged by that extraction. The failed run remains recorded, and qualification
+of this successor belongs to its own exact public revision.
+
+This exact source activated on September 24 at `15:49:57.891411Z` as
+`openclaw-2026.9.5-c42af6f66b8a-20260924T1528Z-selfcontained` in one attempt with no rollback.
+The activation receipt SHA-256 is
+`6a0666726f5895087c0111d17ffde2804ca74ab01e0c279ae4b187061a084758`. All 33 mechanical postflight
+checks passed: selected source and processes, health/readiness, configuration,
+account ordering, scheduled-job definitions, terminal sessions and retained native
+companions were verified. Current-process Journal capture was visually inspected
+and enrolled; a later natural scheduled sync is not inferred.
+
+The preceding `5233aa69090d` auth/Inbox activation retains its dated receipts.
+Native companions and private workers remain `f29bb229c5c8`, build `2609000594`;
+this central change does not rebuild or install them. MacBook native credential
+acceptance remains separate. The subsequent real Discord review on this c42 deployment passed foreground
+checkpoint, repeated yielded progress, requester resumption and final delivery.
+It also identified the two source edge cases corrected by the successor below.
+Public revision `fd3fc75f8580` subsequently passed all five hosted checks,
+including all 35 native commands, 92 lint shards and the full runtime build;
+all six artifact digests and exact source identities were verified. Those results
+retain their c42 scope and do not qualify the successor below. Successful channel
+delivery does not imply that those source defects were absent.
+
+## Progress ownership and scheduled trigger scope
+
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` corrects three cases found during verification of the
+preceding progress deployment:
+
+- Foreground checkpoint eligibility uses the channel's canonical visible-text
+  normalization. A wrapped `NO_REPLY` token cannot seal a preview, discard the
+  next correction, or leave an orphaned message.
+- One shared ownership predicate distinguishes an interactive pending yield from
+  queued or detached native work. Explicit `state_changes` delivery still works
+  when there is no matching pending requester yield; a real yield keeps its sole
+  native progress owner and respects notification overrides.
+- A scheduled script obtains its own registered-tool refresh scope. A scheduler
+  timer cannot accidentally reuse the expired scope of the interactive request
+  that created it. The production parser/evaluator and expired inherited scope
+  are exercised together in the focused regression.
+
+The existing images above remain dated, synthetic demonstrations of normal
+progress and auth presentation. Their normal-message behavior is checked
+separately from the new suppressed-message and scheduled-scope regressions.
+Source `205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80` activated on September 24 at
+`2026-09-24T17:15:56.505319Z` as
+`openclaw-2026.9.5-205ba711eb3d-20260924T1657Z-selfcontained` in one attempt with no rollback.
+All 33 mechanical postflight checks passed. The activation receipt SHA-256 is
+`0609079db56f3ea6bc07000557bc9f892f99a0af713b3fc3529c2c2b3e759101`; the acceptance receipt is
+`8015885b3eb062adf8892891aa950229d41316b414443774c01eae647ec4ef7b`. The dated auth, Journal and native companion
+receipts retain their original scope. Native apps and workers remain at
+`f29bb229c5c8`, build `2609000594`; this central successor does not install or restart
+them. The original 18:17 BST scheduled trigger then completed naturally through
+Sol in 104.677 seconds. Its exact summary reached Discord at 17:18:43.559 UTC,
+with one match among the 12 messages read; error counters returned to zero through
+normal scheduler behavior. Configuration and schedule were unchanged, with no
+forced run, checkpoint mutation, business replay or failure-history reset.
+This verifies the reported trigger incident, not every automation. Hosted
+qualification remains separate and binds the exact public revision.
+
+## SDK contract qualification reference
+
+Reference `db4ae8b2e6e0cbb6fdd14d4dd4ebb9e99b0c2f6c` differs from the installed `205ba711eb3d` source
+only in the SDK contract documentation, its direct behavior test, and the
+hand-maintained SDK surface inventory. Every other tracked blob and mode matches
+the installed runtime. No new runtime activation or native build is represented.
+
+Public revision `24dcc596e2ef` passed its normal reconstruction build, repository
+checks, all owned follow-up, quota and Discord regressions, and steering tests.
+Its native plan stopped at command 19 because the intentional
+`sanitizeProgressStatusText` export had not been accounted for: one focused
+`channel-outbound` export and the existing `channel-message` compatibility
+projection add two public exports, two callable exports and one deprecated
+entrypoint projection. The correction records exactly those counts, documents
+the existing shared normalization contract, and adds 13 direct SDK cases.
+It changes no evaluator, wildcard rule, forbidden export rule, global silent-reply
+behavior or production implementation. The original failed run remains recorded;
+later native commands were not run there. The reference's own complete checks
+are attached to its exact public revision.
+
+The six existing images and all actual `205ba711eb3d` activation, scheduled-trigger,
+Discord and native companion receipts retain their original scope.
+
+## Native credential discovery diagnostics
+
+Reference `bbc4d8d806a56c706ca1813862e62e89a0c192d8` adds diagnostic reason codes to the existing native
+`credential_prompts` action. The result now distinguishes an unavailable focused
+window, incomplete Accessibility metadata, an unobserved or ambiguous secure
+field, an unsupported form context, and absent or unmatched local bindings.
+Counts and closed codes use the same bounded discovery pass; native text and
+credential values are not returned. Account matching, prompt custody, secret
+resolution and entry checks remain unchanged.
+
+The source compiled and passed all 17 isolated native credential-owner tests,
+focused Swift lint and formatting, documentation formatting, native schema and
+localization verification. The generated localization inventory also synchronizes
+one inherited permission-description row with text already present in source;
+it introduces no additional permission behavior or new settings interface.
+
+This is a companion diagnostic source candidate. Packaging, installation and
+actual password entry require their own receipts. The installed Gateway remains
+`205ba711eb3d9fda86db4ea8bd4d7ebb66d50d80`; its executable source and deployment were not changed by this
+four-file successor. Existing native companion and channel acceptance retain their
+dated scope. No successful MacBook credential entry is claimed here. The public
+successor receives qualification through the existing reference workflows.
+
+## Discord source replies and authentication blockers
+
+Reference `70601fb9c5e4f9173c73ab36662b0f60c973e810` keeps ordinary task updates, blockers and requests for
+human action in the originating conversation through the shared messaging
+instructions. A user's private-delivery request applies to that item; it does
+not make subsequent authentication notices private. Short-lived codes and
+verification URLs retain their existing private handling. Both automatic reply
+mode and message-tool-only mode receive the same source-conversation guidance.
+This changes prompt guidance, not destination identifiers or transport rules.
+
+The shared credential prompt also requires a fresh check of the authorized
+service's session and current challenge before repeating a sign-in blocker.
+Available authorized native credential tools must be inspected when browser
+controls cannot handle the visible challenge. The tool reference explains how
+an offered password fallback can use an enrolled host-local alias without
+exposing its value; actual OS/provider human presence remains a boundary.
+
+Quiet progress now excludes file-change counts from draft staging, so a write
+before any meaningful progress cannot create a standalone file-count message
+or retain that draft on yield. Later human-readable checkpoints still render.
+The same contract applies to ordinary output and native draft snapshots.
+
+Resumed requester turns also register the existing heartbeat lifecycle flag.
+This lets a new ordinary child retain factual progress in its source conversation
+after requester settlement. The existing cron, heartbeat, nested-requester and
+explicit `done_only` or `silent` exclusions remain. A regression uses actual
+command preparation, native registration and yield to verify updates at 15 and
+195 seconds without child-authored prose or new tool events. The 46-case owning
+suite and core typecheck passed. The Gateway is activated and its 33 mechanical
+postflight checks passed; actual channel acceptance remains separate and pending.
+
+The local qualification reported 75 prompt cases and 81 progress/Discord cases
+passing. The source export preserves every production blob and mode; only the
+established two private test labels are normalized. This Gateway source was
+activated once on September 25 at 14:47:26 UTC, with no rollback. All 33 mechanical
+postflight checks passed, including current-process capture and preservation of
+configuration, auth ordering, jobs, terminals and companion processes. Hosted
+qualification and live Discord canaries remain pending. MacBook opaque credential
+entry is a separate pending acceptance; existing native receipts retain their
+dated source and host scope.
+
+The following images are synthetic test renderings of the recorded baseline
+REST failure and repaired test assertions, not live Discord screenshots. They
+show the same write-only event before any human-readable progress. The baseline
+created a file-count post; the repaired case sends no message. The separate
+regression also preserves later meaningful checkpoints.
+
+| Before | After |
+| --- | --- |
+| ![Synthetic test: internal file counts became a chat post](assets/discord-diffstat-20260925/before.png) | ![Synthetic test: no chat post for the tool-only event](assets/discord-diffstat-20260925/after.png) |
+
 ## Reproduction and verification boundaries
 
-The manifest starts at official tag `v2026.9.3`, commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, and separately records the running
-gateway source `18b432ca2f83a107b1bc329cedf2221f20e61639` and reconstructed reference
-`18b432ca2f83a107b1bc329cedf2221f20e61639`. The reference includes the active-child
-follow-up repair and retains the preceding dreaming-effort and native Mac changes.
-The endpoint difference arrays `productionDelta`, `testOnlyDelta`,
-`documentationDelta` and `toolingOnlyDelta` are empty because the deployed and
-reference source identities match. The new build, activation and bounded live
-follow-up and warning-deferral checks passed; hosted qualification remains pending.
-Activation and historical live
-evidence are recorded separately in the [runtime package](../runtime/README.md#active-child-correction-deployment).
+The manifest identifies the exact official base, custom commit, normalized tree,
+patch checksum and export/deployment status. CI consumes its tag and toolchain
+values, then independently checks the annotated tag object and resulting source
+tree. Prior gateway and companion acceptance keeps its original identity; it is
+never transferred to a new candidate by changing the reference manifest.
 
 The public derivative changes only the two established company strings in the
-lane-contract test fixture relative to that reference. No other export
-normalization is applied. The resulting tree is `b8e3bb2de500a88253b78747f13f0b7b0547a928`.
+lane-contract fixture. All other source blobs and file modes are identical to the
+committed custom reference. Production differences are never described as
+fixture-only normalization.
 
 Use the [reconstruction instructions](../runtime/README.md) to apply and verify the
 patch before dependency installation. The helper checks a caller-supplied standalone
@@ -273,3 +622,305 @@ The included OpenClaw source remains MIT licensed under its existing
 [third-party notices](../runtime/THIRD_PARTY_NOTICES.md). Preserve these notices when
 copying substantial source. The consolidated patch avoids exporting private Git
 history or author metadata; it does not replace upstream attribution.
+
+### Observed progress status
+
+Reference `490a24de638ac28f94bd136a6653116d9de56e26` replaces utility-model progress inference with fixed status
+text derived from observed tool names and lifecycle outcomes. An unrelated failed
+command cannot produce a claim that a worker never started. A completed launch
+request does not establish completion of the worker's task. No request text, tool
+arguments, paths, results or private child content enters generated status.
+
+Authored preambles retain priority. Existing visibility, 12-second coalescing,
+unchanged-text suppression, turn cancellation and explicit quiet settings remain.
+The retired narration model module is removed; utility-model routing for titles
+and recaps remains unchanged. Qualification includes 39 cases across the owner,
+requester continuation and Discord transport, followed by 28 owning cases after a
+mechanical closure-binding correction and a production typecheck. These counts
+are overlapping qualification runs, not a unique-test total.
+
+The public pair under `docs/assets/discord-narrator-20260925/` is explicitly a
+synthetic rendering of the owner regression: a mocked baseline utility response
+versus the repaired latest activity. It is not captured live model text or a live
+Discord screenshot. The same source was activated once on September 25 at
+15:50:25 UTC, without rollback. All 33 mechanical postflight checks passed,
+including current-process capture and preservation of configuration, auth
+ordering, jobs, terminals and companion processes. Exact-head hosted checks and
+live Discord canaries remain pending. MacBook opaque credential-entry acceptance
+remains a separate pending check; dated native receipts retain their host scope.
+
+### Bounded waits in active worker tasks
+
+Reference `d83fa84b316c2bb162060ba0ea035425e185ade0` clarifies the existing exec, process and cron descriptions:
+a bounded wait between steps of an active worker task stays within that worker's
+tracked tool call or session. Detached reminders and future follow-ups still use
+the scheduler. This changes model-facing guidance only; scheduler execution,
+authorization and explicit notification modes remain unchanged. The complete
+owning tool-description and cron suites passed 213 cases, including finalized
+available-tool descriptions.
+
+This reference also refreshes the canonical generated config-doc hash for the
+previously reviewed utility-model help wording. The exact owning check passed;
+schema fields, count budgets and executable code are unaffected by that generated
+metadata correction. The original public `ac60b68` check retains its failed stale
+baseline receipt rather than treating its passing build as complete qualification.
+
+The deployed Gateway remains `490a24de638ac28f94bd136a6653116d9de56e26` at this publication.
+The new source's activation, exact-head hosted qualification and live Discord
+acceptance remain separate and pending. Native credential-entry acceptance retains
+its independent host-specific scope. All ten existing synthetic image assets are
+unchanged; these tool-description changes add no new rendered UI.
+
+### Cron description test layout qualification
+
+Reference `c4467dff8d3483c9ee8e38e662a2e331ce48288f` moves the complete cron description regression into a
+coherent sibling test file. All 200 cron cases pass, and both line-cap growth
+checks pass against the official release base without a limit exception. The
+original `c2c0d99` hosted failure remains recorded; its passing jobs do not
+substitute for the successor's complete exact-head CI qualification.
+
+All production files and modes are byte-identical to the built `d83fa84` runtime.
+This test-only reference requires no rebuild or redeployment. The deployed
+Gateway remains `490a24` at publication; activation of the already built `d83fa84`
+candidate, live Discord acceptance and native credential entry remain separately
+tracked. The ten existing synthetic screenshot assets are unchanged.
+
+### Guild admission, queued configuration and paused workers
+
+Reference `513be0562e914cd940cc216255232f8099cc5cfa` corrects three reproduced owner failures. Ordinary guild
+messages use inbound admission; configured member restrictions and actual command
+authorization remain enforced. A paused worker is reported as unfinished, with
+its existing continuation identity, while completed siblings keep their results.
+Queued runs that belonged to the live runtime refresh their configuration before
+secret resolution and policy admission. Explicit scoped configurations stay pinned;
+the exact catalog guard remains enforced and no completed work is retried.
+
+Qualification includes 77 paused-wake tests, 30 guild ingress tests, 104 existing
+Discord preflight controls and 47 queued-admission/secret-resolution tests. The
+strengthened five-case queued regression was also rerun after final mechanical
+changes; it is included in the 47, not an additional unique suite count. It
+reproduces the actual catalog-generation rejection through queued admission and
+checks the repaired model-input read. Current exact-head hosted CI, activation and
+live behavior remain separate gates. Ten earlier synthetic images are unchanged.
+
+At the `513be05` preparation checkpoint, the manifest retained the dated
+`490a24` deployment receipt and recorded the later `d83fa84` activation. The
+`513be05` runtime subsequently activated on September 25 at 18:50:59 UTC with all
+33 mechanical checks accepted. Its ordinary private worker canary completed the
+four-minute recheck, handoff, Discord delivery and cleanup. These are historical
+results, separate from the later quoted-correction failures and repairs below.
+The queued configuration reader does not replace a retired Gateway owner.
+MacBook opaque native credential entry retains its own pending scope.
+
+### Quoted context during an active reply
+
+Reference `5e059c50341c323a01530cb157f50c4f9209acc4` preserves quoted-message and other prepared inbound context
+when new input steers an active Codex reply. Context stays separate from the raw
+user text and media. Producer-classified runtime instructions remain application
+context; conversation data remains untrusted. Existing explicit-mention
+neutralization is reused. Each fragment is bound to its own input batch and
+position, so repeated quotes retain the correct association and a later unquoted
+message carries no earlier quote. Final writes rebuild input and context from the
+same still-authorized items. Unsupported backends retain the complete queued
+follow-up through the existing FIFO path.
+
+The actual Codex steering request regression reproduced the missing context.
+Qualification passed 56 quote/steering tests and 21 narrator tests, plus the
+relevant types, lint and line-cap checks. A final three-case assertion rerun is
+included in the 56. The narrator test change removes one redundant default type
+argument identified by the earlier hosted lint run; it changes no runtime code.
+The existing workflows retain their tests and add the three owning context
+regressions. All ten existing synthetic images and native acceptance records are
+unchanged.
+
+The `5e059c` build and September 25 activation passed all 33 mechanical
+postflight checks; its raw approval-state difference was reconciled to usage
+bookkeeping with policy and other fields unchanged. Those deployment records are
+historical evidence. The subsequent live quoted-correction check failed: the
+queued session clone lost its private Gateway carrier, and the native OpenClaw
+backend lacked the required model-only context projection. The `faf116b9` repair
+below addresses those reproduced boundaries. Revoked Gateway authority remains
+rejected. This intermediate reference was not separately published; the combined
+final source supplies its hosted qualification. The preceding `513be05` worker canary
+remains separate accepted evidence; MacBook opaque credential entry retains its
+own pending scope.
+
+### Queued reply authority and native steering context
+
+Reference `faf116b9fbf17a09a0fd78d14368a8285dac7915` repairs the two boundaries exposed by an ordinary quoted
+correction during an active reply. Session initialization now preserves the
+original private Gateway carrier on its final context clone through the existing
+scope-checking owner. A queued reply can retain its admitted owner after the prior
+reply finishes. Retargeted, unbound and retired contexts remain rejected; unrelated
+ambient authority cannot replace the original owner.
+
+The native OpenClaw backend also preserves prepared context for active steering.
+It keeps the canonical user text and transcript unchanged and projects the quote
+only into the model request after the existing media guard. Image attachments and
+order remain available through their existing metadata owner. Repeated inputs
+retain their own fragments, canceled inputs contribute no context, and authority
+is rechecked before injection. Runs that do not support this contextual path keep
+the existing FIFO fallback.
+
+The corrected four-case session regression fails on the previous producer only
+for the valid bound request, then passes all four cases with the repair. The final
+native regression run passed 20 provider, transcript, media and context-guard
+cases. Earlier owning suites remain recorded separately; their overlapping counts
+are not added. Relevant final types, scoped lint, formatting and both growth
+checks passed. The existing hosted owners add the new session/native regressions
+and the changed stream preparation suite without dropping prior tests.
+
+Gateway `faf116b9` activated on September 25 at 21:14:36 UTC in one attempt,
+without rollback. All 33 mechanical checks passed after the unchanged approval
+policy was reconciled against usage-only bookkeeping; the original 32-of-33
+receipt is retained. Current-process capture passed, and configuration, account
+ordering, job definitions, native companions and existing terminals were preserved.
+The initial-only Discord check and the fresh native active-steering quoted
+follow-up passed. The actual Discord Reply correction was consumed in the original
+Astra Max run; the normal worker-return continuation delivered one final reply,
+with both runs successful and no source-claim or generic-response warning. This
+live check did not exercise FIFO; its authority behavior is covered by the four
+real-host regression cases. Provider quote payload bytes were not retained; the
+SDK/provider composition tests establish context inclusion separately.
+
+Final matching public-head hosted qualification and MacBook opaque native
+credential entry remain pending. The failed `5e059c5` quoted check and earlier
+`513be05` ordinary worker acceptance retain their dated scopes. All ten verified
+images and native acceptance records remain unchanged; this backend correction
+adds no public screenshot gate.
+
+### Historical assertion documentation and operator progress preference
+
+Reference `fd4adc694059151a46ec75e7d4ccea4d90bd7315` adds one required `SAFETY` invariant comment above the
+existing internal steering-context assertion. It changes no executable statement,
+type, test, dependency or ratchet baseline. Removing that comment reproduces the
+exact deployed source file. The failed assertion ratchet and 24 subsequent scoped
+static checks passed; the original failed hosted result is retained. Its hosted qualification did not complete successfully; the test-type
+successor below carries the current qualification.
+
+The deployed runtime remains `faf116b9fbf17a09a0fd78d14368a8285dac7915`, with its
+accepted build, activation, 33 mechanical checks and bounded live quoted follow-up
+above. No rebuild or deployment was needed for the comment. Native credential
+entry retains its separate unresolved scope.
+
+The operator also disabled generic narration through the existing
+`channels.discord.streaming.progress.narration: false` setting after active tasks
+finished naturally at 21:41:17.978 UTC. Authored commentary remains enabled,
+`toolProgress` remains disabled, and the editable progress card retains its
+`progress` mode. One fresh next-turn check preserved meaningful authored progress
+and one final response, verified temporary-note cleanup, and showed no generic
+narration in the exact destination readback and visible interface. This was a
+configuration-only presentation change, with no runtime source or build change.
+The ten existing images retain their dated UI coverage; the narrator pair shows
+the prior enabled-narration behavior.
+
+### Retained steering test type qualification
+
+Reference `969a5720b4d7e80deb9bad4ec57f82d50ece9fe7` corrects three TypeScript errors in two existing Codex
+steering tests. One assertion establishes that each accepted transcript message
+is a user message before reading its content. Two record-shape assertions narrow
+steering parameters and additional context before the existing quote checks.
+The existing behavioral expectations remain. All 44,904 other tracked blobs and
+modes exactly match reference `fd4adc694059151a46ec75e7d4ccea4d90bd7315`.
+No production source, dependency, schema, configuration default, ratchet baseline
+or workflow changed.
+
+The established export still changes only the two private company fixture labels.
+Full isolated-index reconstruction compares all 44,906 entries and pins the new
+normalized tree and patch digest in the manifest. The earlier unsuccessful hosted
+results remain historical evidence. This test-only source is retained in the
+combined successor below; it was not separately published.
+
+At this qualification checkpoint, the deployed runtime was
+`faf116b9fbf17a09a0fd78d14368a8285dac7915`.
+Its existing build, activation, live Discord acceptance, configuration-only
+narration preference and ten dated visuals retain their prior scope. This test-only
+reference requires no new runtime build or activation. At that checkpoint, the separate MacBook
+opaque credential-entry gate remained unresolved.
+
+### Shared Discord reply context and native credential deadlines
+
+Reference `0c5a51f64e28bc34596079df1528dc78db710fe5` preserves the body of a visible Discord reply to the bot
+when the receiving company workspace has no earlier copy of that message.
+The quoted text remains untrusted context. Visibility filters, media suppression,
+canonical user text and sender authority remain unchanged; private session history
+is not imported. The owning regression reproduces the missing quote before the
+change and passes afterward, alongside shared-context, hydration and bot-filter
+checks.
+
+Native credential entry retains repeated parent, signature and item-custody
+validation, but gives the existing helper 30 seconds to finish. Ordinary
+`type_secret` calls allow 50 seconds for native invocation and 55 seconds for
+transport. The 60-second prompt-admission window, final accessibility checks,
+cancellation and owned-process teardown remain. Closed diagnostic stage codes
+help locate a failure without logging credentials, account aliases, paths or raw
+provider errors. Thirty-six sandboxed native tests and 28 transport tests passed.
+These are source tests; they do not establish real credential entry.
+
+The complete export retains the preceding steering-test type correction. All
+44,906 source entries are compared through an isolated index, with only the two
+established company fixture labels normalized. The existing hosted cadence
+commands additionally run the Discord session-routing and two native-credential
+transport test files. The original 35-command native plan and existing jobs remain.
+Gateway source `0c5a51f64e28bc34596079df1528dc78db710fe5` activated on September 26
+at 19:28:48 UTC in one candidate attempt without rollback. Its activation receipt
+SHA-256 is `f3cac4adb0e2d2cbdb5f34eba7fd644c4cf22de588e13623675385a4c0441462`.
+All 33 mechanical postflight checks passed, including current-process Journal
+capture. Live authentication metadata, served UI assets and both signed host
+identities were separately accepted; this does not imply a scheduled Journal sync.
+The Mini retains build `2609000594`. The signed MacBook companion `2609000596`
+is installed, with its sole macOS-added app-root metadata difference reviewed.
+A genuine untouched authentication test performed opaque entry and Return, then
+received a successful OS callback, exited normally and closed its owned processes
+and execution. All seven conditions passed and an independent receipt review
+accepted the result. Native acceptance SHA-256:
+`f5bbbb6378d2173bd017b170683df94897f1b0c8a63da6dc392e0fd9f51b70a4`.
+This proves that bounded native route, not every account login.
+
+An actual human Discord Reply to a fresh shared-bot message recalled its unique
+URL and label in 41.166 seconds on native Astra Max, with no retrieval tools. The
+seed was absent from the receiving transcript baseline, and the final reply was
+verified in the same channel. An earlier mirrored seed was disqualified. Raw
+provider quote bytes were not logged, and this private check does not establish a
+fresh company-agent route or broad persona quality. Root acceptance SHA-256:
+`f6d209e1e8cd01c021756e937a1fc24eedb4e76b1d8d6c5873c4b212a4c30975`.
+
+The initial explanation misread ambiguous wording. A natural clarification later
+delivered the correct explanation after a 126.013-second stream-idle timeout and
+automatic same-model retry, taking 156.087 seconds overall. The inactivity cause
+remains unknown. Recovery and delivery passed; fast or uninterrupted responses
+are not claimed. No source change was justified by this recovered event.
+
+The required hosted workflows qualify each exact published head. Their terminal
+results and artifacts are recorded in the pull request and private publication
+receipts; activation and bounded live acceptance do not stand in for CI.
+
+The reference also includes company-workspace policy examples that preserve the
+assistant's voice without importing private profile material, and Calendar
+helpers that close only a verified, idle process they opened. The live workspace
+policy and a read-only Calendar preservation probe were checked separately; no
+live owned Calendar quit or browser-wide cleanup is claimed by these tests.
+
+### Native transport test lint qualification
+
+Reference `3f1fed76efd40c61b38660b8730a5d24de761796` changes two predicates in
+`src/agents/tools/computer-tool.gateway.test.ts` to read the mock call's third
+argument directly. They select the same requests and preserve every timeout,
+payload and signal assertion. All 44,905 other tracked blobs and modes match
+source `0c5a51f64e28bc34596079df1528dc78db710fe5`. No production source,
+dependency, configuration, workflow, ratchet or native command changed.
+
+The original hosted run for public `1a1f41267a04e81b8692e23ba678f8c994752857`
+passed 32 native commands, then failed command 33 on these two test lint errors.
+Commands 34 and 35 did not run. The original failure and all six digest-verified
+artifacts remain retained. The corrected source passed its 19 owning tests, the
+complete agents lint shard and the two previously unreached commands locally.
+These local results do not replace exact-successor hosted qualification.
+
+The established export retains only the same two fixture-label substitutions
+and compares all 44,906 source entries through an isolated index. Gateway source
+`0c5a51f64e28bc34596079df1528dc78db710fe5`, signed MacBook build `2609000596`
+and their bounded native and Discord acceptance remain unchanged. This test-only
+reference needs no new runtime build, activation or companion installation.
+The existing workflows and original 35-command native plan qualify the published
+successor; terminal evidence is recorded in the pull request and private receipts.
