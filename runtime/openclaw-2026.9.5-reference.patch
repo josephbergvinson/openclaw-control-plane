@@ -41971,7 +41971,7 @@ index 995d34e7096fef2a35e2a3c7a6edfd3b502ce2e2..abdd123a20d2e824edc3055e0e861b39
        ? {
            ...gatewayCallOptionSchemaProperties(),
 diff --git a/src/agents/tools/computer-tool.gateway.test.ts b/src/agents/tools/computer-tool.gateway.test.ts
-index f5b68a94371802b3fbcd4a2dbe889566a285b548..7be58ec660b4d09ed0dfb56c37dd6853aae3ae29 100644
+index f5b68a94371802b3fbcd4a2dbe889566a285b548..74d957d883289e048af73b7cce6b360977025dd2 100644
 --- a/src/agents/tools/computer-tool.gateway.test.ts
 +++ b/src/agents/tools/computer-tool.gateway.test.ts
 @@ -46,6 +46,45 @@ function createHostedComputerTool(options: Parameters<typeof createVisionCompute
@@ -41999,7 +41999,7 @@ index f5b68a94371802b3fbcd4a2dbe889566a285b548..7be58ec660b4d09ed0dfb56c37dd6853
 +        promptRef: "native-credential:v1:fixture",
 +      });
 +      const entry = callGatewayToolMock.mock.calls.find(
-+        ([, , request]) => request.params?.action === "type_secret",
++        (call) => call[2].params?.action === "type_secret",
 +      );
 +      expect(entry).toMatchObject([
 +        target === "gateway" ? "computer.invoke" : "node.invoke",
@@ -42010,7 +42010,7 @@ index f5b68a94371802b3fbcd4a2dbe889566a285b548..7be58ec660b4d09ed0dfb56c37dd6853
 +
 +      await tool.execute("observe-next", { action: "credential_prompts", target });
 +      const observation = callGatewayToolMock.mock.calls.find(
-+        ([, , request]) => request.params?.action === "credential_prompts",
++        (call) => call[2].params?.action === "credential_prompts",
 +      );
 +      expect(observation?.[1].timeoutMs).toBeUndefined();
 +      expect(observation?.[2].timeoutMs).toBeUndefined();

@@ -1245,3 +1245,27 @@ assistant's voice without importing private profile material, and Calendar
 helpers that close only a verified, idle process they opened. The live workspace
 policy and a read-only Calendar preservation probe were checked separately; no
 live owned Calendar quit or browser-wide cleanup is claimed by these tests.
+
+### Native transport test lint qualification
+
+Reference `3f1fed76efd40c61b38660b8730a5d24de761796` changes two predicates in
+`src/agents/tools/computer-tool.gateway.test.ts` to read the mock call's third
+argument directly. They select the same requests and preserve every timeout,
+payload and signal assertion. All 44,905 other tracked blobs and modes match
+source `0c5a51f64e28bc34596079df1528dc78db710fe5`. No production source,
+dependency, configuration, workflow, ratchet or native command changed.
+
+The original hosted run for public `1a1f41267a04e81b8692e23ba678f8c994752857`
+passed 32 native commands, then failed command 33 on these two test lint errors.
+Commands 34 and 35 did not run. The original failure and all six digest-verified
+artifacts remain retained. The corrected source passed its 19 owning tests, the
+complete agents lint shard and the two previously unreached commands locally.
+These local results do not replace exact-successor hosted qualification.
+
+The established export retains only the same two fixture-label substitutions
+and compares all 44,906 source entries through an isolated index. Gateway source
+`0c5a51f64e28bc34596079df1528dc78db710fe5`, signed MacBook build `2609000596`
+and their bounded native and Discord acceptance remain unchanged. This test-only
+reference needs no new runtime build, activation or companion installation.
+The existing workflows and original 35-command native plan qualify the published
+successor; terminal evidence is recorded in the pull request and private receipts.
