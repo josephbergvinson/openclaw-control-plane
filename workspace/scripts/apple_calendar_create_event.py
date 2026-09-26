@@ -15,6 +15,7 @@ from apple_calendar_common import (
     CALENDAR_READ_TIMEOUT_SECONDS,
     applescript_date_lines,
     ensure_calendar_running,
+    run_calendar_cli,
     escape_applescript_text,
     list_calendars,
     now_utc,
@@ -193,4 +194,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_calendar_cli(main))

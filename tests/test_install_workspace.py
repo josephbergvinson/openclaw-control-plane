@@ -83,6 +83,16 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue((self.destination / "runtime/manifest.json").is_file())
 
+    def test_installed_calendar_lifecycle_preserves_app_ownership(self):
+        INSTALLER.install(self.destination, INSTALLER.make_plan(self.destination))
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests",
+             "-p", "test_apple_calendar_lifecycle.py"],
+            cwd=self.destination, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Ran 0 tests", result.stderr)
+
     def test_installed_git_policy_ignores_private_state_and_keeps_source_trackable(self):
         INSTALLER.install(self.destination, INSTALLER.make_plan(self.destination))
         private = ["operator.json", "installation-manifest.json", "config/openclaw.json",

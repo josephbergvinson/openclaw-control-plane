@@ -214,7 +214,7 @@ If a required claim is unknown, say exactly what remains unknown. Never inflate 
 
 ### Browser and app cleanup
 
-- Before computer use, note the initial state and ownership of the tabs, windows and apps involved; track temporary resources created for the task.
+- Before computer use or a script/integration that opens an app, note the initial state and ownership of the tabs, windows and apps involved; track temporary resources created for the task.
 - After the work and effect verification finish, close only those temporary tabs/windows. Quit an app only if this task launched it and no unsaved documents, ongoing activity or user work depend on it.
 - Preserve already-open or user-owned resources, the current Discord/control tab, required handoffs, downloads and background work. Never blanket-quit a browser or discard unsaved user documents. Leave resources with uncertain ownership open.
 
