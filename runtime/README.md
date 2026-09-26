@@ -1134,14 +1134,14 @@ credential entry remain pending. The failed `5e059c5` quoted check and earlier
 images and native acceptance records remain unchanged; this backend correction
 adds no public screenshot gate.
 
-### Assertion documentation and operator progress preference
+### Historical assertion documentation and operator progress preference
 
 Reference `fd4adc694059151a46ec75e7d4ccea4d90bd7315` adds one required `SAFETY` invariant comment above the
 existing internal steering-context assertion. It changes no executable statement,
 type, test, dependency or ratchet baseline. Removing that comment reproduces the
 exact deployed source file. The failed assertion ratchet and 24 subsequent scoped
-static checks passed; the original failed hosted result is retained. Matching
-hosted qualification for this comment-only reference remains pending.
+static checks passed; the original failed hosted result is retained. Its hosted qualification did not complete successfully; the test-type
+successor below carries the current qualification.
 
 The deployed runtime remains `faf116b9fbf17a09a0fd78d14368a8285dac7915`, with its
 accepted build, activation, 33 mechanical checks and bounded live quoted follow-up
@@ -1158,3 +1158,90 @@ narration in the exact destination readback and visible interface. This was a
 configuration-only presentation change, with no runtime source or build change.
 The ten existing images retain their dated UI coverage; the narrator pair shows
 the prior enabled-narration behavior.
+
+### Retained steering test type qualification
+
+Reference `969a5720b4d7e80deb9bad4ec57f82d50ece9fe7` corrects three TypeScript errors in two existing Codex
+steering tests. One assertion establishes that each accepted transcript message
+is a user message before reading its content. Two record-shape assertions narrow
+steering parameters and additional context before the existing quote checks.
+The existing behavioral expectations remain. All 44,904 other tracked blobs and
+modes exactly match reference `fd4adc694059151a46ec75e7d4ccea4d90bd7315`.
+No production source, dependency, schema, configuration default, ratchet baseline
+or workflow changed.
+
+The established export still changes only the two private company fixture labels.
+Full isolated-index reconstruction compares all 44,906 entries and pins the new
+normalized tree and patch digest in the manifest. The earlier unsuccessful hosted
+results remain historical evidence. This test-only source is retained in the
+combined successor below; it was not separately published.
+
+At this qualification checkpoint, the deployed runtime was
+`faf116b9fbf17a09a0fd78d14368a8285dac7915`.
+Its existing build, activation, live Discord acceptance, configuration-only
+narration preference and ten dated visuals retain their prior scope. This test-only
+reference requires no new runtime build or activation. At that checkpoint, the separate MacBook
+opaque credential-entry gate remained unresolved.
+
+### Shared Discord reply context and native credential deadlines
+
+Reference `0c5a51f64e28bc34596079df1528dc78db710fe5` preserves the body of a visible Discord reply to the bot
+when the receiving company workspace has no earlier copy of that message.
+The quoted text remains untrusted context. Visibility filters, media suppression,
+canonical user text and sender authority remain unchanged; private session history
+is not imported. The owning regression reproduces the missing quote before the
+change and passes afterward, alongside shared-context, hydration and bot-filter
+checks.
+
+Native credential entry retains repeated parent, signature and item-custody
+validation, but gives the existing helper 30 seconds to finish. Ordinary
+`type_secret` calls allow 50 seconds for native invocation and 55 seconds for
+transport. The 60-second prompt-admission window, final accessibility checks,
+cancellation and owned-process teardown remain. Closed diagnostic stage codes
+help locate a failure without logging credentials, account aliases, paths or raw
+provider errors. Thirty-six sandboxed native tests and 28 transport tests passed.
+These are source tests; they do not establish real credential entry.
+
+The complete export retains the preceding steering-test type correction. All
+44,906 source entries are compared through an isolated index, with only the two
+established company fixture labels normalized. The existing hosted cadence
+commands additionally run the Discord session-routing and two native-credential
+transport test files. The original 35-command native plan and existing jobs remain.
+Gateway source `0c5a51f64e28bc34596079df1528dc78db710fe5` activated on September 26
+at 19:28:48 UTC in one candidate attempt without rollback. Its activation receipt
+SHA-256 is `f3cac4adb0e2d2cbdb5f34eba7fd644c4cf22de588e13623675385a4c0441462`.
+All 33 mechanical postflight checks passed, including current-process Journal
+capture. Live authentication metadata, served UI assets and both signed host
+identities were separately accepted; this does not imply a scheduled Journal sync.
+The Mini retains build `2609000594`. The signed MacBook companion `2609000596`
+is installed, with its sole macOS-added app-root metadata difference reviewed.
+A genuine untouched authentication test performed opaque entry and Return, then
+received a successful OS callback, exited normally and closed its owned processes
+and execution. All seven conditions passed and an independent receipt review
+accepted the result. Native acceptance SHA-256:
+`f5bbbb6378d2173bd017b170683df94897f1b0c8a63da6dc392e0fd9f51b70a4`.
+This proves that bounded native route, not every account login.
+
+An actual human Discord Reply to a fresh shared-bot message recalled its unique
+URL and label in 41.166 seconds on native Astra Max, with no retrieval tools. The
+seed was absent from the receiving transcript baseline, and the final reply was
+verified in the same channel. An earlier mirrored seed was disqualified. Raw
+provider quote bytes were not logged, and this private check does not establish a
+fresh company-agent route or broad persona quality. Root acceptance SHA-256:
+`f6d209e1e8cd01c021756e937a1fc24eedb4e76b1d8d6c5873c4b212a4c30975`.
+
+The initial explanation misread ambiguous wording. A natural clarification later
+delivered the correct explanation after a 126.013-second stream-idle timeout and
+automatic same-model retry, taking 156.087 seconds overall. The inactivity cause
+remains unknown. Recovery and delivery passed; fast or uninterrupted responses
+are not claimed. No source change was justified by this recovered event.
+
+The required hosted workflows qualify each exact published head. Their terminal
+results and artifacts are recorded in the pull request and private publication
+receipts; activation and bounded live acceptance do not stand in for CI.
+
+The reference also includes company-workspace policy examples that preserve the
+assistant's voice without importing private profile material, and Calendar
+helpers that close only a verified, idle process they opened. The live workspace
+policy and a read-only Calendar preservation probe were checked separately; no
+live owned Calendar quit or browser-wide cleanup is claimed by these tests.

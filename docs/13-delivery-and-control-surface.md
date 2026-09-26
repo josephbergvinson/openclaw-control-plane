@@ -43,9 +43,9 @@ the internal resume and reuses the channel's configured progress card. Private
 worker completion prompts are excluded from narration. Progress does not acquire
 final-delivery custody; stale, replaced or cancelled owners cannot send delayed
 updates. Ninety focused cases pass across the agent and Discord owners. The
-current `5b5942def95c` source retains this repair and passed
-[hosted qualification](../runtime/README.md#current-source-qualification).
-Fresh live channel acceptance remains separate.
+September 23 source `5b5942def95c` retained this repair and passed its
+[dated hosted qualification](../runtime/README.md#september-23-qualified-source).
+Later runtime and live channel receipts retain their separate scope.
 
 ## September 22 native goal delivery repair
 
@@ -127,7 +127,7 @@ Discord received exactly one final response in 117.275 seconds with no stale fai
 warning. The nonzero shell exit in the first check was not used as tool-error proof.
 Hosted qualification of that exact historical public revision remained pending
 at this checkpoint; the current source's separate hosted result is recorded in the
-[runtime package](../runtime/README.md#current-source-qualification). The earlier
+[runtime package](../runtime/README.md#hosted-qualification). The earlier
 completed-child check did not cover this active-child mode mismatch.
 
 ## Additional Discord repair qualification
@@ -177,7 +177,22 @@ A controlled two-worker request retained its acknowledgment after 25.393 seconds
 
 These four checks passed their observed delivery and calendar-state boundaries. The controlled worker test establishes the exercised yield-and-resume path; it does not establish blanket production readiness. The initial failure remains documented above, and the attachment-byte and resumed-typing limits remain explicit.
 
-The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. Actual cleanup behavior and memory savings remain unmeasured.
+The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. That initial policy change alone did not establish actual cleanup behavior or memory savings.
+
+The bundled Calendar helpers now own the app lifecycle around their verified
+operation. A per-user advisory lock serializes helper calls through readback and
+cleanup. A helper launches Calendar hidden in the background only when needed,
+records its process and launch identity, and normally quits only its own unchanged,
+hidden, inactive instance with no visible windows or modified documents. Preexisting
+apps, user takeover, uncertain ownership and incomplete operations are preserved.
+A cleanup failure does not turn a verified event write into an instruction to retry it.
+
+Forty-two focused Calendar tests cover lifecycle and existing read/write behavior.
+The installed public bundle also exercises its lifecycle suite. A real read-only
+probe confirmed that an existing Calendar process stayed open with unchanged
+identity. Actual termination of a newly owned Calendar instance and memory savings
+remain separate live acceptance claims. Browser cleanup likewise preserves existing
+user and control tabs; this repair adds no global app or browser sweeper.
 
 ## Later ownership and access repairs
 
@@ -274,6 +289,23 @@ no second activation or repeated live acceptance is claimed for this test correc
 The manifest records the exact changed test path and both blobs separately from
 the two existing privacy substitutions in another fixture. Consult the hosted
 workflows for the exact reference commit being adopted.
+
+## Replies to a shared bot identity
+
+A bot message may have been posted by a different agent or session. Suppressing
+its quoted body because the author is the bot can leave a first-turn company
+agent with only a message ID and sender, even though the user explicitly replied
+to a deployment request. The Discord context builder uses the existing
+`suppressSelfQuoteBody: false` option to retain that bounded reply text. The shared
+default for other channels is unchanged. Existing visibility filtering still
+applies; quoted text does not become the human's command or acquire authority,
+and self-message attachments are not fetched by this change.
+
+The regression exercises a company agent with no prior history and checks the
+quoted body, current human input, command authority and session routing. These
+source checks do not by themselves establish live delivery or conversational
+quality. Company voice and participation are covered separately in the
+[context policy](08-memory-and-context.md#shared-voice-in-a-separate-company-workspace).
 
 ## Context notices
 
