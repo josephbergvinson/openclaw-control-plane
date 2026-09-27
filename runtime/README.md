@@ -13,8 +13,8 @@ and the boundary between source reconstruction and installation.
 
 ## September 27 recovery and credential corrections
 
-Reference `693b399bf5c6536309529fb0d679b83de306a0a4` corrects four further
-runtime boundaries:
+Reference `0390422beea5265fa8e95e79f204f373e20345b1` retains the following
+recovery corrections:
 
 - Browser credential-binding configuration uses the existing plugin replacement
   owner. Registration adopts the new credential snapshot after retiring the old
@@ -33,22 +33,81 @@ runtime boundaries:
   transcript while the original session incarnation, lifecycle, run and completion
   ownership are rechecked. Ordinary explicit follow-ups retain their prior behavior.
 
-Focused verification passed 566 Gateway reload tests, 30 Browser registration
-and credential tests, 76 task-progress and private-cancellation tests, four
-existing cancellation controls, 58 recovery tests and 200 steering/send tests.
-These groups overlap and are not an aggregate test count. Formatting, focused
-lint and the unchanged file-size rule were checked. The complete Browser policy
-case was moved to a sibling test file with every assertion retained. The existing
-CI test step now includes the new owning regressions.
+The final successor also repairs four boundaries found during continuation:
 
-The aggregate build passed for exact source `693b399bf5c6` on September 27 at
-20:26:57 UTC, with a clean source tree afterward. At this publication checkpoint,
-the recorded live Gateway remains `611db2861e304c42af6bac9aa788b37ad2ab225b`
-and the Mini remains build `2609000597`. Activation and live acceptance of the
-aggregate source remain pending. Earlier hosted results qualify their own dated
-revisions; this public successor requires its own run.
+- Compaction recognizes provider quota, authentication and billing failures and
+  tries only existing eligible accounts on the same provider/model route. Pinned
+  accounts are respected. Exhaustion preserves history and reports the account
+  failure instead of mislabeling it as excessive context. Definite account errors
+  do not repeatedly retry smaller summaries on the same exhausted account.
+- PDF and media reads use the final turn's surviving read-tool authority. Project
+  access carries through to media analysis; sender restrictions, workspace scope,
+  sandbox boundaries and canonical path checks remain enforced.
+- Task notification changes go through the resident Gateway. A successful CLI
+  update therefore changes the same state that later cancellation uses, avoiding
+  stale in-memory policy overwriting the acknowledged setting.
+- A yielded private recovery owner can consume its completed child's result in
+  its existing private transcript. The original logical session admits the work;
+  exact session incarnations, task generation and child receipt remain checked.
+  Durable completion receipts make retry and restart idempotent. Ordinary hidden
+  sessions remain unavailable to public session loading, and existing cleanup
+  retains private receipt custody only until delivery settles or is revoked.
 
-### Apple Passwords native candidate
+The earlier recovery slice passed 566 Gateway reload tests, 30 Browser tests,
+76 task-progress/private-cancellation tests, four cancellation controls,
+58 recovery tests and 200 steering/send tests. The successor passed 86 compaction
+cases, 232 media/read cases, 257 Gateway task-policy cases plus five CLI and four
+protocol cases, and 279 private-continuation/lifecycle cases. Groups overlap;
+these are scoped results at their recorded commits, not a combined test count.
+Final frozen source passed production types, affected test graphs, focused lint,
+formatting and the unchanged file-size rule. New owning regressions are included
+in the existing CI step.
+
+Exact source `0390422beea5` built successfully on September 27 at 22:04:41 UTC.
+The builder updated only generated Workboard asset URLs; the built manifest and
+assets were preserved, and the source manifest was restored to its exact
+pre-build bytes. The original dirty-check receipt and its reconciliation are
+recorded separately. Exact source `0390422beea5` activated at 22:22:37 UTC on
+the originating Gateway, with one candidate attempt and no rollback. Selected
+and loaded identities, health/readiness, connected Discord/Telegram, preserved
+configuration/account order and all 28 job definitions were verified. The native companion process was retained. Journal capture
+continuity was renewed for the new Gateway with an actual capture; the existing
+Journal process was retained and the temporary capture job removed. Export,
+ingest and scheduled sync were not invoked by that check.
+
+A controlled turn on the existing private Discord route created exactly two
+children. Steering updated the active checker without starting a second copy,
+private cancellation stayed private, and the yielded parent resumed once and
+delivered one correct synthesized final on its original route with a sent
+receipt. The visible result took 165.49 seconds, including an intended 75-second
+wait. No generic progress, recovery or private-cancellation notice appeared.
+This external Gateway harness emitted only the final, so initial authored
+progress transport remains unexercised here. A forced restart was not induced
+in production; private recovery across restart is covered by source integration
+tests.
+
+A read-only recovery in an existing long Discord conversation also committed
+its next compaction checkpoint and delivered a substantive answer in three
+confirmed chunks on the original route and session incarnation. It used Astra
+with provider reasoning `max`; no account switch was observed. No routine
+compaction notices appeared, and the larger business goal remained active.
+Recovery took **514.645 seconds**: the checkpoint committed after 411.815 seconds
+and the first visible answer appeared after 513.410 seconds. The checkpoint
+interval includes preflight work; it is not a separately measured compaction
+duration. This result does not establish acceptable interactive latency. The
+first diagnostic's artificial 180-second cap ended during preflight and is
+retained as a failed attempt. The corrected attempt used the existing 1,800-second
+compaction budget. Neither run establishes completion of remaining provider
+access, production assets or the separately prepared, undelivered document
+correction.
+
+The prior candidate `693b399bf5c6` built successfully but was never activated.
+Its hosted build passed; its native-plan run stopped at command 29 on four
+private-cancellation fixture type errors. Those fixture errors are corrected in
+this successor. Earlier hosted results qualify only their own revisions; this
+public successor requires its own complete run.
+
+### Apple Passwords native installation
 
 The same reference includes the native change introduced at
 `3f2d68ed51099856b1ee5035d8776c1f680b6e00`. It recognizes the English Apple
@@ -60,12 +119,14 @@ execution, expiry and single-use checks remain in force.
 
 The focused native suite passed 21 tests, including 12 negative form variants,
 with injected native and credential boundaries in an OS sandbox. Pinned
-SwiftFormat and strict SwiftLint checks passed. Signed Mini candidate build
+SwiftFormat and strict SwiftLint checks passed. Signed Mini build
 `2609000598` and its private worker were built from source `3f2d68ed5109`, not the
-later aggregate source. Its installation, explicit local binding for
-`com.apple.Passwords`, opaque entry and actual unlock remain separate pending
-acceptance steps. This change supports native unlock; it does not establish
-vault-item retrieval or opaque reuse of individual stored site credentials.
+later aggregate source. Build `2609000598` is now installed on the originating
+Mini, with its signature, running identity and explicit local binding for
+`com.apple.Passwords` verified. Opaque credential entry was separately observed;
+actual unlock remains unverified. MacBook installation is not claimed by this
+Mini receipt. Native unlock support does not establish vault-item retrieval or
+opaque reuse of individual stored site credentials.
 
 ## September 27 task delivery correction
 
