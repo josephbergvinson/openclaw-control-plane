@@ -67,6 +67,12 @@ CROSS_AGENT_SESSIONS = (
     'Agents share Gateway-wide session access (default)',
 )
 
+DISCORD_BROAD_MEMBERS = (
+    'channels.discord.allowlisted_groups.broad_members',
+    'warn',
+    'Discord allowlisted groups have broad member access',
+)
+
 INFO_TWO = [
     ('summary.attack_surface', 'info', 'Attack surface summary'),
     ('gateway.tailscale_serve', 'info', 'Tailscale Serve exposure enabled'),
@@ -76,6 +82,17 @@ SECURITY_AUDIT_ACCEPTED = security_audit_json(ACCEPTED_FIVE + INFO_TWO)
 
 # Synthetic additional finding tests the same policy across process boundaries.
 SECURITY_AUDIT_LIVE = security_audit_json([UNENCRYPTED_VOLUME] + ACCEPTED_FIVE + INFO_TWO)
+
+# Reproduce the alert's 0 critical / 8 warn / 3 info shape without private details.
+SECURITY_AUDIT_DISCORD_BROAD_MEMBERS = security_audit_json(
+    ACCEPTED_FIVE + [UNENCRYPTED_VOLUME, CROSS_AGENT_SESSIONS, DISCORD_BROAD_MEMBERS]
+    + INFO_TWO + [('fixture.informational', 'info', 'Additional informational finding')]
+)
+
+SECURITY_ONLY_OUTCOME = (
+    'The operational checks passed, but the audit remains failed pending security review. '
+    'Message delivery was not tested.'
+)
 
 GATEWAY_STATUS_OK = '''
 Runtime: running (pid 93460, state active)
@@ -275,9 +292,52 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
         output = buf.getvalue().strip()
         self.assertEqual(rc, 1)
         self.assertIn("OpenClaw's daily health audit needs attention", output)
-        self.assertIn('security audit found new or changed findings', output)
+        self.assertIn('security audit found issues requiring review', output)
         self.assertNotIn('gateway.public_bind', output)
         self.assert_public_prose(output)
+
+    def test_discord_access_warning_keeps_daily_and_weekly_audits_failed(self):
+        """Healthy operations/receipts cannot make an unaccepted warning green."""
+        responses = {
+            ('gateway', 'status'): GATEWAY_STATUS_OK,
+            ('status', '--deep'): STATUS_DEEP_OK,
+            ('security', 'audit', '--json'): SECURITY_AUDIT_DISCORD_BROAD_MEMBERS,
+            ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_DISCORD_BROAD_MEMBERS,
+            ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
+            ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+            ('cron', 'status', '--json'): json.dumps({'enabled': True, 'triggersEnabled': True}),
+            ('cron', 'list', '--all', '--json'): json.dumps({'jobs': [
+                dict(id=job_id, enabled=True, state=dict(
+                    lastRunAtMs=int(cron.time.time() * 1000),
+                    lastRunStatus='ok', lastDeliveryStatus='delivered',
+                ))
+                for job_id in cron.MAINTENANCE_JOB_IDS
+            ]}),
+        }
+
+        def fake_run(command, **kwargs):
+            return cron.CommandResult(0, responses[tuple(command[1:])])
+
+        for weekly in (False, True):
+            for maintenance in (False, True):
+                with self.subTest(weekly=weekly, maintenance=maintenance), \
+                     mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
+                     mock.patch.object(cron, 'run', side_effect=fake_run) as runner:
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        rc = cron.main(
+                            (['--weekly'] if weekly else []) + (['--maintenance'] if maintenance else [])
+                        )
+                    output = buf.getvalue().strip()
+                    audit_name = 'weekly deep health audit' if weekly else 'daily health audit'
+                    self.assertEqual(rc, 1)
+                    self.assertEqual(
+                        output,
+                        f"OpenClaw's {audit_name} needs attention: the security audit found issues requiring review: "
+                        'broad member access in allowlisted Discord groups (warning). ' + SECURITY_ONLY_OUTCOME,
+                    )
+                    self.assert_public_prose(output)
+                    self.assertEqual(runner.call_count, 5 + int(weekly) + 2 * int(maintenance))
 
     def test_terminal_history_inside_retention_does_not_alert(self):
         """Finished rows waiting out their cleanup window are not the operator's problem."""
@@ -467,6 +527,16 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
              (0, security_audit_json([
                  ('models.weak_tier', 'warn', 'private diagnostic /Users/private-model'),
              ])), 1, 'configured model tier (warning)'),
+            ('Discord member access warning', 'security audit --json',
+             (0, SECURITY_AUDIT_DISCORD_BROAD_MEMBERS),
+             1, 'broad member access in allowlisted Discord groups (warning)'),
+            ('deep Discord member access warning', 'security audit --deep --json',
+             (0, SECURITY_AUDIT_DISCORD_BROAD_MEMBERS),
+             1, 'broad member access in allowlisted Discord groups (warning)'),
+            ('Discord member access critical', 'security audit --json',
+             (0, security_audit_json([
+                 (DISCORD_BROAD_MEMBERS[0], 'critical', 'private diagnostic /Users/private-discord'),
+             ])), 1, 'broad member access in allowlisted Discord groups (critical)'),
             ('unknown private finding', 'security audit --json',
              (0, security_audit_json([
                  ('private diagnostic /Users/private-account', 'critical',
@@ -512,6 +582,16 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                     self.assertNotIn('private diagnostic', proc.stdout)
                     self.assertNotIn('models.weak_tier', proc.stdout)
                     self.assertNotIn(CROSS_AGENT_SESSIONS[0], proc.stdout)
+                    self.assertNotIn(DISCORD_BROAD_MEMBERS[0], proc.stdout)
+                    self.assertNotIn('new or changed', proc.stdout)
+                    if expected_code == 1:
+                        security_only = command.startswith('security audit') and replacement[0] == 0
+                        if security_only:
+                            self.assertIn(SECURITY_ONLY_OUTCOME, proc.stdout)
+                            self.assertNotIn('before relying on scheduled delivery', proc.stdout)
+                        else:
+                            self.assertNotIn(SECURITY_ONLY_OUTCOME, proc.stdout)
+                            self.assertIn('No healthy result was recorded', proc.stdout)
                     self.assertEqual(proc.stderr, '')
                     receipt_paths = list(receipts.glob('*.json'))
                     self.assertEqual(len(receipt_paths), 1)
@@ -535,6 +615,71 @@ class GatewayStatusParsingTests(unittest.TestCase):
 
 
 class SecurityFailurePresentationTests(unittest.TestCase):
+    def test_discord_warning_description_uses_only_the_known_check_id(self):
+        data = json.loads(security_audit_json([
+            (DISCORD_BROAD_MEMBERS[0], 'warn', 'private title /Users/private-discord'),
+        ]))
+        data['findings'][0].update(
+            detail='private detail /Volumes/private-config',
+            remediation='private remediation',
+            unknownField='private unknown field',
+        )
+        output = json.dumps(data)
+        _, blocker = cron.classify_security(output, '')
+        self.assertEqual(
+            cron.public_security_problem(output, '', blocker),
+            'the security audit found issues requiring review: '
+            'broad member access in allowlisted Discord groups (warning)',
+        )
+
+    def test_discord_rendered_title_is_recognized_but_not_accepted(self):
+        for severity, label in (('warn', 'warning'), ('critical', 'critical')):
+            with self.subTest(severity=severity):
+                text = f'Security audit\n{severity.upper()} {DISCORD_BROAD_MEMBERS[2]}\n'
+                _, blocker = cron.classify_security(None, text)
+                self.assertIsNotNone(blocker)
+                self.assertEqual(
+                    cron.public_security_problem(None, text, blocker),
+                    'the security audit found issues requiring review: '
+                    f'broad member access in allowlisted Discord groups ({label})',
+                )
+
+    def test_unknown_id_or_rendered_title_does_not_borrow_the_discord_description(self):
+        for json_output, text_output in (
+            (security_audit_json([('private unknown id', 'warn', DISCORD_BROAD_MEMBERS[2])]), ''),
+            (None, f'Security audit\nWARN {DISCORD_BROAD_MEMBERS[2]} /Users/private-account\n'),
+        ):
+            with self.subTest(json_output=json_output):
+                _, blocker = cron.classify_security(json_output, text_output)
+                self.assertEqual(
+                    cron.public_security_problem(json_output, text_output, blocker),
+                    'the security audit found issues requiring review: an unrecognized security finding (warning)',
+                )
+
+    def test_operational_failures_never_claim_the_operational_checks_passed(self):
+        arguments = dict(
+            weekly=True, gateway_ok=True, status_ok=True,
+            security_problems=['the security audit found issues requiring review'],
+            deep_security_ok=True, task_maintenance_blocker=None,
+        )
+        cases = [
+            ({'gateway_ok': False}, 'gateway RPC check failed'),
+            ({'status_ok': False}, 'full runtime and Discord check did not complete'),
+            ({'deep_security_ok': False}, 'deep security check did not complete'),
+            ({'task_maintenance_blocker': 'task_maintenance_apply=private diagnostic'},
+             'task-ledger maintenance did not complete'),
+            ({'task_maintenance_blocker': 'task_ledger_repair_incomplete private diagnostic'},
+             'task-ledger maintenance left active residue'),
+            ({'security_problems': []}, 'one or more required checks did not complete'),
+        ]
+        for changes, problem in cases:
+            with self.subTest(changes=changes):
+                message = cron.public_failure_message(**(arguments | changes))
+                self.assertIn(problem, message)
+                self.assertIn('No healthy result was recorded', message)
+                self.assertNotIn('operational checks passed', message)
+                self.assertNotIn('private diagnostic', message)
+
     def test_summary_mismatch_does_not_present_an_untrusted_subset(self):
         data = json.loads(security_audit_json([
             ('models.weak_tier', 'warn', 'private model configuration'),
@@ -581,6 +726,23 @@ class SecurityFindingsAreNamedAndAcceptedPerSeverity(unittest.TestCase):
         self.assertIn('gateway.auth_token_missing', blocker)
         self.assertIn('warn=7', blocker)
         self.assertIn('critical=0 warn=7 info=2', note)
+
+    def test_discord_warning_remains_unaccepted_in_ordinary_and_deep_audits(self):
+        findings = cron.parse_security_findings_json(SECURITY_AUDIT_DISCORD_BROAD_MEMBERS)
+        self.assertEqual(len(findings), 11)
+        self.assertEqual(
+            cron.unaccepted_security_findings(findings),
+            [cron.SecurityFinding(*DISCORD_BROAD_MEMBERS)],
+        )
+        self.assertNotIn(DISCORD_BROAD_MEMBERS[0], cron.ACCEPTED_SECURITY_FINDINGS)
+        for prefix in ('', 'deep_'):
+            with self.subTest(prefix=prefix):
+                note, blocker = cron.classify_security(SECURITY_AUDIT_DISCORD_BROAD_MEMBERS, '', prefix=prefix)
+                self.assertEqual(note, 'critical=0 warn=8 info=3 source=json')
+                self.assertEqual(
+                    blocker,
+                    f'{prefix}unaccepted_security_audit_findings critical=0 warn=8 {DISCORD_BROAD_MEMBERS[0]}',
+                )
 
     def test_explicit_fixture_volume_warning_acceptance_is_severity_bound(self):
         """Authorised 2026-07-23 in the OWC primary-storage amendment."""

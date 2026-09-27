@@ -11,6 +11,84 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 27 focused reliability repair
+
+Reference `939bf80b795d9b1addefdaaf39415628e3481af6` is a focused successor to
+`3f1fed76efd40c61b38660b8730a5d24de761796`. The complete patch retains the
+earlier custom source and changes thirteen paths in this slice.
+
+- The yielded-task owner no longer republishes identical progress every three
+  minutes. It records content only after confirmed delivery, retains the initial
+  notice and actual state changes, retries unsuccessful delivery, and rechecks
+  owner identity and content before dispatch. Authored foreground updates remain
+  editable. Completion and recovery keep their existing owners.
+- Explicit `sessions_send` steering now acknowledges queue admission without a
+  transcript-commit deadline. The previous thirty-second wait could cancel an
+  accepted correction before a busy child reached its next tool boundary.
+  Ordinary completion reports retain their commit and delivery checks.
+- `web_fetch` full-output files and cached handles stay within the effective host
+  workspace when file access is restricted to that workspace. This fixes a tool
+  returning a file that its paired read tool could not open; file permissions,
+  untrusted-content markings and workspace isolation remain enforced.
+- The macOS companion constructs its local Gateway endpoint from the resolved
+  SecretRef credential, so stale ambient credentials cannot replace that result.
+  The three pure credential-selection tests pass; installed-app evidence is recorded below.
+
+Focused regressions reproduce the unchanged checkpoint, delayed steering boundary
+and unreadable full-output cases. CI runs their owning registered-tool and
+execution suites explicitly, in addition to the retained native plan and build.
+The public Linux workflow does not execute Swift tests. The retained source's
+macOS CI selects the new credential suite through its full default-profile run;
+the three focused Swift results above were obtained separately on macOS.
+The export compares all 44,908 tracked source entries against the reviewed commit;
+only the established two fixture-label substitutions differ.
+
+The exact Gateway source activated on September 27 at 12:35:28 UTC, with one
+candidate attempt and no rollback. The activation owner verified loaded Gateway
+and node identities, successful health/readiness responses and preserved
+configuration. Capture continuity was renewed for the current Gateway process;
+the original Journal process was preserved and the temporary capture job removed.
+That check did not invoke scheduled export or ingest. Earlier acceptance remains
+dated under its original identities.
+A controlled turn bound to an existing private Discord QA route delivered one
+initial state notice and one resumed-parent final, with no identical repeat during
+the 205 seconds from the initial notice to child completion. Explicit steering
+was durably recorded and consumed; the parent and child succeeded and delivery
+settled. This was Gateway-initiated diagnostic input, not a human-origin ingress
+or ordinary writing-quality test. Its CLI-authored foreground acknowledgment was
+not observed in Discord, so that path is not claimed here. A separate company-agent
+fetch/read completed in 21.1 seconds and confirmed the workspace output was
+readable; its bounded read does not establish full-page comprehension. Hosted
+results must belong to the exact published revision.
+
+The originating Mini separately runs signed build `2609000597` from this source.
+A fresh native connection and Gateway-scoped credential-cache update followed
+app launch; 103 seconds of observation found no token mismatch. After Gateway
+activation, a fresh scoped-cache update matched the Gateway credential and no
+token mismatch appeared in the 241-second observation, without another app restart.
+One macOS-added
+app-root metadata attribute was reviewed without changing contents or ownership.
+This verifies the repaired local credential-selection path; it does not repeat
+account credential-entry acceptance. The MacBook retains its dated build
+`2609000596` acceptance. Receipt hashes and exact scopes are in the manifest.
+
+Ordinary private workers do not stream their prose into the requester thread.
+No new relay or periodic model polling is introduced. Long work that needs useful
+intermediate updates should return bounded, reviewable milestones for the parent
+to explain and continue; runtime state notices alone are liveness information.
+The AGENTS and TOOLS templates preserve meaningful foreground checkpoints and
+make that delegation responsibility explicit without adding polling or granting
+workers a public messaging route. The company tool example also points current
+status research to task-bound company correspondence when that access is already
+available, preserving account provenance and distinguishing receipt, review and
+approval. It does not grant a new mail route or include personal accounts.
+
+The workspace health-audit helper also includes the portable reporting correction
+from the same day: recognized Discord access warnings are described accurately,
+and a security-only failure does not claim message delivery failed. An operator's
+private, exact-posture risk acceptance is not installed for adopters. The exported
+helper continues to obtain accepted findings from explicit adopter policy.
+
 ## September 22 upgrade
 
 The upgrade targets official `v2026.9.5`, commit

@@ -13,6 +13,23 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 27 focused reliability changes
+
+Source `939bf80b795d9b1addefdaaf39415628e3481af6` changes the existing progress,
+steering, file-output and native endpoint owners. Confirmed unchanged task notices
+are suppressed; explicit steering retains admission past a slow tool boundary;
+workspace-scoped fetch output remains readable by its paired file tool; native
+local endpoints use the resolved SecretRef credential. Each change has a focused
+regression at its owning boundary. The complete custom patch and all historical
+qualification evidence remain intact.
+
+The [focused record](../runtime/README.md#september-27-focused-reliability-repair)
+separates source checks, accepted Gateway and Mini installation, and real-channel
+acceptance. It also
+explains the ordinary private-worker progress boundary and the portable health
+audit reporting correction. No new monitoring service or automatic forwarding of
+private worker prose is added.
+
 ## September 22 upgrade
 
 The 2026.9.5 port starts from official commit
