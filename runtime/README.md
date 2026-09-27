@@ -11,6 +11,62 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 27 recovery and credential corrections
+
+Reference `693b399bf5c6536309529fb0d679b83de306a0a4` corrects four further
+runtime boundaries:
+
+- Browser credential-binding configuration uses the existing plugin replacement
+  owner. Registration adopts the new credential snapshot after retiring the old
+  Browser generation, without requiring a Gateway restart. Browser control
+  sessions can be interrupted by that replacement; adding an alias does not sign
+  in to its site. Other Browser settings retain their declared reload policies.
+- Mechanical recovery notices follow the existing Discord tool-progress setting
+  and are checked again at dispatch. Private child recovery stays with its parent
+  even when progress is enabled. Persisted notice debt retires without repeating
+  the recovered work; authored updates and final results keep their existing paths.
+- Generic cancellation delivery defers to the exact private child's lifecycle
+  owner. Ordinary operator cancellation receipts remain available. This prevents
+  inherited thread destinations from exposing private supporting-task notices.
+- Steering finds the registered recovery run rather than opening a competing
+  turn on its original child session. Input is recorded in the current private
+  transcript while the original session incarnation, lifecycle, run and completion
+  ownership are rechecked. Ordinary explicit follow-ups retain their prior behavior.
+
+Focused verification passed 566 Gateway reload tests, 30 Browser registration
+and credential tests, 76 task-progress and private-cancellation tests, four
+existing cancellation controls, 58 recovery tests and 200 steering/send tests.
+These groups overlap and are not an aggregate test count. Formatting, focused
+lint and the unchanged file-size rule were checked. The complete Browser policy
+case was moved to a sibling test file with every assertion retained. The existing
+CI test step now includes the new owning regressions.
+
+The aggregate build passed for exact source `693b399bf5c6` on September 27 at
+20:26:57 UTC, with a clean source tree afterward. At this publication checkpoint,
+the recorded live Gateway remains `611db2861e304c42af6bac9aa788b37ad2ab225b`
+and the Mini remains build `2609000597`. Activation and live acceptance of the
+aggregate source remain pending. Earlier hosted results qualify their own dated
+revisions; this public successor requires its own run.
+
+### Apple Passwords native candidate
+
+The same reference includes the native change introduced at
+`3f2d68ed51099856b1ee5035d8776c1f680b6e00`. It recognizes the English Apple
+Passwords locked view after **Use Password**, requiring the locked heading,
+lock image, complete local account instruction and a single secure field in the
+same native group. It rejects vault-item editors, unrelated fields and incomplete
+form evidence. Apple signing, host identity, focused-field identity, active
+execution, expiry and single-use checks remain in force.
+
+The focused native suite passed 21 tests, including 12 negative form variants,
+with injected native and credential boundaries in an OS sandbox. Pinned
+SwiftFormat and strict SwiftLint checks passed. Signed Mini candidate build
+`2609000598` and its private worker were built from source `3f2d68ed5109`, not the
+later aggregate source. Its installation, explicit local binding for
+`com.apple.Passwords`, opaque entry and actual unlock remain separate pending
+acceptance steps. This change supports native unlock; it does not establish
+vault-item retrieval or opaque reuse of individual stored site credentials.
+
 ## September 27 task delivery correction
 
 Reference `611db2861e304c42af6bac9aa788b37ad2ab225b` corrects two gaps left by
