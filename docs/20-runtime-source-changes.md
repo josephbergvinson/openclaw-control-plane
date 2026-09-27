@@ -15,7 +15,13 @@ workstreams, rather than only the final Discord changes.
 
 ## September 27 recovery and credential corrections
 
-Current reference `0390422beea5265fa8e95e79f204f373e20345b1` retains Browser
+Current reference `9c062db6a307f5189ac1a06c3f496114b2499d52` adds only the required
+`SAFETY` explanation beside an existing guarded private-transcript cast. It has
+no executable changes from the activated Gateway source `0390422beea5`; local
+assertion, formatting, file-size and inexpensive native-plan guards passed. Its
+complete hosted qualification is separate. No build or deployment was repeated.
+
+The retained behavioral source `0390422beea5265fa8e95e79f204f373e20345b1` repairs Browser
 credential replacement, private recovery notice/cancellation ownership and
 steering through the active private transcript. It also adds account-aware
 compaction, final-turn media read authority, resident Gateway task notification
