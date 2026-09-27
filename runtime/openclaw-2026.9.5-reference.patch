@@ -3843,10 +3843,10 @@ index ae67f122a359090c911c6230936a20498e8e821b..83265d9b9e75e2f2f52fbebeb3ffecd7
  target has already delivered its final reply to the source conversation through
  `message`, OpenClaw skips the duplicate channel announcement. Progress messages
 diff --git a/docs/concepts/streaming.md b/docs/concepts/streaming.md
-index 4fd67b29d2b8c116bc37dbcc3522fb0e21eeeba0..b5fc29ae262e2ccf2d14336445af0eb8a2141684 100644
+index 4fd67b29d2b8c116bc37dbcc3522fb0e21eeeba0..4b6a7079556d16e28e19d25fc0d4e676654800e0 100644
 --- a/docs/concepts/streaming.md
 +++ b/docs/concepts/streaming.md
-@@ -278,9 +278,10 @@ Slack-only:
+@@ -278,9 +278,13 @@ Slack-only:
    enabled.
  - `progress` is quiet by default: headline, authored commentary and reasoning,
    plan milestones, and approval requests. Intermediate tool failures and nonzero
@@ -3857,10 +3857,13 @@ index 4fd67b29d2b8c116bc37dbcc3522fb0e21eeeba0..b5fc29ae262e2ccf2d14336445af0eb8
 +  progress-card renderers; `streaming.progress.toolProgress: true` adds the
 +  rolling tool log, including failed tool rows. Final task errors still use
 +  normal delivery when tool progress is off.
++- The same `toolProgress` preference covers automatic background-task start
++  and activity notices after the assistant yields. Turning it off preserves
++  authored updates, questions, approvals, and final results.
  - `progress` mode deletes the status draft once the final answer is delivered,
    so busy channels keep no orphaned tool log above the reply. Error finals keep
    the draft as the record of the failed turn.
-@@ -378,7 +379,9 @@ Supported surfaces:
+@@ -378,7 +382,9 @@ Supported surfaces:
    normally.
  - `streaming.preview.toolProgress` (default `true`) controls tool-progress
    lines in `partial` and `block` previews; `streaming.progress.toolProgress`
@@ -37166,7 +37169,7 @@ index 4a5dbf48c927551db50dd067bb68b6af47e31df6..a68b04318e83e7e057958793fe965a05
          requesterAgentId: params.requesterAgentId,
          requesterRunTimeoutSeconds: params.requesterRunTimeoutSeconds,
 diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
-index 258678ab6829ade42e090701c643889459777fe1..13675b3c9e88154accfe8b56a37f7ef9d8aa907d 100644
+index 258678ab6829ade42e090701c643889459777fe1..fea5bf8fa413c0c1a852ce8555ed1db3d12134fb 100644
 --- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 +++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 @@ -20,6 +20,7 @@ import {
@@ -37185,7 +37188,41 @@ index 258678ab6829ade42e090701c643889459777fe1..13675b3c9e88154accfe8b56a37f7ef9
    requesterAgentId?: string;
    requesterRunTimeoutSeconds?: number;
    targetRequesterSessionKey: string;
-@@ -394,6 +396,7 @@ export async function sendSubagentAnnounceDirectly(params: {
+@@ -195,16 +197,18 @@ export async function sendSubagentAnnounceDirectly(params: {
+       params.targetRequesterSessionKey,
+       params.requesterAgentId,
+     );
++    const expectedRequesterSessionId = parentOnly
++      ? params.completionRequesterSessionId
++      : params.requesterPresentation?.sessionId;
+     if (
+-      parentOnly &&
+-      (!params.completionRequesterSessionId ||
+-        requesterActivity.sessionId !== params.completionRequesterSessionId)
++      (parentOnly && !expectedRequesterSessionId) ||
++      (expectedRequesterSessionId && requesterActivity.sessionId !== expectedRequesterSessionId)
+     ) {
+       return {
+         delivered: false,
+         path: "none",
+         reason: "completion_handoff_unavailable",
+-        error: "private completion requester session is unavailable or replaced",
++        error: "completion requester session is unavailable or replaced",
+         terminal: true,
+         disposition: "intentional_non_delivery",
+       };
+@@ -358,7 +362,9 @@ export async function sendSubagentAnnounceDirectly(params: {
+     // A private completion gets its own serialized turn. Steering into a public
+     // turn would inherit that turn's delivery policy and expose child output.
+     const directAgentParams: Record<string, unknown> = {
+-      ...(parentOnly ? { expectedExistingSessionId: params.completionRequesterSessionId } : {}),
++      ...(expectedRequesterSessionId
++        ? { expectedExistingSessionId: expectedRequesterSessionId }
++        : {}),
+       sessionKey: canonicalRequesterSessionKey,
+       timeout: params.requesterRunTimeoutSeconds,
+       message: params.triggerMessage,
+@@ -394,6 +400,7 @@ export async function sendSubagentAnnounceDirectly(params: {
            }
            return await runAnnounceAgentCall({
              agentParams: directAgentParams,
@@ -37285,7 +37322,7 @@ index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7
 +  });
 +}
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
-index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330abe432117e 100644
+index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..7358f0a77ae64af078ae96a55cfd0304c3266442 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
 @@ -9,6 +9,8 @@ import {
@@ -37297,7 +37334,7 @@ index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330ab
  import { killSessionSubagentRuns } from "../registry/subagent-control-kill.js";
  import { useSubagentControlFixture } from "../registry/subagent-control.test-support.js";
  import { subagentRuns } from "../registry/subagent-registry-memory.js";
-@@ -260,3 +262,92 @@ it.each(["batch", "ordinary"] as const)(
+@@ -260,3 +262,100 @@ it.each(["batch", "ordinary"] as const)(
      }
    },
  );
@@ -37369,7 +37406,8 @@ index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330ab
 +    const [, params, options] = args;
 +    presentation = options?.requesterPresentation;
 +    expect(presentation).toBeDefined();
-+    expect(params?.deliver).toBe(false);
++    expect(params?.deliver).toBe(true);
++    expect(params?.expectedExistingSessionId).toBe("presentation-parent-session");
 +    presentation!.assertCurrent();
 +    adopted = adoptPausedSubagentRunForFollowUp({
 +      childSessionKey: String(params?.sessionKey),
@@ -37381,7 +37419,14 @@ index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330ab
 +    options?.onAccepted?.([true, { status: "accepted", runId: params?.idempotencyKey }]);
 +    options?.onExecutionStarted?.();
 +    presentation!.assertCurrent();
-+    return { status: "ok", inputProcessingCompleted: true, result: { payloads: [] } } as T;
++    return {
++      status: "ok",
++      inputProcessingCompleted: true,
++      result: {
++        payloads: [{ text: "The requested work could not complete." }],
++        deliveryStatus: { status: "sent", resultCount: 1 },
++      },
++    } as T;
 +  };
 +  setSubagentAnnounceDeliveryDepsForTest({ dispatchGatewayMethodInProcess: dispatch });
 +  expect(markSubagentRunTerminated({ runId: "presentation-child", reason: "killed" })).toBe(1);
@@ -37391,7 +37436,7 @@ index c1960016b15edac1281f0b0ada7f8e24d10c7c9f..d6f49a4fe15a523df0c0e217e1e330ab
 +  expect(() => presentation!.assertCurrent()).toThrow("owner changed");
 +});
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
-index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa850a8981 100644
+index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..c5368109fdb921552f125f561fe9a71e19a029dd 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts
 @@ -25,6 +25,7 @@ import { trackAsyncWork } from "../../../shared/async-work-scope.js";
@@ -37402,11 +37447,11 @@ index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa
  import type { AgentCommandOpts } from "../../command/types.js";
  import { prepareEmbeddedAttemptTimeout } from "../../embedded-agent-runner/run/attempt-timeout-prepare.js";
  import { createEmbeddedRunLaneController } from "../../embedded-agent-runner/run/lane-controller.js";
-@@ -308,6 +309,96 @@ describe("requester settle dispatch deadline", () => {
+@@ -308,6 +309,162 @@ describe("requester settle dispatch deadline", () => {
      },
    );
  
-+  it("retains original-request presentation through private admission and adoption, then revokes it", async () => {
++  it("delivers the yielded requester's final after private children while retaining adoption and revocation guards", async () => {
 +    const context = createContext();
 +    const child = settledChild();
 +    child.completionTarget = "parent";
@@ -37420,37 +37465,60 @@ index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa
 +      pauseReason: "sessions_yield" as const,
 +    };
 +    registryRead.getLatestLiveSubagentRunByChildSessionKey.mockReturnValue(pausedRequester);
++    const source = {
++      channel: "discord",
++      to: "channel:123",
++      accountId: "company",
++      threadId: "456",
++    };
 +    let presentation: RequesterPresentation | undefined;
 +    const active = createDeferredCore();
 +    const finish = createDeferredCore();
-+    startTurn.mockImplementation(async ({ preflight, io, requesterPresentation }) => {
-+      presentation = requesterPresentation;
-+      const request = preflight.request;
-+      expect(request.deliver).toBe(false);
-+      expect(request.requesterPresentation).toBeUndefined(); // never a wire field
-+      expect(presentation?.source).toMatchObject({ channel: "discord", to: "channel:123" });
-+      presentation?.assertCurrent();
-+      io.emitAcceptance([true, { runId: request.idempotencyKey, status: "accepted" }], {
-+        runId: request.idempotencyKey,
-+      });
-+      // The admitted continuation adopts the paused requester task before model execution.
-+      registryRead.getLatestLiveSubagentRunByChildSessionKey.mockReturnValue({
-+        ...pausedRequester,
-+        runId: request.idempotencyKey,
-+        generation: 2,
-+        createdAt: 4_000,
-+        pauseReason: undefined,
-+      });
-+      io.emitExecutionStarted?.();
-+      presentation?.assertCurrent();
-+      active.resolve();
-+      await finish.promise;
-+      presentation?.assertCurrent();
-+      io.emitFinal([
-+        true,
-+        { status: "ok", inputProcessingCompleted: true, result: { payloads: [] } },
-+      ]);
-+    });
++    startTurn.mockImplementation(
++      async ({ preflight, io, requesterPresentation, privateCompletion }) => {
++        presentation = requesterPresentation;
++        const request = preflight.request;
++        expect(request).toMatchObject({
++          deliver: true,
++          expectedExistingSessionId: "requester-session",
++          ...source,
++          sourceReplyDeliveryMode: "automatic",
++        });
++        expect(request.message).toContain("requires your visible final answer");
++        expect(request.message).not.toContain("Your final reply stays internal");
++        expect(privateCompletion).not.toBe(true);
++        expect(request.requesterPresentation).toBeUndefined(); // never a wire field
++        expect(presentation?.source).toEqual(source);
++        presentation?.assertCurrent();
++        io.emitAcceptance([true, { runId: request.idempotencyKey, status: "accepted" }], {
++          runId: request.idempotencyKey,
++        });
++        // The admitted continuation adopts the paused requester task before model execution.
++        registryRead.getLatestLiveSubagentRunByChildSessionKey.mockReturnValue({
++          ...pausedRequester,
++          runId: request.idempotencyKey,
++          generation: 2,
++          createdAt: 4_000,
++          pauseReason: undefined,
++        });
++        io.emitExecutionStarted?.();
++        presentation?.assertCurrent();
++        active.resolve();
++        await finish.promise;
++        presentation?.assertCurrent();
++        io.emitFinal([
++          true,
++          {
++            status: "ok",
++            inputProcessingCompleted: true,
++            result: {
++              payloads: [{ text: "Reviewed requester answer" }],
++              deliveryStatus: { status: "sent", resultCount: 1 },
++            },
++          },
++        ]);
++      },
++    );
 +    setSubagentAnnounceDeliveryDepsForTest({
 +      getRuntimeConfig: () => ({}),
 +      loadRequesterSessionEntry: () => ({
@@ -37470,7 +37538,7 @@ index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa
 +      () =>
 +        maybeWakeRequesterAfterAllChildrenSettled({
 +          requesterSessionKey: REQUESTER_KEY,
-+          requesterOrigin: { channel: "discord", to: "channel:123" },
++          requesterOrigin: source,
 +          settledEntry: child,
 +          transitionBatch: (_batch, state) => {
 +            child.requesterSettleWake = state;
@@ -37488,12 +37556,55 @@ index 8cc3f76dc22092e41adae04806e76e8a5e6f5825..b98caa65de9617644d17c66afb6c9efa
 +      expect(() => presentation!.assertCurrent()).not.toThrow();
 +      finish.resolve();
 +      await expect(wake).resolves.toBe(true);
-+      expect(completeBatch).toHaveBeenCalledOnce();
++      expect(completeBatch).toHaveBeenCalledExactlyOnceWith(
++        [child],
++        1,
++        expect.objectContaining({ delivered: true, requesterVisibleFinalDelivered: true }),
++      );
 +      expect(() => presentation!.assertCurrent()).toThrow("owner changed");
 +    } finally {
 +      finish.resolve();
 +      await wake;
 +    }
++  });
++
++  it("rejects a replaced requester before admitting a yielded public final", async () => {
++    setSubagentAnnounceDeliveryDepsForTest({
++      getRuntimeConfig: () => ({}),
++      loadRequesterSessionEntry: () => ({
++        cfg: {},
++        canonicalKey: REQUESTER_KEY,
++        agentId: "main",
++        entry: { sessionId: "replacement", updatedAt: 1 },
++      }),
++      getRequesterSessionActivity: () => ({ sessionId: "replacement", isActive: false }),
++    });
++    const source = { channel: "discord", to: "channel:123" };
++    const result = await sendSubagentAnnounceDirectly({
++      requesterSessionKey: REQUESTER_KEY,
++      targetRequesterSessionKey: REQUESTER_KEY,
++      requesterIsSubagent: false,
++      expectsCompletionMessage: false,
++      requireVisibleReply: true,
++      sourceTool: "subagent_settle",
++      triggerMessage: "Synthesize the original request",
++      directOrigin: source,
++      directIdempotencyKey: "requester-resume",
++      requesterPresentation: {
++        runId: "requester-resume",
++        sessionKey: REQUESTER_KEY,
++        sessionId: "requester-session",
++        source,
++        assertCurrent: vi.fn(),
++      },
++    });
++    expect(result).toMatchObject({
++      delivered: false,
++      reason: "completion_handoff_unavailable",
++      disposition: "intentional_non_delivery",
++      terminal: true,
++    });
++    expect(startTurn).not.toHaveBeenCalled();
 +  });
 +
    it("preserves the final attempt when its Gateway closes during runtime loading", async () => {
@@ -37567,7 +37678,7 @@ index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..4bc2d627bc927ab6192872d0ff0cf390
    ].join("\n");
  }
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
-index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..ca81e0245493e3e5666fc4013ef9cdbb855b0183 100644
+index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..73a6313167870099614942f66660b52dcbe8feae 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
 @@ -1,5 +1,6 @@
@@ -37578,7 +37689,7 @@ index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..ca81e0245493e3e5666fc4013ef9cdbb
  import {
    sessionStore,
    registryRuntimeMock,
-@@ -15,8 +16,108 @@ import {
+@@ -15,8 +16,169 @@ import {
  
  const { maybeWakeRequesterAfterAllChildrenSettled } =
    await import("./subagent-announce.requester-settle-wake.js");
@@ -37586,6 +37697,67 @@ index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..ca81e0245493e3e5666fc4013ef9cdbb
  
  describe("maybeWakeRequesterAfterAllChildrenSettled results", () => {
 +  afterEach(() => vi.restoreAllMocks());
++
++  it.each([
++    { name: "no route", requester: "agent:main:main", yielded: true, origin: undefined },
++    {
++      name: "non-message route",
++      requester: "agent:main:main",
++      yielded: true,
++      origin: { channel: "webchat", to: "channel:123" },
++    },
++    {
++      name: "missing target",
++      requester: "agent:main:main",
++      yielded: true,
++      origin: { channel: "discord" },
++    },
++    {
++      name: "nested requester",
++      requester: "agent:main:subagent:parent",
++      yielded: true,
++      origin: { channel: "discord", to: "channel:123" },
++    },
++    {
++      name: "non-yielded requester",
++      requester: "agent:main:main",
++      yielded: false,
++      origin: { channel: "discord", to: "channel:123" },
++    },
++  ])("keeps the private aggregate internal for $name", async ({ requester, yielded, origin }) => {
++    sessionStore[requester] = { sessionId: "sess-main" };
++    const children = ["run-a", "run-b"].map((runId) =>
++      makeSettledChild({
++        runId,
++        requesterSessionKey: requester,
++        completionTarget: "parent",
++        completionRequesterSessionId: "sess-main",
++        completion: { required: true, resultText: "private child finding" },
++        requesterSettleWake: {
++          status: "pending",
++          attemptCount: 0,
++          ...(yielded ? { requesterYieldBatch: true, rearmGeneration: 1 } : {}),
++        },
++      }),
++    );
++    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue(children);
++    expect(
++      await maybeWakeRequesterAfterAllChildrenSettled(
++        wakeParams({
++          requesterSessionKey: requester,
++          requesterOrigin: origin,
++          settledEntry: children[1],
++        }),
++      ),
++    ).toBe(true);
++    expect(deliveredCallArg()).toMatchObject({
++      completionTarget: "parent",
++      completionRequesterSessionId: "sess-main",
++      triggerMessage: expect.stringContaining("Your final reply stays internal"),
++    });
++    expect(deliveredCallArg()).not.toHaveProperty("requesterPresentation");
++    expect(deliveredCallArg()).not.toHaveProperty("requireVisibleReply");
++  });
 +
 +  it.each([false, true])(
 +    "reports a yielded child as interim, then delivers its same-session completion (completed sibling: %s)",
@@ -37811,7 +37983,7 @@ index 6f39d2dba0008c9b86805ce2b1d67a8fe382cdb6..fcaaa7c18253542dce8dc9322a4275d2
      const woke = await maybeWakeRequesterAfterAllChildrenSettled(
        wakeParams({ requesterSessionKey: "agent:main:cron:daily-report" }),
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
-index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946efa4108f6 100644
+index 63f576a01723851c80a08d35c4d9b506cc04961c..bce220a1674e10e5fba68e7572e8fbe8c2e02b5f 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 @@ -212,8 +212,12 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
@@ -37829,7 +38001,17 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946e
      return false;
    }
  
-@@ -429,7 +433,22 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -411,8 +415,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+       getLatestSubagentRunByChildSessionKey,
+     }),
+   );
+-  // Delivered children remain in yield cohorts. One private result makes the
+-  // aggregate private; public siblings keep their individual completion route.
++  // Child results stay bound to the requester that privately consumed them.
+   const privateRows = completionRows.filter((entry) => entry.completionTarget === "parent");
+   const parentOnly = privateRows.length > 0;
+   if (
+@@ -429,15 +432,43 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
      finalizeRequesterAttachment(batchRunIds, selectedState);
      return false;
    }
@@ -37853,17 +38035,30 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946e
    const requesterSessionOrigin = normalizeDeliveryContext(params.requesterOrigin);
    const directOrigin = resolveAnnounceOrigin(requesterEntry, requesterSessionOrigin);
    const completionChannel = normalizeMessageChannel(directOrigin?.channel);
-@@ -437,7 +456,8 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
++  // A top-level yielded request still owes its own synthesized reply. Child
++  // privacy must not turn that original request's final into an internal reply.
++  const requesterPresentationOrigin =
++    parentOnly &&
++    requesterYieldedAfterDelivery &&
++    requesterDepth === 0 &&
++    completionChannel &&
++    isDeliverableMessageChannel(completionChannel) &&
++    directOrigin?.to
++      ? directOrigin
++      : undefined;
++  const privateWake = parentOnly && !requesterPresentationOrigin;
+   const wakeMessage = buildRequesterSettleWakeMessage({
      findings: preparedFindings.text,
      requireVisibleReply: requesterYieldedAfterDelivery,
-     parentOnly,
+-    parentOnly,
 -    children: completionRows,
++    parentOnly: privateWake,
 +    children: completedChildren,
 +    pausedChildSessionKeys: pausedChildren.map(({ entry }) => entry.childSessionKey),
      preserveModelRouteNotice: !completionChannel || !isDeliverableMessageChannel(completionChannel),
    });
    const wakeKeyBase = [
-@@ -557,6 +577,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -557,6 +588,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
      const isSourceSessionEffectsAllowed = () =>
        !params.signal?.aborted &&
        preparedFindings.isCurrent() &&
@@ -37871,17 +38066,17 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946e
        !isGatewayClosed() &&
        isBatchCurrent() &&
        isRequesterCurrent() &&
-@@ -598,6 +619,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -598,6 +630,21 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
            deliverSubagentAnnouncement({
              requesterSessionKey,
              requesterAgentId,
-+            ...(parentOnly && requesterYieldedAfterDelivery && requesterDepth === 0 && directOrigin
++            ...(requesterPresentationOrigin
 +              ? {
 +                  requesterPresentation: {
 +                    runId: directIdempotencyKey,
 +                    sessionKey: requesterSessionKey,
 +                    sessionId: requesterEntry.sessionId,
-+                    source: directOrigin,
++                    source: requesterPresentationOrigin,
 +                    assertCurrent: () => {
 +                      if (!isSourceSessionEffectsAllowed()) {
 +                        throw new Error("requester continuation presentation owner changed");
@@ -37893,6 +38088,22 @@ index 63f576a01723851c80a08d35c4d9b506cc04961c..cb1bfe1c1e1d7f77183823c28442946e
              requesterRunTimeoutSeconds:
                requesterDepth >= 1 && requesterRun
                  ? (requesterRun.runTimeoutSeconds ?? 0)
+@@ -612,13 +659,13 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+             requesterIsSubagent: requesterDepth >= 1,
+             expectsCompletionMessage: false,
+             requireDirectDelivery: true,
+-            ...(parentOnly
++            ...(privateWake
+               ? {
+                   completionTarget: "parent",
+                   completionRequesterSessionId: requesterEntry.sessionId,
+                 }
+               : {}),
+-            ...(!parentOnly && requesterYieldedAfterDelivery ? { requireVisibleReply: true } : {}),
++            ...(!privateWake && requesterYieldedAfterDelivery ? { requireVisibleReply: true } : {}),
+             directIdempotencyKey,
+             signal: params.signal,
+             resolveGatewayContext,
 diff --git a/src/agents/subagents/registry/subagent-control-kill.ts b/src/agents/subagents/registry/subagent-control-kill.ts
 index 040363bbfdcb7f11af9124a493af01dbd926abfe..467517481cae15b6c7e80b7b4fdda21a5058b648 100644
 --- a/src/agents/subagents/registry/subagent-control-kill.ts
@@ -79852,21 +80063,76 @@ index 0000000000000000000000000000000000000000..8cac73ff3e4dec72555c70d06bca60cc
 +  }
 +  return { kind: "yielded" as const, entry, wake, generation: backing.generation };
 +}
+diff --git a/src/tasks/task-progress-visibility.ts b/src/tasks/task-progress-visibility.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..06f32708cc01959f73c4d3c9865194657fe36b83
+--- /dev/null
++++ b/src/tasks/task-progress-visibility.ts
+@@ -0,0 +1,44 @@
++import { createAccountListHelpers } from "../channels/plugins/account-helpers.js";
++import {
++  resolveChannelPreviewStreamMode,
++  resolveChannelStreamingPreviewToolProgress,
++} from "../channels/streaming.js";
++import { getRuntimeConfig } from "../config/config.js";
++import type { DiscordAccountConfig } from "../config/types.discord.js";
++import type { TaskDeliveryState } from "./task-registry.types.js";
++
++const discordAccounts = createAccountListHelpers<DiscordAccountConfig>("discord", {
++  implicitDefaultAccount: { channelKeys: ["token"], envVars: ["DISCORD_BOT_TOKEN"] },
++});
++
++/** Apply Discord's existing tool/task progress preference to host-generated notices too. */
++export function isTaskProgressVisible(origin: TaskDeliveryState["requesterOrigin"]): boolean {
++  if (origin?.channel !== "discord") {
++    return true;
++  }
++  const cfg = getRuntimeConfig();
++  const account = discordAccounts.resolveAccountConfig(
++    cfg,
++    origin.accountId ?? discordAccounts.resolveDefaultAccountId(cfg),
++  );
++  const mode = resolveChannelPreviewStreamMode(account, "off");
++  return mode !== "progress" || resolveChannelStreamingPreviewToolProgress(account, false, mode);
++}
++
++/** Transient Discord status must not outlive the preference checked at dispatch. */
++export function taskProgressDeliveryOptions(origin: TaskDeliveryState["requesterOrigin"]) {
++  if (origin?.channel !== "discord") {
++    return {};
++  }
++  const assertProgressVisible = () => {
++    if (!isTaskProgressVisible(origin)) {
++      throw new Error("Background task progress was disabled before delivery");
++    }
++  };
++  return {
++    skipQueue: true,
++    gatewayOwnedDelivery: true,
++    assertDirectAdapterHandoff: assertProgressVisible,
++    onPlatformSendDispatch: async () => assertProgressVisible(),
++  };
++}
 diff --git a/src/tasks/task-registry-delivery.ts b/src/tasks/task-registry-delivery.ts
-index 8184cac14f549eff20cbabb4ee245ade94640542..c0ac189b9583aa51eca25aaf1f36139ee543f67e 100644
+index 8184cac14f549eff20cbabb4ee245ade94640542..9c94055fbe7864649e7f846347183fa91ba9f158 100644
 --- a/src/tasks/task-registry-delivery.ts
 +++ b/src/tasks/task-registry-delivery.ts
-@@ -22,6 +22,7 @@ import {
+@@ -22,6 +22,8 @@ import {
    shouldUseParentReviewTaskTerminalMessage,
  } from "./task-executor-policy.js";
  import { getTaskFlowById } from "./task-flow-runtime-internal.js";
 +import { resolveNativeTaskProgressOwner } from "./task-native-progress-owner.js";
++import { isTaskProgressVisible, taskProgressDeliveryOptions } from "./task-progress-visibility.js";
  import {
    getTaskDeliveryState,
    updateTask,
-@@ -580,6 +581,12 @@ function prepareTaskStateChangeDelivery(
+@@ -579,7 +581,16 @@ function prepareTaskStateChangeDelivery(
+   }
    try {
      const owner = resolveTaskDeliveryOwner(current);
++    if (!isTaskProgressVisible(owner.requesterOrigin)) {
++      return { result: cloneTaskRecord(current) };
++    }
      const ownerSessionKey = owner.sessionKey?.trim();
 +    const progressOwner = resolveNativeTaskProgressOwner(current);
 +    if (progressOwner && ownerSessionKey && canDeliverToRequesterOrigin(owner.requesterOrigin)) {
@@ -79877,11 +80143,19 @@ index 8184cac14f549eff20cbabb4ee245ade94640542..c0ac189b9583aa51eca25aaf1f36139e
      if (!ownerSessionKey) {
        return {
          result: updateTask(taskId, {
+@@ -649,6 +660,7 @@ async function maybeDeliverTaskStateChangeUpdateUnderAdmission(
+               agentId: requesterAgentId,
+               idempotencyKey,
+               mirror: { sessionKey: ownerSessionKey, agentId: requesterAgentId, idempotencyKey },
++              ...taskProgressDeliveryOptions(owner.requesterOrigin),
+             }),
+           };
+           return undefined;
 diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
-index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506786213b9 100644
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb5299ede2756 100644
 --- a/src/tasks/task-registry-progress.test.ts
 +++ b/src/tasks/task-registry-progress.test.ts
-@@ -1,10 +1,19 @@
+@@ -1,10 +1,22 @@
  import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  import { createDeferred } from "../../test/helpers/promise.js";
 +import { prepareEmbeddedSessionState } from "../agents/command/session-preparation.js";
@@ -79893,6 +80167,9 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +  RegisterSubagentRunParams,
 +  SubagentRunRecord,
 +} from "../agents/subagents/registry/subagent-registry.types.js";
++import * as config from "../config/config.js";
++import type { DiscordConfig } from "../config/types.discord.js";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
  import { emitAgentEvent, resetAgentEventsForTest } from "../infra/agent-events.js";
 -import { registerAgentRunContext } from "../infra/agent-run-registry.js";
 +import {
@@ -79903,7 +80180,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
  import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
  import {
    markGatewayRestartDraining,
-@@ -14,9 +23,10 @@ import {
+@@ -14,19 +26,22 @@ import {
    createInMemoryTaskFlowRegistryStore,
    createInMemoryTaskRegistryStore,
  } from "../test-utils/task-registry-store.js";
@@ -79915,7 +80192,11 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
  import {
    createTaskRecord,
    getTaskById,
-@@ -27,6 +37,7 @@ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
+   markTaskTerminalById,
++  maybeDeliverTaskTerminalUpdate,
+   updateTaskNotifyPolicyById,
+ } from "./task-registry.js";
+ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
  import type { TaskNotifyPolicy } from "./task-registry.types.js";
  import {
    configureTaskFlowRegistryRuntime,
@@ -79923,7 +80204,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
    resetTaskFlowRegistryForTests,
    resetTaskRegistryDeliveryRuntimeForTests,
    resetTaskRegistryForTests,
-@@ -34,10 +45,27 @@ import {
+@@ -34,10 +49,27 @@ import {
  } from "./task-runtime.test-helpers.js";
  
  vi.mock("../utils/message-channel.js", () => ({
@@ -79953,10 +80234,41 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
  const origin = {
    channel: "notifychat",
    to: "synthetic-recipient",
-@@ -46,6 +74,60 @@ const origin = {
+@@ -45,6 +77,90 @@ const origin = {
+   threadId: "test-thread",
  };
  const sendMessage = vi.fn<deliveryRuntime.TaskRegistryDeliveryRuntime["sendMessage"]>();
- 
++const DISCORD_PARENT = "agent:main:discord:channel:requester";
++const quietProgress = { mode: "progress", progress: { toolProgress: false } } as const;
++const visibleProgress = { mode: "progress", progress: { toolProgress: true } } as const;
++const quietAccount = { streaming: quietProgress };
++const visibleAccount = { streaming: visibleProgress };
++let runtimeConfig: OpenClawConfig;
++
++function discordChild(accountId: string | undefined, direct = false) {
++  const sessionKey = direct ? "agent:main:discord:direct:requester" : DISCORD_PARENT;
++  registerAgentRunContext("parent-turn", { sessionKey, isHeartbeat: false });
++  const item = registerChild({
++    requesterSessionKey: sessionKey,
++    requesterDisplayKey: sessionKey,
++    requesterOrigin: { ...origin, channel: "discord", accountId },
++  });
++  expect(item.task.notifyPolicy).toBe("state_changes");
++  yieldParent(sessionKey);
++  clearAgentRunContext("parent-turn");
++  return item;
++}
++
++function sentResult(to: string) {
++  return {
++    channel: "notifychat",
++    to,
++    via: "direct" as const,
++    mediaUrl: null,
++    deliveryStatus: "sent" as const,
++  };
++}
++
 +function registerChild(overrides: Partial<RegisterSubagentRunParams> = {}) {
 +  const manager = new SubagentLaunchManager({
 +    runs: subagentRuns,
@@ -80010,11 +80322,10 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +  entry.requesterTurnYielded = true;
 +  return { entry, task: task!, manager };
 +}
-+
+ 
  function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
    const entry: SubagentRunRecord = {
-     runId: `run-${name}`,
-@@ -87,12 +169,12 @@ function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
+@@ -87,12 +203,12 @@ function child(name: string, notifyPolicy: TaskNotifyPolicy = "state_changes") {
    return { entry, task };
  }
  
@@ -80030,7 +80341,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
        requesterYielded: true,
        acceptedSessionSpawns: entries.map((entry) => ({
          runId: entry.runId,
-@@ -120,6 +202,18 @@ function tool(entry: SubagentRunRecord, index = 1) {
+@@ -120,8 +236,23 @@ function tool(entry: SubagentRunRecord, index = 1) {
    });
  }
  
@@ -80048,10 +80359,225 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +
  beforeEach(() => {
    vi.useFakeTimers();
++  runtimeConfig = {};
++  vi.spyOn(config, "getRuntimeConfig").mockImplementation(() => runtimeConfig);
++  vi.stubEnv("DISCORD_BOT_TOKEN", "");
    vi.setSystemTime(new Date("2026-09-13T12:00:00Z"));
-@@ -156,6 +250,255 @@ afterEach(() => {
+   resetGatewayWorkAdmission();
+   resetTaskRegistryForTests({ persist: false });
+@@ -132,13 +263,7 @@ beforeEach(() => {
+   configureTaskFlowRegistryRuntime({ store: createInMemoryTaskFlowRegistryStore() });
+   sendMessage.mockReset().mockImplementation(async (params) => {
+     params.assertDirectAdapterHandoff?.();
+-    return {
+-      channel: "notifychat",
+-      to: params.to,
+-      via: "direct",
+-      mediaUrl: null,
+-      deliveryStatus: "sent",
+-    };
++    return sentResult(params.to);
+   });
+   setTaskRegistryDeliveryRuntimeForTests({ sendMessage });
+ });
+@@ -152,10 +277,450 @@ afterEach(() => {
+   subagentRuns.clear();
+   resetGatewayWorkAdmission();
+   vi.restoreAllMocks();
++  vi.unstubAllEnvs();
+   vi.useRealTimers();
  });
  
++describe("Discord task progress visibility", () => {
++  it.each(["failed", "blocked"] as const)(
++    "preserves actual %s outcomes with quiet progress",
++    async (outcome) => {
++      runtimeConfig = { channels: { discord: { streaming: quietProgress } } };
++      const task = createTaskRecord({
++        runtime: "cli",
++        ownerKey: "agent:main:discord:direct:requester",
++        scopeKind: "session",
++        task: "Prepare the report",
++        status: "running",
++        notifyPolicy: "state_changes",
++        deliveryStatus: "pending",
++        requesterOrigin: { ...origin, channel: "discord" },
++      });
++      expect(task).toBeDefined();
++      markTaskTerminalById({
++        taskId: task!.taskId,
++        status: outcome === "failed" ? "failed" : "succeeded",
++        endedAt: Date.now(),
++        ...(outcome === "failed"
++          ? { error: "The source could not be read." }
++          : {
++              terminalOutcome: "blocked",
++              terminalSummary: "The source requires your approval.",
++            }),
++      });
++      await maybeDeliverTaskTerminalUpdate(task!.taskId);
++      expect(sendMessage).toHaveBeenCalledOnce();
++      expect(sendMessage.mock.calls[0]![0].content).toContain(
++        outcome === "failed"
++          ? "The source could not be read."
++          : "The source requires your approval.",
++      );
++      expect(getTaskById(task!.taskId)?.deliveryStatus).toBe("delivered");
++      if (outcome === "blocked") {
++        expect(peekSystemEvents(task!.ownerKey)).toEqual([
++          "Task needs follow-up: Prepare the report. The source requires your approval.",
++        ]);
++      }
++    },
++  );
++
++  it.each<[string, string | undefined, boolean, DiscordConfig]>([
++    ["root opt-out", "test", false, quietAccount],
++    ["default opt-out", "test", false, { streaming: { mode: "progress" } }],
++    ["account opt-in", "test", true, { ...quietAccount, accounts: { test: visibleAccount } }],
++    ["account opt-out", "test", false, { ...visibleAccount, accounts: { test: quietAccount } }],
++    [
++      "whole streaming replacement",
++      "test",
++      false,
++      {
++        ...visibleAccount,
++        accounts: { test: { streaming: { mode: "progress" } } },
++      },
++    ],
++    [
++      "sole named account",
++      undefined,
++      false,
++      { ...visibleAccount, accounts: { team: quietAccount } },
++    ],
++    [
++      "configured default account",
++      undefined,
++      false,
++      {
++        ...visibleAccount,
++        accounts: { first: {}, team: quietAccount },
++        defaultAccount: "team",
++      },
++    ],
++    [
++      "other streaming mode",
++      "test",
++      true,
++      { streaming: { mode: "off", progress: { toolProgress: false } } },
++    ],
++  ])(
++    "honors %s at ordinary task registration and yield",
++    async (_name, accountId, visible, discord) => {
++      runtimeConfig = { channels: { discord } };
++      const item = discordChild(accountId);
++      tool(item.entry);
++      await vi.advanceTimersByTimeAsync(15_000);
++      expect(sendMessage).toHaveBeenCalledTimes(visible ? 1 : 0);
++      execution(item.entry, "waiting");
++      tool(item.entry, 2);
++      await vi.advanceTimersByTimeAsync(360_000);
++      expect(sendMessage).toHaveBeenCalledTimes(visible ? 2 : 0);
++      expect(peekSystemEvents(DISCORD_PARENT)).toEqual([]);
++      expect(getTaskById(item.task.taskId)?.deliveryStatus).toBe("pending");
++      expect(item.entry.requesterSettleWake).toMatchObject({ status: "pending", attemptCount: 0 });
++    },
++  );
++
++  it.each([false, true])(
++    "suppresses generic start/update fallback (direct=%s) without recording delivery",
++    async (direct) => {
++      runtimeConfig = { channels: { discord: { streaming: quietProgress } } };
++      const item = discordChild("test", direct);
++      // No valid batch owner remains; the legacy state-change path must honor visibility too.
++      item.entry.generation = 2;
++      for (const kind of ["running", "progress"] as const) {
++        await maybeDeliverTaskStateChangeUpdate(item.task.taskId, {
++          kind,
++          at: Date.now(),
++          summary: "Private supporting work",
++        });
++      }
++      expect(sendMessage).not.toHaveBeenCalled();
++      expect(peekSystemEvents(item.task.ownerKey)).toEqual([]);
++      runtimeConfig = { channels: { discord: { streaming: visibleProgress } } };
++      // Same event can still deliver after explicit opt-in; silence did not acknowledge it.
++      await maybeDeliverTaskStateChangeUpdate(item.task.taskId, {
++        kind: "running",
++        at: Date.now(),
++      });
++      if (direct) {
++        expect(sendMessage).toHaveBeenCalledOnce();
++        expect(sendMessage.mock.calls[0]![0].content).toBe(
++          "Background task started: Prepare the document.",
++        );
++      } else {
++        expect(peekSystemEvents(item.task.ownerKey)).toEqual([
++          "Background task started: Prepare the document.",
++        ]);
++      }
++      expect(getTaskById(item.task.taskId)?.deliveryStatus).toBe("pending");
++    },
++  );
++
++  it.each([
++    { direct: false, boundary: "loader" },
++    { direct: true, boundary: "loader" },
++    { direct: false, boundary: "handoff" },
++    { direct: true, boundary: "handoff" },
++    { direct: false, boundary: "dispatch" },
++    { direct: true, boundary: "dispatch" },
++  ])("rechecks visibility at $boundary (generic direct=$direct)", async ({ direct, boundary }) => {
++    runtimeConfig = { channels: { discord: { streaming: visibleProgress } } };
++    const item = discordChild("test", direct);
++    if (direct) {
++      item.entry.generation = 2;
++    }
++    const hideProgress = () => {
++      runtimeConfig = { channels: { discord: { streaming: quietProgress } } };
++    };
++    const loaded = createDeferred<deliveryRuntime.TaskRegistryDeliveryRuntime>();
++    let visibleSends = 0;
++    if (boundary === "loader") {
++      vi.spyOn(deliveryRuntime, "loadTaskRegistryDeliveryRuntime").mockReturnValueOnce(
++        loaded.promise,
++      );
++    } else {
++      sendMessage.mockImplementationOnce(async (params) => {
++        if (boundary === "handoff") {
++          hideProgress();
++        }
++        params.assertDirectAdapterHandoff?.();
++        hideProgress();
++        await params.onPlatformSendDispatch?.();
++        visibleSends++;
++        return {
++          channel: "discord",
++          to: params.to,
++          via: "direct",
++          mediaUrl: null,
++          deliveryStatus: "sent",
++        };
++      });
++    }
++    const pending = direct
++      ? maybeDeliverTaskStateChangeUpdate(item.task.taskId, { kind: "running", at: Date.now() })
++      : undefined;
++    await vi.advanceTimersByTimeAsync(15_000);
++    if (boundary === "loader") {
++      hideProgress();
++      loaded.resolve({ sendMessage });
++    }
++    await pending;
++    await vi.advanceTimersByTimeAsync(360_000);
++    expect(visibleSends).toBe(0);
++    expect(sendMessage).toHaveBeenCalledTimes(boundary === "loader" ? 0 : 1);
++    expect(peekSystemEvents(item.task.ownerKey)).toEqual([]);
++    expect(getTaskById(item.task.taskId)?.deliveryStatus).toBe("pending");
++  });
++});
++
  describe("yielded subagent progress delivery", () => {
 +  it.each([
 +    { heartbeat: false, override: undefined, expected: "state_changes" },
@@ -80305,7 +80831,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
    it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
      const first = child("First");
      vi.setSystemTime(Date.now() + 1);
-@@ -184,7 +527,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -184,7 +749,7 @@ describe("yielded subagent progress delivery", () => {
        mirror: { sessionKey: PARENT, agentId: "main" },
      });
      expect(message.content).toBe(
@@ -80314,7 +80840,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
      );
      expect(message.content).not.toMatch(/Quiet|private-/);
      expect(getTaskById(first.task.taskId)).toMatchObject({
-@@ -280,7 +623,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -280,7 +845,7 @@ describe("yielded subagent progress delivery", () => {
      expect(getTaskById(second.task.taskId)?.deliveryStatus).toBe("pending");
    });
  
@@ -80323,22 +80849,16 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
      const items = Array.from({ length: 35 }, (_, index) => {
        vi.setSystemTime(Date.now() + 1);
        return child(`Worker ${index + 1}`);
-@@ -290,7 +633,13 @@ describe("yielded subagent progress delivery", () => {
+@@ -290,7 +855,7 @@ describe("yielded subagent progress delivery", () => {
      sendMessage.mockImplementationOnce(async (params) => {
        tool(first.entry);
        params.assertDirectAdapterHandoff?.();
 -      return { channel: "notifychat", to: params.to, via: "direct", mediaUrl: null };
-+      return {
-+        channel: "notifychat",
-+        to: params.to,
-+        via: "direct",
-+        mediaUrl: null,
-+        deliveryStatus: "sent",
-+      };
++      return sentResult(params.to);
      });
      await vi.advanceTimersByTimeAsync(15_000);
      expect(sendMessage).toHaveBeenCalledOnce();
-@@ -298,10 +647,189 @@ describe("yielded subagent progress delivery", () => {
+@@ -298,10 +863,177 @@ describe("yielded subagent progress delivery", () => {
      expect(sendMessage.mock.calls[0]![0].content).toContain(
        "More task activity is available in Tasks.",
      );
@@ -80391,7 +80911,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +  it("suppresses a snapshot that returns to its delivered state while runtime loading awaits", async () => {
 +    const item = child("Worker");
 +    yieldParent();
-+    await vi.advanceTimersByTimeAsync(15_000);
+     await vi.advanceTimersByTimeAsync(15_000);
 +    expect(sendMessage).toHaveBeenCalledOnce();
 +    execution(item.entry, "waiting");
 +    const loaded = createDeferred<deliveryRuntime.TaskRegistryDeliveryRuntime>();
@@ -80408,7 +80928,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +  it("rejects obsolete public state at the final platform dispatch boundary", async () => {
 +    const item = child("Worker");
 +    yieldParent();
-     await vi.advanceTimersByTimeAsync(15_000);
++    await vi.advanceTimersByTimeAsync(15_000);
 +    execution(item.entry, "waiting");
 +    let visibleSends = 0;
 +    sendMessage.mockImplementationOnce(async (params) => {
@@ -80416,13 +80936,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +      execution(item.entry, "running");
 +      await params.onPlatformSendDispatch?.();
 +      visibleSends++;
-+      return {
-+        channel: "notifychat",
-+        to: params.to,
-+        via: "direct",
-+        mediaUrl: null,
-+        deliveryStatus: "sent",
-+      };
++      return sentResult(params.to);
 +    });
 +    await vi.advanceTimersByTimeAsync(180_000);
 +    expect(sendMessage).toHaveBeenCalledTimes(2);
@@ -80438,13 +80952,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
 +    sendMessage.mockImplementationOnce(async (params) => {
 +      params.assertDirectAdapterHandoff?.();
 +      await sent.promise;
-+      return {
-+        channel: "notifychat",
-+        to: params.to,
-+        via: "direct",
-+        mediaUrl: null,
-+        deliveryStatus: "sent",
-+      };
++      return sentResult(params.to);
 +    });
 +    await vi.advanceTimersByTimeAsync(15_000);
 +    execution(item.entry, "waiting");
@@ -80530,7 +81038,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506
    });
  });
 diff --git a/src/tasks/task-registry-progress.ts b/src/tasks/task-registry-progress.ts
-index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa8a4b43bf 100644
+index d5caebed36fa2b1f42158fc78cbd8c87829084e0..ded62d24d97019c6522f0be955d0e9a93fae713d 100644
 --- a/src/tasks/task-registry-progress.ts
 +++ b/src/tasks/task-registry-progress.ts
 @@ -1,5 +1,4 @@
@@ -80539,7 +81047,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
  import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
  import type { AgentEventPayload } from "../infra/agent-events.js";
  import {
-@@ -7,9 +6,8 @@ import {
+@@ -7,9 +6,9 @@ import {
    resolveProjectedAgentRunProgressState,
  } from "../infra/agent-run-registry.js";
  import { runWithGatewayIndependentRootWorkContinuation } from "../process/gateway-work-admission.js";
@@ -80547,10 +81055,11 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
  import { getTaskExecutionObservation } from "./task-execution-observation.js";
 -import { shouldAutoDeliverTaskStateChange } from "./task-executor-policy.js";
 +import { resolveNativeTaskProgressOwner } from "./task-native-progress-owner.js";
++import { isTaskProgressVisible } from "./task-progress-visibility.js";
  import { canDeliverToRequesterOrigin, resolveTaskDeliveryOwner } from "./task-registry-delivery.js";
  import { loadTaskRegistryDeliveryRuntime } from "./task-registry-runtime-loaders.js";
  import {
-@@ -21,43 +19,20 @@ import {
+@@ -21,47 +20,28 @@ import {
  } from "./task-registry-state.js";
  import type { TaskProgressBatch } from "./task-registry.process-state.js";
  import type { TaskRecord } from "./task-registry.types.js";
@@ -80565,12 +81074,16 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
  
  function resolveYieldedTaskProgress(task: TaskRecord, runId: string) {
 -  if (task.runtime !== "subagent" || !shouldAutoDeliverTaskStateChange(task)) {
--    return undefined;
--  }
++  const nativeOwner = resolveNativeTaskProgressOwner(task, runId);
++  if (nativeOwner?.kind !== "yielded") {
+     return undefined;
+   }
 -  const backing = readTaskBackingInstance(task.detail);
 -  const entry = subagentRuns.get(runId);
 -  const wake = entry?.requesterSettleWake;
--  if (
++  const { entry, wake, generation } = nativeOwner;
++  const owner = resolveTaskDeliveryOwner(task);
+   if (
 -    backing?.runtime !== "subagent" ||
 -    !entry ||
 -    entry.generation !== backing.generation ||
@@ -80590,16 +81103,20 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
 -    wake.rearmGeneration === undefined ||
 -    !wake.batchRunIds?.includes(runId) ||
 -    !hasAuthoritativeTaskBacking(task)
--  ) {
-+  const nativeOwner = resolveNativeTaskProgressOwner(task, runId);
-+  if (nativeOwner?.kind !== "yielded") {
++    !owner.sessionKey ||
++    !canDeliverToRequesterOrigin(owner.requesterOrigin) ||
++    !isTaskProgressVisible(owner.requesterOrigin)
+   ) {
      return undefined;
    }
-+  const { entry, wake, generation } = nativeOwner;
-   const owner = resolveTaskDeliveryOwner(task);
-   if (!owner.sessionKey || !canDeliverToRequesterOrigin(owner.requesterOrigin)) {
-     return undefined;
-@@ -69,7 +44,7 @@ function resolveYieldedTaskProgress(task: TaskRecord, runId: string) {
+-  const owner = resolveTaskDeliveryOwner(task);
+-  if (!owner.sessionKey || !canDeliverToRequesterOrigin(owner.requesterOrigin)) {
+-    return undefined;
+-  }
+   const key = JSON.stringify([
+     owner.sessionKey,
+     owner.agentId,
+@@ -69,7 +49,7 @@ function resolveYieldedTaskProgress(task: TaskRecord, runId: string) {
      wake.rearmGeneration,
      wake.batchRunIds,
    ]);
@@ -80608,7 +81125,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
  }
  
  /** Enqueue only host-observed activity, never private child prose or tool results. */
-@@ -101,7 +76,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+@@ -101,7 +81,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
      batch = {
        lifecycleGeneration: getAgentRunLifecycleGeneration(),
        members: new Map(),
@@ -80616,7 +81133,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
        overflow: false,
      };
      taskProgressBatches.set(progress.key, batch);
-@@ -111,7 +85,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
+@@ -111,7 +90,6 @@ function enqueueYieldedTaskProgress(task: TaskRecord, runId: string) {
    } else {
      batch.overflow = true;
    }
@@ -80624,7 +81141,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
    scheduleProgressBatch(progress.key, batch);
  }
  
-@@ -119,10 +92,13 @@ function scheduleProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -119,10 +97,13 @@ function scheduleProgressBatch(key: string, batch: TaskProgressBatch) {
    if (batch.timer || batch.publishing) {
      return;
    }
@@ -80642,7 +81159,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
    batch.timer.unref?.();
  }
  
-@@ -156,48 +132,45 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -156,48 +137,45 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
    }
    const lines = rows.slice(0, MAX_PROGRESS_DISPLAY_MEMBERS).map(({ task }) => {
      const observation = getTaskExecutionObservation(task);
@@ -80706,7 +81223,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
          return null;
        }
        const { sendMessage } = await loadTaskRegistryDeliveryRuntime();
-@@ -205,17 +178,17 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -205,17 +183,17 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
          () => prepareProgressBatch(key, batch),
          () => undefined,
        );
@@ -80727,7 +81244,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
          channel: fresh.owner.requesterOrigin?.channel,
          to: fresh.owner.requesterOrigin?.to ?? "",
          accountId: fresh.owner.requesterOrigin?.accountId,
-@@ -233,6 +206,11 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -233,6 +211,11 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
          assertDirectAdapterHandoff: assertCurrent,
          onPlatformSendDispatch: async () => assertCurrent(),
        });
@@ -80739,7 +81256,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa
        return null;
      }, "tasks:progress");
    } catch (error) {
-@@ -242,7 +220,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -242,7 +225,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
    } finally {
      batch.publishing = false;
      if (taskProgressBatches.get(key) === batch) {
