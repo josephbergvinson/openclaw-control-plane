@@ -35258,10 +35258,26 @@ index e5599fdffafde1be5085cd113f3d05bb341b90dd..80e0ba8439a53dd03cece8978e99313a
        expect(markRequesterTurnYielded).toHaveBeenCalledOnce();
        expect(onYield).not.toHaveBeenCalled();
 diff --git a/src/agents/openclaw-tools.sessions-steering.test.ts b/src/agents/openclaw-tools.sessions-steering.test.ts
-index 05bc80da5525fb1fdbf6e5997900dd4ab01182f3..9db18477e593b5527d3189ce889abbd6703b1218 100644
+index 05bc80da5525fb1fdbf6e5997900dd4ab01182f3..1961a6b8998f739c3da06bf8d3183477e21ba563 100644
 --- a/src/agents/openclaw-tools.sessions-steering.test.ts
 +++ b/src/agents/openclaw-tools.sessions-steering.test.ts
-@@ -193,7 +193,7 @@ it.each([
+@@ -34,6 +34,7 @@ import {
+   type EmbeddedAgentQueueMessageOptions,
+ } from "./embedded-agent-runner/runs.js";
+ import { testing as embeddedRunsTesting } from "./embedded-agent-runner/runs.test-support.js";
++import type { AgentMessage } from "./runtime/index.js";
+ import { guardSessionManager } from "./session-tool-result-guard-wrapper.js";
+ import {
+   createAssistant,
+@@ -43,6 +44,7 @@ import {
+   streamMocks,
+ } from "./sessions/agent-session-loop-correctness.test-support.js";
+ import { SessionManager } from "./sessions/session-manager.js";
++import { setSteeringMessageIdentity } from "./sessions/steering-message-identity.js";
+ import { createSessionsSendTool } from "./tools/sessions-send-tool.js";
+ 
+ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+@@ -193,7 +195,7 @@ it.each([
        );
        expect(queueMessage).toHaveBeenCalledOnce();
        expect(queueMessage.mock.calls[0]?.[1]?.waitForTranscriptCommit).toBe(
@@ -35270,115 +35286,96 @@ index 05bc80da5525fb1fdbf6e5997900dd4ab01182f3..9db18477e593b5527d3189ce889abbd6
        );
        expect(queueMessage.mock.calls[0]?.[1]?.isInboundUserMessage).toBeUndefined();
        expect(SessionManager.open(scope, dir).getEntries()).toContainEqual(
-diff --git a/src/agents/openclaw-tools.sessions.test.ts b/src/agents/openclaw-tools.sessions.test.ts
-index 41a764058df763b2ba83ddf21f9b2d74289f7765..e9b960f52e7dde87f5d49c3ae53cdc58efe4b41e 100644
---- a/src/agents/openclaw-tools.sessions.test.ts
-+++ b/src/agents/openclaw-tools.sessions.test.ts
-@@ -63,8 +63,11 @@ vi.mock("../config/config.js", () => ({
- import "./test-helpers/fast-openclaw-tools-sessions.js";
- import { setActivePluginRegistry } from "../plugins/runtime.js";
- import { createOperationalRunInstanceRef } from "./admitted-run-context.js";
-+import { steerActiveSessionWithOptionalDeliveryWait } from "./embedded-agent-runner/run/attempt-queue-message.js";
- import { setActiveEmbeddedRun } from "./embedded-agent-runner/runs.js";
- import { testing as embeddedRunsTesting } from "./embedded-agent-runner/runs.test-support.js";
-+import type { AgentMessage } from "./runtime/index.js";
-+import { setSteeringMessageIdentity } from "./sessions/steering-message-identity.js";
- import { subagentRuns } from "./subagents/registry/subagent-registry-memory.js";
- import { addSubagentRunForTests } from "./subagents/registry/subagent-registry.test-helpers.js";
- import { textAssistant } from "./test-helpers/sparse-transcript.test-support.js";
-@@ -499,6 +502,92 @@ describe("sessions tools", () => {
-     expect(calls.filter((request) => request.method === "agent")).toHaveLength(1);
-   });
- 
-+  it.each([true, false])(
-+    "sessions_send explicit steer survives a slow next boundary (commit wait supported: %s)",
-+    async (supportsTranscriptCommitWait) => {
-+      vi.useFakeTimers();
-+      try {
-+        const targetKey = "agent:main:dashboard:slow-steering-target";
-+        const pending: AgentMessage[] = [];
-+        const cancelSteeringMessage = vi.fn((predicate: (message: AgentMessage) => boolean) => {
-+          const index = pending.findIndex(predicate);
-+          return index < 0 ? undefined : pending.splice(index, 1)[0];
-+        });
-+        const activeSession = {
-+          agent: { cancelSteeringMessage },
-+          steer: vi.fn<Parameters<typeof steerActiveSessionWithOptionalDeliveryWait>[0]["steer"]>(
-+            async (text, _images, _recorder, _media, _order, queueIdentity) => {
-+              const message: AgentMessage = {
-+                role: "user",
-+                content: [{ type: "text", text }],
-+                timestamp: Date.now(),
-+              };
-+              setSteeringMessageIdentity(message, queueIdentity);
-+              pending.push(message);
-+            },
-+          ),
-+          subscribe: vi.fn(() => () => {}),
-+        };
-+        const queueMessage = vi.fn(
-+          (
-+            ...[text, options]: Parameters<
-+              Parameters<typeof setActiveEmbeddedRun>[1]["queueMessage"]
-+            >
-+          ) => steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options),
-+        );
-+        setActiveEmbeddedRun(
-+          "slow-steering-session",
-+          {
-+            queueMessage,
-+            isStreaming: () => true,
-+            isCompacting: () => false,
-+            supportsTranscriptCommitWait,
-+            sourceReplyDeliveryMode: "automatic",
-+            abort: () => {},
-+          },
-+          targetKey,
-+        );
-+        callGatewayMock.mockImplementation(async () => ({}));
-+        const tool = getSessionTool("sessions_send", { agentSessionKey: "agent:main:main" });
-+        const result = tool.execute("slow-steer", {
-+          sessionKey: targetKey,
-+          message: "Use the source invitation and preserve its meeting link.",
-+          mode: "steer",
-+          timeoutSeconds: 0,
-+        });
-+        await vi.waitFor(() => expect(queueMessage).toHaveBeenCalledTimes(1));
-+        // The receiving model has not reached its next tool/input boundary yet.
-+        await vi.advanceTimersByTimeAsync(35_000);
-+        expect((await result).details).toMatchObject({
-+          status: "accepted",
-+          targetDisposition: "steered",
-+          delivery: { status: "skipped" },
-+        });
-+        expect(pending).toEqual([
-+          expect.objectContaining({
-+            content: [
-+              {
-+                type: "text",
-+                text: expect.stringContaining(
-+                  "Use the source invitation and preserve its meeting link.",
-+                ),
-+              },
-+            ],
-+          }),
-+        ]);
-+        expect(cancelSteeringMessage).not.toHaveBeenCalled();
-+        expect(activeSession.subscribe).not.toHaveBeenCalled();
-+        expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent")).toBe(false);
-+        expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent.wait")).toBe(
-+          false,
-+        );
-+        expect(queueMessage.mock.calls[0]?.[1]?.userTurnTranscriptRecorder).toBeDefined();
-+      } finally {
-+        vi.useRealTimers();
-+      }
-+    },
-+  );
+@@ -228,3 +230,89 @@ it.each([
+     }
+   },
+ );
 +
-   it("sessions_send does not enqueue a notification beyond an exact session grant", async () => {
-     const targetKey = "agent:main:dashboard:notification-target";
-     callGatewayMock.mockImplementation(async () => ({}));
++it.each([true, false])(
++  "sessions_send explicit steer survives a slow next boundary (commit wait supported: %s)",
++  async (supportsTranscriptCommitWait) => {
++    vi.useFakeTimers();
++    try {
++      const targetKey = "agent:main:dashboard:slow-steering-target";
++      const pending: AgentMessage[] = [];
++      const cancelSteeringMessage = vi.fn((predicate: (message: AgentMessage) => boolean) => {
++        const index = pending.findIndex(predicate);
++        return index < 0 ? undefined : pending.splice(index, 1)[0];
++      });
++      const activeSession = {
++        agent: { cancelSteeringMessage },
++        steer: vi.fn<Parameters<typeof steerActiveSessionWithOptionalDeliveryWait>[0]["steer"]>(
++          async (text, _images, _recorder, _media, _order, queueIdentity) => {
++            const message: AgentMessage = {
++              role: "user",
++              content: [{ type: "text", text }],
++              timestamp: Date.now(),
++            };
++            setSteeringMessageIdentity(message, queueIdentity);
++            pending.push(message);
++          },
++        ),
++        subscribe: vi.fn(() => () => {}),
++      };
++      const queueMessage = vi.fn(
++        (
++          ...[text, options]: Parameters<Parameters<typeof setActiveEmbeddedRun>[1]["queueMessage"]>
++        ) => steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options),
++      );
++      setActiveEmbeddedRun(
++        "slow-steering-session",
++        {
++          queueMessage,
++          isStreaming: () => true,
++          isCompacting: () => false,
++          supportsTranscriptCommitWait,
++          sourceReplyDeliveryMode: "automatic",
++          abort: () => {},
++        },
++        targetKey,
++      );
++      callGatewayMock.mockImplementation(async () => ({}));
++      const tool = createSessionsSendTool({
++        agentSessionKey: "agent:main:main",
++        config,
++        callGateway: (opts: unknown) => callGatewayMock(opts),
++      });
++      const result = tool.execute("slow-steer", {
++        sessionKey: targetKey,
++        message: "Use the source invitation and preserve its meeting link.",
++        mode: "steer",
++        timeoutSeconds: 0,
++      });
++      await vi.waitFor(() => expect(queueMessage).toHaveBeenCalledTimes(1));
++      // The receiving model has not reached its next tool/input boundary yet.
++      await vi.advanceTimersByTimeAsync(35_000);
++      expect((await result).details).toMatchObject({
++        status: "accepted",
++        targetDisposition: "steered",
++        delivery: { status: "skipped" },
++      });
++      expect(pending).toEqual([
++        expect.objectContaining({
++          content: [
++            {
++              type: "text",
++              text: expect.stringContaining(
++                "Use the source invitation and preserve its meeting link.",
++              ),
++            },
++          ],
++        }),
++      ]);
++      expect(cancelSteeringMessage).not.toHaveBeenCalled();
++      expect(activeSession.subscribe).not.toHaveBeenCalled();
++      expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent")).toBe(false);
++      expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent.wait")).toBe(false);
++      expect(queueMessage.mock.calls[0]?.[1]?.userTurnTranscriptRecorder).toBeDefined();
++    } finally {
++      vi.useRealTimers();
++    }
++  },
++);
 diff --git a/src/agents/openclaw-tools.ts b/src/agents/openclaw-tools.ts
 index 265a4ce046e8c440d97e866201c868795447828b..53bb200f02e9f21fdd33d6775afc868043000408 100644
 --- a/src/agents/openclaw-tools.ts
@@ -45144,11 +45141,173 @@ index 0a093f5914ba71ba145a8bb2b043a2b48cfc9be0..cdb08dbf551d7ee31c9da38c909b449a
    it("does not disclose a resolved session key when sessionId access is denied", async () => {
      const tool = createSessionsSendTool({
        agentSessionKey: MAIN_AGENT_SESSION_KEY,
+diff --git a/src/agents/tools/web-fetch.schema.ts b/src/agents/tools/web-fetch.schema.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d58518766959ef361ba3e3c14adc5ebb7d8b8ef7
+--- /dev/null
++++ b/src/agents/tools/web-fetch.schema.ts
+@@ -0,0 +1,60 @@
++import { Type } from "typebox";
++import { stringEnum } from "../schema/string-enum.js";
++
++const EXTRACT_MODES = ["markdown", "text"] as const;
++
++export const WebFetchSchema = Type.Object({
++  url: Type.String({ description: "HTTP(S) URL." }),
++  extractMode: Type.Optional(
++    stringEnum(EXTRACT_MODES, {
++      description: "Extract as markdown/text.",
++      default: "markdown",
++    }),
++  ),
++  maxChars: Type.Optional(
++    Type.Integer({
++      description: "Max chars returned; truncates.",
++      minimum: 100,
++    }),
++  ),
++});
++
++export const WebFetchOutputSchema = Type.Object(
++  {
++    url: Type.String(),
++    finalUrl: Type.String(),
++    status: Type.Integer({ minimum: 0 }),
++    contentType: Type.Optional(Type.String()),
++    title: Type.Optional(Type.String()),
++    extractMode: stringEnum(EXTRACT_MODES),
++    extractor: Type.String(),
++    externalContent: Type.Object(
++      {
++        untrusted: Type.Literal(true),
++        source: Type.Literal("web_fetch"),
++        wrapped: Type.Literal(true),
++        provider: Type.Optional(Type.String()),
++      },
++      { additionalProperties: false },
++    ),
++    truncated: Type.Boolean(),
++    length: Type.Integer({ minimum: 0 }),
++    rawLength: Type.Integer({ minimum: 0 }),
++    spill: Type.Optional(
++      Type.Object(
++        {
++          path: Type.String(),
++          chars: Type.Integer({ minimum: 0 }),
++          truncated: Type.Optional(Type.Literal(true)),
++        },
++        { additionalProperties: false },
++      ),
++    ),
++    fetchedAt: Type.String(),
++    tookMs: Type.Integer({ minimum: 0 }),
++    text: Type.String(),
++    warning: Type.Optional(Type.String()),
++    cached: Type.Optional(Type.Literal(true)),
++  },
++  { additionalProperties: false },
++);
 diff --git a/src/agents/tools/web-fetch.ts b/src/agents/tools/web-fetch.ts
-index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5aefd947b1 100644
+index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..d555f84e20f4823e7f381180c5b648add8e81ca9 100644
 --- a/src/agents/tools/web-fetch.ts
 +++ b/src/agents/tools/web-fetch.ts
-@@ -443,6 +443,7 @@ async function spillWebFetchContent(
+@@ -10,7 +10,6 @@ import {
+   normalizeOptionalString,
+ } from "@openclaw/normalization-core/string-coerce";
+ import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+-import { Type } from "typebox";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import { sha256Hex } from "../../infra/crypto-digest.js";
+ import { SsrFBlockedError, type LookupFn, type SsrFPolicy } from "../../infra/net/ssrf.js";
+@@ -27,7 +26,6 @@ import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+ import { isRecord } from "../../utils.js";
+ import { extractReadableContent } from "../../web-fetch/content-extractors.runtime.js";
+ import { resolveWebProviderConfig } from "../../web/provider-runtime-shared.js";
+-import { stringEnum } from "../schema/string-enum.js";
+ import { writePrivateTempFile } from "../sessions/tools/private-temp-file.js";
+ import { formatFullOutputFooter } from "../sessions/tools/tool-contracts.js";
+ import { setToolTerminalPresentation } from "../tool-terminal-presentation.js";
+@@ -45,6 +43,7 @@ import {
+   truncateWebFetchText,
+   type ExtractMode,
+ } from "./web-fetch-utils.js";
++import { WebFetchOutputSchema, WebFetchSchema } from "./web-fetch.schema.js";
+ import {
+   DEFAULT_CACHE_TTL_MINUTES,
+   DEFAULT_TIMEOUT_SECONDS,
+@@ -58,8 +57,6 @@ import {
+ import type { CacheEntry } from "./web-shared.js";
+ import { resolveWebFetchToolRuntimeContext } from "./web-tool-runtime-context.js";
+ 
+-const EXTRACT_MODES = ["markdown", "text"] as const;
+-
+ const DEFAULT_FETCH_MAX_CHARS = 20_000;
+ const DEFAULT_FETCH_MAX_RESPONSE_BYTES = 750_000;
+ const FETCH_MAX_RESPONSE_BYTES_MIN = 32_000;
+@@ -101,62 +98,6 @@ const FETCH_BLOCKED_HEADER_NAMES = new Set([
+   "upgrade",
+ ]);
+ 
+-const WebFetchSchema = Type.Object({
+-  url: Type.String({ description: "HTTP(S) URL." }),
+-  extractMode: Type.Optional(
+-    stringEnum(EXTRACT_MODES, {
+-      description: "Extract as markdown/text.",
+-      default: "markdown",
+-    }),
+-  ),
+-  maxChars: Type.Optional(
+-    Type.Integer({
+-      description: "Max chars returned; truncates.",
+-      minimum: 100,
+-    }),
+-  ),
+-});
+-
+-const WebFetchOutputSchema = Type.Object(
+-  {
+-    url: Type.String(),
+-    finalUrl: Type.String(),
+-    status: Type.Integer({ minimum: 0 }),
+-    contentType: Type.Optional(Type.String()),
+-    title: Type.Optional(Type.String()),
+-    extractMode: stringEnum(EXTRACT_MODES),
+-    extractor: Type.String(),
+-    externalContent: Type.Object(
+-      {
+-        untrusted: Type.Literal(true),
+-        source: Type.Literal("web_fetch"),
+-        wrapped: Type.Literal(true),
+-        provider: Type.Optional(Type.String()),
+-      },
+-      { additionalProperties: false },
+-    ),
+-    truncated: Type.Boolean(),
+-    length: Type.Integer({ minimum: 0 }),
+-    rawLength: Type.Integer({ minimum: 0 }),
+-    spill: Type.Optional(
+-      Type.Object(
+-        {
+-          path: Type.String(),
+-          chars: Type.Integer({ minimum: 0 }),
+-          truncated: Type.Optional(Type.Literal(true)),
+-        },
+-        { additionalProperties: false },
+-      ),
+-    ),
+-    fetchedAt: Type.String(),
+-    tookMs: Type.Integer({ minimum: 0 }),
+-    text: Type.String(),
+-    warning: Type.Optional(Type.String()),
+-    cached: Type.Optional(Type.Literal(true)),
+-  },
+-  { additionalProperties: false },
+-);
+-
+ type WebFetchConfig = NonNullable<OpenClawConfig["tools"]>["web"] extends infer Web
+   ? Web extends { fetch?: infer Fetch }
+     ? Fetch
+@@ -443,6 +384,7 @@ async function spillWebFetchContent(
    wrapped: WebFetchWrappedContent,
    maxChars: number,
    sourceTruncated = false,
@@ -45156,7 +45315,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
  ): Promise<WebFetchWrappedContent> {
    if (!wrapped.truncated) {
      return sourceTruncated ? { ...wrapped, truncated: true } : wrapped;
-@@ -454,6 +455,7 @@ async function spillWebFetchContent(
+@@ -454,6 +396,7 @@ async function spillWebFetchContent(
    const spillPath = await writePrivateTempFile(
      "openclaw-web-fetch",
      wrapWebContent(content, "web_fetch"),
@@ -45164,7 +45323,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    );
    const spillCapped = value.length > WEB_FETCH_SPILL_MAX_CHARS;
    const isSpillTruncated = sourceTruncated || spillCapped;
-@@ -509,6 +511,7 @@ type WebFetchRuntimeParams = {
+@@ -509,6 +452,7 @@ type WebFetchRuntimeParams = {
    maxRedirects: number;
    timeoutSeconds: number;
    cacheTtlMs: number;
@@ -45172,7 +45331,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    userAgent: string;
    headers?: Record<string, string>;
    readabilityEnabled: boolean;
-@@ -577,6 +580,7 @@ async function buildWebFetchPayload(params: {
+@@ -577,6 +521,7 @@ async function buildWebFetchPayload(params: {
    extractMode: ExtractMode;
    maxChars: number;
    tookMs: number;
@@ -45180,7 +45339,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
  }): Promise<Record<string, unknown>> {
    const payload = isRecord(params.payload) ? params.payload : {};
    let metadataTruncated = false;
-@@ -619,6 +623,7 @@ async function buildWebFetchPayload(params: {
+@@ -619,6 +564,7 @@ async function buildWebFetchPayload(params: {
      wrapWebFetchContent(rawText, bodyMaxChars),
      bodyMaxChars,
      payload.truncated === true,
@@ -45188,7 +45347,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    );
    const providerRawLength =
      typeof payload.rawLength === "number" && Number.isFinite(payload.rawLength)
-@@ -712,6 +717,7 @@ async function maybeFetchProviderWebFetchPayload(
+@@ -712,6 +658,7 @@ async function maybeFetchProviderWebFetchPayload(
      extractMode: params.extractMode,
      maxChars: params.maxChars,
      tookMs: params.tookMs,
@@ -45196,7 +45355,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    });
  }
  
-@@ -737,6 +743,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
+@@ -737,6 +684,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
      ssrfPolicy ? `ssrf-policy:${sha256Hex(JSON.stringify(ssrfPolicy))}` : "",
      useTrustedEnvProxy ? "trusted-env-proxy" : "",
      headersCacheKey ? `headers:${headersCacheKey}` : "",
@@ -45205,7 +45364,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    ].filter(Boolean);
    const cacheKey = normalizeCacheKey(
      [
-@@ -931,6 +939,7 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
+@@ -931,6 +880,7 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
        extractMode: params.extractMode,
        maxChars: params.maxChars,
        tookMs: Date.now() - start,
@@ -45213,7 +45372,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
      });
    } finally {
      if (!res.bodyUsed) {
-@@ -945,6 +954,8 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
+@@ -945,6 +895,8 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
  export function createWebFetchTool(options?: {
    config?: OpenClawConfig;
    sandboxed?: boolean;
@@ -45222,7 +45381,7 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5a
    runtimeWebFetch?: RuntimeWebFetchMetadata;
    lateBindRuntimeConfig?: boolean;
    lookupFn?: LookupFn;
-@@ -1043,6 +1054,7 @@ export function createWebFetchTool(options?: {
+@@ -1043,6 +995,7 @@ export function createWebFetchTool(options?: {
              DEFAULT_TIMEOUT_SECONDS,
            ),
            cacheTtlMs: resolveCacheTtlMs(executionFetch?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES),

@@ -13,6 +13,10 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 27 source organization
+
+Current reference `8c2d7ca386eb2b8e2b1948b02a3ade74bd877dbb` reorganizes the focused repair to pass the unchanged line-cap growth ratchet. Both new delayed-steering cases move into the existing steering suite without lost assertions; fetch schema declarations move unchanged into a sibling module. Runtime behavior remains that of deployed `939bf80`. The [qualification record](../runtime/README.md#september-27-source-organization-qualification) separates the source successor, retained failed CI artifact and current live receipts. No additional activation or native package is claimed.
+
 ## September 27 focused reliability changes
 
 Source `939bf80b795d9b1addefdaaf39415628e3481af6` changes the existing progress,

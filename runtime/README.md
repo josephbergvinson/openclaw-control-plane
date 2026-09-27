@@ -11,6 +11,14 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 27 source organization qualification
+
+Reference `8c2d7ca386eb2b8e2b1948b02a3ade74bd877dbb` retains deployed source `939bf80b795d9b1addefdaaf39415628e3481af6` behavior while satisfying the original line-cap growth rule. The first public repair revision failed native command 3 because the two new steering cases and fetch changes grew files already above their limits. That failed result and its digest-verified artifact are retained; no retry or rule exemption is used.
+
+The successor moves both delayed-steering cases, with their assertions and equivalent tool-factory options intact, into the existing steering suite. Unchanged fetch input/output schema declarations move to one sibling module; schema values compare equal and all 56 remaining nonimport statements are unchanged. Tests and the original ratchet qualify that organization change. The public workflow still runs the same named test files and all retained native commands.
+
+This source-only successor is not a new Gateway activation or companion installation. Gateway `939bf80` and Mini build `2609000597` retain the bounded acceptance below. Hosted results must belong to this successor's exact public revision; the prior failed run is not a passing qualification.
+
 ## September 27 focused reliability repair
 
 Reference `939bf80b795d9b1addefdaaf39415628e3481af6` is a focused successor to
