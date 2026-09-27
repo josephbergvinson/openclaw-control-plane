@@ -15,20 +15,25 @@ workstreams, rather than only the final Discord changes.
 
 ## September 27 recovery and credential corrections
 
-Current reference `693b399bf5c6536309529fb0d679b83de306a0a4` uses existing
-Browser plugin replacement for credential metadata, keeps private child recovery
-and cancellation with their parent, and steers recovered children through their
-current execution and transcript. Logical session and completion ownership remain
-checked. The [qualification record](../runtime/README.md#september-27-recovery-and-credential-corrections)
-separates the passed source tests and exact-source aggregate build from pending
-activation and live acceptance.
+Current reference `0390422beea5265fa8e95e79f204f373e20345b1` retains Browser
+credential replacement, private recovery notice/cancellation ownership and
+steering through the active private transcript. It also adds account-aware
+compaction, final-turn media read authority, resident Gateway task notification
+updates and child-result continuation for yielded private recovery owners.
+Logical and private session incarnations, task generations, receipts, account
+eligibility and read restrictions remain enforced. The
+[qualification record](../runtime/README.md#september-27-recovery-and-credential-corrections)
+separates scoped source tests, the successful exact-source build and Gateway
+activation from bounded Discord acceptance and its explicitly unexercised paths.
 
-It also includes Apple Passwords locked-view recognition from source
-`3f2d68ed51099856b1ee5035d8776c1f680b6e00`. Signed Mini candidate build
-`2609000598` remains pinned to that earlier native source. Installation, local
-binding and actual unlock need their own receipts. The recorded live Gateway
-is still source `611db2861e304c42af6bac9aa788b37ad2ab225b`; the recorded installed
-Mini remains build `2609000597` at this publication checkpoint.
+Apple Passwords locked-view recognition comes from source
+`3f2d68ed51099856b1ee5035d8776c1f680b6e00`. Signed Mini build `2609000598` and
+its private worker remain pinned to that earlier native source and are now
+installed on the originating Mini. Local binding and opaque credential entry
+are verified separately; actual unlock remains unverified. This does not claim
+MacBook installation or vault-item retrieval. The live Gateway is now
+`0390422beea5265fa8e95e79f204f373e20345b1`, activated on September 27 at
+22:22:37 UTC.
 
 ## September 27 task delivery correction
 

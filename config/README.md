@@ -32,7 +32,7 @@ The profile carries these reference choices:
 | Compaction | Safeguard mode, strict identifier preservation, 120,000 recent tokens, six recent turns, quality guard with one retry. |
 | Compaction trigger | Native context pressure and overflow recovery; the optional active-transcript byte threshold is unset. |
 | Compaction maintenance | 1,800-second timeout; enabled memory flush with the native 4,000-token soft margin and an 8 MiB force-flush threshold. |
-| Visibility | Native compaction notification enabled; path-specific background behavior still needs verification. |
+| Visibility | Routine automatic compaction notices are disabled with `notifyUser: false`. Explicit compact commands and actionable turn failures retain their normal responses. |
 | Memory search | Local EmbeddingGemma model, no provider fallback; requires managed llama.cpp setup below. Native citation display is off; policy still requires support for factual claims. |
 | Sessions | Per-channel peer scope, long-lived Discord sessions and explicit thread binding limits. |
 

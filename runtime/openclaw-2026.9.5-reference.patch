@@ -11,6 +11,18 @@ index e182868ed7cf40a530d29d5bc2940b87af608051..be5fbbdb709721973630087594c6ab7e
      {"id":"native.apple.2601e0fe3d38e8d0","source":"Mobile setup codes, QR, and node approval.","surface":"apple","sites":[{"kind":"ui-named-argument","path":"apps/ios/Sources/Design/OpenClawDocsScreen.swift"}]},
      {"id":"native.apple.d399edeffed0ac89","source":"Mode","surface":"apple","sites":[{"kind":"ui-call","path":"apps/ios/Sources/Onboarding/OnboardingWizardView.swift"}]},
      {"id":"native.apple.4238f1cc6d590fc1","source":"Model","surface":"apple","sites":[{"kind":"ui-named-argument","path":"apps/ios/Sources/Design/ChatModelControlsMenu.swift"},{"kind":"ui-call","path":"apps/ios/Sources/Design/SettingsProTabSections.swift"},{"kind":"ui-call","path":"apps/macos/Sources/OpenClaw/PairingApprovalPanelView.swift"},{"kind":"ui-localized-call","path":"apps/macos/Sources/OpenClaw/QuickChatModelMenu.swift"},{"kind":"ui-modifier","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatComposer+CleanControls.swift"},{"kind":"ui-modifier","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatComposer+Controls.swift"},{"kind":"ui-call","path":"apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSessionManagementViews.swift"}]},
+diff --git a/apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt b/apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt
+index fb958e4f185743ca670a04d29ab2b00091848df8..4f886f3c39051f192a3d3d1bc1dd06afeb9a9f15 100644
+--- a/apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt
++++ b/apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt
+@@ -956,6 +956,7 @@ enum class GatewayMethod(
+   PluginsSkillsRead("plugins.skills.read"),
+   DiagnosticsHeapProfile("diagnostics.heapProfile"),
+   DesktopRelease("desktop.release"),
++  TasksNotify("tasks.notify"),
+ }
+ 
+ enum class GatewayEvent(
 diff --git a/apps/macos/Package.swift b/apps/macos/Package.swift
 index 8ea69dbf4802667b47124e6ef131217e3df5c035..f4c1764399e3f89cd79aad09662627ced1f22b1a 100644
 --- a/apps/macos/Package.swift
@@ -3609,7 +3621,7 @@ index 0000000000000000000000000000000000000000..0298a786bfd5f40f0fb3f81136ac54c0
 +
 +#endif
 diff --git a/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift b/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
-index 953ffd73adfa9f1383262d0cab0093afb0e7d046..60bfb7ee25690fa08b0221f9a4f0f91fed356643 100644
+index 953ffd73adfa9f1383262d0cab0093afb0e7d046..15204997b61a8e3c1d4e10d0c23d838784f11c8d 100644
 --- a/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
 +++ b/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
 @@ -5590,6 +5590,7 @@ public struct CronListParams: Codable, Sendable {
@@ -3644,6 +3656,53 @@ index 953ffd73adfa9f1383262d0cab0093afb0e7d046..60bfb7ee25690fa08b0221f9a4f0f91f
          case action
          case status
          case completionstatus = "completionStatus"
+@@ -21446,6 +21450,46 @@ public struct TasksListResult: Codable, Sendable {
+     }
+ }
+ 
++public struct TasksNotifyParams: Codable, Sendable {
++    public let taskid: String
++    public let notifypolicy: AnyCodable
++
++    public init(
++        taskid: String,
++        notifypolicy: AnyCodable)
++    {
++        self.taskid = taskid
++        self.notifypolicy = notifypolicy
++    }
++
++    private enum CodingKeys: String, CodingKey {
++        case taskid = "taskId"
++        case notifypolicy = "notifyPolicy"
++    }
++}
++
++public struct TasksNotifyResult: Codable, Sendable {
++    public let found: Bool
++    public let taskid: String?
++    public let notifypolicy: AnyCodable?
++
++    public init(
++        found: Bool,
++        taskid: String? = nil,
++        notifypolicy: AnyCodable? = nil)
++    {
++        self.found = found
++        self.taskid = taskid
++        self.notifypolicy = notifypolicy
++    }
++
++    private enum CodingKeys: String, CodingKey {
++        case found
++        case taskid = "taskId"
++        case notifypolicy = "notifyPolicy"
++    }
++}
++
+ public struct TasksRecoveryParams: Codable, Sendable {
+     public let taskids: [String]
+ 
 diff --git a/config/assertion-safety-baseline.txt b/config/assertion-safety-baseline.txt
 index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..7560f64bef866ac04ce670422f7607212cfaaa8b 100644
 --- a/config/assertion-safety-baseline.txt
@@ -20834,6 +20893,19 @@ index b1b1f2d92a57cdeb1f4f9afc04bc59ca0821cae8..a3d6806ecbf15980783cd7aea66b7c69
 +    expect(Value.Check(CronRunLogEntrySchema, entry)).toBe(valid);
 +  });
 +});
+diff --git a/packages/gateway-protocol/src/public-schema.ts b/packages/gateway-protocol/src/public-schema.ts
+index 0bd51ffd8b319906727215ebe48f3c43df119482..5c05b331c66ca3e8b63f63b60140d97da7a13a32 100644
+--- a/packages/gateway-protocol/src/public-schema.ts
++++ b/packages/gateway-protocol/src/public-schema.ts
+@@ -363,6 +363,8 @@ export {
+   TasksHistoryResultSchema,
+   TasksCancelParamsSchema,
+   TasksCancelResultSchema,
++  TasksNotifyParamsSchema,
++  TasksNotifyResultSchema,
+   TasksRecoveryParamsSchema,
+   TasksRecoveryResultSchema,
+   ConfigGetParamsSchema,
 diff --git a/packages/gateway-protocol/src/schema/cron.ts b/packages/gateway-protocol/src/schema/cron.ts
 index d9f1ef1e3b083ada89926ed188b2993eb6fac1a0..24ded5ed82bfdcc01a52c67af8b247c04de6ad37 100644
 --- a/packages/gateway-protocol/src/schema/cron.ts
@@ -20846,6 +20918,88 @@ index d9f1ef1e3b083ada89926ed188b2993eb6fac1a0..24ded5ed82bfdcc01a52c67af8b247c0
    action: Type.Literal("finished"),
    status: Type.Optional(CronRunStatusSchema),
    completionStatus: Type.Optional(CronCompletionStatusSchema),
+diff --git a/packages/gateway-protocol/src/schema/tasks.ts b/packages/gateway-protocol/src/schema/tasks.ts
+index 7f8c8f9854127004158830b9b6a725bbbd3ce2e8..678a8af3a71b025b649251d1e631de0499ee5ed9 100644
+--- a/packages/gateway-protocol/src/schema/tasks.ts
++++ b/packages/gateway-protocol/src/schema/tasks.ts
+@@ -171,6 +171,28 @@ export const TasksCancelResultSchema = closedObject({
+   task: Type.Optional(TaskSummarySchema),
+ });
+ 
++/** Notification updates run in the Gateway that owns the task registry. */
++const TaskNotifyPolicySchema = Type.Union([
++  Type.Literal("done_only"),
++  Type.Literal("state_changes"),
++  Type.Literal("silent"),
++]);
++export const TasksNotifyParamsSchema = withSince(
++  "2026.9",
++  closedObject({
++    taskId: NonEmptyString,
++    notifyPolicy: TaskNotifyPolicySchema,
++  }),
++);
++export const TasksNotifyResultSchema = withSince(
++  "2026.9",
++  closedObject({
++    found: Type.Boolean(),
++    taskId: Type.Optional(NonEmptyString),
++    notifyPolicy: Type.Optional(TaskNotifyPolicySchema),
++  }),
++);
++
+ export const TasksRecoveryParamsSchema = closedObject({
+   taskIds: Type.Array(NonEmptyString, { minItems: 1, maxItems: 10 }),
+ });
+@@ -200,3 +222,6 @@ export type TasksCancelParams = Static<typeof TasksCancelParamsSchema>;
+ export type TasksCancelResult = Static<typeof TasksCancelResultSchema>;
+ export type TasksRecoveryParams = Static<typeof TasksRecoveryParamsSchema>;
+ export type TasksRecoveryResult = Static<typeof TasksRecoveryResultSchema>;
++
++export type TasksNotifyParams = Static<typeof TasksNotifyParamsSchema>;
++export type TasksNotifyResult = Static<typeof TasksNotifyResultSchema>;
+diff --git a/packages/gateway-protocol/src/tasks-validators.test.ts b/packages/gateway-protocol/src/tasks-validators.test.ts
+index 327ee774f0dd81d0b2d8ea3f86f288dae2a71c93..8cfaa76d098485ab54c70ab98ec4c489056f2fe7 100644
+--- a/packages/gateway-protocol/src/tasks-validators.test.ts
++++ b/packages/gateway-protocol/src/tasks-validators.test.ts
+@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
+ import {
+   validateTasksCancelParams,
+   validateTasksListParams,
++  validateTasksNotifyParams,
+   validateTasksRecoveryParams,
+ } from "./validator-registry.js";
+ 
+@@ -28,6 +29,17 @@ describe("task validators", () => {
+     expect(validateTasksCancelParams({ taskId: "task-1", force: true })).toBe(false);
+   });
+ 
++  it("accepts only closed notification policies", () => {
++    for (const notifyPolicy of ["done_only", "state_changes", "silent"]) {
++      expect(validateTasksNotifyParams({ taskId: "task-1", notifyPolicy })).toBe(true);
++    }
++    expect(validateTasksNotifyParams({ taskId: "task-1", notifyPolicy: "all" })).toBe(false);
++    expect(
++      validateTasksNotifyParams({ taskId: "task-1", notifyPolicy: "silent", force: true }),
++    ).toBe(false);
++    expect(validateTasksNotifyParams({ taskId: "task-1" })).toBe(false);
++  });
++
+   it("bounds recovery batches", () => {
+     expect(validateTasksRecoveryParams({ taskIds: ["task-1", "task-2"] })).toBe(true);
+     expect(validateTasksRecoveryParams({ taskIds: [] })).toBe(false);
+diff --git a/packages/gateway-protocol/src/validator-registry.ts b/packages/gateway-protocol/src/validator-registry.ts
+index 63364a05eccf83681c33e124f87139269e215e38..28d0eebccead44bd42a5cc34c48e919fafa57a54 100644
+--- a/packages/gateway-protocol/src/validator-registry.ts
++++ b/packages/gateway-protocol/src/validator-registry.ts
+@@ -349,6 +349,7 @@ export const validateTasksListParams = compile(S.TasksListParamsSchema);
+ export const validateTasksGetParams = compile(S.TasksGetParamsSchema);
+ export const validateTasksHistoryParams = compile(S.TasksHistoryParamsSchema);
+ export const validateTasksCancelParams = compile(S.TasksCancelParamsSchema);
++export const validateTasksNotifyParams = compile(S.TasksNotifyParamsSchema);
+ export const validateTasksRecoveryParams = compile(S.TasksRecoveryParamsSchema);
+ export const validateConfigGetParams = compile(S.ConfigGetParamsSchema);
+ export const validateConfigSetParams = compile(S.ConfigSetParamsSchema);
 diff --git a/packages/memory-host-sdk/src/host/types.ts b/packages/memory-host-sdk/src/host/types.ts
 index 6f25e512e37726553f2905d5b9fa6a369ccbadb0..8b40cbf6cb3e7bd6a5c0a6e18a9008775a431d59 100644
 --- a/packages/memory-host-sdk/src/host/types.ts
@@ -23447,6 +23601,329 @@ index 83c938612577b5f1a5d8937f4b517877cebaee43..0cc298c7242ee26185467edfada65ca2
  function normalizeCompactionSuffix(suffix: string | CompactionSuffix): CompactionSuffix {
    return typeof suffix === "string" ? { text: suffix, contextRanges: [] } : suffix;
  }
+diff --git a/src/agents/agent-tools.fs-policy.ts b/src/agents/agent-tools.fs-policy.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2aa1cf2853024eb1dbc50d41845169c423d690ee
+--- /dev/null
++++ b/src/agents/agent-tools.fs-policy.ts
+@@ -0,0 +1,48 @@
++import { getAgentScopedMediaLocalRootsForSources } from "../media/local-roots.js";
++import type { OpenClawCodingToolsOptions } from "./agent-tools.options.js";
++import { resolveSessionPermissionCoreToolPolicy } from "./session-permission-exec-mode.js";
++import { resolveToolFsConfig, type ToolFsPolicy } from "./tool-fs-policy.js";
++
++/** Bind filesystem scope and media reads to this turn's final authorized tool surface. */
++export function createAgentToolFsPolicy(
++  options: OpenClawCodingToolsOptions | undefined,
++  context: {
++    agentId?: string;
++    workspaceDir: string;
++    attachmentReadRoot?: string;
++    canRead: () => boolean;
++  },
++) {
++  const sessionPermissionPolicy = options?.sessionPermissionPolicy;
++  const sessionCoreToolPolicy = sessionPermissionPolicy
++    ? resolveSessionPermissionCoreToolPolicy(sessionPermissionPolicy)
++    : undefined;
++  const fsConfig = resolveToolFsConfig({ cfg: options?.config, agentId: context.agentId });
++  const workspaceOnly =
++    options?.requireWorkspaceOnly === true ||
++    options?.trigger === "memory" ||
++    (sessionCoreToolPolicy?.workspaceOnly ?? fsConfig.workspaceOnly === true);
++  const config = options?.config;
++  const fsPolicy: ToolFsPolicy = {
++    workspaceOnly,
++    ...(sessionPermissionPolicy ? { root: sessionPermissionPolicy.root } : {}),
++    ...(context.attachmentReadRoot ? { readOnlyRoots: [context.attachmentReadRoot] } : {}),
++    ...(config && !workspaceOnly && !options?.sandbox?.enabled
++      ? {
++          resolveMediaLocalRoots: (sources: readonly string[]) =>
++            getAgentScopedMediaLocalRootsForSources({
++              cfg: config,
++              agentId: context.agentId,
++              sessionWorkspaceDir: sessionPermissionPolicy?.root ?? context.workspaceDir,
++              mediaSources: context.canRead() ? sources : undefined,
++            }),
++        }
++      : {}),
++  };
++  return {
++    fsPolicy,
++    workspaceOnly,
++    sessionCoreToolPolicy,
++    readOnly: sessionCoreToolPolicy?.readOnly ?? false,
++  };
++}
+diff --git a/src/agents/agent-tools.media-read-authority.test.ts b/src/agents/agent-tools.media-read-authority.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8ace76ef3d77cb175ae148f01c9b046e64fd63a7
+--- /dev/null
++++ b/src/agents/agent-tools.media-read-authority.test.ts
+@@ -0,0 +1,198 @@
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
++import type { OpenClawConfig } from "../config/config.js";
++import { createOpenClawCodingTools } from "./agent-tools.js";
++import type { OpenClawCodingToolsOptions } from "./agent-tools.options.js";
++import { createAgentToolsSandboxContext } from "./test-helpers/agent-tools-sandbox-context.js";
++import { createHostSandboxFsBridge } from "./test-helpers/host-sandbox-fs-bridge.js";
++import * as pdfNativeProviders from "./tools/pdf-native-providers.js";
++import { createPdfTool } from "./tools/pdf-tool.js";
++import {
++  createPdfToolInfraStub,
++  FAKE_PDF_MEDIA,
++  resetPdfToolAuthEnv,
++} from "./tools/pdf-tool.test-support.js";
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++const { stubPdfToolInfra } = createPdfToolInfraStub(vi.fn());
++
++describe("assembled PDF tool read authority", () => {
++  beforeEach(() => resetPdfToolAuthEnv());
++  afterEach(() => {
++    vi.restoreAllMocks();
++    vi.unstubAllEnvs();
++  });
++
++  async function fixture(options?: {
++    senderId?: string;
++    permissionMode?: "full" | "workspace" | "guarded" | "read-only";
++    sandboxed?: boolean;
++    toolOptions?: Partial<OpenClawCodingToolsOptions>;
++  }) {
++    const root = tempDirs.make("openclaw-pdf-read-authority-");
++    const workspaceDir = path.join(root, "workspace");
++    const agentDir = path.join(root, "agent");
++    const projectDir = path.join(root, "project", "work-product");
++    const stateDir = path.join(root, "state");
++    const pdf = path.join(projectDir, "review.pdf");
++    await Promise.all(
++      [workspaceDir, agentDir, projectDir].map((dir) => fs.mkdir(dir, { recursive: true })),
++    );
++    await fs.writeFile(pdf, FAKE_PDF_MEDIA.buffer);
++    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
++    const config: OpenClawConfig = {
++      agents: {
++        defaults: { workspace: workspaceDir, pdfModel: { primary: "anthropic/claude-opus-4-6" } },
++      },
++      tools: {
++        profile: "full",
++        allow: ["read", "pdf"],
++        fs: { workspaceOnly: false },
++        toolsBySender: { "id:guest": { deny: ["read"] } },
++      },
++    };
++    await stubPdfToolInfra(agentDir, { mockLoad: false });
++    const native = vi
++      .spyOn(pdfNativeProviders, "anthropicAnalyzePdf")
++      .mockResolvedValue("Reviewed PDF");
++    const tools = createOpenClawCodingTools({
++      config,
++      agentId: "main",
++      agentDir,
++      workspaceDir,
++      sessionKey: "agent:main:main",
++      senderId: options?.senderId ?? "owner",
++      messageProvider: "discord",
++      ...(options?.permissionMode
++        ? { sessionPermissionPolicy: { root: workspaceDir, mode: options.permissionMode } }
++        : {}),
++      ...(options?.sandboxed
++        ? {
++            sandbox: createAgentToolsSandboxContext({
++              workspaceDir,
++              fsBridge: createHostSandboxFsBridge(workspaceDir),
++            }),
++          }
++        : {}),
++      ...options?.toolOptions,
++    });
++    const tool = tools.find((entry) => entry.name === "pdf");
++    if (!tool) {
++      throw new Error("registered PDF tool missing");
++    }
++    return { tool, tools, pdf, native, config, agentDir, workspaceDir, stateDir, projectDir };
++  }
++
++  it("reads generated project PDFs with the same full-owner authority as the read tool", async () => {
++    const { tool, tools, pdf, native } = await fixture({ permissionMode: "full" });
++    expect(tools.some((entry) => entry.name === "read")).toBe(true);
++    const result = await tool.execute("review", { pdf, prompt: "Review this generated PDF." });
++    expect(result.content).toEqual([{ type: "text", text: "Reviewed PDF" }]);
++    expect(native.mock.calls[0]?.[0].pdfs[0]?.base64).toBe(
++      FAKE_PDF_MEDIA.buffer.toString("base64"),
++    );
++  });
++
++  it("does not inherit the owner's read authority for a sender denied read", async () => {
++    const { tool, tools, pdf, native } = await fixture({ senderId: "guest" });
++    expect(tools.some((entry) => entry.name === "read")).toBe(false);
++    await expect(tool.execute("review", { pdf, prompt: "Review" })).rejects.toThrow(
++      /allowed directory/i,
++    );
++    expect(native).not.toHaveBeenCalled();
++  });
++
++  it("keeps required workspace-only turns confined even with a surviving read tool", async () => {
++    const { tool, pdf, native } = await fixture({ toolOptions: { requireWorkspaceOnly: true } });
++    await expect(tool.execute("review", { pdf, prompt: "Review" })).rejects.toThrow(
++      /allowed directory/i,
++    );
++    expect(native).not.toHaveBeenCalled();
++  });
++
++  it.each(["workspace", "guarded", "read-only"] as const)(
++    "retains session %s confinement while allowing its own generated PDF",
++    async (permissionMode) => {
++      const { tool, pdf, native, workspaceDir } = await fixture({ permissionMode });
++      await expect(tool.execute("outside", { pdf, prompt: "Review" })).rejects.toThrow(
++        /allowed directory/i,
++      );
++      expect(native).not.toHaveBeenCalled();
++      const ownPdf = path.join(workspaceDir, "review.pdf");
++      await fs.copyFile(pdf, ownPdf);
++      await expect(tool.execute("own", { pdf: ownPdf, prompt: "Review" })).resolves.toMatchObject({
++        content: [{ type: "text", text: "Reviewed PDF" }],
++      });
++    },
++  );
++
++  it("keeps sandbox bridge confinement when global filesystem access is full", async () => {
++    const { tool, pdf, native } = await fixture({ sandboxed: true });
++    await expect(tool.execute("outside", { pdf, prompt: "Review" })).rejects.toThrow(
++      /outside|escapes|sandbox/i,
++    );
++    expect(native).not.toHaveBeenCalled();
++  });
++
++  it("does not expand media reads when construction omits the read tool", async () => {
++    const { tool, tools, pdf, native } = await fixture({
++      toolOptions: {
++        toolConstructionPlan: {
++          includeBaseCodingTools: false,
++          includeShellTools: false,
++          includeChannelTools: false,
++          includeOpenClawTools: true,
++          includePluginTools: false,
++        },
++      },
++    });
++    expect(tools.some((entry) => entry.name === "read")).toBe(false);
++    await expect(tool.execute("review", { pdf, prompt: "Review" })).rejects.toThrow(
++      /allowed directory/i,
++    );
++    expect(native).not.toHaveBeenCalled();
++  });
++
++  it.each(["direct", "directory-symlink", "file-symlink"])(
++    "does not promote a sibling sandbox through a %s source path",
++    async (kind) => {
++      const { tool, native, stateDir, projectDir } = await fixture();
++      const siblingDir = path.join(stateDir, "sandboxes", "another-session");
++      const siblingPdf = path.join(siblingDir, "private.pdf");
++      await fs.mkdir(siblingDir, { recursive: true });
++      await fs.writeFile(siblingPdf, FAKE_PDF_MEDIA.buffer);
++      let pdf = siblingPdf;
++      if (kind === "directory-symlink") {
++        const link = path.join(projectDir, "linked-directory");
++        await fs.symlink(siblingDir, link);
++        pdf = path.join(link, "private.pdf");
++      } else if (kind === "file-symlink") {
++        pdf = path.join(projectDir, "linked-file.pdf");
++        await fs.symlink(siblingPdf, pdf);
++      }
++      await expect(tool.execute("review", { pdf, prompt: "Review" })).rejects.toThrow(
++        /allowed directory|not safe to read/i,
++      );
++      expect(native).not.toHaveBeenCalled();
++    },
++  );
++
++  it("does not treat workspaceOnly=false alone as explicit read authority", async () => {
++    const { config, agentDir, workspaceDir, pdf, native } = await fixture();
++    const tool = createPdfTool({
++      config,
++      agentDir,
++      workspaceDir,
++      fsPolicy: { workspaceOnly: false },
++    });
++    if (!tool) {
++      throw new Error("PDF tool missing");
++    }
++    await expect(tool.execute("review", { pdf, prompt: "Review" })).rejects.toThrow(
++      /allowed directory/i,
++    );
++    expect(native).not.toHaveBeenCalled();
++  });
++});
+diff --git a/src/agents/agent-tools.ts b/src/agents/agent-tools.ts
+index de6798c1f1a1ad52de35822f5a6c2a9395214d4f..75015db6545ca6c0cddabcc5526da133c3261dd9 100644
+--- a/src/agents/agent-tools.ts
++++ b/src/agents/agent-tools.ts
+@@ -23,6 +23,7 @@ import {
+   copyAgentToolMetadata,
+ } from "./agent-tool-metadata.js";
+ import { finalizeAgentTools } from "./agent-tools.finalize.js";
++import { createAgentToolFsPolicy } from "./agent-tools.fs-policy.js";
+ import {
+   filterToolsByMessageProvider,
+   messageProviderExcludesTool,
+@@ -61,13 +62,9 @@ import { applySwarmCollectorToolContract } from "./openclaw-tools.swarm.js";
+ import { resolveSandboxFileIdentity } from "./sandbox/file-mutation-identity.js";
+ import { createEmbeddedMessageInvocationPolicy } from "./scheduled-message-invocation.js";
+ import { resolveScheduledToolCallerContext } from "./scheduled-tool-policy.js";
+-import {
+-  resolveSessionPermissionCoreToolPolicy,
+-  projectEffectiveExecPolicy,
+-} from "./session-permission-exec-mode.js";
++import { projectEffectiveExecPolicy } from "./session-permission-exec-mode.js";
+ import { resolveSessionPlacementComputer } from "./session-placement-computer.js";
+ import { subagentAttachmentRootForRun } from "./subagents/subagent-attachment-paths.js";
+-import { resolveToolFsConfig } from "./tool-fs-policy.js";
+ import { resolveToolLoopDetectionConfig } from "./tool-loop-detection-config.js";
+ import { buildDeclaredToolAllowlistContext } from "./tool-policy-declared-context.js";
+ import {
+@@ -239,11 +236,7 @@ export function createOpenClawCodingToolsInternal(
+           agentId: executionAgentId,
+         })
+       : undefined;
+-  const fsConfig = resolveToolFsConfig({ cfg: options?.config, agentId });
+   const sessionPermissionPolicy = options?.sessionPermissionPolicy;
+-  const sessionCoreToolPolicy = sessionPermissionPolicy
+-    ? resolveSessionPermissionCoreToolPolicy(sessionPermissionPolicy)
+-    : undefined;
+   const sandboxRoot = sandbox?.workspaceDir;
+   const sandboxFsBridge = sandbox?.fsBridge;
+   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
+@@ -284,16 +277,15 @@ export function createOpenClawCodingToolsInternal(
+   const includeOpenClawTools = includeCoreTools && toolConstructionPlan.includeOpenClawTools;
+   const includeChannelTools = toolConstructionPlan.includeChannelTools;
+   const includePluginTools = toolConstructionPlan.includePluginTools;
+-  const workspaceOnly =
+-    options?.requireWorkspaceOnly === true ||
+-    isMemoryFlushRun ||
+-    (sessionCoreToolPolicy?.workspaceOnly ?? fsConfig.workspaceOnly === true);
+-  const fsPolicy = {
+-    workspaceOnly,
+-    ...(sessionPermissionPolicy ? { root: sessionPermissionPolicy.root } : {}),
+-    ...(attachmentReadRoot ? { readOnlyRoots: [attachmentReadRoot] } : {}),
+-  };
+-  const readOnly = sessionCoreToolPolicy?.readOnly ?? false;
++  const { fsPolicy, workspaceOnly, sessionCoreToolPolicy, readOnly } = createAgentToolFsPolicy(
++    options,
++    {
++      agentId,
++      workspaceDir: codingRoot,
++      attachmentReadRoot,
++      canRead: () => authorizedTools.some((tool) => tool.name === "read"),
++    },
++  );
+   const applyPatchConfig = execConfig.applyPatch;
+   // Required file roots still constrain patches after a full-mode change; shell policy is separate.
+   const applyPatchWorkspaceOnly =
 diff --git a/src/agents/auth-health.test.ts b/src/agents/auth-health.test.ts
 index 38a8229f81ccf9f6e5a7c3f4a40f03bdb2194d47..34452256c1d3b86e0e2ac954d7c95cc6061d110a 100644
 --- a/src/agents/auth-health.test.ts
@@ -26490,10 +26967,17 @@ index 0000000000000000000000000000000000000000..c04569eea18e2118e6e82eb757e341f5
 +  assertCurrent: () => void;
 +};
 diff --git a/src/agents/command/run-embedded-attempt.ts b/src/agents/command/run-embedded-attempt.ts
-index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..f50f363854762ee6bea9578617b8eb3286ace9e6 100644
+index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..b0a8a28c53281353bcffba9b49591bff6ab73991 100644
 --- a/src/agents/command/run-embedded-attempt.ts
 +++ b/src/agents/command/run-embedded-attempt.ts
-@@ -49,7 +49,7 @@ import {
+@@ -1,5 +1,6 @@
+ import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
+ import { resolveSessionAuthProfileOverrideSource } from "../../config/sessions/auth-profile-override-provenance.js";
++import { resolvePrivateCompletionTranscript } from "../../gateway/session-subagent-private-completion.js";
+ import { clearAgentRunTerminalWriteContext } from "../../infra/agent-run-terminal-writes.js";
+ import { createSubsystemLogger } from "../../logging/subsystem.js";
+ import {
+@@ -49,7 +50,7 @@ import {
  } from "../thinking-runtime.js";
  import {
    createAgentAttemptLifecycleCallbacks,
@@ -26502,7 +26986,36 @@ index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..f50f363854762ee6bea9578617b8eb32
  } from "./attempt-callbacks.js";
  import { persistAgentSession } from "./attempt-execution.shared.js";
  import { createCommandCompactionAccounting } from "./compaction-accounting.js";
-@@ -136,14 +136,11 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
+@@ -113,15 +114,20 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
+     sessionKey,
+     storePath,
+   });
+-  const internalSessionTarget = params.suppressVisibleSessionEffects
+-    ? await prepareInternalSessionEffectsSession({
+-        agentId: sessionAgentId,
+-        cwd: cwd ?? workspaceDir,
+-        runId,
+-        source: sessionEffectsSource,
+-        storePath,
+-      })
++  const privateResume = params.opts.privateCompletionResume?.privateCompletion
++    ? params.opts.privateCompletionResume
+     : undefined;
++  const internalSessionTarget = privateResume
++    ? resolvePrivateCompletionTranscript(privateResume, runId)
++    : params.suppressVisibleSessionEffects
++      ? await prepareInternalSessionEffectsSession({
++          agentId: sessionAgentId,
++          cwd: cwd ?? workspaceDir,
++          runId,
++          source: sessionEffectsSource,
++          storePath,
++        })
++      : undefined;
+   params.trackInternalModelRunTarget(internalSessionTarget);
+   let attemptSessionTarget =
+     internalSessionTarget ??
+@@ -136,14 +142,11 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
    const attemptSessionFile = internalSessionTarget?.sessionFile ?? sessionFile;
  
    const startedAt = Date.now();
@@ -26519,7 +27032,18 @@ index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..f50f363854762ee6bea9578617b8eb32
    );
    const transcriptMedia = params.opts.transcriptMedia ?? [];
    const hasTranscriptMedia = transcriptMedia.length > 0;
-@@ -529,7 +526,7 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
+@@ -152,7 +155,9 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
+     (params.opts.transcriptMessage === "" && !hasTranscriptMedia);
+   const recorderTranscriptText = transcriptBody || undefined;
+   const userTurnTranscriptRecorder =
+-    (internalSessionTarget ? undefined : params.opts.userTurnTranscriptRecorder) ??
++    (internalSessionTarget && !privateResume
++      ? undefined
++      : params.opts.userTurnTranscriptRecorder) ??
+     createUserTurnTranscriptRecorder({
+       ...(!suppressUserTurnPersistence && (recorderTranscriptText || hasTranscriptMedia)
+         ? {
+@@ -529,7 +534,7 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
                authProfileFailurePolicy: runOptions.authProfileFailurePolicy,
                contextEngineLogicalTurnLease: runOptions.contextEngineLogicalTurnLease,
                onContextEngineTurnCandidate: runOptions.onContextEngineTurnCandidate,
@@ -26528,7 +27052,7 @@ index f13241bcbff7df7cf7abb8e4990cdb91e161a2bf..f50f363854762ee6bea9578617b8eb32
                onCompactionAccounting: candidateAccounting.observe,
                onCompactionRequestBudget: candidateAccounting.observeRequestBudget,
                onSuccessfulAuthProfile: (selection) => {
-@@ -540,7 +537,6 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
+@@ -540,7 +545,6 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
                  lifecycleGeneration = nextLifecycleGeneration;
                  params.onLifecycleGenerationChanged(nextLifecycleGeneration);
                },
@@ -26575,10 +27099,18 @@ index f9331b00a41c84407a2b4568a8b3fdb6dfb4ed42..ae1f139e4c95b9bf5f9704b6acd90077
        ...(coordination ? { projectSessionMessages: false } : {}),
        // Node and local command ingress may not have a separate chat activity owner.
 diff --git a/src/agents/command/types.ts b/src/agents/command/types.ts
-index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113a12a9b32 100644
+index 6ca10fedb6326b01d8e483d64b4b9198156ed442..0606c6a121d862a4e49c8cf20371b3195343bd1e 100644
 --- a/src/agents/command/types.ts
 +++ b/src/agents/command/types.ts
-@@ -25,6 +25,7 @@ import type { RuntimeContextFragment } from "../internal-runtime-context.js";
+@@ -7,6 +7,7 @@ import type { SpawnedRunMetadata } from "../../agents/spawned-context.js";
+ import type { PromptMode } from "../../agents/system-prompt.types.js";
+ import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
+ import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.public.js";
++import type { TrustedSubagentResume } from "../../gateway/in-process-subagent-resume.js";
+ import type { MediaFact } from "../../media/media-facts.js";
+ import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
+ import type { PluginHookChannelContext } from "../../plugins/hook-types.js";
+@@ -25,6 +26,7 @@ import type { RuntimeContextFragment } from "../internal-runtime-context.js";
  import type { MainSessionRecoveryOwnerLease } from "../main-session-recovery/main-session-recovery-store.js";
  import type { ScheduledToolPolicyContext } from "../scheduled-tool-policy.js";
  import type { TrustedSubagentCompletionHandoff } from "../subagents/announce/subagent-announce-handoff.js";
@@ -26586,7 +27118,7 @@ index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113
  import type { AgentStreamParams, ClientToolDefinition } from "./shared-types.js";
  
  /** Image content block for Claude API multimodal messages. */
-@@ -88,6 +89,8 @@ export type AgentCommandOpts = {
+@@ -88,6 +90,8 @@ export type AgentCommandOpts = {
    json?: boolean;
    timeout?: string;
    deliver?: boolean;
@@ -26595,6 +27127,100 @@ index 6ca10fedb6326b01d8e483d64b4b9198156ed442..78b77e4993bc2811d4528b52ce952113
    /** Override delivery target (separate from session routing). */
    replyTo?: string;
    /** Override delivery channel (separate from session routing). */
+@@ -238,6 +242,8 @@ export type AgentCommandOpts = {
+   suppressPromptPersistence?: boolean;
+   /** Gateway/channel ingress can provide a canonical user-turn persistence owner. */
+   userTurnTranscriptRecorder?: UserTurnTranscriptRecorder;
++  /** Host-bound recovery transcript; never accepted from Gateway wire parameters. */
++  privateCompletionResume?: TrustedSubagentResume;
+ };
+ 
+ /** Restricted option surface for external ingress callsites. */
+diff --git a/src/agents/compaction.summarize-fallback.test.ts b/src/agents/compaction.summarize-fallback.test.ts
+index d1effdb9bd30245b0545d25b5ec7a33bd14f30cb..ada7bfd7d22ffa673e2a4472ddecb9c9c1b3aee3 100644
+--- a/src/agents/compaction.summarize-fallback.test.ts
++++ b/src/agents/compaction.summarize-fallback.test.ts
+@@ -92,6 +92,29 @@ describe("compaction summarization fallback", () => {
+     },
+   );
+ 
++  it.each([
++    "Summarization failed: Codex error: The usage limit has been reached",
++    "HTTP 401 authentication failed",
++    "insufficient_quota",
++  ])("returns %s to the auth owner without retrying the same credential", async (message) => {
++    const error = new Error(message);
++    agentSessionMocks.generateSummary.mockRejectedValue(error);
++    const assertion = expect(
++      summarizeInStages({
++        parts: 1,
++        messages: [makeUserMessage("keep this original request", 1)],
++        model: testModel,
++        apiKey: "test-key", // pragma: allowlist secret
++        signal: new AbortController().signal,
++        reserveTokens: 1000,
++        maxChunkTokens: 50_000,
++        contextWindow: 200_000,
++      }),
++    ).rejects.toBe(error);
++    await finishAssertionWithTimers(assertion);
++    expect(agentSessionMocks.generateSummary).toHaveBeenCalledTimes(1);
++  });
++
+   it("retries provider-side AbortError and returns a real summary when caller signal is not aborted", async () => {
+     // Reproduce the undici AbortError("This operation was aborted") shape thrown
+     // when the LLM API closes the connection mid-stream without the caller signal
+diff --git a/src/agents/compaction.ts b/src/agents/compaction.ts
+index 31e6ceb611ed3ceadb768c651d3273def82bacfe..fab601973c48a35b4cae269300f6f1bcc7c0a4d3 100644
+--- a/src/agents/compaction.ts
++++ b/src/agents/compaction.ts
+@@ -22,7 +22,8 @@ import {
+   SUMMARIZATION_OVERHEAD_TOKENS,
+ } from "./compaction-planning.js";
+ import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
+-import { isTimeoutError } from "./failover-error.js";
++import { describeFailoverError, isTimeoutError } from "./failover-error.js";
++import { hasLongWindowRateLimitEvidence } from "./failover/retry-evidence.js";
+ import type {
+   AgentMessage,
+   CompactionSummaryPrompt,
+@@ -46,6 +47,16 @@ const log = createSubsystemLogger("compaction");
+ 
+ type PartialSummaryError = Error & { partialSummary?: string };
+ 
++function requiresCompactionAuthFallback(error: unknown): boolean {
++  const reason = describeFailoverError(error).reason;
++  return (
++    (reason === "rate_limit" && hasLongWindowRateLimitEvidence(formatErrorMessage(error))) ||
++    reason === "billing" ||
++    reason === "auth" ||
++    reason === "auth_permanent"
++  );
++}
++
+ const DEFAULT_SUMMARY_FALLBACK = "No prior history.";
+ const MERGE_SUMMARIES_INSTRUCTIONS = [
+   "Merge these partial summaries into a single cohesive summary.",
+@@ -160,7 +171,9 @@ async function summarizeChunks(params: CompactionSummaryParams): Promise<string>
+           // Caller aborts and transport timeouts are terminal; provider-side
+           // AbortErrors without caller cancellation remain retryable.
+           shouldRetry: (err) =>
+-            !params.signal.aborted && (isAbortError(err) || !isTimeoutError(err)),
++            !params.signal.aborted &&
++            !requiresCompactionAuthFallback(err) &&
++            (isAbortError(err) || !isTimeoutError(err)),
+         },
+       );
+     } catch (err) {
+@@ -211,7 +224,7 @@ async function summarizeWithFallback(params: CompactionSummaryParams): Promise<s
+     return await summarizeChunks(params);
+   } catch (err) {
+     lastError = err;
+-    if (params.signal.aborted) {
++    if (params.signal.aborted || requiresCompactionAuthFallback(err)) {
+       throw lastError;
+     }
+     log.warn(`Full summarization failed: ${formatErrorMessage(lastError)}`);
 diff --git a/src/agents/credential-safety-prompt.test.ts b/src/agents/credential-safety-prompt.test.ts
 index 4e582ebf91ca2a4ed75a55ecaef4fbb7f653fc25..54b09abc2ccb099832c30cc10c1edeb442ec0ad6 100644
 --- a/src/agents/credential-safety-prompt.test.ts
@@ -26771,6 +27397,336 @@ index 0000000000000000000000000000000000000000..04fa4b66f9ccc050c18db39ae44ae8c5
 +    currentTokenCount: params.params.currentTokenCount,
 +  };
 +}
+diff --git a/src/agents/embedded-agent-runner/compact.auth-fallback.test.ts b/src/agents/embedded-agent-runner/compact.auth-fallback.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2158f76ed77803512c8eb96a123bffdf42c82610
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/compact.auth-fallback.test.ts
+@@ -0,0 +1,324 @@
++import { realpath } from "node:fs/promises";
++import { join } from "node:path";
++import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { createDeferred } from "../../../test/helpers/promise.js";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import { createApiKeyCredential } from "../auth-profiles/credential-fixtures.test-support.js";
++import type { AuthProfileStore } from "../auth-profiles/types.js";
++import {
++  createAssistant,
++  createAssistantResultStream,
++  createTestSession,
++  registerAgentSessionLoopTestLifecycle,
++  testModel,
++} from "../sessions/agent-session-loop-correctness.test-support.js";
++import { createResourceLoader } from "../sessions/agent-session-loop-resource-loader.test-support.js";
++import { generateSummary as generateRealSummary } from "../sessions/compaction/compaction.js";
++import { createEventBus } from "../sessions/event-bus.js";
++import { createExtensionRuntime, loadExtensionFromFactory } from "../sessions/extensions/loader.js";
++import { SessionManager } from "../sessions/session-manager.js";
++import { SettingsManager } from "../sessions/settings-manager.js";
++import {
++  limitHistoryTurnsMock,
++  resolveEffectiveCompactionModeMock,
++  ensureAuthProfileStoreMock,
++  getApiKeyForModelMock,
++  loadCompactHooksHarness,
++  resetCompactHooksHarnessMocks,
++  sessionCompactImpl,
++  sessionMessages,
++} from "./compact.hooks.harness.js";
++
++const { compactEmbeddedAgentSessionDirect } = await loadCompactHooksHarness();
++const [
++  authProfiles,
++  { upsertSessionEntryCore },
++  { closeOpenClawAgentDatabasesForTest },
++  { AsyncWorkScope, captureAsyncWorkTracker },
++] = await Promise.all([
++  import("../auth-profiles.js"),
++  import("../../config/sessions/session-accessor.js"),
++  import("../../state/openclaw-agent-db.js"),
++  import("../../shared/async-work-scope.js"),
++]);
++const dirs = useAutoCleanupTempDirTracker((cleanup) =>
++  afterEach(() => {
++    vi.restoreAllMocks();
++    closeOpenClawAgentDatabasesForTest();
++    cleanup();
++  }),
++);
++
++describe("compaction provider auth fallback", () => {
++  registerAgentSessionLoopTestLifecycle();
++  let workspaceDir: string;
++  let store: AuthProfileStore;
++  beforeEach(async () => {
++    workspaceDir = await realpath(dirs.make("compaction-auth-fallback-"));
++    resetCompactHooksHarnessMocks(workspaceDir);
++    store = {
++      version: 1,
++      profiles: {
++        "openai:first": createApiKeyCredential("openai", "test-first"),
++        "openai:second": createApiKeyCredential("openai", "test-second"),
++        "openai:outside": createApiKeyCredential("openai", "test-outside"),
++      },
++      order: { openai: ["openai:first", "openai:second"] },
++    };
++    ensureAuthProfileStoreMock.mockReturnValue(store);
++    getApiKeyForModelMock.mockImplementation(async (params) => ({
++      apiKey: `key-${params?.profileId}`,
++      mode: "api-key",
++      source: `profile:${params?.profileId}`,
++      ...(params?.profileId ? { profileId: params.profileId } : {}),
++    }));
++    vi.spyOn(authProfiles, "markAuthProfileFailure").mockResolvedValue();
++  });
++
++  async function compact(
++    source: "auto" | "user" = "auto",
++    trigger: "budget" | "overflow" = "budget",
++  ) {
++    const target = {
++      agentId: "main",
++      sessionId: "auth-fallback",
++      sessionKey: "agent:main:auth-fallback",
++      storePath: join(workspaceDir, "sessions.sqlite"),
++    };
++    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++    const scope = new AsyncWorkScope();
++    try {
++      return await scope.run(() =>
++        compactEmbeddedAgentSessionDirect({
++          ...target,
++          sessionTarget: target,
++          sessionFile: target.sessionKey,
++          workspaceDir,
++          provider: "openai",
++          model: "gpt-test",
++          authProfileId: "openai:first",
++          authProfileIdSource: source,
++          trigger,
++          forcePreflight: true,
++          preflightRequired: true,
++          config: {
++            agents: { defaults: { model: { primary: "openai/gpt-test", fallbacks: [] } } },
++          },
++        }),
++      );
++    } finally {
++      await AsyncWorkScope.runWhenAllIdle(
++        () => [scope],
++        () => scope.drain(),
++      );
++    }
++  }
++
++  it("uses the next authorized credential after quota failure without model fallbacks", async () => {
++    sessionCompactImpl.mockRejectedValueOnce(
++      new Error("Codex error: The usage limit has been reached"),
++    );
++    const result = await compact();
++    expect(result.ok).toBe(true);
++    expect(sessionCompactImpl).toHaveBeenCalledTimes(2);
++    expect(getApiKeyForModelMock.mock.calls.map(([arg]) => arg?.profileId)).toEqual([
++      "openai:first",
++      "openai:second",
++    ]);
++    expect(authProfiles.markAuthProfileFailure).toHaveBeenCalledWith(
++      expect.objectContaining({ profileId: "openai:first", reason: "rate_limit" }),
++    );
++  });
++
++  it("preserves history and returns quota failure when all authorized candidates fail", async () => {
++    const history = structuredClone(sessionMessages);
++    sessionCompactImpl.mockRejectedValue(
++      new Error("Codex error: The usage limit has been reached"),
++    );
++    const result = await compact();
++    expect(result).toMatchObject({
++      ok: false,
++      compacted: false,
++      failure: { reason: "rate_limit" },
++    });
++    expect(sessionCompactImpl).toHaveBeenCalledTimes(2);
++    expect(sessionMessages).toEqual(history);
++    expect(getApiKeyForModelMock.mock.calls.map(([arg]) => arg?.profileId)).not.toContain(
++      "openai:outside",
++    );
++  });
++
++  it("does not rotate an explicitly pinned account", async () => {
++    sessionCompactImpl.mockRejectedValue(
++      new Error("Codex error: The usage limit has been reached"),
++    );
++    expect(await compact("user")).toMatchObject({ ok: false, compacted: false });
++    expect(sessionCompactImpl).toHaveBeenCalledTimes(1);
++  });
++
++  it("skips candidates that enter cooldown while the failed request is in flight", async () => {
++    sessionCompactImpl.mockImplementation(async () => {
++      store.usageStats = { "openai:second": { cooldownUntil: Date.now() + 60_000 } };
++      throw new Error("Codex error: The usage limit has been reached");
++    });
++    expect(await compact()).toMatchObject({ ok: false, compacted: false });
++    expect(sessionCompactImpl).toHaveBeenCalledTimes(1);
++  });
++
++  it("retains failed-attempt tools until their accepted descendants finish", async () => {
++    const { createBundleMcpToolRuntime } = await import("../agent-bundle-mcp-tools.js");
++    const finish = createDeferred();
++    const retried = createDeferred();
++    const disposed: number[] = [];
++    let runtime = 0;
++    vi.mocked(createBundleMcpToolRuntime).mockImplementation(async () => {
++      const id = ++runtime;
++      return {
++        tools: [],
++        dispose: async () => {
++          disposed.push(id);
++        },
++      };
++    });
++    sessionCompactImpl
++      .mockImplementationOnce(async () => {
++        void captureAsyncWorkTracker()(() => finish.promise);
++        throw new Error("Codex error: The usage limit has been reached");
++      })
++      .mockImplementationOnce(async () => {
++        retried.resolve();
++        return {
++          summary: "summary",
++          firstKeptEntryId: "entry-1",
++          tokensBefore: 120,
++          details: { ok: true },
++        };
++      });
++    const pending = compact();
++    try {
++      await retried.promise;
++      expect(disposed).toEqual([]);
++    } finally {
++      finish.resolve();
++    }
++    expect(await pending).toMatchObject({ ok: true, compacted: true });
++    expect(disposed).toEqual([1, 2]);
++  });
++
++  it.each([false, true])(
++    "retains provider provenance through the real safeguard, exhausted=%s",
++    async (exhausted) => {
++      const { default: safeguard } = await import("../agent-hooks/compaction-safeguard.js");
++      const { setCompactionSafeguardRuntime } =
++        await import("../agent-hooks/compaction-safeguard-runtime.js");
++      const { generateSummary } = await import("../sessions/index.js");
++      const { guardSessionManager } = await import("../session-tool-result-guard-wrapper.js");
++      const { resolveEmbeddedAgentStream } = await import("./stream-resolution.js");
++      const { createAgentSessionForEmbeddedRunner } = await import("../sessions/sdk.js");
++      const { buildEmbeddedExtensionFactories } = await import("./extensions.js");
++      const manager = SessionManager.inMemory(workspaceDir);
++      for (const content of [
++        "Review deployment notes.",
++        "Compare the remaining options.",
++        "Keep the rollout notes.",
++      ]) {
++        manager.appendMessage({ role: "user", content, timestamp: 1 });
++      }
++      const history = manager.buildSessionContext().messages;
++      const extension = await loadExtensionFromFactory(
++        safeguard,
++        workspaceDir,
++        createEventBus(),
++        createExtensionRuntime(),
++      );
++      const summary = [
++        "## Decisions",
++        "Review deployment notes.",
++        "## Open TODOs",
++        "Compare the remaining options.",
++        "## Constraints/Rules",
++        "None.",
++        "## Pending user asks",
++        "Keep the rollout notes.",
++        "## Exact identifiers",
++        "None.",
++      ].join("\n");
++      const keys: Array<string | undefined> = [];
++      const stream = vi.fn<StreamFn>((model, _context, options) => {
++        keys.push(options?.apiKey);
++        return createAssistantResultStream(
++          exhausted || options?.apiKey === "key-openai:first"
++            ? {
++                ...createAssistant(model, [], "error"),
++                errorMessage: "Codex error: The usage limit has been reached",
++              }
++            : createAssistant(model, [{ type: "text", text: summary }]),
++        );
++      });
++      vi.mocked(generateSummary).mockImplementation(generateRealSummary);
++      vi.mocked(guardSessionManager).mockReturnValue(manager);
++      limitHistoryTurnsMock.mockImplementation((messages) => messages);
++      resolveEffectiveCompactionModeMock.mockReturnValue("safeguard");
++      vi.mocked(resolveEmbeddedAgentStream).mockReturnValue({
++        streamFn: stream,
++        strategy: "session-custom",
++      });
++      vi.mocked(buildEmbeddedExtensionFactories).mockImplementation(({ model }) => {
++        setCompactionSafeguardRuntime(manager, {
++          model,
++          contextWindowTokens: 128_000,
++          recentTurnsPreserve: 0,
++          qualityGuardEnabled: false,
++        });
++        return [];
++      });
++      vi.mocked(createAgentSessionForEmbeddedRunner).mockImplementation(async ({ model }) => {
++        if (!model) {
++          throw new Error("Expected prepared model");
++        }
++        const created = await createTestSession({
++          model: { ...testModel, ...model, maxTokens: 1_024 },
++          sessionManager: manager,
++          settingsManager: SettingsManager.inMemory({
++            compaction: { enabled: false, reserveTokens: 1_024, keepRecentTokens: 1 },
++            retry: { enabled: false },
++          }),
++          resourceLoader: createResourceLoader(extension.handlers),
++        });
++        const auth = await getApiKeyForModelMock.mock.results.at(-1)?.value;
++        if (!auth?.apiKey) {
++          throw new Error("Expected prepared credential");
++        }
++        created.modelRegistry.authStorage.setRuntimeApiKey(model.provider, auth.apiKey);
++        return created;
++      });
++      try {
++        const result = await compact("auto", "overflow");
++        expect(keys).toEqual(["key-openai:first", "key-openai:second"]);
++        if (exhausted) {
++          expect(result).toMatchObject({
++            ok: false,
++            compacted: false,
++            failure: { reason: "rate_limit" },
++          });
++          expect(result.reason).toContain("safeguard");
++          expect(manager.buildSessionContext().messages).toEqual(history);
++          expect(manager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
++        } else {
++          expect(result).toMatchObject({ ok: true, compacted: true });
++          expect(manager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
++        }
++      } finally {
++        vi.mocked(generateSummary).mockReset().mockResolvedValue("summary");
++      }
++    },
++  );
++
++  it("does not rotate accounts for a transcript or quality failure", async () => {
++    sessionCompactImpl.mockRejectedValue(new Error("Compaction cancelled"));
++    expect(await compact()).toMatchObject({ ok: false, compacted: false });
++    expect(sessionCompactImpl).toHaveBeenCalledTimes(1);
++    expect(authProfiles.markAuthProfileFailure).not.toHaveBeenCalled();
++  });
++});
 diff --git a/src/agents/embedded-agent-runner/compact.ingress-watchdog.test.ts b/src/agents/embedded-agent-runner/compact.ingress-watchdog.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..edf9e8ada3d7135568eb5303a607260f68287423
@@ -27163,6 +28119,90 @@ index 0e476e24e4a26834fcfd4116b5a279a843eb0221..133dc62df718fb700ab9de02c315d98c
 -    currentTokenCount: params.params.currentTokenCount,
 -  };
 -}
+diff --git a/src/agents/embedded-agent-runner/compaction-auth-fallback.ts b/src/agents/embedded-agent-runner/compaction-auth-fallback.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7118adf068f59c124e36745fd00b6d5db2cbeff
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/compaction-auth-fallback.ts
+@@ -0,0 +1,78 @@
++/** Advance failed compaction through its existing, same-route credential plan. */
++import { isProfileInCooldown, markAuthProfileFailure } from "../auth-profiles.js";
++import type { DirectCompactionPreparation } from "./direct-compaction-preparation.js";
++import { log } from "./logger.js";
++import { resolveAuthProfileFailureReason } from "./run/auth-profile-failure-policy.js";
++import type { EmbeddedAgentCompactResult } from "./types.js";
++
++export async function prepareCompactionAuthRetry(
++  prepared: DirectCompactionPreparation,
++  result: EmbeddedAgentCompactResult,
++  attemptedProfiles: Set<string>,
++): Promise<DirectCompactionPreparation["params"] | undefined> {
++  const {
++    params,
++    apiKeyInfo,
++    resolvedRuntimeAuthPlan: plan,
++    runtimeAuthProfileStore: store,
++  } = prepared;
++  const profileId = apiKeyInfo.profileId;
++  const failure = result.failure?.reason;
++  if (
++    result.ok ||
++    result.compacted ||
++    params.abortSignal?.aborted ||
++    !profileId ||
++    plan.forwardedAuthProfileSource !== "auto" ||
++    params.authProfileIdSource === "user" ||
++    (failure !== "rate_limit" &&
++      failure !== "billing" &&
++      failure !== "auth" &&
++      failure !== "auth_permanent")
++  ) {
++    return undefined;
++  }
++  attemptedProfiles.add(profileId);
++  const reason = resolveAuthProfileFailureReason({
++    failoverReason: failure,
++    providerStarted: true,
++  });
++  if (reason) {
++    try {
++      await markAuthProfileFailure({
++        store,
++        profileId,
++        credential: prepared.authProfileCredential,
++        reason,
++        cfg: params.config,
++        agentDir: prepared.agentDir,
++        runId: prepared.runId,
++        modelId: prepared.modelId,
++      });
++    } catch {
++      // Run-local exhaustion must still advance if shared bookkeeping is unavailable.
++      log.warn("Compaction auth failure bookkeeping failed; retaining run-local exhaustion.");
++    }
++  }
++  params.abortSignal?.throwIfAborted();
++  const candidates = plan.forwardedAuthProfileCandidateIds?.filter(
++    (candidate) =>
++      !attemptedProfiles.has(candidate) &&
++      !isProfileInCooldown(store, candidate, undefined, prepared.modelId),
++  );
++  if (!candidates?.length) {
++    return undefined;
++  }
++  return {
++    ...params,
++    authProfileId: candidates[0],
++    authProfileIdSource: "auto",
++    runtimeAuthPlan: {
++      ...plan,
++      forwardedAuthProfileId: candidates[0],
++      forwardedAuthProfileCandidateIds: candidates,
++    },
++    // Rebuild the model and request wrappers from the next immutable auth tuple.
++    runtimePlan: undefined,
++  };
++}
 diff --git a/src/agents/embedded-agent-runner/context-engine-maintenance.ts b/src/agents/embedded-agent-runner/context-engine-maintenance.ts
 index fc56b5af3d04b3ab4dec3d4b57c6e954912f13e4..152742b0eeac2f8bbc5485f1c7bd08430ebcc649 100644
 --- a/src/agents/embedded-agent-runner/context-engine-maintenance.ts
@@ -27181,6 +28221,101 @@ index fc56b5af3d04b3ab4dec3d4b57c6e954912f13e4..152742b0eeac2f8bbc5485f1c7bd0843
  }
  
  function buildTurnMaintenanceTaskDescriptor(params: {
+diff --git a/src/agents/embedded-agent-runner/direct-compaction-preparation.ts b/src/agents/embedded-agent-runner/direct-compaction-preparation.ts
+index b434e0cec68618bb971626f0ff9a421044f957dd..3cb1aeb0d728f9fa17092e7c639c4750646b5f5d 100644
+--- a/src/agents/embedded-agent-runner/direct-compaction-preparation.ts
++++ b/src/agents/embedded-agent-runner/direct-compaction-preparation.ts
+@@ -384,6 +384,10 @@ export async function prepareDirectCompactionAttempt(
+       modelRegistry,
+       runtimeModel,
+       apiKeyInfo,
++      runtimeAuthProfileStore,
++      authProfileCredential: apiKeyInfo.profileId
++        ? structuredClone(runtimeAuthProfileStore.profiles[apiKeyInfo.profileId])
++        : undefined,
+       resolvedRuntimeAuthPlan,
+       hasRuntimeAuthExchange,
+       resolvedWorkspace,
+diff --git a/src/agents/embedded-agent-runner/direct-compaction.ts b/src/agents/embedded-agent-runner/direct-compaction.ts
+index 1355eeb4599c21c070670cbd62205c856c1e5daf..70361bfa9d685ac03fb8be02e81c7424175401bd 100644
+--- a/src/agents/embedded-agent-runner/direct-compaction.ts
++++ b/src/agents/embedded-agent-runner/direct-compaction.ts
+@@ -7,6 +7,7 @@ import {
+   getAsyncWorkSignal,
+ } from "../../shared/async-work-scope.js";
+ import { createDeferredCore } from "../../shared/deferred.js";
++import { prepareCompactionAuthRetry } from "./compaction-auth-fallback.js";
+ import { executePreparedCompactionSession } from "./compaction-session-execution.js";
+ import {
+   prepareDirectCompactionAttempt,
+@@ -32,25 +33,37 @@ export async function compactEmbeddedAgentSessionDirectOnce(
+   const context = work.run(() => AsyncLocalStorage.snapshot());
+   const cleanupWork = new AsyncWorkScope();
+   const cleanupContext = cleanupWork.run(() => AsyncLocalStorage.snapshot());
+-  let cleanup: PreparedCompactionCleanup | undefined;
+-  const runAttempt = async () => {
++  const cleanups: PreparedCompactionCleanup[] = [];
++  const attemptedProfiles = new Set<string>();
++  const runAttempt = async (
++    attemptParams: PreparedCompactEmbeddedAgentSessionParams,
++  ): Promise<EmbeddedAgentCompactResult> => {
+     const preparation = await prepareDirectCompactionAttempt({
+-      ...params,
++      ...attemptParams,
+       abortSignal: work.signal,
+     });
+     if (!preparation.ok) {
+       return preparation.result;
+     }
++    let result: EmbeddedAgentCompactResult;
++    let cleanup: PreparedCompactionCleanup | undefined;
+     try {
+       const runtime = await buildPreparedCompactionRuntime(preparation.value, (preparedCleanup) => {
+         cleanup = preparedCleanup;
++        cleanups.push(preparedCleanup);
+       });
+-      return await executePreparedCompactionSession(runtime);
++      result = await executePreparedCompactionSession(runtime);
+     } catch (err) {
+-      return preparation.value.fail(formatErrorMessage(err), err);
++      result = preparation.value.fail(formatErrorMessage(err), err);
+     } finally {
+       cleanup?.restoreSkillEnvironment();
+     }
++    const retry = await prepareCompactionAuthRetry(preparation.value, result, attemptedProfiles);
++    if (!retry) {
++      return result;
++    }
++    // Retain each attempt’s tools until all accepted descendant work has retired.
++    return runAttempt(retry);
+   };
+   void trackOwner(async () => {
+     const closeWork = () => {
+@@ -62,7 +75,7 @@ export async function compactEmbeddedAgentSessionDirectOnce(
+       closeWork();
+     }
+     try {
+-      callerResult.resolve(await work.track(runAttempt));
++      callerResult.resolve(await work.track(() => runAttempt(params)));
+     } catch (error) {
+       callerResult.reject(error);
+     } finally {
+@@ -74,7 +87,14 @@ export async function compactEmbeddedAgentSessionDirectOnce(
+         );
+         await AsyncWorkScope.runWhenAllIdle(
+           () => [work],
+-          () => cleanupWork.track(() => cleanupContext(() => cleanup?.disposeToolRuntimes())),
++          () =>
++            cleanupWork.track(() =>
++              cleanupContext(async () => {
++                for (const cleanup of cleanups) {
++                  await cleanup.disposeToolRuntimes();
++                }
++              }),
++            ),
+         );
+       } finally {
+         try {
 diff --git a/src/agents/embedded-agent-runner/run-loop.ts b/src/agents/embedded-agent-runner/run-loop.ts
 index 2b68e40f15e9defec0f4d6aab7e59c4116f4ea72..20ebb70ee14a57ef19ed20f2868844d079f5a6c9 100644
 --- a/src/agents/embedded-agent-runner/run-loop.ts
@@ -37358,10 +38493,22 @@ index c4ac2fde3caf3cc8b00c2ef549d7534a05451c80..00ee7bd66cadd8c1c583b08e9c55b912
 +  return `${prefix}-${id}.log`;
  }
 diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
-index 2622e13cea56220c7a92c80164c484f4e5d1a624..37d7f08b6a5f91fe3a6e5520ab5b42c50f7af168 100644
+index 2622e13cea56220c7a92c80164c484f4e5d1a624..81534e1ce4af3ddd28f671b817b4b0c7d379dca0 100644
 --- a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
 +++ b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
-@@ -10,6 +10,7 @@ import { deriveSessionChatTypeFromKey } from "../../../sessions/session-chat-typ
+@@ -3,13 +3,19 @@
+  */
+ import { sanitizePendingFinalDeliveryText } from "../../../auto-reply/reply/pending-final-delivery-state.js";
+ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
++import {
++  bindInProcessSubagentResume,
++  type TrustedSubagentResume,
++} from "../../../gateway/in-process-subagent-resume.js";
+ import { waitForGatewayDispatch } from "../../../gateway/server-in-process-dispatch.js";
++import { capturePrivateCompletionResume } from "../../../gateway/session-subagent-private-completion.js";
+ import { sourceDeliveryTargetsMatch } from "../../../infra/outbound/source-delivery-plan.js";
+ import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../../sessions/input-provenance.js";
+ import { deriveSessionChatTypeFromKey } from "../../../sessions/session-chat-type-shared.js";
  import { isNonTerminalAgentRunStatus } from "../../../shared/agent-run-status.js";
  import { buildAgentRunTerminalOutcomeFromWaitResult } from "../../agent-run-terminal-outcome.js";
  import { sanitizeAgentRunTerminalReplyText } from "../../agent-run-terminal-reply.js";
@@ -37369,22 +38516,134 @@ index 2622e13cea56220c7a92c80164c484f4e5d1a624..37d7f08b6a5f91fe3a6e5520ab5b42c5
  import {
    hasCommittedSourceReplyDeliveryEvidence,
    hasMessagingToolDeliveryEvidence,
-@@ -36,6 +37,7 @@ import { inferDeliveryTargetChatType } from "./subagent-announce-origin.js";
+@@ -33,9 +39,42 @@ import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatc
+ import type { SubagentCompletionToolHandoffRegistration } from "./subagent-announce-handoff.js";
+ import { inferDeliveryTargetChatType } from "./subagent-announce-origin.js";
+ 
++/** Map a hidden requester to its logical admission owner while retaining private execution custody. */
++export function preparePrivateCompletionAgentCall(
++  agentParams: Record<string, unknown>,
++  parentOnly: boolean,
++  sourceSessionKey?: string,
++) {
++  const privateResume =
++    parentOnly &&
++    typeof agentParams.expectedExistingSessionId === "string" &&
++    typeof agentParams.sessionKey === "string"
++      ? capturePrivateCompletionResume({
++          requesterSessionKey: agentParams.sessionKey,
++          requesterSessionId: agentParams.expectedExistingSessionId,
++          sourceSessionKey,
++          continuationRunId:
++            typeof agentParams.idempotencyKey === "string" ? agentParams.idempotencyKey : undefined,
++        })
++      : undefined;
++  return {
++    privateResume,
++    agentParams: privateResume
++      ? {
++          ...agentParams,
++          sessionKey: privateResume.childSessionKey,
++          expectedExistingSessionId: privateResume.childSessionId,
++          sessionEffects: "internal",
++        }
++      : agentParams,
++  };
++}
++
  export async function runAnnounceAgentCall(params: {
    agentParams: Record<string, unknown>;
    privateCompletion?: true;
++  privateResume?: TrustedSubagentResume;
 +  requesterPresentation?: RequesterPresentation;
    delegatedToolPolicyHandoff?: SubagentCompletionToolHandoffRegistration;
    expectFinal?: boolean;
    signal?: AbortSignal;
-@@ -67,6 +69,7 @@ export async function runAnnounceAgentCall(params: {
-     const dispatch = dispatchSubagentAnnounceAgent(params.agentParams, {
-       cancelOnDeadline: true,
-       privateCompletion: params.privateCompletion,
-+      requesterPresentation: params.requesterPresentation,
-       expectFinal: params.expectFinal,
-       forceSyntheticClient: shouldPreserveUserFacingSessionStateForInputProvenance(
-         params.agentParams.inputProvenance,
+@@ -64,42 +103,49 @@ export async function runAnnounceAgentCall(params: {
+   timer?.unref?.();
+   try {
+     signal.throwIfAborted();
+-    const dispatch = dispatchSubagentAnnounceAgent(params.agentParams, {
+-      cancelOnDeadline: true,
+-      privateCompletion: params.privateCompletion,
+-      expectFinal: params.expectFinal,
+-      forceSyntheticClient: shouldPreserveUserFacingSessionStateForInputProvenance(
+-        params.agentParams.inputProvenance,
+-      ),
+-      operatorRoleActor: { kind: "system" },
+-      delegatedToolPolicyHandoff: params.delegatedToolPolicyHandoff,
+-      signal: executionSignal,
+-      ...(isSourceSessionAdmissionAllowed
+-        ? {
+-            sessionMutationCommitGuard: () => {
+-              if (!isSourceSessionAdmissionAllowed()) {
+-                const error = new SourceOwnerChangedError();
+-                sourceLifecycle.abort(error);
+-                throw error;
++    const dispatch = dispatchSubagentAnnounceAgent(
++      params.agentParams,
++      bindInProcessSubagentResume(
++        {
++          cancelOnDeadline: true,
++          privateCompletion: params.privateCompletion,
++          requesterPresentation: params.requesterPresentation,
++          expectFinal: params.expectFinal,
++          forceSyntheticClient: shouldPreserveUserFacingSessionStateForInputProvenance(
++            params.agentParams.inputProvenance,
++          ),
++          operatorRoleActor: { kind: "system" as const },
++          delegatedToolPolicyHandoff: params.delegatedToolPolicyHandoff,
++          signal: executionSignal,
++          ...(isSourceSessionAdmissionAllowed
++            ? {
++                sessionMutationCommitGuard: () => {
++                  if (!isSourceSessionAdmissionAllowed()) {
++                    const error = new SourceOwnerChangedError();
++                    sourceLifecycle.abort(error);
++                    throw error;
++                  }
++                },
+               }
+-            },
+-          }
+-        : {}),
+-      // Accepted queue waits belong to session admission; execution belongs to
+-      // the requester runtime budget, not the announcement handoff deadline.
+-      onAccepted: () => clearTimeout(timer),
+-      onExecutionStarted: () => {
+-        executionSignal.throwIfAborted();
+-        if (!params.isExecutionAllowed()) {
+-          sourceLifecycle.abort(new SourceOwnerChangedError());
+-          // Classify execution immediately, before Gateway observes cancellation.
+-          throw createAgentRunDirectAbortError();
+-        }
+-        // Execution can be observed before acceptance on an already-running replay.
+-        clearTimeout(timer);
+-      },
+-      resolveGatewayContext: params.resolveGatewayContext,
+-    });
++            : {}),
++          // Accepted queue waits belong to session admission; execution belongs to
++          // the requester runtime budget, not the announcement handoff deadline.
++          onAccepted: () => clearTimeout(timer),
++          onExecutionStarted: () => {
++            executionSignal.throwIfAborted();
++            if (!params.isExecutionAllowed()) {
++              sourceLifecycle.abort(new SourceOwnerChangedError());
++              // Classify execution immediately, before Gateway observes cancellation.
++              throw createAgentRunDirectAbortError();
++            }
++            // Execution can be observed before acceptance on an already-running replay.
++            clearTimeout(timer);
++          },
++          resolveGatewayContext: params.resolveGatewayContext,
++        },
++        params.privateResume,
++      ),
++    );
+     return params.privateCompletion
+       ? await waitForGatewayDispatch("agent", dispatch, undefined, signal)
+       : await dispatch;
 diff --git a/src/agents/subagents/announce/subagent-announce-delivery.ts b/src/agents/subagents/announce/subagent-announce-delivery.ts
 index 4a5dbf48c927551db50dd067bb68b6af47e31df6..a68b04318e83e7e057958793fe965a05dc1127f8 100644
 --- a/src/agents/subagents/announce/subagent-announce-delivery.ts
@@ -37414,7 +38673,7 @@ index 4a5dbf48c927551db50dd067bb68b6af47e31df6..a68b04318e83e7e057958793fe965a05
          requesterAgentId: params.requesterAgentId,
          requesterRunTimeoutSeconds: params.requesterRunTimeoutSeconds,
 diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
-index 258678ab6829ade42e090701c643889459777fe1..fea5bf8fa413c0c1a852ce8555ed1db3d12134fb 100644
+index 258678ab6829ade42e090701c643889459777fe1..eb7b3efdea865a345694a52de98d2f26a6550ea6 100644
 --- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 +++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 @@ -20,6 +20,7 @@ import {
@@ -37425,7 +38684,15 @@ index 258678ab6829ade42e090701c643889459777fe1..fea5bf8fa413c0c1a852ce8555ed1db3
  import {
    getAgentCommandDeliveryFailure,
    getGatewayAgentResult,
-@@ -79,6 +80,7 @@ const REQUESTER_FINAL_VISIBLE_TEXT_MAX_CHARS = 12_000;
+@@ -50,6 +51,7 @@ import {
+   isGatewayAgentRunPending,
+   resolvePrivateCompletionDeliveryResult,
+   runAnnounceAgentCall,
++  preparePrivateCompletionAgentCall,
+ } from "./subagent-announce-completion-delivery.js";
+ import {
+   hasAnnounceSendEvidence,
+@@ -79,6 +81,7 @@ const REQUESTER_FINAL_VISIBLE_TEXT_MAX_CHARS = 12_000;
  
  export async function sendSubagentAnnounceDirectly(params: {
    requesterSessionKey: string;
@@ -37433,7 +38700,7 @@ index 258678ab6829ade42e090701c643889459777fe1..fea5bf8fa413c0c1a852ce8555ed1db3
    requesterAgentId?: string;
    requesterRunTimeoutSeconds?: number;
    targetRequesterSessionKey: string;
-@@ -195,16 +197,18 @@ export async function sendSubagentAnnounceDirectly(params: {
+@@ -195,16 +198,18 @@ export async function sendSubagentAnnounceDirectly(params: {
        params.targetRequesterSessionKey,
        params.requesterAgentId,
      );
@@ -37456,25 +38723,52 @@ index 258678ab6829ade42e090701c643889459777fe1..fea5bf8fa413c0c1a852ce8555ed1db3
          terminal: true,
          disposition: "intentional_non_delivery",
        };
-@@ -358,7 +362,9 @@ export async function sendSubagentAnnounceDirectly(params: {
+@@ -357,8 +362,10 @@ export async function sendSubagentAnnounceDirectly(params: {
+         : undefined;
      // A private completion gets its own serialized turn. Steering into a public
      // turn would inherit that turn's delivery policy and expose child output.
-     const directAgentParams: Record<string, unknown> = {
+-    const directAgentParams: Record<string, unknown> = {
 -      ...(parentOnly ? { expectedExistingSessionId: params.completionRequesterSessionId } : {}),
++    const rawAgentParams: Record<string, unknown> = {
 +      ...(expectedRequesterSessionId
 +        ? { expectedExistingSessionId: expectedRequesterSessionId }
 +        : {}),
        sessionKey: canonicalRequesterSessionKey,
        timeout: params.requesterRunTimeoutSeconds,
        message: params.triggerMessage,
-@@ -394,6 +400,7 @@ export async function sendSubagentAnnounceDirectly(params: {
+@@ -380,6 +387,11 @@ export async function sendSubagentAnnounceDirectly(params: {
+         : {}),
+       idempotencyKey: params.directIdempotencyKey,
+     };
++    const { agentParams: directAgentParams, privateResume } = preparePrivateCompletionAgentCall(
++      rawAgentParams,
++      parentOnly,
++      params.sourceSessionKey,
++    );
+     let directAnnounceResponse: unknown;
+     try {
+       directAnnounceResponse = await runAnnounceDeliveryWithRetry({
+@@ -394,6 +406,8 @@ export async function sendSubagentAnnounceDirectly(params: {
            }
            return await runAnnounceAgentCall({
              agentParams: directAgentParams,
++            privateResume,
 +            requesterPresentation: params.requesterPresentation,
              ...(parentOnly ? { privateCompletion: true as const } : {}),
              delegatedToolPolicyHandoff:
                isSubagentCompletion &&
+@@ -406,8 +420,9 @@ export async function sendSubagentAnnounceDirectly(params: {
+                     ...(trustedCompletionEvent.childSessionId
+                       ? { sourceSessionId: trustedCompletionEvent.childSessionId }
+                       : {}),
+-                    targetSessionKey: canonicalRequesterSessionKey,
+-                    targetSessionId: requesterActivity.sessionId,
++                    targetSessionKey:
++                      privateResume?.childSessionKey ?? canonicalRequesterSessionKey,
++                    targetSessionId: privateResume?.childSessionId ?? requesterActivity.sessionId,
+                     idempotencyKey: params.directIdempotencyKey,
+                   }
+                 : undefined,
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts b/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7990491a3
@@ -39327,11 +40621,208 @@ index 0000000000000000000000000000000000000000..cf43758b8cd6c3c9319fe6a17d1d974a
 +  };
 +  return batch;
 +}
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-ancestor-cleanup.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-ancestor-cleanup.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f2945eaecdb7093b52f7af33600ff6b75cc3c435
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-ancestor-cleanup.ts
+@@ -0,0 +1,164 @@
++/** Finalize expired announcement attempts and resume their existing ancestor cleanup owner. */
++import {
++  ensureCompletionState,
++  ensureDeliveryState,
++  getDeliveryLastError,
++  isDeliverySuspended,
++} from "./subagent-delivery-state.js";
++import { SUBAGENT_ENDED_REASON_COMPLETE } from "./subagent-lifecycle-events.js";
++import { shouldSuppressSubagentRecoverySessionEffects } from "./subagent-recovery-state.js";
++import { resolveCleanupCompletionReason } from "./subagent-registry-cleanup.js";
++import {
++  ANNOUNCE_EXPIRY_MS,
++  logAnnounceGiveUp,
++  safeRemoveAttachmentsDir,
++} from "./subagent-registry-helpers.js";
++import {
++  beginSubagentCleanup,
++  findPrivateSubagentParent,
++  retireSupersededCleanupIfNeeded,
++  runDetachedCleanupAttempt,
++  suspendPendingFinalDelivery,
++} from "./subagent-registry-lifecycle-cleanup.js";
++import type { SubagentLifecycleAnnounceCleanupContext } from "./subagent-registry-lifecycle-context.js";
++import {
++  clearSubagentPendingDelivery,
++  emitCompletionEndedHookIfNeeded,
++  safeSetSubagentTaskDeliveryStatus,
++} from "./subagent-registry-lifecycle-delivery.js";
++import type { SubagentRunRecord } from "./subagent-registry.types.js";
++
++export const shouldSuspendPendingFinalDelivery = (entry: SubagentRunRecord) =>
++  entry.expectsCompletionMessage === true &&
++  entry.endedReason === SUBAGENT_ENDED_REASON_COMPLETE &&
++  entry.execution.outcome?.status === "ok";
++
++export const finalizeResumedAnnounceGiveUp = async (
++  context: SubagentLifecycleAnnounceCleanupContext,
++  giveUpParams: {
++    runId: string;
++    entry: SubagentRunRecord;
++    reason: "expiry" | "permanent_failure";
++    cleanup?: "delete" | "keep";
++    cleanupGeneration?: number;
++    retryCount?: number;
++    completedAt?: number;
++  },
++) => {
++  const params = context.options;
++  const { runId, entry, reason, cleanup, cleanupGeneration, retryCount, completedAt } =
++    giveUpParams;
++  if (shouldSuspendPendingFinalDelivery(entry)) {
++    suspendPendingFinalDelivery(context, {
++      runId,
++      entry,
++      reason,
++      error: getDeliveryLastError(entry),
++    });
++    return;
++  }
++  const deliveryError = getDeliveryLastError(entry) ?? reason;
++  clearSubagentPendingDelivery(entry);
++  const failedDelivery = ensureDeliveryState(entry);
++  failedDelivery.status = "failed";
++  failedDelivery.lastError = deliveryError;
++  if (retryCount != null) {
++    failedDelivery.attemptCount = retryCount;
++    failedDelivery.lastAttemptAt = completedAt ?? Date.now();
++  }
++  safeSetSubagentTaskDeliveryStatus(params, {
++    entry,
++    deliveryStatus: "failed",
++    deliveryError,
++  });
++  entry.wakeOnDescendantSettle = undefined;
++  const completion = ensureCompletionState(entry);
++  completion.fallbackResultText = undefined;
++  completion.fallbackCapturedAt = undefined;
++  if ((cleanup ?? entry.cleanup) === "delete" || !entry.retainAttachmentsOnKeep) {
++    await safeRemoveAttachmentsDir(entry);
++  }
++  if (
++    cleanupGeneration !== undefined &&
++    !context.isCleanupAttemptCurrent(runId, entry, cleanupGeneration)
++  ) {
++    await retireSupersededCleanupIfNeeded(context, runId, entry, cleanupGeneration);
++    return;
++  }
++  const completionReason = resolveCleanupCompletionReason(entry);
++  logAnnounceGiveUp(entry, reason);
++  // Retry-limit / expiry give-up should not leave cleanup stuck behind the
++  // best-effort ended hook. Mark the run cleaned first, then fire the hook.
++  context.completeCleanupBookkeeping({
++    runId,
++    entry,
++    cleanup: cleanup ?? entry.cleanup,
++    completedAt: completedAt ?? Date.now(),
++  });
++  if (!shouldSuppressSubagentRecoverySessionEffects(entry)) {
++    await emitCompletionEndedHookIfNeeded(
++      params,
++      entry,
++      completionReason,
++      () =>
++        context.isEndedHookOwnerCurrent(runId, entry) &&
++        !shouldSuppressSubagentRecoverySessionEffects(entry),
++    );
++  }
++};
++
++export const resumeAncestorCleanup = (
++  context: SubagentLifecycleAnnounceCleanupContext,
++  settledEntry: SubagentRunRecord,
++) => {
++  const params = context.options;
++  const now = Date.now();
++  const visited = new Set([settledEntry.childSessionKey]);
++  let child = settledEntry;
++  let requesterSessionKey = child.requesterSessionKey;
++  while (requesterSessionKey && !visited.has(requesterSessionKey)) {
++    visited.add(requesterSessionKey);
++    const entry =
++      params.getLatestRunForChildSession(requesterSessionKey) ??
++      findPrivateSubagentParent(params.runs, child);
++    if (!entry || params.runs.get(entry.runId) !== entry) {
++      break;
++    }
++    child = entry;
++    requesterSessionKey = entry.requesterSessionKey;
++    const { runId } = entry;
++    // A failed cleanup belongs to its retry timer or exhausted process-local
++    // budget; even descendant settlement must not reopen that attempt early.
++    if (
++      typeof entry.execution.endedAt !== "number" ||
++      entry.cleanupCompletedAt ||
++      entry.cleanupHandled ||
++      context.hasCleanupFailure(entry) ||
++      isDeliverySuspended(entry) ||
++      params.suppressAnnounceForSteerRestart(entry)
++    ) {
++      continue;
++    }
++    const endedAgo = now - (entry.execution.endedAt ?? now);
++    if (entry.expectsCompletionMessage !== true && endedAgo > ANNOUNCE_EXPIRY_MS) {
++      const cleanupGeneration = beginSubagentCleanup(context, runId);
++      if (cleanupGeneration === undefined) {
++        continue;
++      }
++      runDetachedCleanupAttempt(context, {
++        runId,
++        entry,
++        cleanupGeneration,
++        run: () =>
++          finalizeResumedAnnounceGiveUp(context, {
++            runId,
++            entry,
++            reason: "expiry",
++          }),
++      });
++      continue;
++    }
++    params.resumedRuns.delete(runId);
++    params.resumeSubagentRun(runId);
++  }
++};
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
-index 5e3d14850d03487ad1c1500658cc9e87e4cc789b..917669c813b1c5214ed54252620141fa5313043b 100644
+index 5e3d14850d03487ad1c1500658cc9e87e4cc789b..3b02b8ec87e545888724ed002d24f59e5be1b405 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
 +++ b/src/agents/subagents/registry/subagent-registry-lifecycle-announce-cleanup.ts
-@@ -44,6 +44,7 @@ import {
+@@ -8,7 +8,6 @@ import {
+   getDeliveryLastError,
+   isDeliverySuspended,
+ } from "./subagent-delivery-state.js";
+-import { SUBAGENT_ENDED_REASON_COMPLETE } from "./subagent-lifecycle-events.js";
+ import { shouldSuppressSubagentRecoverySessionEffects } from "./subagent-recovery-state.js";
+ import {
+   resolveCleanupCompletionReason,
+@@ -18,13 +17,17 @@ import {
+ import {
+   ANNOUNCE_COMPLETION_HARD_EXPIRY_MS,
+   ANNOUNCE_EXPIRY_MS,
+-  logAnnounceGiveUp,
+   MIN_ANNOUNCE_RETRY_DELAY_MS,
+   resolveAnnounceRetryDelayMs,
+   safeRemoveAttachmentsDir,
+ } from "./subagent-registry-helpers.js";
++import {
++  finalizeResumedAnnounceGiveUp,
++  shouldSuspendPendingFinalDelivery,
++} from "./subagent-registry-lifecycle-ancestor-cleanup.js";
+ import {
+   beginSubagentCleanup,
++  hasUnsettledPrivateChildReceipt,
+   retireSupersededCleanupIfNeeded,
+   retireSupersededCleanupInBackground,
+   runDetachedCleanupAttempt,
+@@ -44,145 +47,20 @@ import {
    recordAnnounceDeliveryResult,
    safeSetSubagentTaskDeliveryStatus,
  } from "./subagent-registry-lifecycle-delivery.js";
@@ -39339,7 +40830,167 @@ index 5e3d14850d03487ad1c1500658cc9e87e4cc789b..917669c813b1c5214ed54252620141fa
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
  import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
  import { loadSubagentSessionEntry } from "./subagent-session-reconciliation.js";
-@@ -599,9 +600,7 @@ export const startSubagentAnnounceCleanupFlow = (
+ 
++export {
++  finalizeResumedAnnounceGiveUp,
++  resumeAncestorCleanup,
++} from "./subagent-registry-lifecycle-ancestor-cleanup.js";
++
+ type RunSubagentAnnounceFlow =
+   (typeof import("../announce/subagent-announce.js"))["runSubagentAnnounceFlow"];
+ type SubagentAnnounceFlowOutcome = Awaited<ReturnType<RunSubagentAnnounceFlow>>;
+ 
+-const shouldSuspendPendingFinalDelivery = (entry: SubagentRunRecord) =>
+-  entry.expectsCompletionMessage === true &&
+-  entry.endedReason === SUBAGENT_ENDED_REASON_COMPLETE &&
+-  entry.execution.outcome?.status === "ok";
+-
+-export const finalizeResumedAnnounceGiveUp = async (
+-  context: SubagentLifecycleAnnounceCleanupContext,
+-  giveUpParams: {
+-    runId: string;
+-    entry: SubagentRunRecord;
+-    reason: "expiry" | "permanent_failure";
+-    cleanup?: "delete" | "keep";
+-    cleanupGeneration?: number;
+-    retryCount?: number;
+-    completedAt?: number;
+-  },
+-) => {
+-  const params = context.options;
+-  const { runId, entry, reason, cleanup, cleanupGeneration, retryCount, completedAt } =
+-    giveUpParams;
+-  if (shouldSuspendPendingFinalDelivery(entry)) {
+-    suspendPendingFinalDelivery(context, {
+-      runId,
+-      entry,
+-      reason,
+-      error: getDeliveryLastError(entry),
+-    });
+-    return;
+-  }
+-  const deliveryError = getDeliveryLastError(entry) ?? reason;
+-  clearSubagentPendingDelivery(entry);
+-  const failedDelivery = ensureDeliveryState(entry);
+-  failedDelivery.status = "failed";
+-  failedDelivery.lastError = deliveryError;
+-  if (retryCount != null) {
+-    failedDelivery.attemptCount = retryCount;
+-    failedDelivery.lastAttemptAt = completedAt ?? Date.now();
+-  }
+-  safeSetSubagentTaskDeliveryStatus(params, {
+-    entry,
+-    deliveryStatus: "failed",
+-    deliveryError,
+-  });
+-  entry.wakeOnDescendantSettle = undefined;
+-  const completion = ensureCompletionState(entry);
+-  completion.fallbackResultText = undefined;
+-  completion.fallbackCapturedAt = undefined;
+-  if ((cleanup ?? entry.cleanup) === "delete" || !entry.retainAttachmentsOnKeep) {
+-    await safeRemoveAttachmentsDir(entry);
+-  }
+-  if (
+-    cleanupGeneration !== undefined &&
+-    !context.isCleanupAttemptCurrent(runId, entry, cleanupGeneration)
+-  ) {
+-    await retireSupersededCleanupIfNeeded(context, runId, entry, cleanupGeneration);
+-    return;
+-  }
+-  const completionReason = resolveCleanupCompletionReason(entry);
+-  logAnnounceGiveUp(entry, reason);
+-  // Retry-limit / expiry give-up should not leave cleanup stuck behind the
+-  // best-effort ended hook. Mark the run cleaned first, then fire the hook.
+-  context.completeCleanupBookkeeping({
+-    runId,
+-    entry,
+-    cleanup: cleanup ?? entry.cleanup,
+-    completedAt: completedAt ?? Date.now(),
+-  });
+-  if (!shouldSuppressSubagentRecoverySessionEffects(entry)) {
+-    await emitCompletionEndedHookIfNeeded(
+-      params,
+-      entry,
+-      completionReason,
+-      () =>
+-        context.isEndedHookOwnerCurrent(runId, entry) &&
+-        !shouldSuppressSubagentRecoverySessionEffects(entry),
+-    );
+-  }
+-};
+-
+-export const resumeAncestorCleanup = (
+-  context: SubagentLifecycleAnnounceCleanupContext,
+-  settledEntry: SubagentRunRecord,
+-) => {
+-  const params = context.options;
+-  const now = Date.now();
+-  const visited = new Set([settledEntry.childSessionKey]);
+-  let requesterSessionKey = settledEntry.requesterSessionKey;
+-  while (requesterSessionKey && !visited.has(requesterSessionKey)) {
+-    visited.add(requesterSessionKey);
+-    const entry = params.getLatestRunForChildSession(requesterSessionKey);
+-    if (!entry || params.runs.get(entry.runId) !== entry) {
+-      break;
+-    }
+-    requesterSessionKey = entry.requesterSessionKey;
+-    const { runId } = entry;
+-    // A failed cleanup belongs to its retry timer or exhausted process-local
+-    // budget; even descendant settlement must not reopen that attempt early.
+-    if (
+-      typeof entry.execution.endedAt !== "number" ||
+-      entry.cleanupCompletedAt ||
+-      entry.cleanupHandled ||
+-      context.hasCleanupFailure(entry) ||
+-      isDeliverySuspended(entry) ||
+-      params.suppressAnnounceForSteerRestart(entry)
+-    ) {
+-      continue;
+-    }
+-    const endedAgo = now - (entry.execution.endedAt ?? now);
+-    if (entry.expectsCompletionMessage !== true && endedAgo > ANNOUNCE_EXPIRY_MS) {
+-      const cleanupGeneration = beginSubagentCleanup(context, runId);
+-      if (cleanupGeneration === undefined) {
+-        continue;
+-      }
+-      runDetachedCleanupAttempt(context, {
+-        runId,
+-        entry,
+-        cleanupGeneration,
+-        run: () =>
+-          finalizeResumedAnnounceGiveUp(context, {
+-            runId,
+-            entry,
+-            reason: "expiry",
+-          }),
+-      });
+-      continue;
+-    }
+-    params.resumedRuns.delete(runId);
+-    params.resumeSubagentRun(runId);
+-  }
+-};
+-
+ const finalizeSubagentCleanup = async (
+   context: SubagentLifecycleAnnounceCleanupContext,
+   runId: string,
+@@ -404,10 +282,12 @@ export const startSubagentAnnounceCleanupFlow = (
+   // A terminal delivery failure closes upward delivery, not live descendants.
+   // Their completion callback re-enters this same cleanup path without a timer.
+   if (
+-    skipRequesterDelivery &&
+-    entry.wakeOnDescendantSettle === true &&
+-    params.countPendingDescendantRuns(entry.childSessionKey) > 0
++    (skipRequesterDelivery &&
++      entry.wakeOnDescendantSettle === true &&
++      params.countPendingDescendantRuns(entry.childSessionKey) > 0) ||
++    hasUnsettledPrivateChildReceipt(params.runs, entry)
+   ) {
++    entry.wakeOnDescendantSettle = true;
+     entry.cleanupHandled = false;
+     params.resumedRuns.delete(runId);
+     params.persist(runId);
+@@ -599,9 +479,7 @@ export const startSubagentAnnounceCleanupFlow = (
        !isDeliverySuspended(entry) &&
        (entry.delivery?.status !== "delivered" || entry.delivery === committedDelivery) &&
        context.isCleanupAttemptCurrent(runId, entry, cleanupGeneration),
@@ -39350,6 +41001,70 @@ index 5e3d14850d03487ad1c1500658cc9e87e4cc789b..917669c813b1c5214ed54252620141fa
      onBeforeDeleteChildSession:
        cleanup === "delete"
          ? () => {
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-cleanup.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-cleanup.ts
+index 332caf4cc3a1cc04acf69c70e477ef161fa4da1d..649a0d9e5b6d6b57677a5a75238f3b08e33c575f 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-cleanup.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-cleanup.ts
+@@ -1,4 +1,5 @@
+ import type { cleanupBrowserSessionsForLifecycleEnd } from "../../../browser-lifecycle-cleanup.js";
++import { isInternalSessionEffectsKey } from "../../../config/sessions/internal-session-key.js";
+ import { runWithoutOwnedSessionTranscriptWrites } from "../../../config/sessions/transcript-write-context.js";
+ import {
+   isGatewayRestartDraining,
+@@ -46,6 +47,53 @@ function runWithSubagentCleanupWorkAdmission<T>(run: () => Promise<T>): Promise<
+     : runWithGatewayIndependentRootWorkContinuation(run, "subagents:lifecycle-cleanup");
+ }
+ 
++/** A recovery transcript remains owned until its exact children's private receipts settle. */
++export function hasUnsettledPrivateChildReceipt(
++  runs: ReadonlyMap<string, SubagentRunRecord>,
++  owner: SubagentRunRecord,
++): boolean {
++  const target = owner.execution.transcriptTarget;
++  return Boolean(
++    !owner.killIntent &&
++    !owner.killReconciliation &&
++    !owner.execution.suppressSessionEffects &&
++    target?.sessionKey &&
++    isInternalSessionEffectsKey(target.sessionKey) &&
++    [...runs.values()].some(
++      (child) =>
++        child.requesterSessionKey === target.sessionKey &&
++        child.completionRequesterSessionId === target.sessionId &&
++        child.completionTarget === "parent" &&
++        child.delivery?.status !== "delivered" &&
++        child.cleanupCompletedAt === undefined &&
++        !child.suppressCompletionDelivery &&
++        !child.execution.suppressSessionEffects &&
++        !child.killIntent &&
++        !child.killReconciliation,
++    ),
++  );
++}
++
++/** Resolve only the private incarnation recorded by the completed child's owner. */
++export function findPrivateSubagentParent(
++  runs: ReadonlyMap<string, SubagentRunRecord>,
++  child: SubagentRunRecord,
++): SubagentRunRecord | undefined {
++  if (
++    !isInternalSessionEffectsKey(child.requesterSessionKey) ||
++    !child.completionRequesterSessionId
++  ) {
++    return undefined;
++  }
++  const owners = [...runs.values()].filter(
++    (owner) =>
++      owner.execution.transcriptTarget?.sessionKey === child.requesterSessionKey &&
++      owner.execution.transcriptTarget.sessionId === child.completionRequesterSessionId &&
++      owner.cleanupCompletedAt === undefined,
++  );
++  return owners.length === 1 ? owners[0] : undefined;
++}
++
+ export function scheduleResumeSubagentRun(
+   context: SubagentLifecycleCleanupContext,
+   runId: string,
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
 index 285d73d89d0aa41e5899130a83581b34a503fe49..fe1da5bb873cae7fef9f924a90b3812b66e6356d 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
@@ -42113,7 +43828,7 @@ index e4f41719cf0dacdffd6013dfeb59556711973cc0..3d9fab9a63d96e1bf3cb05680f9758ae
  export function loadSubagentRegistryFromSqlite(): Map<string, SubagentRunRecord> {
    // Retired file-era runs are intentionally not recovered here: after SQLite
 diff --git a/src/agents/subagents/registry/subagent-registry.ts b/src/agents/subagents/registry/subagent-registry.ts
-index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..3e23b88f169c619536010e5401b221477d09be54 100644
+index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..e05e1748adba83419d2a996aba13fc289e6ab633 100644
 --- a/src/agents/subagents/registry/subagent-registry.ts
 +++ b/src/agents/subagents/registry/subagent-registry.ts
 @@ -16,10 +16,12 @@ import { prependAgentSteeringPrompt } from "../../agent-steering-queue.js";
@@ -42160,7 +43875,23 @@ index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..3e23b88f169c619536010e5401b22147
  export const startQueuedSubagentRun = subagentRunManager.startQueuedSubagentRun;
  export const settleFailedQueuedSubagentLaunch = subagentRunManager.settleFailedQueuedSubagentLaunch;
  
-@@ -691,6 +701,15 @@ export function activateSubagentRegistry(resolveGatewayContext: GatewayContextRe
+@@ -572,6 +582,7 @@ export function adoptPausedSubagentRunForFollowUp(params: {
+   task: string;
+   /** Exact paused owner captured by explicit task-resume admission. */
+   expected?: SubagentRunRecord;
++  transcriptTarget?: SubagentRunRecord["execution"]["transcriptTarget"];
+   gatewayContextResolver?: GatewayContextResolver;
+ }): boolean {
+   const childSessionKey = params.childSessionKey.trim();
+@@ -594,6 +605,7 @@ export function adoptPausedSubagentRunForFollowUp(params: {
+     previousRunId: paused.runId,
+     nextRunId: runId,
+     expected: paused,
++    transcriptTarget: params.transcriptTarget,
+     // A paused row is terminal by construction; adoption is exactly the case the
+     // ended-source gate exists to keep out of unrelated replacement callers.
+     allowEndedSource: true,
+@@ -691,6 +703,15 @@ export function activateSubagentRegistry(resolveGatewayContext: GatewayContextRe
  }
  export const settleRequesterAfterSessionSpawns = publicApi.settleRequesterAfterSessionSpawns;
  export const markRequesterTurnYielded = publicApi.markRequesterTurnYielded;
@@ -42858,6 +44589,17 @@ index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..53ca68a37b1ffac05fc08f4997b62c2f
      "After spawn, do non-overlap work; follow the receipt's completion mode.",
    ].join(" ");
  }
+diff --git a/src/agents/tool-fs-policy.types.ts b/src/agents/tool-fs-policy.types.ts
+index b7d64e88b7d5a8ec052c2a1e03ef93efc7541565..2b553d341ebadc8c4e9ab344811d9c5751b667f6 100644
+--- a/src/agents/tool-fs-policy.types.ts
++++ b/src/agents/tool-fs-policy.types.ts
+@@ -11,4 +11,6 @@ export type ToolFsPolicy = {
+   root?: string;
+   /** Host-owned roots that read-only tools may consume outside the workspace. */
+   readOnlyRoots?: string[];
++  /** Host-bound resolver; source expansion requires this turn's surviving read authority. */
++  resolveMediaLocalRoots?: (sources: readonly string[]) => readonly string[];
+ };
 diff --git a/src/agents/tool-terminal-outcome.test.ts b/src/agents/tool-terminal-outcome.test.ts
 index 75206ef924bd8dc521d62600f338c827308e3e00..ebf31af6a331f452bfceddcae5196cadc45849c2 100644
 --- a/src/agents/tool-terminal-outcome.test.ts
@@ -43789,6 +45531,194 @@ index de8a551ca0965f54f86442dfb4cb609dc4004310..c0dac0106df51885cbe6d1edf797de74
      const delayMs =
        MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS[
          Math.min(retryIndex, MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS.length - 1)
+diff --git a/src/agents/tools/media-tool-reference-access.ts b/src/agents/tools/media-tool-reference-access.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a7a7538e6c5130759d0096c7818f8b91f07e0c7e
+--- /dev/null
++++ b/src/agents/tools/media-tool-reference-access.ts
+@@ -0,0 +1,67 @@
++import path from "node:path";
++import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
++import { safeFileURLToPath } from "../../infra/local-file-access.js";
++import { getDefaultLocalRootsCore } from "../../media/local-media-access.js";
++import { classifyMediaReferenceSource } from "../../media/media-reference.js";
++import { resolveUserPath } from "../../utils.js";
++import {
++  resolveSandboxedBridgeMediaPath,
++  type SandboxedBridgeMediaPathConfig,
++} from "../sandbox-media-paths.js";
++import type { ToolFsPolicy } from "../tool-fs-policy.js";
++import { normalizeWorkspaceDir } from "./tool-runtime.helpers.js";
++
++/**
++ * Resolves the common filesystem access shape for media-tool references.
++ */
++export async function resolveMediaToolReferenceAccess(params: {
++  input: string;
++  isDataUrl: boolean;
++  workspaceDir?: string;
++  cwd?: string;
++  fsPolicy?: ToolFsPolicy;
++  sandbox?: SandboxedBridgeMediaPathConfig | null;
++}): Promise<{ resolvedPath: string | null; localRoots: string[]; rewrittenFrom?: string }> {
++  const root = normalizeWorkspaceDir(
++    params.sandbox?.root ?? params.fsPolicy?.root ?? params.cwd ?? params.workspaceDir,
++  );
++  const cwd = normalizeWorkspaceDir(params.cwd) ?? root;
++  const workspaceRoots = root ? [root] : [];
++  const workspaceOnly = params.fsPolicy?.workspaceOnly ?? params.sandbox?.workspaceOnly === true;
++  const reference = classifyMediaReferenceSource(params.input);
++  const resolveHostPath = () => {
++    if (reference.isFileUrl) {
++      return safeFileURLToPath(params.input);
++    }
++    if (reference.isHttpUrl || reference.isMediaStoreUrl || reference.looksLikeWindowsDrivePath) {
++      return params.input;
++    }
++    if (params.input.startsWith("~")) {
++      return resolveUserPath(params.input);
++    }
++    return cwd ? path.resolve(cwd, params.input) : params.input;
++  };
++  const pathInfo: { resolved: string; rewrittenFrom?: string } = params.isDataUrl
++    ? { resolved: "" }
++    : params.sandbox
++      ? await resolveSandboxedBridgeMediaPath({
++          sandbox: params.sandbox,
++          mediaPath: params.input,
++          inboundFallbackDir: "media/inbound",
++        })
++      : { resolved: resolveHostPath() };
++  const scopedRoots =
++    !workspaceOnly && !params.sandbox
++      ? params.fsPolicy?.resolveMediaLocalRoots?.(params.isDataUrl ? [] : [pathInfo.resolved])
++      : undefined;
++  return {
++    resolvedPath: params.isDataUrl ? null : pathInfo.resolved,
++    localRoots: uniqueStrings([
++      ...(workspaceOnly
++        ? workspaceRoots
++        : (scopedRoots ?? [...getDefaultLocalRootsCore(), ...workspaceRoots])),
++      ...(params.fsPolicy?.readOnlyRoots ?? []),
++    ]),
++    ...(pathInfo.rewrittenFrom ? { rewrittenFrom: pathInfo.rewrittenFrom } : {}),
++  };
++}
+diff --git a/src/agents/tools/media-tool-shared.ts b/src/agents/tools/media-tool-shared.ts
+index 2c5389e6da86d33ce15e08012ea643f8dbb75f8a..ae2252da3429eee65fdc8d1f77566ffe778e3c38 100644
+--- a/src/agents/tools/media-tool-shared.ts
++++ b/src/agents/tools/media-tool-shared.ts
+@@ -1,23 +1,19 @@
+ /** Shared media tool routing, auth, path, and reference helpers. */
+-import path from "node:path";
+ import { normalizeInboundPathRoots } from "@openclaw/media-core/inbound-path-policy";
+ import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+ import {
+   normalizeOptionalLowercaseString,
+   normalizeOptionalString,
+ } from "@openclaw/normalization-core/string-coerce";
+-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+ import {
+   findCapabilityProviderById,
+   resolveCapabilityModelRefForProviders,
+ } from "../../../packages/media-generation-core/src/capability-model-ref.js";
+ import type { AgentModelConfig } from "../../config/types.agents-shared.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import { safeFileURLToPath } from "../../infra/local-file-access.js";
+ import type { SsrFPolicy } from "../../infra/net/ssrf.js";
+ import type { Model } from "../../llm/types.js";
+ import { resolveChannelInboundAttachmentRootsForChannel } from "../../media/channel-inbound-roots.js";
+-import { getDefaultLocalRootsCore } from "../../media/local-media-access.js";
+ import {
+   classifyMediaReferenceSource,
+   normalizeMediaReferenceSource,
+@@ -30,7 +26,6 @@ import { buildTimeoutAbortSignal } from "../../utils/fetch-timeout.js";
+ import type { AuthProfileStore } from "../auth-profiles/types.js";
+ import {
+   createSandboxBridgeReadFile,
+-  resolveSandboxedBridgeMediaPath,
+   type SandboxedBridgeMediaPathConfig,
+ } from "../sandbox-media-paths.js";
+ import type { ToolFsPolicy } from "../tool-fs-policy.js";
+@@ -45,6 +40,7 @@ import {
+   getCurrentCapabilityMetadataSnapshot,
+   hasSnapshotCapabilityAvailability,
+ } from "./manifest-capability-availability.js";
++import { resolveMediaToolReferenceAccess } from "./media-tool-reference-access.js";
+ import {
+   buildToolModelConfigFromCandidates,
+   coerceToolModelConfig,
+@@ -53,11 +49,9 @@ import {
+   resolveDefaultModelRef,
+   type ToolModelConfig,
+ } from "./model-config.helpers.js";
+-import {
+-  getApiKeyForModelCore,
+-  normalizeWorkspaceDir,
+-  requireApiKey,
+-} from "./tool-runtime.helpers.js";
++import { getApiKeyForModelCore, requireApiKey } from "./tool-runtime.helpers.js";
++
++export { resolveMediaToolReferenceAccess } from "./media-tool-reference-access.js";
+ 
+ type TextToolAttempt = {
+   provider: string;
+@@ -533,55 +527,6 @@ export function buildTaskRunDetails(
+     : {};
+ }
+ 
+-/**
+- * Resolves the common filesystem access shape for media-tool references.
+- */
+-export async function resolveMediaToolReferenceAccess(params: {
+-  input: string;
+-  isDataUrl: boolean;
+-  workspaceDir?: string;
+-  cwd?: string;
+-  fsPolicy?: ToolFsPolicy;
+-  sandbox?: SandboxedBridgeMediaPathConfig | null;
+-}): Promise<{ resolvedPath: string | null; localRoots: string[]; rewrittenFrom?: string }> {
+-  const root = normalizeWorkspaceDir(
+-    params.sandbox?.root ?? params.fsPolicy?.root ?? params.cwd ?? params.workspaceDir,
+-  );
+-  const cwd = normalizeWorkspaceDir(params.cwd) ?? root;
+-  const workspaceRoots = root ? [root] : [];
+-  const workspaceOnly = params.fsPolicy?.workspaceOnly ?? params.sandbox?.workspaceOnly === true;
+-  const reference = classifyMediaReferenceSource(params.input);
+-  const resolveHostPath = () => {
+-    if (reference.isFileUrl) {
+-      return safeFileURLToPath(params.input);
+-    }
+-    if (reference.isHttpUrl || reference.isMediaStoreUrl || reference.looksLikeWindowsDrivePath) {
+-      return params.input;
+-    }
+-    if (params.input.startsWith("~")) {
+-      return resolveUserPath(params.input);
+-    }
+-    return cwd ? path.resolve(cwd, params.input) : params.input;
+-  };
+-  const pathInfo: { resolved: string; rewrittenFrom?: string } = params.isDataUrl
+-    ? { resolved: "" }
+-    : params.sandbox
+-      ? await resolveSandboxedBridgeMediaPath({
+-          sandbox: params.sandbox,
+-          mediaPath: params.input,
+-          inboundFallbackDir: "media/inbound",
+-        })
+-      : { resolved: resolveHostPath() };
+-  return {
+-    resolvedPath: params.isDataUrl ? null : pathInfo.resolved,
+-    localRoots: uniqueStrings([
+-      ...(workspaceOnly ? workspaceRoots : [...getDefaultLocalRootsCore(), ...workspaceRoots]),
+-      ...(params.fsPolicy?.readOnlyRoots ?? []),
+-    ]),
+-    ...(pathInfo.rewrittenFrom ? { rewrittenFrom: pathInfo.rewrittenFrom } : {}),
+-  };
+-}
+-
+ type LoadedToolReferenceMedia = WebMediaResult | ReturnType<typeof decodeDataUrl>;
+ 
+ export type MediaToolSandbox = Pick<
 diff --git a/src/agents/tools/question-prompt-send.ts b/src/agents/tools/question-prompt-send.ts
 index 0a37f1bfb766008714c94a34d69af9597206144e..3693ddf1613f795c51dfd5bbe6cf3af695c0e770 100644
 --- a/src/agents/tools/question-prompt-send.ts
@@ -47380,10 +49310,39 @@ index da684fcc73e97da2594094cec325b28261d7c7d2..d8ce238735c3e7c0b68a86e97a440060
      "ordinary",
      "heartbeat",
 diff --git a/src/auto-reply/reply/agent-runner-execution-compaction.test.ts b/src/auto-reply/reply/agent-runner-execution-compaction.test.ts
-index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd475498ed4a2f 100644
+index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..30d6eb3ff8cb8edad07a8c1f1a2b0136f5970ee9 100644
 --- a/src/auto-reply/reply/agent-runner-execution-compaction.test.ts
 +++ b/src/auto-reply/reply/agent-runner-execution-compaction.test.ts
-@@ -308,7 +308,7 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -36,6 +36,28 @@ function createNotifyUserRun() {
+ }
+ 
+ describe("executeAgentTurn: compaction events", () => {
++  it.each([true, false])(
++    "keeps automatic notices silent when disabled, completed=%s",
++    async (completed) => {
++      const followupRun = createFollowupRun();
++      followupRun.run.config = { agents: { defaults: { compaction: { notifyUser: false } } } };
++      const onBlockReply = vi.fn();
++      const onCompactionEnd = vi.fn();
++      state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
++        await params.onAgentEvent?.({ stream: "compaction", data: { phase: "start" } });
++        await params.onAgentEvent?.({ stream: "compaction", data: { phase: "end", completed } });
++        return { payloads: [{ text: "final" }], meta: {} };
++      });
++      const result = await executeTestTurn(
++        { opts: { onBlockReply, onCompactionEnd } },
++        { followupRun },
++      );
++      expect(result.kind).toBe("success");
++      expect(onCompactionEnd).toHaveBeenCalledWith({ completed });
++      expect(onBlockReply).not.toHaveBeenCalled();
++    },
++  );
++
+   it("keeps compaction start notices silent by default", async () => {
+     const onBlockReply = vi.fn();
+     state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+@@ -308,7 +330,7 @@ describe("executeAgentTurn: compaction events", () => {
      expect(result.kind).toBe("success");
      expect(onBlockReply).toHaveBeenCalledTimes(1);
      expectBlockReplyCall(onBlockReply, 0, {
@@ -47392,7 +49351,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        replyToId: "msg",
        replyToCurrent: true,
        isCompactionNotice: true,
-@@ -333,13 +333,13 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -333,13 +355,13 @@ describe("executeAgentTurn: compaction events", () => {
  
      expect(result.kind).toBe("success");
      expectBlockReplyCall(onBlockReply, 0, {
@@ -47408,7 +49367,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        replyToId: "msg",
        replyToCurrent: true,
        isCompactionNotice: true,
-@@ -374,7 +374,7 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -374,7 +396,7 @@ describe("executeAgentTurn: compaction events", () => {
        isCompactionNotice: true,
      });
      expectBlockReplyCall(onBlockReply, 1, {
@@ -47417,7 +49376,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        replyToId: "msg",
        replyToCurrent: true,
        isCompactionNotice: true,
-@@ -386,7 +386,7 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -386,7 +408,7 @@ describe("executeAgentTurn: compaction events", () => {
        isCompactionNotice: true,
      });
      expectBlockReplyCall(onBlockReply, 3, {
@@ -47426,7 +49385,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        replyToId: "msg",
        replyToCurrent: true,
        isCompactionNotice: true,
-@@ -421,11 +421,11 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -421,11 +443,11 @@ describe("executeAgentTurn: compaction events", () => {
      expect(onCompactionEnd).toHaveBeenCalledTimes(1);
      expect(onBlockReply).toHaveBeenCalledTimes(2);
      expectBlockReplyCall(onBlockReply, 0, {
@@ -47440,7 +49399,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        isCompactionNotice: true,
      });
    });
-@@ -450,11 +450,11 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -450,11 +472,11 @@ describe("executeAgentTurn: compaction events", () => {
      expect(result.kind).toBe("success");
      expect(onCompactionEnd).toHaveBeenCalledWith({ completed: false });
      expectBlockReplyCall(onBlockReply, 0, {
@@ -47454,7 +49413,7 @@ index 1ed5e9c712e37f1a1eca165348dcc866ed458e45..fbf1de2754f1c7a661c0f18a62bd4754
        isCompactionNotice: true,
      });
    });
-@@ -478,13 +478,13 @@ describe("executeAgentTurn: compaction events", () => {
+@@ -478,13 +500,13 @@ describe("executeAgentTurn: compaction events", () => {
      expect(result.kind).toBe("success");
      expect(onCompactionNoticePayload).toHaveBeenCalledTimes(2);
      expectBlockReplyCall(onCompactionNoticePayload, 0, {
@@ -47880,7 +49839,7 @@ index 0c572121caafcaee0791a5edcb90f514ec27a5e2..1ecedbe6343f553e6b217bd5a35856a3
      cfg: resolveQueuedReplyRuntimeConfig(params.followupRun.run.config),
      runId,
 diff --git a/src/auto-reply/reply/agent-runner-failure-reply.test.ts b/src/auto-reply/reply/agent-runner-failure-reply.test.ts
-index d0fd7375144ee433c7e003dc8850c98416690203..8bfa9f9c06c3dba11e04327ca15f2a3665870ade 100644
+index d0fd7375144ee433c7e003dc8850c98416690203..d209dfdaffaff35fe6c75349ecf33ddd302ce0e6 100644
 --- a/src/auto-reply/reply/agent-runner-failure-reply.test.ts
 +++ b/src/auto-reply/reply/agent-runner-failure-reply.test.ts
 @@ -105,7 +105,7 @@ describe("buildExternalRunFailureReply", () => {
@@ -47910,7 +49869,47 @@ index d0fd7375144ee433c7e003dc8850c98416690203..8bfa9f9c06c3dba11e04327ca15f2a36
          "Try again in a moment, or switch to another model if it keeps happening.",
      );
      expect(reply.isGenericRunnerFailure).toBe(false);
-@@ -224,7 +224,7 @@ describe("buildPreflightCompactionFailureText", () => {
+@@ -218,13 +218,47 @@ describe("buildExternalRunFailureReply", () => {
+ });
+ 
+ describe("buildPreflightCompactionFailureText", () => {
++  it.each([
++    "Summarization failed: Codex error: The usage limit has been reached",
++    "Compaction safeguard could not summarize the session: usage limit reached",
++  ])("reports the real quota failure and preserved history: %s", (reason) => {
++    const text = buildPreflightCompactionFailureText(
++      `Preflight compaction required but failed: ${reason}`,
++    );
++    expect(text).toContain("model account reached its usage limit");
++    expect(text).toContain("conversation history is preserved");
++    expect(text).not.toContain("Context is too large");
++    expect(text).not.toContain("/new");
++  });
++
++  it.each([
++    ["HTTP 429 rate limit", "temporarily rate-limiting"],
++    ["insufficient_quota", "billing or credit limit"],
++  ])("distinguishes recoverable provider failure: %s", (reason, expected) => {
++    const text = buildPreflightCompactionFailureText(
++      `Preflight compaction required but failed: ${reason}`,
++    );
++    expect(text).toContain(expected);
++    expect(text).toContain("conversation history is preserved");
++    expect(text).not.toContain("Context is too large");
++  });
++
++  it("reports authentication failure without suggesting a new conversation", () => {
++    const text = buildPreflightCompactionFailureText(
++      "Preflight compaction required but failed: HTTP 401 authentication failed",
++    );
++    expect(text).toContain("could not authenticate");
++    expect(text).toContain("conversation history is preserved");
++    expect(text).not.toContain("/new");
++  });
++
+   it("identifies timeout failures without requiring verbose error details", () => {
+     expect(
+       buildPreflightCompactionFailureText(
          "Preflight compaction required but failed: Compaction timed out",
        ),
      ).toBe(
@@ -47920,10 +49919,18 @@ index d0fd7375144ee433c7e003dc8850c98416690203..8bfa9f9c06c3dba11e04327ca15f2a36
      );
    });
 diff --git a/src/auto-reply/reply/agent-runner-failure-reply.ts b/src/auto-reply/reply/agent-runner-failure-reply.ts
-index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f57eb3646 100644
+index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..55ccb5a7543a8a95b768cbb07fdc213f21ed0d32 100644
 --- a/src/auto-reply/reply/agent-runner-failure-reply.ts
 +++ b/src/auto-reply/reply/agent-runner-failure-reply.ts
-@@ -205,13 +205,13 @@ const CODEX_SESSION_GENERATION_NOT_CURRENT_RE =
+@@ -22,6 +22,7 @@ import {
+   renderFormatErrorCopy,
+ } from "../../agents/failover/assistant-request-failure-copy.js";
+ import { classifyProviderRequestFacets } from "../../agents/failover/request-error-facets.js";
++import { hasLongWindowRateLimitEvidence } from "../../agents/failover/retry-evidence.js";
+ import {
+   GENERIC_EXTERNAL_RUN_FAILURE_TEXT,
+   HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT,
+@@ -205,13 +206,13 @@ const CODEX_SESSION_GENERATION_NOT_CURRENT_RE =
  function buildCodexAppServerFailureText(message: string): string | null {
    const normalizedMessage = collapseRepeatedFailureDetail(message);
    if (CODEX_SESSION_GENERATION_NOT_CURRENT_RE.test(normalizedMessage)) {
@@ -47940,8 +49947,31 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
    }
    return null;
  }
-@@ -234,8 +234,8 @@ export function buildPreflightCompactionFailureText(
+@@ -225,17 +226,27 @@ export function buildPreflightCompactionFailureText(
+   if (!normalizedMessage.startsWith(PREFLIGHT_COMPACTION_FAILURE_PREFIX)) {
+     return null;
+   }
+-  const reason = renderUserFacingText(
+-    normalizedMessage.slice(PREFLIGHT_COMPACTION_FAILURE_PREFIX.length),
+-    { errorContext: true },
+-  )
++  const rawReason = normalizedMessage.slice(PREFLIGHT_COMPACTION_FAILURE_PREFIX.length);
++  const reason = renderUserFacingText(rawReason, { errorContext: true })
+     .trim()
+     .replace(/\s+/gu, " ");
    const isTimeout = classifyCompactionReason(reason) === "timeout";
++  const providerFailure = classifyFailoverReason(rawReason);
++  if (providerFailure === "rate_limit") {
++    return hasLongWindowRateLimitEvidence(rawReason)
++      ? "I couldn’t continue because the model account reached its usage limit. Your conversation history is preserved. Please try again when capacity is available; starting a new chat won’t reset the account limit."
++      : "I couldn’t continue because the model service is temporarily rate-limiting requests. Your conversation history is preserved. Please try again shortly.";
++  }
++  if (providerFailure === "billing") {
++    return "I couldn’t continue because the model account has a billing or credit limit. Your conversation history is preserved. Resolve the account’s billing limit, then try again.";
++  }
++  if (providerFailure === "auth" || providerFailure === "auth_permanent") {
++    return "I couldn’t continue because the model account could not authenticate. Your conversation history is preserved. Reconnect the model account, then try again.";
++  }
    const reasonSuffix = options?.includeDetails && reason && !isTimeout ? ` Reason: ${reason}.` : "";
    const summary = isTimeout
 -    ? "⚠️ Context is too large and auto-compaction timed out before it could finish."
@@ -47951,7 +49981,7 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
    return `${summary}${reasonSuffix} Try again, use /compact, or use /new to start a fresh session.`;
  }
  
-@@ -255,7 +255,7 @@ export function buildAuthProfileFailoverFailureText(error: unknown): string | nu
+@@ -255,7 +266,7 @@ export function buildAuthProfileFailoverFailureText(error: unknown): string | nu
  function resolveExternalRunFailureDetail(message: string): string | undefined {
    const sanitized = message
      .trim()
@@ -47960,7 +49990,7 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
      .replace(/\s+/gu, " ");
    return sanitized.length > EXTERNAL_RUN_FAILURE_DETAIL_MAX_CHARS
      ? `${truncateUtf16Safe(sanitized, EXTERNAL_RUN_FAILURE_DETAIL_MAX_CHARS - 1).trimEnd()}…`
-@@ -265,7 +265,7 @@ function resolveExternalRunFailureDetail(message: string): string | undefined {
+@@ -265,7 +276,7 @@ function resolveExternalRunFailureDetail(message: string): string | undefined {
  function formatForwardedExternalRunFailureText(message: string): string {
    const detail = resolveExternalRunFailureDetail(message);
    return detail
@@ -47969,7 +49999,7 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
      : GENERIC_EXTERNAL_RUN_FAILURE_TEXT;
  }
  
-@@ -325,14 +325,14 @@ export function buildExternalRunFailureReply(
+@@ -325,14 +336,14 @@ export function buildExternalRunFailureReply(
      if (oauthRefreshFailure.reason) {
        return {
          text: providerLoginRecovery
@@ -47987,7 +50017,7 @@ index f9eb2bab2f90241ae1804fa04b5a27ef3eec8d1a..d990d867b0ab8a6837fdda3aa8cd0d9f
        isGenericRunnerFailure: false,
      };
    }
-@@ -433,7 +433,7 @@ export function renderPostCompactionModelFailurePayload(payload: ReplyPayload):
+@@ -433,7 +444,7 @@ export function renderPostCompactionModelFailurePayload(payload: ReplyPayload):
      typeof payload.text === "string"
      ? copyReplyPayloadMetadata(payload, {
          ...payload,
@@ -51760,10 +53790,35 @@ index 7f916c0b3118c44fcbfda04ee78c340eb2b967a5..fc0c3fcc5568eed6d51ff7855a48b354
        },
      });
 diff --git a/src/auto-reply/reply/commands-compact.test.ts b/src/auto-reply/reply/commands-compact.test.ts
-index 15d2898a19bbc013ea0f47baef8b0749dc89a2d2..0ea197c1ff489d95909d88e5b4012d86525d7d14 100644
+index 15d2898a19bbc013ea0f47baef8b0749dc89a2d2..205d36d6225c68d0c27a04f14a20286841e18e05 100644
 --- a/src/auto-reply/reply/commands-compact.test.ts
 +++ b/src/auto-reply/reply/commands-compact.test.ts
-@@ -179,7 +179,7 @@ describe("handleCompactCommand", () => {
+@@ -60,7 +60,7 @@ describe("handleCompactCommand", () => {
+     expect(vi.mocked(compactEmbeddedAgentSession)).not.toHaveBeenCalled();
+   });
+ 
+-  it("routes manual compaction with explicit trigger and context metadata", async () => {
++  it("reports manual compaction with explicit metadata even when automatic notices are disabled", async () => {
+     vi.mocked(compactEmbeddedAgentSession).mockResolvedValueOnce({
+       ok: true,
+       compacted: false,
+@@ -70,6 +70,7 @@ describe("handleCompactCommand", () => {
+     const result = await handleCompactCommand(
+       {
+         ...buildCompactParams("/compact", {
++          agents: { defaults: { compaction: { notifyUser: false } } },
+           commands: { text: true },
+           channels: { whatsapp: { allowFrom: ["*"] } },
+           session: { store: "/tmp/openclaw-session-store.json" },
+@@ -103,6 +104,7 @@ describe("handleCompactCommand", () => {
+     );
+ 
+     expect(result?.shouldContinue).toBe(false);
++    expect(result?.reply?.text).toBeTruthy();
+     expect(vi.mocked(compactEmbeddedAgentSession)).toHaveBeenCalledOnce();
+     const call = requireCompactEmbeddedAgentSessionCall();
+     expect(call.sessionId).toBe("session-1");
+@@ -179,7 +181,7 @@ describe("handleCompactCommand", () => {
      );
  
      expect(result?.reply?.text).toBe(
@@ -51772,7 +53827,7 @@ index 15d2898a19bbc013ea0f47baef8b0749dc89a2d2..0ea197c1ff489d95909d88e5b4012d86
      );
      expect(result?.reply?.isStatusNotice).toBe(true);
      expect(vi.mocked(incrementCompactionCount)).not.toHaveBeenCalled();
-@@ -207,7 +207,7 @@ describe("handleCompactCommand", () => {
+@@ -207,7 +209,7 @@ describe("handleCompactCommand", () => {
      );
  
      expect(result?.reply?.text).toBe(
@@ -51781,7 +53836,7 @@ index 15d2898a19bbc013ea0f47baef8b0749dc89a2d2..0ea197c1ff489d95909d88e5b4012d86
      );
      expect(vi.mocked(incrementCompactionCount)).not.toHaveBeenCalled();
    });
-@@ -234,7 +234,7 @@ describe("handleCompactCommand", () => {
+@@ -234,7 +236,7 @@ describe("handleCompactCommand", () => {
      );
  
      expect(result?.reply?.text).toBe(
@@ -63444,6 +65499,172 @@ index 8f446013fcb5711f617a53c39a95d385618befa8..8f72967afac316f130f3c6b0f99c67a4
  
      for (const resource of params.pluginResources) {
        const anchors = resource.scope === "state" ? [{ sourcePath: stateDir }] : agentRoots;
+diff --git a/src/commands/tasks.notify.test.ts b/src/commands/tasks.notify.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..72a1147b067018574d68d01766f85414d3cbe895
+--- /dev/null
++++ b/src/commands/tasks.notify.test.ts
+@@ -0,0 +1,94 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { useTaskGatewayFixture } from "../gateway/server-methods/tasks.fixture.test-support.js";
++import {
++  runTaskHandler,
++  createSnapshotTask,
++} from "../gateway/server-methods/tasks.test-helpers.js";
++import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
++import { getTaskById } from "../tasks/runtime-internal.js";
++import { createAcpTaskBackingDetailForTest } from "../tasks/task-backing-authority.test-support.js";
++import { reloadTaskRegistryFromStoreAsync } from "../tasks/task-registry-state.js";
++import { seedTaskRegistryRowsForTests } from "../test-utils/task-registry-sqlite.js";
++import { tasksNotifyCommand } from "./tasks.js";
++import { createTestRuntime } from "./test-runtime-config-helpers.js";
++
++const { callGateway } = vi.hoisted(() => ({ callGateway: vi.fn() }));
++vi.mock("../gateway/call.js", () => ({ callGateway }));
++const { cancelSessionMock } = useTaskGatewayFixture();
++
++async function seedActiveTask() {
++  const task = createSnapshotTask({
++    taskId: "notify-resident-task",
++    runtime: "acp",
++    runId: "notify-resident-run",
++    childSessionKey: "agent:main:acp:notify",
++    agentId: "main",
++    detail: createAcpTaskBackingDetailForTest("notify-resident-instance"),
++  });
++  seedTaskRegistryRowsForTests([task]);
++  await reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
++  return task;
++}
++
++beforeEach(() => {
++  callGateway.mockReset();
++});
++
++describe("task notification commands use the resident Gateway owner", () => {
++  it.each(["silent", "state_changes", "done_only"] as const)(
++    "keeps acknowledged %s policy through a subsequent cancellation and reload",
++    async (notify) => {
++      const task = await seedActiveTask();
++      callGateway.mockImplementation(async ({ method, params }) => {
++        expect(method).toBe("tasks.notify");
++        const result = await runTaskHandler("tasks.notify", params);
++        expect(result.calls[0]?.[0]).toBe(true);
++        return result.payload;
++      });
++      const runtime = createTestRuntime();
++      await tasksNotifyCommand({ lookup: task.runId!, notify }, runtime);
++      expect(callGateway).toHaveBeenCalledExactlyOnceWith({
++        method: "tasks.notify",
++        params: { taskId: task.taskId, notifyPolicy: notify },
++        timeoutMs: 15_000,
++      });
++      expect(runtime.error).not.toHaveBeenCalled();
++      expect(runtime.log).toHaveBeenCalledExactlyOnceWith(
++        `Updated ${task.taskId} notify policy to ${notify}.`,
++      );
++      expect(getTaskById(task.taskId)?.notifyPolicy).toBe(notify);
++      cancelSessionMock.mockResolvedValue(undefined);
++      const result = await runTaskHandler("tasks.cancel", { taskId: task.taskId });
++      expect(result.payload).toMatchObject({ found: true, cancelled: true });
++      await reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
++      expect(getTaskById(task.taskId)).toMatchObject({ status: "cancelled", notifyPolicy: notify });
++    },
++  );
++
++  it("does not fall back to a local mutation when the Gateway is unavailable", async () => {
++    const task = await seedActiveTask();
++    callGateway.mockRejectedValue(new Error("gateway unavailable"));
++    const runtime = createTestRuntime();
++    await tasksNotifyCommand({ lookup: task.taskId, notify: "silent" }, runtime);
++    expect(runtime.exit).toHaveBeenCalledExactlyOnceWith(1);
++    expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("gateway unavailable"));
++    expect(runtime.log).not.toHaveBeenCalled();
++    await reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
++    expect(getTaskById(task.taskId)).toEqual(task);
++  });
++
++  it("does not report success for an inaccessible or mismatched Gateway acknowledgement", async () => {
++    const task = await seedActiveTask();
++    for (const response of [
++      { found: false },
++      { found: true, taskId: "other", notifyPolicy: "silent" },
++    ]) {
++      callGateway.mockResolvedValue(response);
++      const runtime = createTestRuntime();
++      await tasksNotifyCommand({ lookup: task.taskId, notify: "silent" }, runtime);
++      expect(runtime.exit).toHaveBeenCalledExactlyOnceWith(1);
++      expect(runtime.log).not.toHaveBeenCalled();
++      expect(getTaskById(task.taskId)).toEqual(task);
++    }
++  });
++});
+diff --git a/src/commands/tasks.ts b/src/commands/tasks.ts
+index a20da25e1b83f7acbec101becdf9d2aea02b034e..23c9c71d3c16b4ba6162f2853a40220a47eff012 100644
+--- a/src/commands/tasks.ts
++++ b/src/commands/tasks.ts
+@@ -4,6 +4,7 @@
+ import { timestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
+ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { truncateWithMarker } from "@openclaw/normalization-core/utf16-slice";
++import type { TasksNotifyResult } from "../../packages/gateway-protocol/src/schema/tasks.js";
+ import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
+ import { isRich, theme } from "../../packages/terminal-core/src/theme.js";
+ import { formatCliCommand } from "../cli/command-format.js";
+@@ -12,7 +13,7 @@ import { formatLookupMiss } from "../cli/error-format.js";
+ import { formatCliJsonFailure, rethrowExpectedCliError } from "../cli/failure-output.js";
+ import { getRuntimeConfig } from "../config/config.js";
+ import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+-import { updateTaskNotifyPolicyById } from "../tasks/runtime-internal.js";
++import { resolveTaskForLookupToken } from "../tasks/runtime-internal.js";
+ import { cancelDetachedTaskRunById } from "../tasks/task-executor.js";
+ import { listTaskFlowAuditFindings } from "../tasks/task-flow-registry.audit.js";
+ import {
+@@ -350,24 +351,33 @@ export async function tasksNotifyCommand(
+   opts: { lookup: string; notify: TaskNotifyPolicy },
+   runtime: RuntimeEnv,
+ ) {
+-  const task = reconcileTaskLookupToken(opts.lookup);
++  const task = resolveTaskForLookupToken(opts.lookup);
+   if (!task) {
+     runtime.error(formatTaskLookupMiss(opts.lookup));
+     runtime.exit(1);
+     return;
+   }
+-  const updated = updateTaskNotifyPolicyById({
+-    taskId: task.taskId,
+-    notifyPolicy: opts.notify,
+-  });
+-  if (!updated) {
+-    runtime.error(formatTaskLookupMiss(opts.lookup));
++  try {
++    const { callGateway } = await import("../gateway/call.js");
++    const updated = await callGateway<TasksNotifyResult>({
++      method: "tasks.notify",
++      params: { taskId: task.taskId, notifyPolicy: opts.notify },
++      timeoutMs: 15_000,
++    });
++    if (!updated.found || updated.taskId !== task.taskId || updated.notifyPolicy !== opts.notify) {
++      runtime.error(formatTaskLookupMiss(opts.lookup));
++      runtime.exit(1);
++      return;
++    }
++    runtime.log(
++      sanitizeTerminalText(`Updated ${updated.taskId} notify policy to ${updated.notifyPolicy}.`),
++    );
++  } catch (error) {
++    runtime.error(
++      sanitizeTerminalText(`Could not update task notification policy: ${String(error)}`),
++    );
+     runtime.exit(1);
+-    return;
+   }
+-  runtime.log(
+-    sanitizeTerminalText(`Updated ${updated.taskId} notify policy to ${updated.notifyPolicy}.`),
+-  );
+ }
+ 
+ /** Cancels a detached task run by lookup token. */
 diff --git a/src/config/schema.help.agents.ts b/src/config/schema.help.agents.ts
 index 18a615475d0ad9d0e480f37507e8b76a7c77f1f8..7a43f6233303b3cb29ee9fc12a3485e812bf3bb0 100644
 --- a/src/config/schema.help.agents.ts
@@ -71003,7 +73224,7 @@ index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca1
    | {
        kind: "script-failure";
 diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
-index f8b96bf1a289089982b7f32b5dee3de6354023a7..e8d0af7af8ff4e5a236b297a374c67c18368c255 100644
+index f8b96bf1a289089982b7f32b5dee3de6354023a7..53d7c2e6bce0d9f7429a67131a7b09c5b5b58d33 100644
 --- a/src/gateway/agent-turn/agent-run-execution-phase.ts
 +++ b/src/gateway/agent-turn/agent-run-execution-phase.ts
 @@ -8,6 +8,7 @@ import {
@@ -71014,7 +73235,15 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..e8d0af7af8ff4e5a236b297a374c67c1
  import { repairMainSessionRecoveryMutation } from "../../agents/main-session-recovery/main-session-recovery-lifecycle.js";
  import { scheduleMainSessionRecoveryPendingTarget } from "../../agents/main-session-recovery/main-session-recovery-owner-release.js";
  import {
-@@ -68,6 +69,7 @@ import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.
+@@ -35,6 +36,7 @@ import {
+ } from "../../sessions/input-provenance.js";
+ import { discardPreparedInboundMedia } from "../chat-attachments.js";
+ import { errorShapeFromError } from "../error-shape.js";
++import { readInProcessSubagentResume } from "../in-process-subagent-resume.js";
+ import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
+ import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
+ import { createAgentRunModelSelectionHandler } from "../server-methods/agent-run-model-selection.js";
+@@ -68,6 +70,7 @@ import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.
  
  export async function startAgentRunExecution(params: {
    assertContextCurrent?: () => void;
@@ -71022,7 +73251,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..e8d0af7af8ff4e5a236b297a374c67c1
    prepared: PreparedAgentRunDispatch;
    mainRestartRecoveryOwnerLease?: MainSessionRecoveryOwnerLease;
    request: AgentRunRequest;
-@@ -385,6 +387,7 @@ export async function startAgentRunExecution(params: {
+@@ -385,6 +388,7 @@ export async function startAgentRunExecution(params: {
                },
                cronCreatorAuthority: prepared.cronCreatorAuthority,
                ingressOpts: {
@@ -71030,6 +73259,62 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..e8d0af7af8ff4e5a236b297a374c67c1
                  skillLibraryAuthoring,
                  message,
                  images: params.images,
+@@ -485,6 +489,7 @@ export async function startAgentRunExecution(params: {
+                 internalDeliverySuppressText: params.client?.internal?.internalDeliverySuppressText,
+                 suppressPromptPersistence: prepared.userTurn.suppressPromptPersistence,
+                 userTurnTranscriptRecorder,
++                privateCompletionResume: readInProcessSubagentResume(params.client?.internal),
+                 cleanupBundleMcpOnRunEnd: params.request.cleanupBundleMcpOnRunEnd,
+                 abortSignal: prepared.activeRunAbort.controller.signal,
+                 lifecycleGeneration: params.lifecycleGeneration,
+diff --git a/src/gateway/agent-turn/agent-run-user-turn.ts b/src/gateway/agent-turn/agent-run-user-turn.ts
+index ae7809bf8c6a9a16b882181bbf4f9790060dbc5d..f36edc1c38bfb0e708b9ae0e9fa39040e2a81d99 100644
+--- a/src/gateway/agent-turn/agent-run-user-turn.ts
++++ b/src/gateway/agent-turn/agent-run-user-turn.ts
+@@ -33,10 +33,12 @@ import {
+   type ChatImageContent,
+   type OffloadedRef,
+ } from "../chat-attachments.js";
++import { readInProcessSubagentResume } from "../in-process-subagent-resume.js";
+ import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
+ import { resolveSessionRuntimeCwd } from "../server-methods/agent-session-reset.js";
+ import { gatewayClientSenderFields } from "../server-methods/gateway-client-identity.js";
+ import { resolveGatewayInputParticipant } from "../session-input-participant.js";
++import { resolvePrivateCompletionTranscript } from "../session-subagent-private-completion.js";
+ import { loadSessionEntry } from "../session-utils.js";
+ import { formatForLog } from "../ws-log.js";
+ import {
+@@ -229,10 +231,13 @@ export async function prepareAgentRunUserTurn(params: {
+           inputProvenance: params.inputProvenance,
+           internalEvents: params.request.internalEvents,
+         }));
++    const resume = readInProcessSubagentResume(params.client?.internal);
++    const privateResume =
++      params.privateCompletion && resume?.privateCompletion ? resume : undefined;
+     let recorder: UserTurnTranscriptRecorder | undefined;
+     if (
+       params.resolvedSessionKey &&
+-      !params.suppressVisibleSessionEffects &&
++      (!params.suppressVisibleSessionEffects || privateResume) &&
+       !suppressPromptPersistence
+     ) {
+       const persistedMedia = await persistInboundImagesForTranscript({
+@@ -270,6 +275,15 @@ export async function prepareAgentRunUserTurn(params: {
+         trackInputCompletion: params.privateCompletion,
+         input,
+         target: () => {
++          if (privateResume) {
++            // Admission has not transferred ownership when staging this input.
++            const target = resolvePrivateCompletionTranscript(privateResume, params.runId, true);
++            return {
++              ...target,
++              expectedSessionId: target.sessionId,
++              config: params.cfgForAgent ?? params.cfg,
++            };
++          }
+           const loaded = loadSessionEntry(params.resolvedSessionKey!, {
+             agentId: params.activeSessionAgentId,
+             clone: false,
 diff --git a/src/gateway/agent-turn/agent-turn-service.ts b/src/gateway/agent-turn/agent-turn-service.ts
 index 232ac08f1990b95f22f25bdc6ad84a27294193bc..98ee3743fb7669d81a71f580e1c46988116a7bfe 100644
 --- a/src/gateway/agent-turn/agent-turn-service.ts
@@ -71387,6 +73672,57 @@ index 2ff2a2c41a68dfe5530ce1e311e0d78d8000fdaa..a633b7ea158a382963bce408214814fa
    it("selects only attached service owners for their declared config and preserves unknown restart policy", () => {
      const serviceRegistry = createTestRegistry([]);
      serviceRegistry.services.push(
+diff --git a/src/gateway/in-process-subagent-resume.ts b/src/gateway/in-process-subagent-resume.ts
+index 52330f9e5321f1668f0de7280ac0dcad7592b7d7..7896a23e345d826d851cba6906066329dcf91239 100644
+--- a/src/gateway/in-process-subagent-resume.ts
++++ b/src/gateway/in-process-subagent-resume.ts
+@@ -1,9 +1,23 @@
++import type { AgentRunSessionTarget } from "../agents/run-session-target.js";
++import type { SessionEntry } from "../config/sessions/types.js";
+ import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+ import type { TrustedAgentToolCaller } from "./server-methods/types.js";
+ 
+ /** Host-only admission facts; never accepted from model arguments or Gateway wire params. */
+ export type TrustedSubagentResume = Readonly<{
+-  caller: TrustedAgentToolCaller;
++  caller?: TrustedAgentToolCaller;
++  privateCompletion?: Readonly<{
++    transcriptTarget: Required<
++      Pick<AgentRunSessionTarget, "agentId" | "sessionId" | "sessionKey" | "storePath">
++    >;
++    logicalLifecycleRevision: SessionEntry["lifecycleRevision"];
++    privateLifecycleRevision: SessionEntry["lifecycleRevision"];
++    childRunId: string;
++    childGeneration: number | undefined;
++    childCreatedAt: number;
++    childResult: string | null | undefined;
++    receiptReplay?: true;
++  }>;
+   childSessionKey: string;
+   childSessionId: string;
+   previousRunId: string;
+diff --git a/src/gateway/method-scopes.test.ts b/src/gateway/method-scopes.test.ts
+index 9f02b0facdae52a9240f13a69b42ae272193283a..a1d016a20e5dd961d909555aa1b509f391ffefaf 100644
+--- a/src/gateway/method-scopes.test.ts
++++ b/src/gateway/method-scopes.test.ts
+@@ -105,6 +105,7 @@ describe("method scope resolution", () => {
+     ["sessions.abort", ["operator.write"]],
+     ["sessions.patchMany", ["operator.write"]],
+     ["tasks.cancel", ["operator.write"]],
++    ["tasks.notify", ["operator.write"]],
+     ["tasks.retry", ["operator.write"]],
+     ["tasks.dismiss", ["operator.write"]],
+     ["tools.invoke", ["operator.write"]],
+diff --git a/src/gateway/methods/core-descriptors.ts b/src/gateway/methods/core-descriptors.ts
+index b5eb0944905ec34ad884f9875f2a44d19f19402d..ee4a9274f6bff4d8562aff5aa0a1be1e76005416 100644
+--- a/src/gateway/methods/core-descriptors.ts
++++ b/src/gateway/methods/core-descriptors.ts
+@@ -678,4 +678,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
+   ["plugins.skills.read", "plugins", "operator.read", "2026.9"],
+   ["diagnostics.heapProfile", "diagnostics", "operator.admin", "2026.9"],
+   ["desktop.release", "environments", "operator.admin", "2026.9", { startup: true }],
++  ["tasks.notify", "tasks", "operator.write", "2026.9"],
+ ] as const satisfies readonly CoreGatewayMethodSpecRow[];
 diff --git a/src/gateway/probe.device-auth-scope.test.ts b/src/gateway/probe.device-auth-scope.test.ts
 index 7ca0c0e0773373b2ae6ca917c5a731d460f0b738..9391c11e4f11c2c46ba12ea153fbb7c0ee5cd059 100644
 --- a/src/gateway/probe.device-auth-scope.test.ts
@@ -71746,6 +74082,34 @@ index 51c91819ae439920342ba29f211f9b0de760c51f..b915081ebfd70dfa4c258ac2ff93ffce
 +    });
    });
  }
+diff --git a/src/gateway/server-methods-list.test.ts b/src/gateway/server-methods-list.test.ts
+index 124eab51fd6f5dbfcf7748db001ce54058fb2777..1743383db5eac6ee17137428b5ca12e89be41dbd 100644
+--- a/src/gateway/server-methods-list.test.ts
++++ b/src/gateway/server-methods-list.test.ts
+@@ -217,6 +217,7 @@ describe("listGatewayMethods", () => {
+       "plugins.skills.read",
+       "diagnostics.heapProfile",
+       "desktop.release",
++      "tasks.notify",
+     ];
+     expect(listGatewayMethods().slice(-expectedSuffix.length)).toEqual(expectedSuffix);
+     const methods = listGatewayMethods();
+@@ -260,6 +261,7 @@ describe("listGatewayMethods", () => {
+       "plugins.skills.read",
+       "diagnostics.heapProfile",
+       "desktop.release",
++      "tasks.notify",
+     ]);
+   });
+ 
+@@ -432,6 +434,7 @@ describe("listGatewayMethods", () => {
+       "plugins.skills.read",
+       "diagnostics.heapProfile",
+       "desktop.release",
++      "tasks.notify",
+     ];
+     expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
+     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
 diff --git a/src/gateway/server-methods/agent-session-reset.ts b/src/gateway/server-methods/agent-session-reset.ts
 index 7bcf6ea2b9ed8362b70e6eb9be289427bce26687..64c033cd73d8ded9821d5f36d03b3ae001f55c24 100644
 --- a/src/gateway/server-methods/agent-session-reset.ts
@@ -72655,6 +75019,108 @@ index caf3e4ec146cd188a9afb726185dccb010512a33..0677b177ef23c3e7c6fca91246438d81
      entry: params.entry,
      cfg: params.cfg,
    });
+diff --git a/src/gateway/server-methods/tasks.test-helpers.ts b/src/gateway/server-methods/tasks.test-helpers.ts
+index 3bd51412b1a5ce2a9c939598dac26b43335fd38e..3ad7a767f814ecc0d6e9ef87f60b4b15309fc560 100644
+--- a/src/gateway/server-methods/tasks.test-helpers.ts
++++ b/src/gateway/server-methods/tasks.test-helpers.ts
+@@ -8,6 +8,8 @@ type TaskResponsePayload = {
+   tasks?: Array<Record<string, unknown>>;
+   task?: Record<string, unknown>;
+   found?: boolean;
++  taskId?: string;
++  notifyPolicy?: string;
+   cancelled?: boolean;
+   nextCursor?: string;
+   results?: Array<{ taskId?: string; ok?: boolean; reason?: string }>;
+@@ -75,6 +77,7 @@ export async function runTaskHandler(
+     | "tasks.list"
+     | "tasks.get"
+     | "tasks.cancel"
++    | "tasks.notify"
+     | "tasks.retry"
+     | "tasks.dismiss",
+   params: Record<string, unknown>,
+diff --git a/src/gateway/server-methods/tasks.test.ts b/src/gateway/server-methods/tasks.test.ts
+index 3c9de853a13226f3df1b946679f6fd8d41516a09..2cbfb62ccc5e82e8e9532f26084443ad10a3dba4 100644
+--- a/src/gateway/server-methods/tasks.test.ts
++++ b/src/gateway/server-methods/tasks.test.ts
+@@ -430,6 +430,15 @@ describe("tasks gateway handlers", () => {
+           { message: `task not found: ${taskId}` },
+         ]);
+       }
++      const previousNotifyPolicy = getTaskById(taskId)?.notifyPolicy;
++      const notify = await runTaskHandler(
++        "tasks.notify",
++        { taskId, notifyPolicy: "silent" },
++        config,
++        viewer,
++      );
++      expect(notify.payload).toEqual({ found: false });
++      expect(getTaskById(taskId)?.notifyPolicy).toBe(previousNotifyPolicy);
+       const cancel = await runTaskHandler("tasks.cancel", { taskId }, config, viewer);
+       expect(cancel.payload).toMatchObject({ found: false, cancelled: false });
+       for (const method of ["tasks.retry", "tasks.dismiss"] as const) {
+diff --git a/src/gateway/server-methods/tasks.ts b/src/gateway/server-methods/tasks.ts
+index c08066eeb55d00f08f8c2238f196099bcdce62c0..6f4fc1d13b4c1ffadea7b6007abbe6b7532ef0db 100644
+--- a/src/gateway/server-methods/tasks.ts
++++ b/src/gateway/server-methods/tasks.ts
+@@ -11,6 +11,7 @@ import {
+   validateTasksCancelParams,
+   validateTasksGetParams,
+   validateTasksListParams,
++  validateTasksNotifyParams,
+   validateTasksRecoveryParams,
+ } from "../../../packages/gateway-protocol/src/index.js";
+ import {
+@@ -18,7 +19,11 @@ import {
+   retrySubagentCompletionDelivery,
+ } from "../../agents/subagents/completion/subagent-completion-delivery.js";
+ import { canonicalizeMainSessionAlias } from "../../config/sessions.js";
+-import { getTaskById, listTaskRecordPage } from "../../tasks/runtime-internal.js";
++import {
++  getTaskById,
++  listTaskRecordPage,
++  updateTaskNotifyPolicyById,
++} from "../../tasks/runtime-internal.js";
+ import type { TaskRecord, TaskStatus } from "../../tasks/task-registry.types.js";
+ import { readGatewayAccessRevision } from "../gateway-access-revision.js";
+ import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
+@@ -291,6 +296,35 @@ export const tasksHandlers: GatewayRequestHandlers = {
+     respond(true, { task: mapTaskSummary(task, { includePrompt: true }) });
+   },
+   "tasks.history": taskHistoryHandler,
++  "tasks.notify": ({ params, respond, context, client }) => {
++    if (!assertValidParams(params, validateTasksNotifyParams, "tasks.notify", respond)) {
++      return;
++    }
++    const task = getTaskById(params.taskId);
++    if (
++      !task ||
++      !canAccessTaskRequesterSession({
++        access: "write",
++        cfg: context.getRuntimeConfig(),
++        client,
++        task,
++      })
++    ) {
++      respond(true, { found: false });
++      return;
++    }
++    const updated = updateTaskNotifyPolicyById(params);
++    respond(
++      true,
++      updated
++        ? {
++            found: true,
++            taskId: updated.taskId,
++            notifyPolicy: updated.notifyPolicy,
++          }
++        : { found: false },
++    );
++  },
+   "tasks.cancel": async ({ params, respond, context, client }) => {
+     if (!assertValidParams(params, validateTasksCancelParams, "tasks.cancel", respond)) {
+       return;
 diff --git a/src/gateway/server-plugin-in-process-dispatch.ts b/src/gateway/server-plugin-in-process-dispatch.ts
 index 6f2e405433dd59d7174fa73cc66273103eecf2c7..b33c75523ca8909d4c4f8d4a92a5c4fb64229693 100644
 --- a/src/gateway/server-plugin-in-process-dispatch.ts
@@ -72968,6 +75434,211 @@ index c104a19e19d107df99021715067f400ef635a3b7..b925deb8b43eb98cc08827beb2f4b9fc
      let attempt = 0;
      mocks.readRestartSentinel.mockResolvedValue({
        version: 1,
+diff --git a/src/gateway/server.private-recovery-completion.test.ts b/src/gateway/server.private-recovery-completion.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c0b4025f7afe352eff4e61b621c29c26d9f33073
+--- /dev/null
++++ b/src/gateway/server.private-recovery-completion.test.ts
+@@ -0,0 +1,199 @@
++/** Real Gateway admission, task adoption, and durable receipts for a hidden recovery parent. */
++import path from "node:path";
++import { expectDefined } from "@openclaw/normalization-core/expect";
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { AgentCommandOpts } from "../agents/command/types.js";
++import {
++  preparePrivateCompletionAgentCall,
++  runAnnounceAgentCall,
++} from "../agents/subagents/announce/subagent-announce-completion-delivery.js";
++import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
++import { markSubagentRunPausedAfterYield } from "../agents/subagents/registry/subagent-registry-run-pause.js";
++import { persistSubagentRunsToDiskOrThrow } from "../agents/subagents/registry/subagent-registry-state.js";
++import { registerSubagentRun } from "../agents/subagents/registry/subagent-registry.js";
++import { loadTranscriptEventsSync } from "../config/sessions/session-accessor.js";
++import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
++import { startGatewayServerHarness, type GatewayServerHarness } from "./server.e2e-ws-harness.js";
++import { resolvePrivateCompletionTranscript } from "./session-subagent-private-completion.js";
++import { loadSessionEntry } from "./session-utils.js";
++import {
++  agentCommandMock,
++  installGatewayTestHooks,
++  prepareGatewayReplyRuntimeForTest,
++  testState,
++  writeSessionStore,
++} from "./test-helpers.js";
++
++describe("yielded private recovery completion", () => {
++  let harness: GatewayServerHarness;
++  let kernel: Awaited<ReturnType<(typeof import("./server-kernel.js"))["createGatewayKernel"]>>;
++  let storePath: string;
++  const logical = "agent:main:subagent:recovered-receipt-parent";
++  const privateKey = "agent:main:internal-session-effects:recovered-receipt-parent";
++  const childKey = "agent:main:subagent:recovered-receipt-child";
++  const priorRun = "recovered-receipt-parent";
++  const nextRun = "announce:recovered-receipt-child";
++  const marker = "Synthetic child result for hidden recovery only";
++  async function start() {
++    const module = await import("./server-kernel.js");
++    const create = module.createGatewayKernel;
++    const capture = vi.spyOn(module, "createGatewayKernel").mockImplementation(async (...args) => {
++      kernel = await create(...args);
++      return kernel;
++    });
++    try {
++      harness = await startGatewayServerHarness();
++    } finally {
++      capture.mockRestore();
++    }
++  }
++  installGatewayTestHooks({ scope: "suite", setup: start, cleanup: async () => harness?.close() });
++  beforeEach(async () => {
++    storePath = path.join(
++      process.env.OPENCLAW_STATE_DIR!,
++      "agents",
++      "main",
++      "sessions",
++      "sessions.json",
++    );
++    testState.sessionStorePath = storePath;
++    await writeSessionStore({
++      entries: {
++        [logical]: { sessionId: "logical-recovered-parent", updatedAt: Date.now() },
++        [privateKey]: { sessionId: "private-recovered-parent", updatedAt: Date.now() },
++        [childKey]: { sessionId: "private-recovered-child", updatedAt: Date.now() },
++      },
++    });
++    agentCommandMock.mockReset();
++    await prepareGatewayReplyRuntimeForTest();
++    registerSubagentRun({
++      runId: priorRun,
++      childSessionKey: logical,
++      requesterSessionKey: "agent:main:main",
++      requesterDisplayKey: "agent:main:main",
++      task: "Complete original research",
++      cleanup: "keep",
++      expectsCompletionMessage: true,
++      queued: true,
++      completionTarget: "parent",
++      completionRequesterSessionId: "operator-id",
++    });
++    const owner = subagentRuns.get(priorRun)!;
++    owner.execution.transcriptTarget = {
++      agentId: "main",
++      sessionKey: privateKey,
++      sessionId: "private-recovered-parent",
++      storePath,
++    };
++    markSubagentRunPausedAfterYield({ entry: owner });
++    registerSubagentRun({
++      runId: "recovered-receipt-child",
++      childSessionKey: childKey,
++      requesterSessionKey: privateKey,
++      controllerSessionKey: privateKey,
++      requesterDisplayKey: privateKey,
++      task: "Resolve exact source identity",
++      cleanup: "keep",
++      expectsCompletionMessage: true,
++      queued: true,
++      completionTarget: "parent",
++      completionRequesterSessionId: "private-recovered-parent",
++    });
++    const child = subagentRuns.get("recovered-receipt-child")!;
++    child.execution = {
++      status: "terminal",
++      startedAt: Date.now() - 10,
++      endedAt: Date.now(),
++      outcome: { status: "ok" },
++    };
++    child.completion = { required: true, resultText: marker };
++    persistSubagentRunsToDiskOrThrow(subagentRuns, [priorRun, child.runId]);
++  });
++  function privateTranscript() {
++    return loadTranscriptEventsSync({
++      agentId: "main",
++      sessionKey: privateKey,
++      sessionId: "private-recovered-parent",
++      storePath,
++    });
++  }
++  function dispatch(message = marker) {
++    const prepared = preparePrivateCompletionAgentCall(
++      {
++        sessionKey: privateKey,
++        expectedExistingSessionId: "private-recovered-parent",
++        idempotencyKey: nextRun,
++        message,
++        deliver: false,
++        sourceReplyDeliveryMode: "automatic",
++        inputProvenance: {
++          kind: "inter_session",
++          sourceTool: "subagent_announce",
++          sourceSessionKey: childKey,
++        },
++      },
++      true,
++      childKey,
++    );
++    return runAnnounceAgentCall({
++      ...prepared,
++      privateCompletion: true,
++      expectFinal: true,
++      isExecutionAllowed: () => true,
++      resolveGatewayContext: () => kernel.gatewayRequestContext,
++    });
++  }
++  it("consumes once in the preserved private transcript and reconciles a lost acknowledgement after restart", async () => {
++    let processingCount = 0;
++    agentCommandMock.mockImplementationOnce(async (input) => {
++      const opts = input as AgentCommandOpts;
++      expect(opts.deliver).toBe(false);
++      expect(opts.sessionId).toBe("logical-recovered-parent");
++      const resume = expectDefined(
++        opts.privateCompletionResume,
++        "Expected private recovery authority",
++      );
++      const target = resolvePrivateCompletionTranscript(resume, nextRun);
++      expect(target.sessionId).toBe("private-recovered-parent");
++      expect(target.sessionKey).toBe(privateKey);
++      expect(subagentRuns.has(priorRun)).toBe(false);
++      expect(subagentRuns.get(nextRun)?.taskRunId).toBe(priorRun);
++      expect(
++        await expectDefined(
++          opts.userTurnTranscriptRecorder,
++          "Expected private recovery input recorder",
++        ).persistApproved(),
++      ).toMatchObject({
++        appended: true,
++      });
++      processingCount += 1;
++      return { payloads: [{ text: "NO_REPLY", mediaUrl: null }], meta: { durationMs: 1 } };
++    });
++    expect(await dispatch()).toMatchObject({ status: "ok", inputProcessingCompleted: true });
++    expect(processingCount).toBe(1);
++    const committed = privateTranscript();
++    expect(JSON.stringify(committed)).toContain(marker);
++    expect(
++      JSON.stringify(
++        loadTranscriptEventsSync({
++          agentId: "main",
++          sessionKey: logical,
++          sessionId: "logical-recovered-parent",
++          storePath,
++        }),
++      ),
++    ).not.toContain(marker);
++    expect(loadSessionEntry(privateKey).entry).toBeUndefined();
++    const priorDedupe = kernel.gatewayRequestContext.dedupe;
++    await harness.close();
++    closeOpenClawAgentDatabasesForTest();
++    await start();
++    await prepareGatewayReplyRuntimeForTest({ force: true });
++    expect(kernel.gatewayRequestContext.dedupe).not.toBe(priorDedupe);
++    expect(await dispatch()).toMatchObject({ status: "ok", inputProcessingCompleted: true });
++    expect(processingCount).toBe(1);
++    expect(agentCommandMock).toHaveBeenCalledOnce();
++    expect(privateTranscript()).toEqual(committed);
++    await expect(dispatch("changed result cannot reuse the receipt")).rejects.toThrow("conflicts");
++  });
++});
 diff --git a/src/gateway/server.sessions.create.test-fixtures.ts b/src/gateway/server.sessions.create.test-fixtures.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..1191c17318484e574b111867da5a7c4be94d8196
@@ -73312,6 +75983,407 @@ index fd0c60c3e9b761dd86f0ab71314af4694bfdb0bc..a11def300c7be08c37bdafb2da450153
  test("sessions.create can start the first agent turn from an initial task", async () => {
    const { storePath } = await createSessionStoreDir();
    // Register "ops" so the deleted-agent guard added in #65986 does not
+diff --git a/src/gateway/session-subagent-private-completion.test.ts b/src/gateway/session-subagent-private-completion.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..986dfac116f895f7181cb0bb2513095602991b7f
+--- /dev/null
++++ b/src/gateway/session-subagent-private-completion.test.ts
+@@ -0,0 +1,244 @@
++/** Real registry and SQLite custody for a completed child's private recovery wake. */
++import { expect, it, vi } from "vitest";
++import { useSubagentControlFixture } from "../agents/subagents/registry/subagent-control.test-support.js";
++import { hasUnsettledPrivateChildReceipt } from "../agents/subagents/registry/subagent-registry-lifecycle-cleanup.js";
++import { SubagentLifecycleController } from "../agents/subagents/registry/subagent-registry-lifecycle.js";
++import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
++import { markSubagentRunPausedAfterYield } from "../agents/subagents/registry/subagent-registry-run-pause.js";
++import { persistSubagentRunsToDiskOrThrow } from "../agents/subagents/registry/subagent-registry-state.js";
++import { registerSubagentRun } from "../agents/subagents/registry/subagent-registry.js";
++import { writeSubagentSessionEntry } from "../agents/subagents/registry/subagent-registry.persistence.test-support.js";
++import { getRuntimeConfig } from "../config/config.js";
++import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
++import {
++  loadExactSessionEntry,
++  patchSessionEntryCore,
++} from "../config/sessions/session-accessor.js";
++import {
++  assertPrivateCompletionResumeCurrent,
++  capturePrivateCompletionResume,
++  resolvePrivateCompletionTranscript,
++} from "./session-subagent-private-completion.js";
++import { prepareParentSubagentResume } from "./session-subagent-resume.js";
++import { loadSessionEntry } from "./session-utils.js";
++
++const fixture = useSubagentControlFixture();
++const logical = "agent:main:subagent:recovered-parent";
++const privateKey = "agent:main:internal-session-effects:private-recovery-parent";
++const childKey = "agent:main:subagent:completed-private-child";
++const previousRun = "recovery-parent";
++const nextRun = "announce:private-child";
++async function arrange() {
++  for (const [sessionKey, sessionId] of [
++    [logical, "logical-id"],
++    [privateKey, "private-id"],
++    [childKey, "child-id"],
++  ] as const) {
++    await writeSubagentSessionEntry({
++      stateDir: fixture.stateDir,
++      agentId: "main",
++      sessionKey,
++      defaultSessionId: sessionId,
++    });
++  }
++  registerSubagentRun({
++    runId: previousRun,
++    childSessionKey: logical,
++    requesterSessionKey: "agent:main:main",
++    requesterDisplayKey: "agent:main:main",
++    task: "Finish existing research",
++    cleanup: "keep",
++    expectsCompletionMessage: true,
++    queued: true,
++    completionTarget: "parent",
++    completionRequesterSessionId: "operator-id",
++  });
++  const owner = subagentRuns.get(previousRun)!;
++  owner.execution.transcriptTarget = {
++    agentId: "main",
++    sessionKey: privateKey,
++    sessionId: "private-id",
++    storePath: resolveSessionStorePathCore(getRuntimeConfig().session?.store, { agentId: "main" }),
++  };
++  markSubagentRunPausedAfterYield({ entry: owner });
++  registerSubagentRun({
++    runId: "completed-child",
++    childSessionKey: childKey,
++    requesterSessionKey: privateKey,
++    controllerSessionKey: privateKey,
++    requesterDisplayKey: privateKey,
++    task: "Resolve identity",
++    cleanup: "keep",
++    expectsCompletionMessage: true,
++    queued: true,
++    completionTarget: "parent",
++    completionRequesterSessionId: "private-id",
++  });
++  const child = subagentRuns.get("completed-child")!;
++  child.execution = {
++    status: "terminal",
++    startedAt: Date.now() - 10,
++    endedAt: Date.now(),
++    outcome: { status: "ok" },
++  };
++  child.completion = { required: true, resultText: "The saved first-party identity is verified." };
++  persistSubagentRunsToDiskOrThrow(subagentRuns, [previousRun, child.runId]);
++  const capture = () =>
++    capturePrivateCompletionResume({
++      requesterSessionKey: privateKey,
++      requesterSessionId: "private-id",
++      sourceSessionKey: childKey,
++      continuationRunId: nextRun,
++    })!;
++  return { owner, child, capture, target: owner.execution.transcriptTarget! };
++}
++
++it("retains the hidden transcript and one task while adopting the yielded owner exactly once", async () => {
++  const state = await arrange();
++  const resume = state.capture();
++  expect(loadSessionEntry(privateKey).entry).toBeUndefined();
++  expect(resolvePrivateCompletionTranscript(resume).sessionId).toBe("private-id");
++  const adopt = await prepareParentSubagentResume({
++    cfg: getRuntimeConfig(),
++    resume,
++    sessionKey: logical,
++    getSessionId: () => "logical-id",
++    runId: nextRun,
++    task: state.child.completion!.resultText!,
++    assertAdmissionCurrent: vi.fn(),
++  });
++  expect(adopt()).toBe(previousRun);
++  const successor = subagentRuns.get(nextRun)!;
++  expect(successor.execution.transcriptTarget).toBe(state.target);
++  expect(successor.taskRunId).toBe(previousRun);
++  expect(successor.requesterSessionKey).toBe("agent:main:main");
++  expect(resolvePrivateCompletionTranscript(resume, nextRun).sessionId).toBe("private-id");
++  expect(loadExactSessionEntry({ ...state.target, sessionKey: privateKey })?.entry.sessionId).toBe(
++    "private-id",
++  );
++  expect(subagentRuns.has(previousRun)).toBe(false);
++  expect(() => adopt()).toThrow(/changed/);
++  const replay = state.capture();
++  expect(replay.privateCompletion?.receiptReplay).toBe(true);
++  const replayAdopt = await prepareParentSubagentResume({
++    cfg: getRuntimeConfig(),
++    resume: replay,
++    sessionKey: logical,
++    getSessionId: () => "logical-id",
++    runId: nextRun,
++    task: "duplicate child receipt",
++    assertAdmissionCurrent: vi.fn(),
++  });
++  expect(() => replayAdopt()).toThrow(/no completed processing receipt/);
++  expect(loadSessionEntry(privateKey).entry).toBeUndefined();
++});
++
++it.each(["logical", "private"])("rejects a replaced %s session before adoption", async (which) => {
++  const state = await arrange();
++  const resume = state.capture();
++  await patchSessionEntryCore(
++    { ...state.target, sessionKey: which === "logical" ? logical : privateKey },
++    (entry) => ({ ...entry, sessionId: "replacement" }),
++  );
++  expect(() => assertPrivateCompletionResumeCurrent(resume)).toThrow(/changed/);
++  expect(subagentRuns.has(nextRun)).toBe(false);
++});
++
++it.each([
++  "owner generation",
++  "child generation",
++  "child result",
++  "cancellation",
++  "no private completion",
++  "child delivery suppressed",
++])("rejects changed custody: %s", async (change) => {
++  const state = await arrange();
++  const resume = state.capture();
++  if (change === "owner generation") {
++    state.owner.generation = (state.owner.generation ?? 0) + 1;
++  }
++  if (change === "child generation") {
++    state.child.generation = (state.child.generation ?? 0) + 1;
++  }
++  if (change === "child result") {
++    state.child.completion!.resultText = "different result";
++  }
++  if (change === "cancellation") {
++    state.owner.execution.suppressSessionEffects = true;
++  }
++  if (change === "no private completion") {
++    state.child.completionTarget = undefined;
++  }
++  if (change === "child delivery suppressed") {
++    state.child.suppressCompletionDelivery = true;
++  }
++  expect(() => assertPrivateCompletionResumeCurrent(resume)).toThrow(/changed/);
++});
++
++it("does not change ordinary completion admission", () => {
++  expect(
++    capturePrivateCompletionResume({
++      requesterSessionKey: "agent:main:main",
++      requesterSessionId: "normal-id",
++    }),
++  ).toBeUndefined();
++});
++
++it("retains receipt custody until child settlement and then cleans up through the existing ancestor callback", async () => {
++  const state = await arrange();
++  state.owner.pauseReason = undefined;
++  state.owner.delivery = { status: "delivered", deliveredAt: Date.now() };
++  state.owner.retainAttachmentsOnKeep = true;
++  const resume = vi.fn();
++  const controller = new SubagentLifecycleController({
++    runs: subagentRuns,
++    resumedRuns: new Set(),
++    subagentAnnounceTimeoutMs: 1000,
++    getRuntimeConfig,
++    persist: vi.fn(),
++    persistOrThrow: vi.fn(),
++    clearPendingLifecycleError: vi.fn(),
++    countPendingDescendantRuns: () => 0,
++    getLatestRunForChildSession: (key) =>
++      [...subagentRuns.values()].find((entry) => entry.childSessionKey === key) ?? null,
++    suppressAnnounceForSteerRestart: () => false,
++    resolveSubagentTask: () => ({ lookup: "available" }),
++    shouldEmitEndedHookForRun: () => false,
++    emitSubagentEndedHookForRun: vi.fn(async () => {}),
++    emitSubagentProgressEndedForRun: vi.fn(async () => {}),
++    notifyContextEngineSubagentEnded: vi.fn(async () => {}),
++    retireSupersededRun: vi.fn(async () => {}),
++    resumeSubagentRun: resume,
++    callGateway: async () => {
++      throw new Error("Unexpected public Gateway call");
++    },
++    captureSubagentCompletionReply: vi.fn(async () => "done"),
++    runSubagentAnnounceFlow: vi.fn(async () => "delivered" as const),
++    maybeWakeRequesterAfterAllChildrenSettled: vi.fn(async (params) => {
++      params.completeBatch([params.settledEntry]);
++      return false;
++    }),
++    warn: vi.fn(),
++  });
++  expect(controller.startSubagentAnnounceCleanupFlow(previousRun, state.owner)).toBe(true);
++  expect(state.owner.cleanupCompletedAt).toBeUndefined();
++  expect(loadExactSessionEntry({ ...state.target, sessionKey: privateKey })).toBeDefined();
++  state.child.delivery = { status: "delivered", deliveredAt: Date.now() };
++  controller.resumeAncestorCleanup(state.child);
++  expect(resume).toHaveBeenCalledWith(previousRun);
++  expect(controller.startSubagentAnnounceCleanupFlow(previousRun, state.owner)).toBe(true);
++  await expect.poll(() => state.owner.cleanupCompletedAt).toBeTypeOf("number");
++  await expect
++    .poll(() => loadExactSessionEntry({ ...state.target, sessionKey: privateKey }))
++    .toBeUndefined();
++});
++
++it("does not retain a revoked parent's transcript or another incarnation's receipt", async () => {
++  const state = await arrange();
++  expect(hasUnsettledPrivateChildReceipt(subagentRuns, state.owner)).toBe(true);
++  state.child.completionRequesterSessionId = "unrelated-private-incarnation";
++  expect(hasUnsettledPrivateChildReceipt(subagentRuns, state.owner)).toBe(false);
++  state.child.completionRequesterSessionId = state.target.sessionId;
++  state.owner.execution.suppressSessionEffects = true;
++  expect(hasUnsettledPrivateChildReceipt(subagentRuns, state.owner)).toBe(false);
++});
+diff --git a/src/gateway/session-subagent-private-completion.ts b/src/gateway/session-subagent-private-completion.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2661193d223151a6cad7845c4cabb53f7f902c7a
+--- /dev/null
++++ b/src/gateway/session-subagent-private-completion.ts
+@@ -0,0 +1,145 @@
++/** Binds a completed child to the preserved transcript of its yielded recovery owner. */
++import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
++import { getLatestLiveSubagentRunByChildSessionKey } from "../agents/subagents/registry/subagent-registry-read.js";
++import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
++import { isInternalSessionEffectsKey } from "../config/sessions/internal-session-key.js";
++import { loadExactSessionEntry } from "../config/sessions/session-accessor.js";
++import type { TrustedSubagentResume } from "./in-process-subagent-resume.js";
++
++function unavailable(): never {
++  throw new Error("Private completion recovery owner or session changed before continuation.");
++}
++
++/** Only host-owned completion delivery can create this non-serializable admission binding. */
++export function capturePrivateCompletionResume(params: {
++  requesterSessionKey: string;
++  requesterSessionId: string;
++  sourceSessionKey?: string;
++  continuationRunId?: string;
++}): TrustedSubagentResume | undefined {
++  if (!isInternalSessionEffectsKey(params.requesterSessionKey)) {
++    return undefined;
++  }
++  const candidates = [...subagentRuns.values()].filter(
++    (entry) =>
++      (entry.pauseReason === "sessions_yield" || entry.runId === params.continuationRunId) &&
++      entry.execution.transcriptTarget?.sessionKey === params.requesterSessionKey &&
++      entry.execution.transcriptTarget.sessionId === params.requesterSessionId,
++  );
++  const owner = candidates.length === 1 ? candidates[0] : undefined;
++  const target = owner?.execution.transcriptTarget;
++  const child = params.sourceSessionKey
++    ? getLatestLiveSubagentRunByChildSessionKey(params.sourceSessionKey)
++    : undefined;
++  if (
++    !owner ||
++    !target?.agentId ||
++    !target.storePath ||
++    !target.sessionId ||
++    !target.sessionKey ||
++    !child
++  ) {
++    unavailable();
++  }
++  const logical = loadExactSessionEntry({ ...target, sessionKey: owner.childSessionKey })?.entry;
++  const privateEntry = loadExactSessionEntry({ ...target, sessionKey: target.sessionKey! })?.entry;
++  if (!logical || !privateEntry) {
++    unavailable();
++  }
++  const resume: TrustedSubagentResume = Object.freeze({
++    childSessionKey: owner.childSessionKey,
++    childSessionId: logical.sessionId,
++    previousRunId: owner.runId,
++    taskRunId: owner.taskRunId ?? owner.runId,
++    generation: owner.generation,
++    createdAt: owner.createdAt,
++    privateCompletion: Object.freeze({
++      transcriptTarget: target as NonNullable<
++        TrustedSubagentResume["privateCompletion"]
++      >["transcriptTarget"],
++      logicalLifecycleRevision: logical.lifecycleRevision,
++      privateLifecycleRevision: privateEntry.lifecycleRevision,
++      childRunId: child.runId,
++      childGeneration: child.generation,
++      childCreatedAt: child.createdAt,
++      childResult: child.completion?.resultText,
++      ...(owner.runId === params.continuationRunId ? { receiptReplay: true as const } : {}),
++    }),
++  });
++  assertPrivateCompletionResumeCurrent(resume);
++  return resume;
++}
++
++/** Revalidates both incarnations and the same completed-child receipt across every await. */
++export function assertPrivateCompletionResumeCurrent(
++  resume: TrustedSubagentResume,
++  successorRunId?: string,
++): SubagentRunRecord {
++  const completion = resume.privateCompletion;
++  if (!completion) {
++    unavailable();
++  }
++  const target = completion.transcriptTarget;
++  const owner = subagentRuns.get(successorRunId ?? resume.previousRunId);
++  const child = subagentRuns.get(completion.childRunId);
++  const logical = loadExactSessionEntry({ ...target, sessionKey: resume.childSessionKey })?.entry;
++  const privateEntry = loadExactSessionEntry({ ...target, sessionKey: target.sessionKey! })?.entry;
++  if (
++    !owner ||
++    !child ||
++    !logical ||
++    !privateEntry ||
++    owner.childSessionKey !== resume.childSessionKey ||
++    (owner.taskRunId ?? owner.runId) !== resume.taskRunId ||
++    owner.killIntent ||
++    owner.killReconciliation ||
++    owner.terminalOwner ||
++    owner.execution.suppressSessionEffects ||
++    owner.execution.transcriptTarget !== target ||
++    ((!successorRunId || completion.receiptReplay) &&
++      ((!completion.receiptReplay &&
++        (owner.pauseReason !== "sessions_yield" || owner.execution.endedAt === undefined)) ||
++        owner.generation !== resume.generation ||
++        owner.createdAt !== resume.createdAt ||
++        owner.cleanupCompletedAt !== undefined)) ||
++    (successorRunId &&
++      !completion.receiptReplay &&
++      (owner.generation ?? 0) <= (resume.generation ?? 0)) ||
++    logical.sessionId !== resume.childSessionId ||
++    logical.lifecycleRevision !== completion.logicalLifecycleRevision ||
++    logical.archivedAt !== undefined ||
++    privateEntry.sessionId !== target.sessionId ||
++    privateEntry.lifecycleRevision !== completion.privateLifecycleRevision ||
++    privateEntry.archivedAt !== undefined ||
++    child.generation !== completion.childGeneration ||
++    child.createdAt !== completion.childCreatedAt ||
++    child.completion?.resultText !== completion.childResult ||
++    child.execution.endedAt === undefined ||
++    child.completionTarget !== "parent" ||
++    child.requesterSessionKey !== target.sessionKey ||
++    child.completionRequesterSessionId !== target.sessionId ||
++    child.suppressCompletionDelivery ||
++    child.killIntent ||
++    child.killReconciliation ||
++    child.execution.suppressSessionEffects
++  ) {
++    unavailable();
++  }
++  return owner;
++}
++
++/** The command and its input recorder share this exact hidden transcript, never the logical one. */
++export function resolvePrivateCompletionTranscript(
++  resume: TrustedSubagentResume,
++  runId?: string,
++  allowUnadopted = false,
++) {
++  const successorRunId = allowUnadopted && runId && !subagentRuns.has(runId) ? undefined : runId;
++  assertPrivateCompletionResumeCurrent(resume, successorRunId);
++  const target = resume.privateCompletion!.transcriptTarget;
++  const entry = loadExactSessionEntry({ ...target, sessionKey: target.sessionKey! })?.entry;
++  if (!entry) {
++    unavailable();
++  }
++  return { ...target, sessionEntry: entry, sessionFile: target.sessionKey };
++}
 diff --git a/src/gateway/session-subagent-reactivation.test.ts b/src/gateway/session-subagent-reactivation.test.ts
 index 07e1fd32783091d659c6e6e909473c42ab9f018c..b2938f331b6f8737ea62dea652662307818b0d26 100644
 --- a/src/gateway/session-subagent-reactivation.test.ts
@@ -73459,6 +76531,66 @@ index 3b13ac1dfd44cb15d17a48f9879d5cd5b864b18c..a53b7c33ba4c1ec02ba2d21eabd0a22e
          runTimeoutSeconds: existing.runTimeoutSeconds ?? 0,
          persistenceFailure: "throw",
          ...(hasTask ? { task } : {}),
+diff --git a/src/gateway/session-subagent-resume.ts b/src/gateway/session-subagent-resume.ts
+index 4787ef435e739c30cdfd408f47e8522134ea8fbd..7ca75161cfacc79d09ebcaf76cdd2d5b0855b89c 100644
+--- a/src/gateway/session-subagent-resume.ts
++++ b/src/gateway/session-subagent-resume.ts
+@@ -8,6 +8,7 @@ import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-re
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import type { TrustedSubagentResume } from "./in-process-subagent-resume.js";
+ import type { GatewayContextResolver, TrustedAgentToolCaller } from "./server-methods/types.js";
++import { assertPrivateCompletionResumeCurrent } from "./session-subagent-private-completion.js";
+ 
+ // Control ownership comes from the registry, not the child's key shape or message provenance.
+ function requirePausedChild(cfg: OpenClawConfig, caller: TrustedAgentToolCaller, key: string) {
+@@ -80,6 +81,18 @@ export function assertParentSubagentResumeCurrent(params: {
+   sessionId: string;
+ }): SubagentRunRecord {
+   const { resume } = params;
++  if (resume.privateCompletion) {
++    if (
++      params.sessionKey !== resume.childSessionKey ||
++      params.sessionId !== resume.childSessionId
++    ) {
++      throw new Error("Private completion logical session changed before resume.");
++    }
++    return assertPrivateCompletionResumeCurrent(resume);
++  }
++  if (!resume.caller) {
++    throw new Error("Task resume requires an admitted parent tool caller.");
++  }
+   const entry = requirePausedChild(params.cfg, resume.caller, resume.childSessionKey);
+   if (
+     params.sessionKey !== resume.childSessionKey ||
+@@ -101,6 +114,9 @@ export function assertParentSubagentResumeSuccessorCurrent(
+   resume: TrustedSubagentResume,
+   runId: string,
+ ): void {
++  if (resume.privateCompletion) {
++    assertPrivateCompletionResumeCurrent(resume, runId);
++  }
+   const current = getLatestLiveSubagentRunByChildSessionKey(resume.childSessionKey);
+   if (
+     !current ||
+@@ -133,12 +149,18 @@ export async function prepareParentSubagentResume(params: {
+       ...params,
+       sessionId: params.getSessionId(),
+     });
++    if (params.resume.privateCompletion?.receiptReplay) {
++      // A prior receipt may acknowledge this replay before adoption. Missing receipts
++      // must not create another provider turn under an already transferred owner.
++      throw new Error("Private completion replay has no completed processing receipt.");
++    }
+     // No await separates revalidation from the registry's atomic task/flow replacement.
+     const adopted = runtime.adoptPausedSubagentRunForFollowUp({
+       childSessionKey: params.resume.childSessionKey,
+       runId: params.runId,
+       task: params.task,
+       expected,
++      transcriptTarget: params.resume.privateCompletion?.transcriptTarget,
+       gatewayContextResolver: params.gatewayContextResolver,
+     });
+     if (!adopted) {
 diff --git a/src/infra/backup-create.summary.test.ts b/src/infra/backup-create.summary.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..c1861159356b31f04d43fd95a9003f4ec25f3a11
@@ -81192,10 +84324,10 @@ index 8184cac14f549eff20cbabb4ee245ade94640542..b6a0abdcdd08122d54f8d3090f7ca113
            return undefined;
 diff --git a/src/tasks/task-registry-private-cancellation.test.ts b/src/tasks/task-registry-private-cancellation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..1d378b71de319106988aad8a437d2277b515ceb4
+index 0000000000000000000000000000000000000000..f1339fe7a6dbf67285f7c64eb8886a4018d95b58
 --- /dev/null
 +++ b/src/tasks/task-registry-private-cancellation.test.ts
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,205 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
 +import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
@@ -81240,7 +84372,7 @@ index 0000000000000000000000000000000000000000..1d378b71de319106988aad8a437d2277
 +const kill = vi.fn<TaskRegistryControlRuntime["killSubagentRunAdmin"]>();
 +
 +function createChild(overrides: Partial<SubagentRunRecord> = {}) {
-+  const entry: SubagentRunRecord = {
++  const entry: SubagentRunRecord & { generation: number } = {
 +    runId: "child-run",
 +    childSessionKey: "agent:main:subagent:child",
 +    requesterSessionKey: "agent:main:subagent:parent",
@@ -81251,11 +84383,11 @@ index 0000000000000000000000000000000000000000..1d378b71de319106988aad8a437d2277
 +    label: "Private supporting assignment",
 +    cleanup: "keep",
 +    createdAt: Date.now(),
-+    generation: 1,
 +    execution: { status: "running", startedAt: Date.now() },
 +    expectsCompletionMessage: true,
 +    completionTarget: "parent",
 +    ...overrides,
++    generation: overrides.generation ?? 1,
 +  };
 +  subagentRuns.set(entry.runId, entry);
 +  const task = createTaskRecord({
@@ -81362,6 +84494,7 @@ index 0000000000000000000000000000000000000000..1d378b71de319106988aad8a437d2277
 +    markTaskTerminalById({
 +      taskId: task.taskId,
 +      status: "cancelled",
++      endedAt: Date.now(),
 +      error: "Cancelled by operator.",
 +    });
 +    vi.spyOn(deliveryRuntime, "loadTaskRegistryDeliveryRuntime").mockImplementationOnce(
@@ -81391,6 +84524,7 @@ index 0000000000000000000000000000000000000000..1d378b71de319106988aad8a437d2277
 +      markTaskTerminalById({
 +        taskId: task.taskId,
 +        status: "cancelled",
++        endedAt: Date.now(),
 +        error: "Cancelled by operator.",
 +      });
 +      await maybeDeliverTaskTerminalUpdate(task.taskId);
