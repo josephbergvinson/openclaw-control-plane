@@ -13,9 +13,26 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 27 recovery and credential corrections
+
+Current reference `693b399bf5c6536309529fb0d679b83de306a0a4` uses existing
+Browser plugin replacement for credential metadata, keeps private child recovery
+and cancellation with their parent, and steers recovered children through their
+current execution and transcript. Logical session and completion ownership remain
+checked. The [qualification record](../runtime/README.md#september-27-recovery-and-credential-corrections)
+separates the passed source tests and exact-source aggregate build from pending
+activation and live acceptance.
+
+It also includes Apple Passwords locked-view recognition from source
+`3f2d68ed51099856b1ee5035d8776c1f680b6e00`. Signed Mini candidate build
+`2609000598` remains pinned to that earlier native source. Installation, local
+binding and actual unlock need their own receipts. The recorded live Gateway
+is still source `611db2861e304c42af6bac9aa788b37ad2ab225b`; the recorded installed
+Mini remains build `2609000597` at this publication checkpoint.
+
 ## September 27 task delivery correction
 
-Current reference `611db2861e304c42af6bac9aa788b37ad2ab225b` applies Discord's
+Source `611db2861e304c42af6bac9aa788b37ad2ab225b` applies Discord's
 existing tool-progress visibility setting to both background-task notice
 producers, including the first notice. It also restores automatic delivery of a
 yielded top-level parent's synthesized final after private children settle,
