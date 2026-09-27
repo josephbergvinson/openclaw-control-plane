@@ -76235,10 +76235,10 @@ index 0000000000000000000000000000000000000000..986dfac116f895f7181cb0bb25130956
 +});
 diff --git a/src/gateway/session-subagent-private-completion.ts b/src/gateway/session-subagent-private-completion.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..2661193d223151a6cad7845c4cabb53f7f902c7a
+index 0000000000000000000000000000000000000000..0140091b99a7aaf2b52b04055ed08e54ad8ba26c
 --- /dev/null
 +++ b/src/gateway/session-subagent-private-completion.ts
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,146 @@
 +/** Binds a completed child to the preserved transcript of its yielded recovery owner. */
 +import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
 +import { getLatestLiveSubagentRunByChildSessionKey } from "../agents/subagents/registry/subagent-registry-read.js";
@@ -76295,6 +76295,7 @@ index 0000000000000000000000000000000000000000..2661193d223151a6cad7845c4cabb53f
 +    generation: owner.generation,
 +    createdAt: owner.createdAt,
 +    privateCompletion: Object.freeze({
++      // SAFETY: The guard above verifies every required field; preserve the registry-owned target.
 +      transcriptTarget: target as NonNullable<
 +        TrustedSubagentResume["privateCompletion"]
 +      >["transcriptTarget"],

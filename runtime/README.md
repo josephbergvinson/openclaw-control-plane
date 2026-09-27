@@ -13,8 +13,19 @@ and the boundary between source reconstruction and installation.
 
 ## September 27 recovery and credential corrections
 
-Reference `0390422beea5265fa8e95e79f204f373e20345b1` retains the following
-recovery corrections:
+Reference `9c062db6a307f5189ac1a06c3f496114b2499d52` is a comment-only successor of
+activated Gateway source `0390422beea5265fa8e95e79f204f373e20345b1`. It adds
+one adjacent `SAFETY` comment explaining the existing required-field guard for a
+private transcript target. Executable behavior is unchanged. The assertion,
+formatting and file-size checks, plus 21 other inexpensive native-plan guards,
+passed locally. The [preceding hosted native run](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/36356647516)
+failed because that required explanation was absent; its failed artifact is
+preserved. The rule and baseline are unchanged. This source reference needs its
+own complete hosted qualification. No new build, Gateway activation or native
+installation was performed for the comment correction; all live results below
+remain tied to `0390422beea5`, and native installation retains its separate source.
+
+The reference retains the following recovery corrections:
 
 - Browser credential-binding configuration uses the existing plugin replacement
   owner. Registration adopts the new credential snapshot after retiring the old
