@@ -204,10 +204,23 @@ index 6925d7af9ed7b53d3135442a51fa7b6c3251f5e0..afc37dbde57ea24ba40dc1b424cd70d8
          self.lastSnapshot = nil
          self.resetCanvasPluginSurfaceState()
 diff --git a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
-index c91af1bf7ee535d01e6686a05b288b0623a2776f..0d9f65eac862fa00fa19716b43f6ed2f816a0cb1 100644
+index c91af1bf7ee535d01e6686a05b288b0623a2776f..6258de561b92422dd06df231add82ff9d9a1c51d 100644
 --- a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
 +++ b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
-@@ -1025,19 +1025,33 @@ extension GatewayEndpointStore {
+@@ -1004,12 +1004,6 @@ extension GatewayEndpointStore {
+             ? app.tailscaleIP ?? TailscaleService.fallbackTailnetIPv4()
+             : nil
+         let localPort = self.resolveGatewayPort(root: root, env: env, profile: profile)
+-        let localConfig = mode == .local ? self.localConfig(
+-            root: root,
+-            env: env,
+-            launchdSnapshot: launchdSnapshot,
+-            tailscaleIP: tailscaleIP,
+-            port: localPort) : nil
+         let remoteResolution = GatewayRemoteConfig.resolveTransportResolution(root: root)
+         let sshRouteIdentity: SSHRouteIdentity?
+         if mode == .remote, remoteResolution.transport == .ssh {
+@@ -1025,6 +1019,27 @@ extension GatewayEndpointStore {
          }
          let deviceAuthGatewayID = GatewayDiscoveryPreferences.deviceAuthGatewayID(root: root, connectionMode: mode)
  
@@ -224,25 +237,64 @@ index c91af1bf7ee535d01e6686a05b288b0623a2776f..0d9f65eac862fa00fa19716b43f6ed2f
 +        } else {
 +            GatewayLocalAuthResolver.invalidate()
 +        }
++        let localConfig = mode == .local ? self.localConfig(
++            root: root,
++            env: env,
++            launchdSnapshot: launchdSnapshot,
++            tailscaleIP: tailscaleIP,
++            port: localPort,
++            resolvedCredentials: localCredentials) : nil
 +
          let source = SourceSnapshot(
              routingGeneration: app.generation,
              mode: SourceMode(mode),
-             token: mode == .local ? localConfig?.token : mode == .unconfigured
-                 ? nil
--                : self.resolveGatewayToken(
-+                : localCredentials != nil ? localCredentials?.token : self.resolveGatewayToken(
-                     isRemote: isRemote,
-                     root: root,
-                     env: env,
-                     launchdSnapshot: launchdSnapshot),
-             password: mode == .local ? localConfig?.password : mode == .unconfigured
-                 ? nil
--                : self.resolveGatewayPassword(
-+                : localCredentials != nil ? localCredentials?.password : self.resolveGatewayPassword(
-                     isRemote: isRemote,
-                     root: root,
-                     env: env,
+@@ -1216,7 +1231,8 @@ extension GatewayEndpointStore {
+         env: [String: String],
+         launchdSnapshot: LaunchAgentPlistSnapshot?,
+         tailscaleIP: String?,
+-        port: Int) -> GatewayConnection.Config
++        port: Int,
++        resolvedCredentials: GatewayLocalAuthResolver.Credentials? = nil) -> GatewayConnection.Config
+     {
+         let bind = self.resolveGatewayBindMode(root: root, env: env)
+         let customBindHost = self.resolveGatewayCustomBindHost(root: root)
+@@ -1225,12 +1241,14 @@ extension GatewayEndpointStore {
+             bindMode: bind,
+             customBindHost: customBindHost,
+             tailscaleIP: tailscaleIP)
+-        let token = self.resolveGatewayToken(
++        // A resolved SecretRef owns the whole credential pair. Falling back for
++        // its nil sibling could send a stale token instead of the selected password.
++        let token = resolvedCredentials != nil ? resolvedCredentials?.token : self.resolveGatewayToken(
+             isRemote: false,
+             root: root,
+             env: env,
+             launchdSnapshot: launchdSnapshot)
+-        let password = self.resolveGatewayPassword(
++        let password = resolvedCredentials != nil ? resolvedCredentials?.password : self.resolveGatewayPassword(
+             isRemote: false,
+             root: root,
+             env: env,
+@@ -1403,14 +1421,17 @@ extension GatewayEndpointStore {
+         root: [String: Any],
+         env: [String: String],
+         launchdSnapshot: LaunchAgentPlistSnapshot? = nil,
+-        tailscaleIP: String? = nil) -> GatewayConnection.Config
++        tailscaleIP: String? = nil,
++        port: Int? = nil,
++        resolvedCredentials: GatewayLocalAuthResolver.Credentials? = nil) -> GatewayConnection.Config
+     {
+         self.localConfig(
+             root: root,
+             env: env,
+             launchdSnapshot: launchdSnapshot,
+             tailscaleIP: tailscaleIP,
+-            port: GatewayEnvironment.gatewayPort())
++            port: port ?? GatewayEnvironment.gatewayPort(),
++            resolvedCredentials: resolvedCredentials)
+     }
+ }
+ #endif
 diff --git a/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift b/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
 new file mode 100644
 index 0000000000000000000000000000000000000000..6bb0893be8b800c403a2d18d07950712cae05ae6
@@ -1982,6 +2034,59 @@ index daef962f015e4b92aeaed6c5899c692645ac9671..c520d4bd584c89f3f5286e5c246bcd91
          }
      }
  
+diff --git a/apps/macos/Tests/OpenClawIPCTests/GatewayEndpointCredentialSelectionTests.swift b/apps/macos/Tests/OpenClawIPCTests/GatewayEndpointCredentialSelectionTests.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ff6fa47bae8ca1578a3368d3d1c01c911aba677
+--- /dev/null
++++ b/apps/macos/Tests/OpenClawIPCTests/GatewayEndpointCredentialSelectionTests.swift
+@@ -0,0 +1,47 @@
++import Foundation
++import Testing
++@testable import OpenClaw
++
++/// Pure endpoint construction: no app state, preferences, Keychain, or live Gateway.
++struct GatewayEndpointCredentialSelectionTests {
++    private let reference: [String: String] = ["source": "store", "provider": "default", "id": "GATEWAY_AUTH"]
++
++    @Test func `local token SecretRef reaches the endpoint instead of ambient auth`() throws {
++        let root: [String: Any] = ["gateway": ["mode": "local", "auth": ["mode": "token", "token": self.reference]]]
++        #expect(try GatewayLocalAuthResolver.request(root: root, env: [:]) != nil)
++        let credentials = try GatewayLocalAuthResolver.decode(.init(
++            output: Data(#"{"version":1,"token":"resolved-token"}"#.utf8), terminationStatus: 0))
++        let endpoint = GatewayEndpointStore._testLocalConfig(
++            root: root,
++            env: ["OPENCLAW_GATEWAY_TOKEN": "stale-ambient", "OPENCLAW_GATEWAY_PASSWORD": "stale-password"],
++            port: 18789,
++            resolvedCredentials: credentials)
++        #expect(endpoint.url.absoluteString == "ws://127.0.0.1:18789")
++        #expect(endpoint.token == "resolved-token")
++        #expect(endpoint.password == nil)
++    }
++
++    @Test func `local password SecretRef clears the sibling token`() throws {
++        let root: [String: Any] = ["gateway": ["mode": "local", "auth": [
++            "mode": "password", "password": self.reference, "token": "stale-config-token",
++        ]]]
++        #expect(try GatewayLocalAuthResolver.request(root: root, env: [:]) != nil)
++        let credentials = try GatewayLocalAuthResolver.decode(.init(
++            output: Data(#"{"version":1,"password":"resolved-password"}"#.utf8), terminationStatus: 0))
++        let endpoint = GatewayEndpointStore._testLocalConfig(
++            root: root,
++            env: ["OPENCLAW_GATEWAY_TOKEN": "stale-ambient"],
++            port: 18789,
++            resolvedCredentials: credentials)
++        #expect(endpoint.token == nil)
++        #expect(endpoint.password == "resolved-password")
++    }
++
++    @Test func `local literal auth keeps the existing fast path`() throws {
++        let root: [String: Any] = ["gateway": ["mode": "local", "auth": ["mode": "token", "token": "literal"]]]
++        #expect(try GatewayLocalAuthResolver.request(root: root, env: [:]) == nil)
++        let endpoint = GatewayEndpointStore._testLocalConfig(root: root, env: [:], port: 18789)
++        #expect(endpoint.token == "literal")
++        #expect(endpoint.password == nil)
++    }
++}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/GatewayLocalAuthResolverTests.swift b/apps/macos/Tests/OpenClawIPCTests/GatewayLocalAuthResolverTests.swift
 new file mode 100644
 index 0000000000000000000000000000000000000000..a4e465cafe6e7460b245900ba9819a56a787e076
@@ -4442,6 +4547,21 @@ index 16a2e5dc818590fd999089c135da00b5e4f81a32..be8f187ad27e3fe60cfb553cd92fff08
  Among plugin runtime follow-ups, continuation applies to those that use default
  delivery. A follow-up that supplies its own requester or completion-delivery
  context is asking for its own audience, so it runs as a separate sibling and
+diff --git a/docs/tools/web-fetch.md b/docs/tools/web-fetch.md
+index 0b94fffdd4d608b79c41ffa35e6e486b69d7a755..7b4eff84679f9164cc896c91b0d45fd4d63d5be1 100644
+--- a/docs/tools/web-fetch.md
++++ b/docs/tools/web-fetch.md
+@@ -50,6 +50,10 @@ Truncate output to this many characters. Clamped to `tools.web.fetch.maxCharsCap
+ `length` is the wrapped `text` length. `rawLength` is the extracted content length
+ before external-content wrapping.
+ 
++For host sessions with workspace-only file access, spill files stay under
++`.openclaw/tmp/` in the permitted task root so the same session can read them.
++Cached spill handles are scoped to that root; file permissions are not widened.
++
+ `text`, `title`, and `warning` share `maxChars`, including their content wrappers.
+ Titles and warnings retain at most 256 characters each, with a combined wrapped
+ allowance of at most 512 characters and half of `maxChars`. Warnings take priority
 diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
 index 7f43d93e16b9da4f4d8b7696eb01bdfc95e88b2b..be6b13c1ced38986798f2bc66c335dce521dcdeb 100644
 --- a/extensions/browser/index.test.ts
@@ -35137,8 +35257,130 @@ index e5599fdffafde1be5085cd113f3d05bb341b90dd..80e0ba8439a53dd03cece8978e99313a
        });
        expect(markRequesterTurnYielded).toHaveBeenCalledOnce();
        expect(onYield).not.toHaveBeenCalled();
+diff --git a/src/agents/openclaw-tools.sessions-steering.test.ts b/src/agents/openclaw-tools.sessions-steering.test.ts
+index 05bc80da5525fb1fdbf6e5997900dd4ab01182f3..9db18477e593b5527d3189ce889abbd6703b1218 100644
+--- a/src/agents/openclaw-tools.sessions-steering.test.ts
++++ b/src/agents/openclaw-tools.sessions-steering.test.ts
+@@ -193,7 +193,7 @@ it.each([
+       );
+       expect(queueMessage).toHaveBeenCalledOnce();
+       expect(queueMessage.mock.calls[0]?.[1]?.waitForTranscriptCommit).toBe(
+-        supportsTranscriptCommitWait ? true : undefined,
++        supportsTranscriptCommitWait && mode !== "steer" ? true : undefined,
+       );
+       expect(queueMessage.mock.calls[0]?.[1]?.isInboundUserMessage).toBeUndefined();
+       expect(SessionManager.open(scope, dir).getEntries()).toContainEqual(
+diff --git a/src/agents/openclaw-tools.sessions.test.ts b/src/agents/openclaw-tools.sessions.test.ts
+index 41a764058df763b2ba83ddf21f9b2d74289f7765..e9b960f52e7dde87f5d49c3ae53cdc58efe4b41e 100644
+--- a/src/agents/openclaw-tools.sessions.test.ts
++++ b/src/agents/openclaw-tools.sessions.test.ts
+@@ -63,8 +63,11 @@ vi.mock("../config/config.js", () => ({
+ import "./test-helpers/fast-openclaw-tools-sessions.js";
+ import { setActivePluginRegistry } from "../plugins/runtime.js";
+ import { createOperationalRunInstanceRef } from "./admitted-run-context.js";
++import { steerActiveSessionWithOptionalDeliveryWait } from "./embedded-agent-runner/run/attempt-queue-message.js";
+ import { setActiveEmbeddedRun } from "./embedded-agent-runner/runs.js";
+ import { testing as embeddedRunsTesting } from "./embedded-agent-runner/runs.test-support.js";
++import type { AgentMessage } from "./runtime/index.js";
++import { setSteeringMessageIdentity } from "./sessions/steering-message-identity.js";
+ import { subagentRuns } from "./subagents/registry/subagent-registry-memory.js";
+ import { addSubagentRunForTests } from "./subagents/registry/subagent-registry.test-helpers.js";
+ import { textAssistant } from "./test-helpers/sparse-transcript.test-support.js";
+@@ -499,6 +502,92 @@ describe("sessions tools", () => {
+     expect(calls.filter((request) => request.method === "agent")).toHaveLength(1);
+   });
+ 
++  it.each([true, false])(
++    "sessions_send explicit steer survives a slow next boundary (commit wait supported: %s)",
++    async (supportsTranscriptCommitWait) => {
++      vi.useFakeTimers();
++      try {
++        const targetKey = "agent:main:dashboard:slow-steering-target";
++        const pending: AgentMessage[] = [];
++        const cancelSteeringMessage = vi.fn((predicate: (message: AgentMessage) => boolean) => {
++          const index = pending.findIndex(predicate);
++          return index < 0 ? undefined : pending.splice(index, 1)[0];
++        });
++        const activeSession = {
++          agent: { cancelSteeringMessage },
++          steer: vi.fn<Parameters<typeof steerActiveSessionWithOptionalDeliveryWait>[0]["steer"]>(
++            async (text, _images, _recorder, _media, _order, queueIdentity) => {
++              const message: AgentMessage = {
++                role: "user",
++                content: [{ type: "text", text }],
++                timestamp: Date.now(),
++              };
++              setSteeringMessageIdentity(message, queueIdentity);
++              pending.push(message);
++            },
++          ),
++          subscribe: vi.fn(() => () => {}),
++        };
++        const queueMessage = vi.fn(
++          (
++            ...[text, options]: Parameters<
++              Parameters<typeof setActiveEmbeddedRun>[1]["queueMessage"]
++            >
++          ) => steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options),
++        );
++        setActiveEmbeddedRun(
++          "slow-steering-session",
++          {
++            queueMessage,
++            isStreaming: () => true,
++            isCompacting: () => false,
++            supportsTranscriptCommitWait,
++            sourceReplyDeliveryMode: "automatic",
++            abort: () => {},
++          },
++          targetKey,
++        );
++        callGatewayMock.mockImplementation(async () => ({}));
++        const tool = getSessionTool("sessions_send", { agentSessionKey: "agent:main:main" });
++        const result = tool.execute("slow-steer", {
++          sessionKey: targetKey,
++          message: "Use the source invitation and preserve its meeting link.",
++          mode: "steer",
++          timeoutSeconds: 0,
++        });
++        await vi.waitFor(() => expect(queueMessage).toHaveBeenCalledTimes(1));
++        // The receiving model has not reached its next tool/input boundary yet.
++        await vi.advanceTimersByTimeAsync(35_000);
++        expect((await result).details).toMatchObject({
++          status: "accepted",
++          targetDisposition: "steered",
++          delivery: { status: "skipped" },
++        });
++        expect(pending).toEqual([
++          expect.objectContaining({
++            content: [
++              {
++                type: "text",
++                text: expect.stringContaining(
++                  "Use the source invitation and preserve its meeting link.",
++                ),
++              },
++            ],
++          }),
++        ]);
++        expect(cancelSteeringMessage).not.toHaveBeenCalled();
++        expect(activeSession.subscribe).not.toHaveBeenCalled();
++        expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent")).toBe(false);
++        expect(callGatewayMock.mock.calls.some(([call]) => call.method === "agent.wait")).toBe(
++          false,
++        );
++        expect(queueMessage.mock.calls[0]?.[1]?.userTurnTranscriptRecorder).toBeDefined();
++      } finally {
++        vi.useRealTimers();
++      }
++    },
++  );
++
+   it("sessions_send does not enqueue a notification beyond an exact session grant", async () => {
+     const targetKey = "agent:main:dashboard:notification-target";
+     callGatewayMock.mockImplementation(async () => ({}));
 diff --git a/src/agents/openclaw-tools.ts b/src/agents/openclaw-tools.ts
-index 265a4ce046e8c440d97e866201c868795447828b..15cd5e002317174f464dbdf4d36878e895f8b771 100644
+index 265a4ce046e8c440d97e866201c868795447828b..53bb200f02e9f21fdd33d6775afc868043000408 100644
 --- a/src/agents/openclaw-tools.ts
 +++ b/src/agents/openclaw-tools.ts
 @@ -53,11 +53,7 @@ import { createGatewayToolCallerWrapper } from "./tools/gateway-caller-context.j
@@ -35154,7 +35396,18 @@ index 265a4ce046e8c440d97e866201c868795447828b..15cd5e002317174f464dbdf4d36878e8
  import { createHeartbeatResponseTool } from "./tools/heartbeat-response-tool.js";
  import { createImageGenerateTool } from "./tools/image-generate-tool.js";
  import { createImageTool } from "./tools/image-tool.js";
-@@ -472,19 +468,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -232,6 +228,10 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+   const webFetchTool = createWebFetchTool({
+     config: options?.config,
+     sandboxed: options?.sandboxed,
++    spillRoot:
++      !options?.sandboxed && !sandbox && options?.fsPolicy?.workspaceOnly
++        ? resolveWorkspaceRoot(options.fsPolicy.root ?? options.cwd ?? workspaceDir)
++        : undefined,
+     runtimeWebFetch: runtimeWebTools?.fetch,
+     lateBindRuntimeConfig: true,
+     hostnameAllowlistRef: options?.webFetchHostnameAllowlistRef,
+@@ -472,19 +472,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
        agentSessionKey: options?.agentSessionKey,
        requesterAgentIdOverride: sessionAgentId,
      }),
@@ -35176,7 +35429,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..15cd5e002317174f464dbdf4d36878e8
        agentSessionKey: options?.agentSessionKey,
        runSessionKey: options?.runSessionKey,
        sessionAgentId,
-@@ -584,6 +569,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -584,6 +573,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
              // Match sessions_spawn: spawned children record the durable run
              // session as spawnedBy, so the parent check must use the same key.
              agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
@@ -35185,6 +35438,151 @@ index 265a4ce046e8c440d97e866201c868795447828b..15cd5e002317174f464dbdf4d36878e8
              agentChannel: options?.agentChannel,
              sandboxed: options?.sandboxed,
              config: sessionConfig,
+diff --git a/src/agents/openclaw-tools.web-fetch-workspace.test.ts b/src/agents/openclaw-tools.web-fetch-workspace.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..51b2f01e5d69b8027d17e987ba1a3861697a5b89
+--- /dev/null
++++ b/src/agents/openclaw-tools.web-fetch-workspace.test.ts
+@@ -0,0 +1,139 @@
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
++import { wrapToolWorkspaceRootGuardWithOptions } from "./agent-tools.read.js";
++import { createOpenClawTools } from "./openclaw-tools.js";
++import { createReadTool } from "./sessions/tools/read.js";
++
++const { guardedFetch, providerDefinition } = vi.hoisted(() => ({
++  guardedFetch: vi.fn(),
++  providerDefinition: vi.fn(),
++}));
++
++vi.mock("./openclaw-plugin-tools.js", () => ({
++  resolveOpenClawPluginToolsForOptions: () => [],
++}));
++vi.mock("./tools/web-guarded-fetch.js", () => ({
++  fetchWithWebToolsNetworkGuard: guardedFetch,
++}));
++vi.mock("../web-fetch/runtime.js", () => ({
++  resolveWebFetchDefinition: providerDefinition,
++}));
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++const spillPaths = new Set<string>();
++const body = "Company source material.\n".repeat(100);
++
++function createTool(options: NonNullable<Parameters<typeof createOpenClawTools>[0]>) {
++  const tool = createOpenClawTools({
++    config: {
++      plugins: { enabled: false },
++      tools: { web: { fetch: { maxChars: 1_000, cacheTtlMinutes: 1 } } },
++    },
++    disablePluginTools: true,
++    disableMessageTool: true,
++    wrapBeforeToolCallHook: false,
++    ...options,
++  }).find((candidate) => candidate.name === "web_fetch");
++  if (!tool) {
++    throw new Error("Expected registered web_fetch tool");
++  }
++  return tool;
++}
++
++async function fetchSpill(tool: ReturnType<typeof createTool>, url: string) {
++  const result = await tool.execute("fetch-company-source", { url });
++  const details = result.details as { spill: { path: string }; cached?: true };
++  expect(details.spill?.path).toEqual(expect.any(String));
++  spillPaths.add(details.spill.path);
++  return details;
++}
++
++async function expectReadable(spillPath: string, root: string) {
++  const read = wrapToolWorkspaceRootGuardWithOptions(createReadTool(root), root);
++  const result = await read.execute("read-company-source", { path: spillPath });
++  const text = result.content
++    .filter((block) => block.type === "text")
++    .map((block) => block.text)
++    .join("\n");
++  expect(text).toContain("Company source material.");
++  expect(text).toContain("EXTERNAL_UNTRUSTED_CONTENT");
++  expect((await fs.stat(spillPath)).mode & 0o777).toBe(0o600);
++}
++
++describe("registered web_fetch workspace spill", () => {
++  beforeEach(() => {
++    guardedFetch.mockReset();
++    providerDefinition.mockReset();
++    providerDefinition.mockReturnValue(null);
++    guardedFetch.mockImplementation(async () => ({
++      response: new Response(body, { headers: { "content-type": "text/plain" } }),
++      finalUrl: "https://example.com/company-source",
++      release: async () => {},
++    }));
++  });
++
++  afterEach(async () => {
++    await Promise.all([...spillPaths].map((file) => fs.rm(file, { force: true })));
++    spillPaths.clear();
++  });
++
++  it.each(["workspace", "cwd", "session-root"])(
++    "makes full output readable inside the effective %s boundary",
++    async (kind) => {
++      const workspaceDir = tempDirs.make("openclaw-fetch-canonical-");
++      const taskRoot = tempDirs.make("openclaw-fetch-task-");
++      const readRoot = kind === "workspace" ? workspaceDir : taskRoot;
++      const tool = createTool({
++        workspaceDir,
++        ...(kind === "cwd" ? { cwd: taskRoot } : {}),
++        fsPolicy: { workspaceOnly: true, ...(kind === "session-root" ? { root: taskRoot } : {}) },
++      });
++      const details = await fetchSpill(tool, `https://example.com/workspace-spill-${kind}`);
++      await expectReadable(details.spill.path, readRoot);
++    },
++  );
++
++  it("keeps cached full-output handles in the requesting workspace", async () => {
++    const roots = [tempDirs.make("openclaw-fetch-a-"), tempDirs.make("openclaw-fetch-b-")];
++    for (const root of roots) {
++      const tool = createTool({ workspaceDir: root, fsPolicy: { workspaceOnly: true } });
++      const first = await fetchSpill(tool, "https://example.com/shared-spill-cache");
++      const cached = await fetchSpill(tool, "https://example.com/shared-spill-cache");
++      expect(first.cached).toBeUndefined();
++      expect(cached.cached).toBe(true);
++      expect(cached.spill.path).toBe(first.spill.path);
++      await expectReadable(cached.spill.path, root);
++    }
++    expect(guardedFetch).toHaveBeenCalledTimes(2);
++  });
++
++  it("keeps provider fallback output readable inside the same boundary", async () => {
++    const workspaceDir = tempDirs.make("openclaw-fetch-provider-");
++    guardedFetch.mockRejectedValue(new Error("direct route unavailable"));
++    providerDefinition.mockReturnValue({
++      provider: { id: "fixture" },
++      definition: { execute: async () => ({ text: body }) },
++    });
++    const details = await fetchSpill(
++      createTool({ workspaceDir, fsPolicy: { workspaceOnly: true } }),
++      "https://example.com/provider-spill-root",
++    );
++    await expectReadable(details.spill.path, workspaceDir);
++  });
++
++  it("does not spill through a workspace scratch symlink to another directory", async () => {
++    const workspaceDir = tempDirs.make("openclaw-fetch-symlink-");
++    const outside = tempDirs.make("openclaw-fetch-outside-");
++    await fs.mkdir(path.join(workspaceDir, ".openclaw"));
++    await fs.symlink(outside, path.join(workspaceDir, ".openclaw", "tmp"), "dir");
++    await expect(
++      fetchSpill(
++        createTool({ workspaceDir, fsPolicy: { workspaceOnly: true } }),
++        "https://example.com/escaping-spill-root",
++      ),
++    ).rejects.toThrow();
++    expect(await fs.readdir(outside)).toEqual([]);
++  });
++});
 diff --git a/src/agents/owner-permission-default.test.ts b/src/agents/owner-permission-default.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..a9549cb03c6ecfa0e79decea012e390f74c39390
@@ -36672,6 +37070,48 @@ index e03aaa14c2a6ade1c67b8cc66154e9dc33fb0798..c6501ee9b4eec4de1581d5de72014047
      this.trackQueuedUserMessage(promptMessage, "steering", text);
      this.agent.steer(
        transcriptContext
+diff --git a/src/agents/sessions/tools/private-temp-file.ts b/src/agents/sessions/tools/private-temp-file.ts
+index c4ac2fde3caf3cc8b00c2ef549d7534a05451c80..00ee7bd66cadd8c1c583b08e9c55b91295e24808 100644
+--- a/src/agents/sessions/tools/private-temp-file.ts
++++ b/src/agents/sessions/tools/private-temp-file.ts
+@@ -8,6 +8,7 @@ import { createWriteStream, type WriteStream } from "node:fs";
+ import { writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
++import { root } from "../../../infra/fs-safe.js";
+ 
+ /** Opens a unique write stream with owner-only permissions. */
+ export function createPrivateTempWriteStream(prefix: string): {
+@@ -21,13 +22,27 @@ export function createPrivateTempWriteStream(prefix: string): {
+   };
+ }
+ 
+-export async function writePrivateTempFile(prefix: string, content: string): Promise<string> {
++export async function writePrivateTempFile(
++  prefix: string,
++  content: string,
++  workspaceRoot?: string,
++): Promise<string> {
++  if (workspaceRoot) {
++    const relativePath = join(".openclaw", "tmp", createPrivateTempFileName(prefix));
++    const workspace = await root(workspaceRoot);
++    await workspace.create(relativePath, content, { mkdir: true, mode: 0o600 });
++    return join(workspaceRoot, relativePath);
++  }
+   const filePath = createPrivateTempFilePath(prefix);
+   await writeFile(filePath, content, { flag: "wx", mode: 0o600 });
+   return filePath;
+ }
+ 
+ function createPrivateTempFilePath(prefix: string): string {
++  return join(tmpdir(), createPrivateTempFileName(prefix));
++}
++
++function createPrivateTempFileName(prefix: string): string {
+   const id = randomBytes(8).toString("hex");
+-  return join(tmpdir(), `${prefix}-${id}.log`);
++  return `${prefix}-${id}.log`;
+ }
 diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
 index 2622e13cea56220c7a92c80164c484f4e5d1a624..37d7f08b6a5f91fe3a6e5520ab5b42c50f7af168 100644
 --- a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
@@ -43115,6 +43555,31 @@ index 0000000000000000000000000000000000000000..b57bb982eaf48e3be19bb20d1d1a6874
 +    { additionalProperties: false },
 +  ),
 +]);
+diff --git a/src/agents/tools/sessions-send-tool.delivery.ts b/src/agents/tools/sessions-send-tool.delivery.ts
+index 0c53e73719dde2aecf1a28c060235417ffcfe43b..b5827d537d1af33fc25be32fd17555bf9fc70e4b 100644
+--- a/src/agents/tools/sessions-send-tool.delivery.ts
++++ b/src/agents/tools/sessions-send-tool.delivery.ts
+@@ -109,9 +109,17 @@ export async function startSessionsSendAgentRun(params: {
+       const queueOptions: EmbeddedAgentQueueMessageOptions = {
+         steeringMode: "all",
+         debounceMs: 0,
+-        deliveryTimeoutMs: params.deliveryTimeoutMs,
+-        waitForTranscriptCommit: true,
+-        ...(params.mode === "steer" ? {} : { sourceReplyDeliveryMode }),
++        // Explicit guidance returns admission to the active owner's queue. A
++        // slow model/tool boundary must not cancel that accepted input merely
++        // because the sender's reply wait expired. Completion reports retain
++        // their stronger transcript-commit custody below.
++        ...(params.mode === "steer"
++          ? {}
++          : {
++              deliveryTimeoutMs: params.deliveryTimeoutMs,
++              waitForTranscriptCommit: true,
++              sourceReplyDeliveryMode,
++            }),
+         // Carry the same input facts as a new run; transcript ownership stays
+         // with the receiving runtime and its exact session incarnation.
+         userTurnTranscriptRecorder: createUserTurnTranscriptRecorder({
 diff --git a/src/agents/tools/sessions-send-tool.ts b/src/agents/tools/sessions-send-tool.ts
 index f169ac619d3208c8f5e47be6d3102907fb0b79ed..2f53944a30824c6e8ad520fba149a5587c8d3238 100644
 --- a/src/agents/tools/sessions-send-tool.ts
@@ -44679,6 +45144,92 @@ index 0a093f5914ba71ba145a8bb2b043a2b48cfc9be0..cdb08dbf551d7ee31c9da38c909b449a
    it("does not disclose a resolved session key when sessionId access is denied", async () => {
      const tool = createSessionsSendTool({
        agentSessionKey: MAIN_AGENT_SESSION_KEY,
+diff --git a/src/agents/tools/web-fetch.ts b/src/agents/tools/web-fetch.ts
+index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..2f9feff097c7a556fdc53c9ea3970b5aefd947b1 100644
+--- a/src/agents/tools/web-fetch.ts
++++ b/src/agents/tools/web-fetch.ts
+@@ -443,6 +443,7 @@ async function spillWebFetchContent(
+   wrapped: WebFetchWrappedContent,
+   maxChars: number,
+   sourceTruncated = false,
++  spillRoot?: string,
+ ): Promise<WebFetchWrappedContent> {
+   if (!wrapped.truncated) {
+     return sourceTruncated ? { ...wrapped, truncated: true } : wrapped;
+@@ -454,6 +455,7 @@ async function spillWebFetchContent(
+   const spillPath = await writePrivateTempFile(
+     "openclaw-web-fetch",
+     wrapWebContent(content, "web_fetch"),
++    spillRoot,
+   );
+   const spillCapped = value.length > WEB_FETCH_SPILL_MAX_CHARS;
+   const isSpillTruncated = sourceTruncated || spillCapped;
+@@ -509,6 +511,7 @@ type WebFetchRuntimeParams = {
+   maxRedirects: number;
+   timeoutSeconds: number;
+   cacheTtlMs: number;
++  spillRoot?: string;
+   userAgent: string;
+   headers?: Record<string, string>;
+   readabilityEnabled: boolean;
+@@ -577,6 +580,7 @@ async function buildWebFetchPayload(params: {
+   extractMode: ExtractMode;
+   maxChars: number;
+   tookMs: number;
++  spillRoot?: string;
+ }): Promise<Record<string, unknown>> {
+   const payload = isRecord(params.payload) ? params.payload : {};
+   let metadataTruncated = false;
+@@ -619,6 +623,7 @@ async function buildWebFetchPayload(params: {
+     wrapWebFetchContent(rawText, bodyMaxChars),
+     bodyMaxChars,
+     payload.truncated === true,
++    params.spillRoot,
+   );
+   const providerRawLength =
+     typeof payload.rawLength === "number" && Number.isFinite(payload.rawLength)
+@@ -712,6 +717,7 @@ async function maybeFetchProviderWebFetchPayload(
+     extractMode: params.extractMode,
+     maxChars: params.maxChars,
+     tookMs: params.tookMs,
++    spillRoot: params.spillRoot,
+   });
+ }
+ 
+@@ -737,6 +743,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
+     ssrfPolicy ? `ssrf-policy:${sha256Hex(JSON.stringify(ssrfPolicy))}` : "",
+     useTrustedEnvProxy ? "trusted-env-proxy" : "",
+     headersCacheKey ? `headers:${headersCacheKey}` : "",
++    // Cached payloads contain file handles; never reuse a different workspace's spill.
++    params.spillRoot ? `spill-root:${sha256Hex(params.spillRoot)}` : "",
+   ].filter(Boolean);
+   const cacheKey = normalizeCacheKey(
+     [
+@@ -931,6 +939,7 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
+       extractMode: params.extractMode,
+       maxChars: params.maxChars,
+       tookMs: Date.now() - start,
++      spillRoot: params.spillRoot,
+     });
+   } finally {
+     if (!res.bodyUsed) {
+@@ -945,6 +954,8 @@ async function fetchWebPayload(params: WebFetchRuntimeParams): Promise<Record<st
+ export function createWebFetchTool(options?: {
+   config?: OpenClawConfig;
+   sandboxed?: boolean;
++  /** Prepared host file boundary for recoverable output, not a model-selected path. */
++  spillRoot?: string;
+   runtimeWebFetch?: RuntimeWebFetchMetadata;
+   lateBindRuntimeConfig?: boolean;
+   lookupFn?: LookupFn;
+@@ -1043,6 +1054,7 @@ export function createWebFetchTool(options?: {
+             DEFAULT_TIMEOUT_SECONDS,
+           ),
+           cacheTtlMs: resolveCacheTtlMs(executionFetch?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES),
++          spillRoot: options?.spillRoot,
+           userAgent,
+           headers: resolveFetchHeaders(executionFetch),
+           readabilityEnabled,
 diff --git a/src/agents/utility-completion.test.ts b/src/agents/utility-completion.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..110d99e27af331e24f1632a490e6d3d8a3cc29bc
@@ -79168,7 +79719,7 @@ index 8184cac14f549eff20cbabb4ee245ade94640542..c0ac189b9583aa51eca25aaf1f36139e
        return {
          result: updateTask(taskId, {
 diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
-index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2a274901f 100644
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..8521b6007c1f04e87fbccbc4171e6506786213b9 100644
 --- a/src/tasks/task-registry-progress.test.ts
 +++ b/src/tasks/task-registry-progress.test.ts
 @@ -1,10 +1,19 @@
@@ -79193,14 +79744,18 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
  import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
  import {
    markGatewayRestartDraining,
-@@ -14,6 +23,7 @@ import {
+@@ -14,9 +23,10 @@ import {
    createInMemoryTaskFlowRegistryStore,
    createInMemoryTaskRegistryStore,
  } from "../test-utils/task-registry-store.js";
 +import { findDetachedTaskRun } from "./detached-task-runtime.js";
  import { createSubagentTaskBackingDetail } from "./task-backing-authority.js";
  import * as deliveryRuntime from "./task-registry-runtime-loaders.js";
- import { resetTaskRegistryListenerState } from "./task-registry-state.js";
+-import { resetTaskRegistryListenerState } from "./task-registry-state.js";
++import { resetTaskRegistryListenerState, taskProgressBatches } from "./task-registry-state.js";
+ import {
+   createTaskRecord,
+   getTaskById,
 @@ -27,6 +37,7 @@ import { configureTaskRegistryRuntime } from "./task-registry.store.js";
  import type { TaskNotifyPolicy } from "./task-registry.types.js";
  import {
@@ -79316,7 +79871,26 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
        requesterYielded: true,
        acceptedSessionSpawns: entries.map((entry) => ({
          runId: entry.runId,
-@@ -156,6 +238,255 @@ afterEach(() => {
+@@ -120,6 +202,18 @@ function tool(entry: SubagentRunRecord, index = 1) {
+   });
+ }
+ 
++function execution(entry: SubagentRunRecord, state: "running" | "waiting") {
++  emitAgentEvent({
++    runId: entry.runId,
++    sessionKey: entry.childSessionKey,
++    stream: "execution",
++    data: {
++      state,
++      ...(state === "waiting" ? { wait: { kind: "user_input" } } : {}),
++    },
++  });
++}
++
+ beforeEach(() => {
+   vi.useFakeTimers();
+   vi.setSystemTime(new Date("2026-09-13T12:00:00Z"));
+@@ -156,6 +250,255 @@ afterEach(() => {
  });
  
  describe("yielded subagent progress delivery", () => {
@@ -79367,7 +79941,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
 +        // The handoff must cover a long-running tool even without child commentary or new events.
 +        await vi.advanceTimersByTimeAsync(195_000);
 +        if (expected === "state_changes") {
-+          expect(sendMessage).toHaveBeenCalledTimes(2);
++          expect(sendMessage).toHaveBeenCalledOnce();
 +          for (const [message] of sendMessage.mock.calls) {
 +            expect(message).toMatchObject({
 +              ...requesterOrigin,
@@ -79572,7 +80146,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
    it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
      const first = child("First");
      vi.setSystemTime(Date.now() + 1);
-@@ -184,7 +515,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -184,7 +527,7 @@ describe("yielded subagent progress delivery", () => {
        mirror: { sessionKey: PARENT, agentId: "main" },
      });
      expect(message.content).toBe(
@@ -79581,22 +80155,181 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
      );
      expect(message.content).not.toMatch(/Quiet|private-/);
      expect(getTaskById(first.task.taskId)).toMatchObject({
-@@ -298,10 +629,47 @@ describe("yielded subagent progress delivery", () => {
+@@ -280,7 +623,7 @@ describe("yielded subagent progress delivery", () => {
+     expect(getTaskById(second.task.taskId)?.deliveryStatus).toBe("pending");
+   });
+ 
+-  it("bounds a large batch and keeps publishing when newer activity arrives during transport work", async () => {
++  it("bounds a large batch without treating newer tool activity as a changed public state", async () => {
+     const items = Array.from({ length: 35 }, (_, index) => {
+       vi.setSystemTime(Date.now() + 1);
+       return child(`Worker ${index + 1}`);
+@@ -290,7 +633,13 @@ describe("yielded subagent progress delivery", () => {
+     sendMessage.mockImplementationOnce(async (params) => {
+       tool(first.entry);
+       params.assertDirectAdapterHandoff?.();
+-      return { channel: "notifychat", to: params.to, via: "direct", mediaUrl: null };
++      return {
++        channel: "notifychat",
++        to: params.to,
++        via: "direct",
++        mediaUrl: null,
++        deliveryStatus: "sent",
++      };
+     });
+     await vi.advanceTimersByTimeAsync(15_000);
+     expect(sendMessage).toHaveBeenCalledOnce();
+@@ -298,10 +647,189 @@ describe("yielded subagent progress delivery", () => {
      expect(sendMessage.mock.calls[0]![0].content).toContain(
        "More task activity is available in Tasks.",
      );
 +    await vi.advanceTimersByTimeAsync(179_999);
 +    expect(sendMessage).toHaveBeenCalledOnce();
 +    await vi.advanceTimersByTimeAsync(1);
-+    expect(sendMessage).toHaveBeenCalledTimes(2);
-+    expect(sendMessage.mock.calls[1]![0].content).toContain("Worker 1: still working.");
++    expect(sendMessage).toHaveBeenCalledOnce();
++    // Finishing an undisplayed member is not a change to this bounded public summary.
++    markTaskTerminalById({
++      taskId: items[31]!.task.taskId,
++      status: "succeeded",
++      endedAt: Date.now(),
++    });
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
 +  });
 +
-+  it("keeps a slow-tool checkpoint within three minutes without new events and stops after mute", async () => {
++  it.each(["rejected", "suppressed", "unconfirmed"] as const)(
++    "retries a %s snapshot and suppresses it only after confirmed delivery",
++    async (outcome) => {
++      child("Worker");
++      yieldParent();
++      sendMessage.mockImplementationOnce(async (params) => {
++        if (outcome === "rejected") {
++          throw new Error("Synthetic transport failure");
++        }
++        return {
++          channel: "notifychat",
++          to: params.to,
++          via: "direct",
++          mediaUrl: null,
++          ...(outcome === "suppressed"
++            ? {
++                deliveryStatus: "suppressed" as const,
++                suppressionReason: "adapter_returned_no_identity" as const,
++              }
++            : {}),
++        };
++      });
++      await vi.advanceTimersByTimeAsync(15_000);
++      expect(sendMessage).toHaveBeenCalledOnce();
++      await vi.advanceTimersByTimeAsync(180_000);
++      expect(sendMessage).toHaveBeenCalledTimes(2);
++      expect(sendMessage.mock.calls[1]![0].content).toBe(sendMessage.mock.calls[0]![0].content);
++      await vi.advanceTimersByTimeAsync(360_000);
++      expect(sendMessage).toHaveBeenCalledTimes(2);
++    },
++  );
++
++  it("suppresses a snapshot that returns to its delivered state while runtime loading awaits", async () => {
++    const item = child("Worker");
++    yieldParent();
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    execution(item.entry, "waiting");
++    const loaded = createDeferred<deliveryRuntime.TaskRegistryDeliveryRuntime>();
++    vi.spyOn(deliveryRuntime, "loadTaskRegistryDeliveryRuntime").mockReturnValueOnce(
++      loaded.promise,
++    );
++    await vi.advanceTimersByTimeAsync(180_000);
++    execution(item.entry, "running");
++    loaded.resolve({ sendMessage });
++    await vi.advanceTimersByTimeAsync(1);
++    expect(sendMessage).toHaveBeenCalledOnce();
++  });
++
++  it("rejects obsolete public state at the final platform dispatch boundary", async () => {
++    const item = child("Worker");
++    yieldParent();
+     await vi.advanceTimersByTimeAsync(15_000);
++    execution(item.entry, "waiting");
++    let visibleSends = 0;
++    sendMessage.mockImplementationOnce(async (params) => {
++      params.assertDirectAdapterHandoff?.();
++      execution(item.entry, "running");
++      await params.onPlatformSendDispatch?.();
++      visibleSends++;
++      return {
++        channel: "notifychat",
++        to: params.to,
++        via: "direct",
++        mediaUrl: null,
++        deliveryStatus: "sent",
++      };
++    });
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++    expect(visibleSends).toBe(0);
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++  });
++
++  it("serializes delivery and preserves state changes while a send is pending", async () => {
++    const item = child("Worker");
++    yieldParent();
++    const sent = createDeferred();
++    sendMessage.mockImplementationOnce(async (params) => {
++      params.assertDirectAdapterHandoff?.();
++      await sent.promise;
++      return {
++        channel: "notifychat",
++        to: params.to,
++        via: "direct",
++        mediaUrl: null,
++        deliveryStatus: "sent",
++      };
++    });
++    await vi.advanceTimersByTimeAsync(15_000);
++    execution(item.entry, "waiting");
++    await vi.advanceTimersByTimeAsync(360_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
++    sent.resolve();
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++    expect(sendMessage.mock.calls[1]![0].content).toContain("waiting for your input");
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++  });
++
++  it("reports changed batch membership and retires presentation state when all work ends", async () => {
++    const first = child("First");
++    const second = child("Second");
++    yieldParent();
++    await vi.advanceTimersByTimeAsync(15_000);
++    markTaskTerminalById({
++      taskId: first.task.taskId,
++      status: "succeeded",
++      endedAt: Date.now(),
++    });
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++    expect(sendMessage.mock.calls[1]![0].content).toBe(
++      "Background work is still in progress:\n- Second: still working.",
++    );
++    markTaskTerminalById({
++      taskId: second.task.taskId,
++      status: "succeeded",
++      endedAt: Date.now(),
++    });
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(2);
++    expect(taskProgressBatches.size).toBe(0);
++    expect(getTaskById(second.task.taskId)?.status).toBe("succeeded");
++  });
++
++  it("keeps the initial slow-tool notice without repeating unchanged work and reports a changed wait", async () => {
 +    const item = child("Prepare the document");
 +    tool(item.entry);
 +    yieldParent();
-     await vi.advanceTimersByTimeAsync(15_000);
++    await vi.advanceTimersByTimeAsync(15_000);
 +    expect(sendMessage).toHaveBeenCalledOnce();
 +    for (let index = 0; index < 20; index++) {
 +      tool(item.entry, index);
@@ -79604,9 +80337,9 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
 +    await vi.advanceTimersByTimeAsync(179_999);
 +    expect(sendMessage).toHaveBeenCalledOnce();
 +    await vi.advanceTimersByTimeAsync(1);
-     expect(sendMessage).toHaveBeenCalledTimes(2);
--    expect(sendMessage.mock.calls[1]![0].content).toContain(
--      "Worker 1: running read; 1 tool call started.",
++    expect(sendMessage).toHaveBeenCalledOnce();
++    await vi.advanceTimersByTimeAsync(360_000);
++    expect(sendMessage).toHaveBeenCalledOnce();
 +    emitAgentEvent({
 +      runId: item.entry.runId,
 +      sessionKey: item.entry.childSessionKey,
@@ -79621,18 +80354,24 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..ec0fb45f1fa536e0b386c4bb23c757b2
 +      },
 +    });
 +    await vi.advanceTimersByTimeAsync(180_000);
-+    expect(sendMessage).toHaveBeenCalledTimes(3);
-+    expect(sendMessage.mock.calls[2]![0].content).toContain(
+     expect(sendMessage).toHaveBeenCalledTimes(2);
+     expect(sendMessage.mock.calls[1]![0].content).toContain(
+-      "Worker 1: running read; 1 tool call started.",
 +      "waiting for supporting work to finish",
      );
-+    expect(sendMessage.mock.calls[2]![0].content).not.toContain("private-nested-run");
++    expect(sendMessage.mock.calls[1]![0].content).not.toContain("private-nested-run");
++    execution(item.entry, "running");
++    await vi.advanceTimersByTimeAsync(180_000);
++    expect(sendMessage).toHaveBeenCalledTimes(3);
++    expect(sendMessage.mock.calls[2]![0].content).toContain("still working");
 +    updateTaskNotifyPolicyById({ taskId: item.task.taskId, notifyPolicy: "silent" });
 +    await vi.advanceTimersByTimeAsync(360_000);
 +    expect(sendMessage).toHaveBeenCalledTimes(3);
++    expect(taskProgressBatches.size).toBe(0);
    });
  });
 diff --git a/src/tasks/task-registry-progress.ts b/src/tasks/task-registry-progress.ts
-index d5caebed36fa2b1f42158fc78cbd8c87829084e0..9ca0490923b8a4dfbe1a13aab6cffff70aac9d80 100644
+index d5caebed36fa2b1f42158fc78cbd8c87829084e0..cf92a916327e7f70fa759cd6b8f062aa8a4b43bf 100644
 --- a/src/tasks/task-registry-progress.ts
 +++ b/src/tasks/task-registry-progress.ts
 @@ -1,5 +1,4 @@
@@ -79744,7 +80483,7 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..9ca0490923b8a4dfbe1a13aab6cffff7
    batch.timer.unref?.();
  }
  
-@@ -156,29 +132,23 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+@@ -156,48 +132,45 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
    }
    const lines = rows.slice(0, MAX_PROGRESS_DISPLAY_MEMBERS).map(({ task }) => {
      const observation = getTaskExecutionObservation(task);
@@ -79781,7 +80520,20 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..9ca0490923b8a4dfbe1a13aab6cffff7
    });
    if (rows.length > MAX_PROGRESS_DISPLAY_MEMBERS || batch.overflow) {
      lines.push("- More task activity is available in Tasks.");
-@@ -194,7 +164,7 @@ function prepareProgressBatch(key: string, batch: TaskProgressBatch) {
+   }
++  const content = `Background work is still in progress:\n${lines.join("\n")}`;
+   return {
+     owner,
+-    membersKey: JSON.stringify(
++    snapshotKey: JSON.stringify([
+       rows.map(({ task, entry }) => [task.taskId, entry.runId, entry.generation]),
+-    ),
+-    content: `Background work is still in progress:\n${lines.join("\n")}`,
++      content,
++    ]),
++    content,
+   };
+ }
  
  async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
    batch.publishing = true;
@@ -79789,14 +80541,52 @@ index d5caebed36fa2b1f42158fc78cbd8c87829084e0..9ca0490923b8a4dfbe1a13aab6cffff7
 +  batch.nextPublishAt = Date.now() + YIELDED_PROGRESS_CHECKPOINT_MS;
    try {
      await runWithGatewayIndependentRootWorkContinuation(async () => {
-       if (!prepareProgressBatch(key, batch)) {
-@@ -242,7 +212,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+-      if (!prepareProgressBatch(key, batch)) {
++      const initial = prepareProgressBatch(key, batch);
++      if (!initial || initial.content === batch.lastPublishedContent) {
+         return null;
+       }
+       const { sendMessage } = await loadTaskRegistryDeliveryRuntime();
+@@ -205,17 +178,17 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+         () => prepareProgressBatch(key, batch),
+         () => undefined,
+       );
+-      if (!fresh) {
++      if (!fresh || fresh.content === batch.lastPublishedContent) {
+         return null;
+       }
+       const assertCurrent = () => {
+         const current = prepareProgressBatch(key, batch);
+-        if (!current || current.membersKey !== fresh.membersKey) {
++        if (!current || current.snapshotKey !== fresh.snapshotKey) {
+           throw new Error("Background progress was superseded before delivery");
+         }
+       };
+       const idempotencyKey = `task-progress:${createHash("sha256").update(key).digest("hex")}:${Date.now()}`;
+-      await sendMessage({
++      const result = await sendMessage({
+         channel: fresh.owner.requesterOrigin?.channel,
+         to: fresh.owner.requesterOrigin?.to ?? "",
+         accountId: fresh.owner.requesterOrigin?.accountId,
+@@ -233,6 +206,11 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
+         assertDirectAdapterHandoff: assertCurrent,
+         onPlatformSendDispatch: async () => assertCurrent(),
+       });
++      // Tool activity and elapsed time are not a new user-visible state. Keep
++      // retries eligible until transport confirms this exact snapshot was sent.
++      if (result.deliveryStatus === "sent" && taskProgressBatches.get(key) === batch) {
++        batch.lastPublishedContent = fresh.content;
++      }
+       return null;
+     }, "tasks:progress");
+   } catch (error) {
+@@ -242,7 +220,9 @@ async function publishProgressBatch(key: string, batch: TaskProgressBatch) {
    } finally {
      batch.publishing = false;
      if (taskProgressBatches.get(key) === batch) {
 -      if (batch.revision !== revision) {
-+      // Retain this existing presentation batch for slow tools and nested waits
-+      // that produce no new event. Every checkpoint revalidates its exact owner.
++      // Checkpoints revalidate ownership and retry unconfirmed delivery; only
++      // changed state is published. Retire the bounded batch when its owner ends.
 +      if (prepareProgressBatch(key, batch)) {
          scheduleProgressBatch(key, batch);
        } else {
@@ -79951,10 +80741,10 @@ index bca18ae884121708de9f2decf6f9210f3da99b8d..76119b4d67996565b3202f03fa9d07b4
    return withTaskRegistryMutation(
      () => {
 diff --git a/src/tasks/task-registry.process-state.ts b/src/tasks/task-registry.process-state.ts
-index e6d4b75a617f2f95fec9e032c07b6f1a32bcf371..fe41b8f39018fafe78070ca8dd0a6c404d189290 100644
+index e6d4b75a617f2f95fec9e032c07b6f1a32bcf371..f149232badac9ac83f4c336784c632b2f262ef23 100644
 --- a/src/tasks/task-registry.process-state.ts
 +++ b/src/tasks/task-registry.process-state.ts
-@@ -45,9 +45,9 @@ export type TaskActivityOverlayState = {
+@@ -45,9 +45,10 @@ export type TaskActivityOverlayState = {
  export type TaskProgressBatch = {
    lifecycleGeneration: string;
    members: Map<string, { runId: string; generation: number }>;
@@ -79962,6 +80752,7 @@ index e6d4b75a617f2f95fec9e032c07b6f1a32bcf371..fe41b8f39018fafe78070ca8dd0a6c40
    timer?: ReturnType<typeof setTimeout>;
    publishing?: boolean;
 +  nextPublishAt?: number;
++  lastPublishedContent?: string;
    overflow: boolean;
  };
  

@@ -107,6 +107,29 @@ jobs:
           set -o pipefail
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/reference-build-source.txt"
           pnpm build 2>&1 | tee "$RUNNER_TEMP/reference-build.log"
+      - name: Verify focused progress, steering and workspace read regressions
+        id: focused-reliability
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs \
+            src/tasks/task-registry-progress.test.ts \
+            src/agents/openclaw-tools.sessions.test.ts \
+            src/agents/openclaw-tools.sessions-steering.test.ts \
+            src/agents/openclaw-tools.web-fetch-workspace.test.ts \
+            src/agents/tools/web-fetch-output-contract.test.ts \
+            src/agents/sessions/tools/output-accumulator.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-focused-reliability.log"
+      - name: Preserve focused reliability outcomes
+        if: always() && steps.focused-reliability.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reference-focused-reliability-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/reference-build-source.txt
+            ${{ runner.temp }}/reference-focused-reliability.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Run owned follow-up and yield regressions
         id: followup
         working-directory: ${{ runner.temp }}/openclaw-reference
