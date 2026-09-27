@@ -11,6 +11,55 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 27 task delivery correction
+
+Reference `611db2861e304c42af6bac9aa788b37ad2ab225b` corrects two gaps left by
+the earlier repair. Discord's existing `streaming.progress.toolProgress: false`
+now also applies to automatic background-task start and activity notices, including
+the first notice. Both task progress producers check the preference; transient
+Discord notices recheck it before dispatch. Authored commentary, questions,
+approvals, failures and final results retain their existing delivery paths.
+
+A top-level requester that yields to private children still receives its own
+synthesized final answer on its original external route. Previously, private
+child completion made the resumed parent's final internal-only as well. The
+correction preserves private child results, requester incarnation checks,
+cancellation and original-route ownership. Nested, non-yielded and unroutable
+private handoffs remain private; no raw child-result relay is added.
+
+Local verification passed 68 task-progress tests, 394 requester-settlement and
+announcement tests, 26 Discord draft-progress tests and five executor-policy
+tests, plus core typechecking, focused lint, the unchanged line-cap ratchet and
+the aggregate build. The manifest records activation and live acceptance
+separately from these source checks. No native companion rebuild is required.
+
+This source activated on the originating Gateway at 16:58:43 UTC. Identity,
+health, readiness and connected channels were verified; existing configuration
+was preserved. Current-process Journal capture continuity was renewed without
+running export or ingest. A controlled Astra Max turn on the existing private
+Discord QA route spawned one ordinary state-change worker and one private child,
+then yielded. The ordinary worker remained active for another 45.986 seconds.
+No generic notice was posted. The parent resumed automatically and delivered one
+synthesized final, with a sent receipt and exact platform readback. Private child
+results were not directly relayed. This is a Gateway-initiated delivery check;
+the initial CLI-authored acknowledgment remained in its transcript but was not
+observed on Discord, so it does not establish human-ingress progress behavior.
+Hosted checks must qualify the exact published successor separately.
+
+The company workspace example now explicitly traces a paraphrase or notification
+to the requested original correspondence before judging it. It also carries the
+operator-authorized credential-continuation rule: check existing company sessions
+and supported stored credentials before treating a sign-in page as a blocker.
+These instructions preserve company/private-account boundaries and do not bypass
+provider-required verification.
+A separate, read-only company WebChat check used Astra Max and an ordinary
+question about original correspondence. It read the company source guide first,
+retrieved the original account-bound email and grounded its answer in that text:
+six tool calls, zero errors and 52.823 seconds. The updated instructions were
+injected without truncation. This is one source-selection check, not universal
+persona acceptance. Access to a separate provider portal remains unverified:
+its local passkey password prompt was refused by native credential discovery.
+
 ## September 27 source organization qualification
 
 Reference `8c2d7ca386eb2b8e2b1948b02a3ade74bd877dbb` retains deployed source `939bf80b795d9b1addefdaaf39415628e3481af6` behavior while satisfying the original line-cap growth rule. The first public repair revision failed native command 3 because the two new steering cases and fetch changes grew files already above their limits. That failed result and its digest-verified artifact are retained; no retry or rule exemption is used.

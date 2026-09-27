@@ -13,9 +13,21 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 27 task delivery correction
+
+Current reference `611db2861e304c42af6bac9aa788b37ad2ab225b` applies Discord's
+existing tool-progress visibility setting to both background-task notice
+producers, including the first notice. It also restores automatic delivery of a
+yielded top-level parent's synthesized final after private children settle,
+without exposing raw child results or losing session and original-route checks.
+The [qualification record](../runtime/README.md#september-27-task-delivery-correction)
+separates source tests, deployment and bounded live acceptance. The company
+workspace example reinforces original-source checking and authorized company
+credential reuse without changing private-account boundaries.
+
 ## September 27 source organization
 
-Current reference `8c2d7ca386eb2b8e2b1948b02a3ade74bd877dbb` reorganizes the focused repair to pass the unchanged line-cap growth ratchet. Both new delayed-steering cases move into the existing steering suite without lost assertions; fetch schema declarations move unchanged into a sibling module. Runtime behavior remains that of deployed `939bf80`. The [qualification record](../runtime/README.md#september-27-source-organization-qualification) separates the source successor, retained failed CI artifact and current live receipts. No additional activation or native package is claimed.
+Reference `8c2d7ca386eb2b8e2b1948b02a3ade74bd877dbb` reorganized the focused repair to pass the unchanged line-cap growth ratchet. Both new delayed-steering cases moved into the existing steering suite without lost assertions; fetch schema declarations moved unchanged into a sibling module. Runtime behavior remained that of deployed `939bf80`. The [qualification record](../runtime/README.md#september-27-source-organization-qualification) separates that source successor, retained failed CI artifact and its dated live receipts. That organization-only change did not require activation or a native package.
 
 ## September 27 focused reliability changes
 
