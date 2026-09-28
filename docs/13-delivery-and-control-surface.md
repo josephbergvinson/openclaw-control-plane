@@ -28,6 +28,16 @@ During substantial work, post meaningful milestones and explain real dependencie
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
+## Approved company Discord reply surfaces
+
+A company channel can be both a registered read source and an explicitly approved
+reply surface. Source registration alone does not create an inbound agent binding
+or permission to post. When the operator approves another reply channel, align
+its exact guild/channel route, live company-agent binding, sender/mention controls,
+channel prompt and company workspace policy. Preserve the intended teammate
+permissions and company context. Verify an ordinary allowed mention receives its
+response in that channel; a configuration readback alone does not prove delivery.
+
 ## Requested Discord voice meetings
 
 The configured operator preference is to take meeting minutes when asked to join
