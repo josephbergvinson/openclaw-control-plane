@@ -33,7 +33,10 @@ A legitimate yield is not a failed empty answer. The runtime patch preserves pen
 Joining a room and recording a meeting are separate operations. A plain-language
 join request should use native `message` action `voice-join` with the verified
 guild and channel IDs; `voice-leave` leaves that connection. A minutes request
-uses the native `transcripts` tool and `discord-voice` provider. Manual capture can
+uses the native `transcripts` tool and `discord-voice` provider. Run voice controls
+and capture start/stop in the authenticated requesting agent; delegate note
+drafting only after capture ends, and do not assume a background worker inherits
+the caller’s live meeting authority. Manual capture can
 join silently, retaining speaker-attributed text for later notes. Neither a bare
 join nor ordinary team-server membership authorizes recording.
 
