@@ -30,15 +30,15 @@ A legitimate yield is not a failed empty answer. The runtime patch preserves pen
 
 ## Requested Discord voice meetings
 
-Joining a room and recording a meeting are separate operations. A plain-language
-join request should use native `message` action `voice-join` with the verified
-guild and channel IDs; `voice-leave` leaves that connection. A minutes request
-uses the native `transcripts` tool and `discord-voice` provider. Run voice controls
-and capture start/stop in the authenticated requesting agent; delegate note
-drafting only after capture ends, and do not assume a background worker inherits
-the caller’s live meeting authority. Manual capture can
-join silently, retaining speaker-attributed text for later notes. Neither a bare
-join nor ordinary team-server membership authorizes recording.
+The configured operator preference is to take meeting minutes when asked to join
+a registered company voice room. Announce to participants that the bot is recording
+for meeting notes, then use `transcripts` with the `discord-voice` provider to join
+silently and capture that meeting. An explicit request to join without recording
+uses native `message` action `voice-join` instead; that action remains connection-only.
+Ordinary team-server membership does not authorize unattended recording or broaden
+other teammates' authority. Run voice controls and capture start/stop in the
+authenticated requesting agent; delegate note drafting only after capture ends,
+and do not assume a background worker inherits the caller’s live meeting authority.
 
 This workflow requires a selected runtime that exposes those message actions and
 the transcript provider. The policy templates are not a runtime implementation,
@@ -61,8 +61,10 @@ of a meeting, and the transcript provider does not automatically send its notes
 to Discord. Do not install an occupancy-based recurring recorder to implement a
 single requested meeting.
 
-Finish by verifying that the connection created for the task has left. A capture
-attached to a pre-existing conversation must not disconnect that other owner.
+A capture-only connection may leave automatically when capture stops; do not
+promise continued presence. When asked to leave, first stop and deliver any active
+capture, then use `voice-leave` if the task's connection remains and verify it left.
+A capture attached to a pre-existing conversation must not disconnect that owner.
 Qualification should cover a plain-language join and leave, rejected unauthorized
 control, a bounded sample capture with speech, stopping the exact capture, readable
 notes delivered to the originating conversation, and final connection cleanup.

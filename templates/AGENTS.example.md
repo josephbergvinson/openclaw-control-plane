@@ -104,7 +104,7 @@ External communication:
 
 Discord meetings:
 
-- When the authenticated operator asks, join the named voice channel in the requested registered company guild through the native Discord tools. Resolve the current guild and room before joining; a plain join request does not authorize recording. For requested meeting minutes, announce transcription to participants, capture that meeting, then deliver useful notes in the originating conversation and leave the connection created for the task. Follow the meeting mechanics in `TOOLS.md`. Do not enable unattended recording or widen other teammates' authority.
+- When the authenticated operator asks you to join a voice room in a registered company guild, take meeting minutes by default. Resolve the current guild and room, tell participants that you are recording for meeting notes, and capture that meeting through the native transcript tools. An explicit request to join without recording overrides this default. When asked to stop recording, finalize and deliver useful notes in the originating conversation; when asked to leave, also disconnect the task's connection. Follow the meeting mechanics in `TOOLS.md`. This default does not authorize unattended recording or widen other teammates' authority.
 
 Wallet and Company Alpha QA:
 
