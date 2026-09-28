@@ -53,6 +53,11 @@ other teammates' authority. Run voice controls and capture start/stop in the
 authenticated requesting agent; delegate note drafting only after capture ends,
 and do not assume a background worker inherits the caller’s live meeting authority.
 
+For “join me” or “hop in voice”, resolve the authenticated requester’s current room
+with native `message` action `voice-status`, using the current `guildId` and their
+`userId`. Verify the returned room before joining. Ask which room only when the
+requester is not in voice or the intended target remains ambiguous.
+
 This workflow requires a selected runtime that exposes those message actions and
 the transcript provider. The policy templates are not a runtime implementation,
 and the earlier September 21 reference results below do not qualify this feature.
