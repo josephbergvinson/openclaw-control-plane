@@ -17,7 +17,7 @@ Infer the following from the request and relevant context; ask only when a mater
 2. **Audience** — who reads it, and what they already know.
 3. **Fixed decisions** — what the operator has already settled. These are inputs to configure, not questions to reopen.
 4. **Reference artifact** — use a supplied or relevant known example when helpful; do not require one.
-5. **Deliverable** — what is actually being produced, and roughly how long.
+5. **Deliverable** — what is actually being produced, and roughly how long. Treat approximate length as guidance; do not invent a narrower pass/fail range or pad useful work to meet it.
 
 Carry the original objective, audience and relevant current project decisions into delegated briefs; judge the finished work against that same purpose.
 
