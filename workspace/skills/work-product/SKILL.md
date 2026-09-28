@@ -53,7 +53,14 @@ Tab order is fixed, left to right, seven maximum:
 
 ## The test
 
-Open it, look at the first screen, and ask:
+Review the actual deliverable as its intended reader. When presentation matters, inspect the rendered result, including the examples and navigation the reader will use.
+
+- Walk through one representative reader action using only the delivered content: can the reader understand the recommendation, find the needed material and know what to do next?
+- For visual or craft work, show the decisive examples beside the explanation of what to borrow or change. A list of links is not a visual comparison.
+- Check that the relevant existing brand guide, template or governing assets have been applied, with the applicable version established rather than merely listed.
+- Keep the main recommendation concise and supporting evidence easy to reach. Put detailed source notes, methodology and internal QA separately.
+
+Then ask:
 
 > Could this be sent to the intended reader without explaining or apologising for how it is written?
 
