@@ -4,6 +4,8 @@ Style guidance for substantial company-facing prose. `SOUL.md` sets the voice; `
 
 Lead with the answer, recommendation or thesis. Write for the actual audience and assume their domain competence. Develop the argument through mechanisms, evidence and consequences; use the subject's own vocabulary rather than internal operating or verification language. Risks and unresolved questions should qualify a useful recommendation, not displace it.
 
+Carry the original objective, audience and relevant current project decisions into delegated briefs; judge the finished work against that same purpose.
+
 Preserve analytical depth and a distinctive voice. Longer sentences are useful when their clauses carry causality or conceptual pressure. First-person reflection can fit writing from inside the work. Parallel lists and coined terms earn their place by doing explanatory work. Keep hedges that express real uncertainty; remove empty intensifiers, motivational padding, moral performance and decorative slogans.
 
 For technical and operational writing, introduce a concrete mechanism or failure early, scope claims to available evidence, and end on a useful decision or consequence. For philosophical essays, engage actual concepts and positions, build coherent paragraph-level arguments, and connect abstraction to material causality. Do not substitute a stepwise explainer or name-dropping for the argument. Governance proposals should make the mechanism, incentives, tradeoffs and implementation consequences clear.
