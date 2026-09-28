@@ -34,9 +34,12 @@ A company channel can be both a registered read source and an explicitly approve
 reply surface. Source registration alone does not create an inbound agent binding
 or permission to post. When the operator approves another reply channel, align
 its exact guild/channel route, live company-agent binding, sender/mention controls,
-channel prompt and company workspace policy. Preserve the intended teammate
-permissions and company context. Verify an ordinary allowed mention receives its
-response in that channel; a configuration readback alone does not prove delivery.
+channel prompt and company workspace policy. Verify the bot's effective View
+Channel and Send Messages permissions, plus Send Messages in Threads when used;
+category or member overrides can block replies despite correct routing. Preserve
+the intended teammate permissions and company context. Verify an ordinary allowed
+mention receives its response in that channel; a configuration readback alone does
+not prove delivery.
 
 ## Requested Discord voice meetings
 
