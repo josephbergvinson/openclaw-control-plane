@@ -28,6 +28,44 @@ During substantial work, post meaningful milestones and explain real dependencie
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
+## Requested Discord voice meetings
+
+Joining a room and recording a meeting are separate operations. A plain-language
+join request should use native `message` action `voice-join` with the verified
+guild and channel IDs; `voice-leave` leaves that connection. A minutes request
+uses the native `transcripts` tool and `discord-voice` provider. Manual capture can
+join silently, retaining speaker-attributed text for later notes. Neither a bare
+join nor ordinary team-server membership authorizes recording.
+
+This workflow requires a selected runtime that exposes those message actions and
+the transcript provider. The policy templates are not a runtime implementation,
+and the earlier September 21 reference results below do not qualify this feature.
+
+Bind the installation's verified operator identity and company guilds. Enable
+`channels.discord.voice.enabled`; keep voice states enabled, allow the intended
+voice rooms, and verify the bot's actual Connect permission. Enable transcripts
+and configure a working batch audio-transcription backend, including an existing
+local CLI backend when suitable. A missing `voice` block does not enable voice.
+Allowlisting a company's text channel alone need not admit its voice room. Keep
+text participation and teammate tool authority scoped to their intended uses.
+
+Before requested capture, tell the participants that the bot is taking and saving
+meeting notes. Save the returned exact capture selector. The operator can then ask
+to stop and deliver the minutes: stop that capture, wait for finalization, inspect
+its notes, and deliver decisions, action owners, deadlines and open questions in
+the originating conversation. Manual capture does not automatically detect the end
+of a meeting, and the transcript provider does not automatically send its notes
+to Discord. Do not install an occupancy-based recurring recorder to implement a
+single requested meeting.
+
+Finish by verifying that the connection created for the task has left. A capture
+attached to a pre-existing conversation must not disconnect that other owner.
+Qualification should cover a plain-language join and leave, rejected unauthorized
+control, a bounded sample capture with speech, stopping the exact capture, readable
+notes delivered to the originating conversation, and final connection cleanup.
+An enabled configuration or a successful join alone does not prove transcription
+or minutes delivery.
+
 ## September 21 follow-up delivery incident
 
 An observed “Yield failed” message was a runtime-generated tool-failure warning.

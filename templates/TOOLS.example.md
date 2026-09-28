@@ -181,6 +181,15 @@ Use the configured Images 2.5 generation/editing route, `openai/gpt-image-2.5-fl
 
 Preflight the complete prompt and intended reference images before the call. An `image_generate` call produces a user-visible delivery; default to one intended call. Inspect the result. An unplanned corrective second delivery needs one natural confirmation unless variants or multiple images were named or implied. Do not assume a hidden generation mode. The requested selector is not independent returned backend attestation if the provider does not supply that identity.
 
+## Discord voice and meeting minutes
+
+Use a runtime that advertises native `message` actions `voice-join` and `voice-leave`, and the `transcripts` tool with the `discord-voice` provider. This policy does not install those capabilities; follow the deployment's selected runtime and live tool schemas.
+
+- Resolve the requested voice room from current channel information in the registered company guild. Verify its type and exact account/guild/channel IDs. For a join without recording, use `message` action `voice-join`; use `voice-leave` to leave. Do not redirect a plain-language request to a slash command when the native action is available. Inspect its result before claiming presence.
+- For requested minutes, announce transcription to participants in the room's associated text channel, then call `transcripts` action `start` with `providerId:"discord-voice"` and the verified `accountId`, `guildId` and `channelId`. A manual capture joins silently when free. Retain its exact returned `selector`, originating conversation and connection ownership. Do not enable recurring `voice.autoJoin` or `transcripts.autoStart` for this request.
+- Manual capture continues until explicitly stopped. When the operator asks to stop or deliver the minutes, use `transcripts` action `stop` with that exact selector, wait for transcription/finalization, then `show` its notes or `summarize` the same capture. Deliver decisions, action owners, stated deadlines and open questions in the originating conversation unless another destination was requested. The provider does not automatically post notes. State meaningful coverage gaps instead of inventing missing speech.
+- Verify the connection created for this task has left, using `voice-leave` if necessary. Preserve a pre-existing or separately owned conversation. Keep each company's transcript and notes in its own context.
+
 ## Discord delivery and substantial work
 
 Use natural prose, not fixed Result/Impact/Blocker schemas or compact JSON. Keep one logical answer together and use code fences when copying matters. Prefer conversation content; use a meaningful attachment when requested or when channel limits would make the answer unreadable. Do not expose absolute host paths or substitute an internal receipt for the answer.
