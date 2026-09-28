@@ -19,6 +19,8 @@ Infer the following from the request and relevant context; ask only when a mater
 4. **Reference artifact** — use a supplied or relevant known example when helpful; do not require one.
 5. **Deliverable** — what is actually being produced, and roughly how long.
 
+Carry the original objective, audience and relevant current project decisions into delegated briefs; judge the finished work against that same purpose.
+
 Then pick the working directory before writing. For a registered project, use its configured runtime data root under `work-product/<slug>-<id>/`. For other work, use `artifacts/<slug>-<id>/` under the configured OpenClaw workspace. Resolve the project through `registry/project_topology.json`; do not invent a second project root in the home directory.
 
 ## While writing
