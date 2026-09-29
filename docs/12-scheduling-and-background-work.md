@@ -61,31 +61,31 @@ For an explicitly requested one-shot chat reminder, use the existing job-level `
 
 Interactive work defaults to Astra/Max; an explicit Discord `/think ultra` adds
 multi-agent orchestration with underlying Max reasoning. Autonomous inference uses
-`openai/gpt-6-sol` with High reasoning. Native `agentTurn` jobs carry those values in
+`openai/gpt-6-astra` with `xhigh` reasoning. Native `agentTurn` jobs carry those values in
 `payload.model` and `payload.thinking`, including intentionally disabled jobs when
 their saved policy is updated. Keep their enablement, schedule and delivery intact.
 For system-owned skill review jobs, leave the projected payload with its owner and
 set the supported execution-session preferences through `sessions.patch` using
-`agent:<agent-id>:cron:<job-id>`, `model: "openai/gpt-6-sol"` and
-`thinkingLevel: "high"`. Check the existing job remains disabled when intended;
+`agent:<agent-id>:cron:<job-id>`, `model: "openai/gpt-6-astra"` and
+`thinkingLevel: "xhigh"`. Check the existing job remains disabled when intended;
 changing its model policy is not authorization to enable it.
 
 The [preferences profile](../config/openclaw.preferences.json) configures the same
-Sol/High policy for heartbeat, active memory, all three dreaming phases and utility
-calls. The [configuration guide](../config/README.md#background-model-and-existing-overrides)
+Astra/xhigh policy for autonomous heartbeat and all three dreaming phases.
+Active memory and utility calls retain Astra/Max; they assist ordinary work. The [configuration guide](../config/README.md#background-model-and-existing-overrides)
 describes provider enrollment and migration of older settings. A model row or a
-successful catalog refresh is not acceptance; verify the effective Sol/High route
+successful catalog refresh is not acceptance; verify the effective Astra/xhigh route
 with a read-only request before relying on the scheduled path.
 
 Global child model and thinking pins stay unset. Children inherit the initiating
-turn, so scheduled Sol/High work remains Sol/High and explicitly selected interactive
+turn, so scheduled Astra/xhigh work remains Astra/xhigh and explicitly selected interactive
 Ultra remains available. Admitted user-task continuations retain their conversation
 model and effort when a heartbeat carries the wake. Existing explicit session or
 per-task selections are not bulk rewritten as part of a defaults change.
 
 Classify command work by its implementation. A script that reads receipts, exports
 data or performs deterministic maintenance has no scheduler reasoning setting.
-A script that invokes an LLM must select Sol/High at that internal inference owner.
+A script that invokes an LLM must select Astra/xhigh at that internal inference owner.
 Foreground helpers belonging to a user turn do not become autonomous jobs merely
 because they run in another process. Configured background-model failures must not
 silently fall back to the interactive model.

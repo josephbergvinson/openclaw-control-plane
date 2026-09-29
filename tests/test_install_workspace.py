@@ -43,6 +43,28 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual(0o600, (self.destination / "operator.json").stat().st_mode & 0o777)
         self.assertTrue((self.destination / "installation-manifest.json").is_file())
 
+    def test_rendered_model_policy_keeps_scheduled_effort_scoped(self):
+        files = INSTALLER.make_plan(self.destination)
+        config = json.loads(files[Path("config/openclaw.json")][0])
+        defaults = config["agents"]["defaults"]
+        self.assertEqual("openai/gpt-6-astra", defaults["model"]["primary"])
+        self.assertEqual("max", defaults["thinkingDefault"])
+        self.assertEqual("max", defaults["models"]["openai/gpt-6-astra"]["params"]["thinking"])
+        self.assertEqual("openai/gpt-6-astra", defaults["utilityModel"])
+        self.assertEqual("openai/gpt-6-astra", defaults["heartbeat"]["model"])
+        self.assertEqual("xhigh", defaults["heartbeat"]["thinking"])
+        self.assertTrue(defaults["heartbeat"]["isolatedSession"])
+        self.assertNotIn("model", defaults["subagents"])
+        self.assertNotIn("thinking", defaults["subagents"])
+        plugins = config["plugins"]["entries"]
+        dreaming = plugins["memory-core"]["config"]["dreaming"]
+        self.assertEqual("openai/gpt-6-astra", dreaming["model"])
+        for phase in ("light", "deep", "rem"):
+            self.assertEqual("xhigh", dreaming["phases"][phase]["execution"]["thinking"])
+        active_memory = plugins["active-memory"]["config"]
+        self.assertEqual("openai/gpt-6-astra", active_memory["model"])
+        self.assertEqual("max", active_memory["thinking"])
+
     def test_existing_destination_is_untouched(self):
         self.destination.mkdir()
         sentinel = self.destination / "existing.txt"

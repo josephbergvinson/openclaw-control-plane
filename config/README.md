@@ -25,7 +25,8 @@ The profile carries these reference choices:
 | Fast mode | Global default `false`; inline, session and per-agent overrides take precedence. |
 | Alternate model | `openai/gpt-5.6-sol` mapped to the Codex runtime when explicitly selected. |
 | Subagents | Inherit the initiating turn’s model and reasoning; maximum eight concurrent subagents, four main runs. Explicit task choices take precedence. |
-| Autonomous inference | `openai/gpt-6-sol` with High reasoning for scheduled agent turns, heartbeat, active memory, dreaming and utility work. Pure command jobs have no scheduler model. |
+| Scheduled inference | Astra with `xhigh` for scheduled agent turns, autonomous heartbeat and all dreaming phases. Pure command jobs have no scheduler model. |
+| Interactive helpers | Active memory and the utility model use Astra/Max. A helper does not become a scheduled automation just because it runs in another process. |
 | Image understanding | Astra in `imageModel`. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
@@ -52,43 +53,21 @@ Do not label a configured reasoning level or a copied memory file as runtime pro
 
 ## Background model and existing overrides
 
-The native OpenAI provider must have an authenticated ChatGPT subscription route
-and an authored `gpt-6-sol` model row if account discovery does not yet list it.
-Add the following row to the existing `models.providers.openai.models` collection,
-preserving every other provider/model entry and the authenticated route:
+The native OpenAI provider needs an authenticated route with Astra available on the
+adopter's account. Preserve provider enrollment, model metadata and credentials
+when applying this preference profile. Verify the actual model and reasoning on
+both an interactive request and a scheduled request; a catalog row alone proves
+neither. This profile does not change the account or require a new API key.
 
-```json
-{
-  "id": "gpt-6-sol",
-  "name": "GPT-6 Sol",
-  "api": "openai-chatgpt-responses",
-  "reasoning": true,
-  "input": ["text", "image"],
-  "contextWindow": 1050000,
-  "maxTokens": 128000,
-  "compat": {
-    "supportedReasoningEfforts": ["none", "low", "medium", "high", "xhigh", "max"]
-  }
-}
-```
-
-These context/output values retain the reference installation’s operator caps;
-verify capabilities on the selected account. Cost metadata is omitted rather than
-copied from another model. The profile leaves provider enrollment separate so a
-preference merge cannot replace an adopter’s model collection or credentials.
-An empty discovery result does not prove the explicit route is unavailable. A
-configured row does not prove access either: run a read-only Sol/High request and
-inspect its effective model and outcome before enabling autonomous work. Keep the
-existing OAuth authority; this configuration does not require an API key.
-
-This profile uses existing model fields and the selected model’s
-`params.thinking: "high"` for heartbeat, dreaming and utility work. It requires the
-matching reconstructed runtime to carry that effort into these background calls;
-there is no added `heartbeat.thinking` or dreaming `execution.thinking` field for a
-retained native app to reject. Autonomous heartbeat settings do not override
-admitted user-task continuations. Configured dreaming model failures remain on the
-selected route and produce the existing degraded outcome instead of silently
-calling the interactive model.
+Scheduled agent turns explicitly select `openai/gpt-6-astra` and `xhigh`.
+Heartbeat has its own `thinking: "xhigh"`; dreaming sets
+`phases.light/deep/rem.execution.thinking` to `xhigh`. These fields require the
+matching reconstructed runtime and compatible companion workers. Active memory
+explicitly uses `max`, and utility calls inherit the Astra model's
+`params.thinking: "max"`. This keeps scheduled effort separate from ordinary work.
+Autonomous heartbeat settings do not override admitted user-task continuations.
+Configured background-model failures retain their selected route and report the
+existing degraded outcome instead of silently changing model or effort.
 
 Autonomous heartbeats use `isolatedSession: true`: each run starts with a fresh
 transcript while retaining its originating conversation's delivery policy.
@@ -117,14 +96,14 @@ model object contains a `fallbacks` array, also pass
 its parent is deleted. Review and name any other reported array removal explicitly.
 
 This restores current-turn inheritance: interactive Astra/Max or explicitly chosen
-Ultra stays with user orchestration, while scheduled Sol/High stays with autonomous
+Ultra stays with user orchestration, while scheduled Astra/xhigh stays with autonomous
 work. Review per-agent `thinkingDefault` values that previously duplicated the old
 Ultra default and update those defaults to Max. Preserve deliberate per-session,
 inline and per-task choices; do not bulk rewrite saved sessions. Use `/think default`
 to restore inheritance when clearing a session override is intended.
 
-Existing `agentTurn` jobs need their own `payload.model: "openai/gpt-6-sol"` and
-`payload.thinking: "high"`; changing the default model does not rewrite job
+Existing `agentTurn` jobs need their own `payload.model: "openai/gpt-6-astra"` and
+`payload.thinking: "xhigh"`; changing the default model does not rewrite job
 payloads. Preserve job IDs, enabled states, schedules, prompts, budgets and delivery
 settings. System-owned skill collection review jobs retain their owner-projected
 payloads: use supported `sessions.patch` on each exact

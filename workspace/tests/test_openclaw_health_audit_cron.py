@@ -557,6 +557,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                         '#!/usr/bin/env python3\nimport sys\n'
                         f'responses = {responses!r}\n'
                         'code, output = responses[" ".join(sys.argv[1:])]\n'
+                        'if "--json" in sys.argv:\n'
+                        '    print(\'healthy diagnostic phaseDurationsMs={"validation":23694}\', file=sys.stderr)\n'
                         'print(output)\nraise SystemExit(code)\n',
                         encoding='utf-8',
                     )
@@ -929,6 +931,56 @@ class SecurityFindingsAreNamedAndAcceptedPerSeverity(unittest.TestCase):
         note, blocker = cron.classify_security(None, 'gateway is fine, nothing to see')
         self.assertEqual(note, 'not_reported')
         self.assertEqual(blocker, 'security_findings_unavailable')
+
+
+class JsonCommandFramingTests(unittest.TestCase):
+    # The natural 2026-09-29 audit appended this diagnostic shape to valid
+    # maintenance JSON. Its nested object made the combined stream unparseable.
+    diagnostic = (
+        '[state/agent-db] slow OpenClaw agent database open '
+        'phaseDurationsMs={"open":0,"validation":23694} '
+        'integrityGateOutcome=healthy integrityGateMs=23677'
+    )
+
+    def test_maintenance_reads_json_stdout_without_structured_stderr(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fake_cli = Path(raw) / 'openclaw-fixture'
+            fake_cli.write_text(
+                '#!/usr/bin/env python3\nimport sys\n'
+                f'print({TASK_MAINTENANCE_OK!r})\n'
+                f'print({self.diagnostic!r}, file=sys.stderr)\n',
+                encoding='utf-8',
+            )
+            fake_cli.chmod(0o700)
+            _, blocker = cron.run_task_ledger_maintenance(str(fake_cli))
+        self.assertIsNone(blocker)
+
+    def test_stderr_cannot_supply_missing_or_invalid_json_stdout(self):
+        for stdout in ('', 'not JSON'):
+            with self.subTest(stdout=stdout):
+                result = cron.run([
+                    sys.executable, '-c',
+                    f'import sys; print({stdout!r}); print({TASK_MAINTENANCE_OK!r}, file=sys.stderr)',
+                    '--json',
+                ])
+                self.assertEqual(result.returncode, 0)
+                self.assertIsNone(cron.parse_json_object(result.output))
+
+    def test_failed_json_command_keeps_diagnostics_and_failure(self):
+        result = cron.run([
+            sys.executable, '-c',
+            f'import sys; print({TASK_MAINTENANCE_OK!r}); print("required write failed", file=sys.stderr); sys.exit(7)',
+            '--json',
+        ])
+        self.assertEqual(result.returncode, 7)
+        self.assertIn('required write failed', result.output)
+
+    def test_text_command_keeps_both_streams(self):
+        result = cron.run([
+            sys.executable, '-c',
+            'import sys; print("runtime status"); print("diagnostic", file=sys.stderr)',
+        ])
+        self.assertEqual(result.output, 'runtime status\ndiagnostic')
 
 
 class RunTimeoutIsAFailureNotACrash(unittest.TestCase):
