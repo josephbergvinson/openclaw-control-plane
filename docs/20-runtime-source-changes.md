@@ -13,9 +13,58 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 29 continuation and activity corrections
+
+Current reference `4e8c6dc647b164b00f798c85154eac539e891e3f` retains the complete runtime source
+and adds bounded Activity recaps, frozen-cohort completion dependencies, ordinary
+child settlement after a parent assistant error, and preservation of structured
+provider-error status for the existing failure classifier. The final prompt correction
+distinguishes useful intermediate progress from completed-answer delivery, without
+changing transport, execution policy or private completion routes. Yielded parents
+can now use idle time for checkpointing and compaction, while returning user or
+child work preempts optional maintenance. Existing final-delivery and lifecycle
+fences remain, and private child receipts retain their exact parent session.
+The goal row fixture correction preserves accepted-usage accounting and golden
+expectations. Spawn and wait also expose canonical task IDs, allowing the authorized
+requester to read a retained terminal result after child-transcript cleanup without
+gaining a new control edge. Summary planning charges the existing serialized
+conversation, avoiding serial summaries for tool-result bytes omitted from the
+summary prompt while preserving user text, tool calls and normal replay pressure.
+Gateway admissions retain their existing run-context claim through required
+preflight and deferred terminal persistence, then release that exact claim with
+its controller. Competing exclusive owners are rejected before new chat state is
+published; sweep policy and existing authority boundaries remain unchanged.
+The claim protects a live admitted run from the registry orphan sweep; this does
+not rewrite historical terminal task records. A normal WebSocket close before the
+response terminal event is now classified as a transport interruption. Completion,
+caller abort, prior errors, handshake behavior, policy denials and existing bounded
+retry/replay guards retain their current owners.
+New OpenAI host models also use their declared reasoning capabilities. GPT-6.1 Sol
+can expose Max and optional Max-based Ultra without requiring a bundled model-name
+rule or offering unsupported off/minimal levels. Native Codex capability lists
+retain their existing interpretation.
+These repairs keep
+provider failures, required writes, live authority and child results distinct;
+they do not claim success by suppressing an error or replaying completed work.
+The reference retains the earlier supersession producer repair, voice/transcript
+controls, goal synchronization and steering/configuration corrections.
+
+The [qualification record](../runtime/README.md#september-29-continuation-and-activity-corrections)
+separates exact source checks and reconstruction from Gateway activation, fresh
+channel acceptance and per-host companion installation. The exported `4e8c6dc`
+source is awaiting exact activation and hosted qualification. The preceding
+`a3d27854992bd22173b51133cab60943aad62d56` activated on September 29 at 20:59 UTC;
+loaded-process, health/readiness and bounded preservation checks passed. Its
+ScreenCapture route was verified at 21:02 UTC; this does not prove scheduled
+Journal sync or qualify a later process. Earlier `6956` and `0b8` activations
+retain their dated scope. Companion build 599 is installed and launched on both
+hosts from the separate `a504` app/private-worker source. Credential and account
+interactions retain their own acceptance evidence. Earlier dated records below
+do not establish successor deployment.
+
 ## September 27 recovery and credential corrections
 
-Current reference `9c062db6a307f5189ac1a06c3f496114b2499d52` adds only the required
+The September 27 reference `9c062db6a307f5189ac1a06c3f496114b2499d52` added only the required
 `SAFETY` explanation beside an existing guarded private-transcript cast. It has
 no executable changes from the activated Gateway source `0390422beea5`; local
 assertion, formatting, file-size and inexpensive native-plan guards passed. Its
@@ -34,10 +83,10 @@ activation from bounded Discord acceptance and its explicitly unexercised paths.
 
 Apple Passwords locked-view recognition comes from source
 `3f2d68ed51099856b1ee5035d8776c1f680b6e00`. Signed Mini build `2609000598` and
-its private worker remain pinned to that earlier native source and are now
-installed on the originating Mini. Local binding and opaque credential entry
+its private worker were pinned to that earlier native source and verified
+installed on the originating Mini at that checkpoint. Local binding and opaque credential entry
 are verified separately; actual unlock remains unverified. This does not claim
-MacBook installation or vault-item retrieval. The live Gateway is now
+MacBook installation or vault-item retrieval. The Gateway at that checkpoint was
 `0390422beea5265fa8e95e79f204f373e20345b1`, activated on September 27 at
 22:22:37 UTC.
 

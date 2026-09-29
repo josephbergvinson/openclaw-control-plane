@@ -11,16 +11,103 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 29 continuation and activity corrections
+
+Reference `4e8c6dc647b164b00f798c85154eac539e891e3f` includes the complete retained runtime delta
+from the pinned official release. This source export adds or retains the following
+corrections at their existing owners:
+
+- OpenAI host-runtime reasoning controls honor the configured or account-declared
+  effort list for new models, including GPT-6.1 Sol. Ultra is available only when
+  the host can use Max; unsupported off/minimal levels are not invented. Native
+  Codex capability declarations and known-model defaults keep their existing owners.
+- Activity recaps use bounded recent visible evidence and a valid previous recap.
+  Tool-only tails cannot falsely mark a stale recap current, and retries do not
+  replenish the same visible event's exhausted budget. Model choice, reasoning
+  effort and the existing deadline remain unchanged.
+- A yielded parent's frozen child cohort controls terminal settlement dependencies.
+  An unrelated historical terminal child cannot block that cohort indefinitely;
+  live or queued overlapping descendants and genuine cohort dependencies still
+  retain their guards. No old task rows are deleted to make delivery proceed.
+- A parent assistant error releases accepted children through ordinary settlement.
+  Successful execution cleanup does not turn the provider error into a provisional
+  yield whose completion notice can never transfer ownership. The error remains
+  visible, and the child result keeps its existing delivery owner.
+- Structured WebSocket provider errors retain status metadata so the existing
+  provider-failure classifier can distinguish transient failures, authentication
+  failures and quota errors. This does not add a retry loop, change the selected
+  model or make a failed provider request successful.
+- A normal WebSocket close before the response terminal event is a transport
+  interruption. Completed responses, caller aborts, previous errors and policy
+  denials retain their existing dispositions. The correction changes neither
+  handshake classification nor bounded retry and replay-safety guards.
+- Automatic continuations distinguish progress updates from completed-answer
+  delivery. A useful intermediate update does not finish the task or suppress its
+  later distinct final answer. Requester-settle guidance uses the permitted route
+  and retains private completion behavior; it adds no new transport or retry loop.
+- Yielded sessions can checkpoint and compact during idle time after the actual
+  reply owner settles. Returning user or child work preempts optional maintenance
+  and waits for its cleanup; pending final delivery, lifecycle, authentication and
+  the original execution budget still govern admission. Private child receipts
+  keep their exact parent session identity; in-place compaction remains allowed.
+- Goal row fixtures now seed accepted usage while preserving the existing golden
+  expectations. The correction changes tests, not goal accounting behavior.
+- Spawn and wait expose the canonical task ID, and the authorized requester can
+  read a terminal retained task result after child-transcript cleanup. Task IDs,
+  execution run IDs and session keys remain distinct. This read does not create
+  a descendant control edge or assert that an earlier completion wake delivered.
+- Summary chunk planning measures the existing serialized summary input. Large
+  tool-result bodies already omitted by that serializer no longer force repeated
+  summary calls. Full user text, assistant text and tool-call arguments remain
+  charged; worker projections retain aligned scalar estimates and original message
+  groups. Normal replay pressure, model/reasoning and retry policy are unchanged.
+- Admitted Gateway runs hold the existing tracked context claim until their exact
+  controller is removed, including quiet required preflight and deferred terminal
+  persistence. Competing exclusive claims are rejected before chat state or
+  abortability is published. The existing sweep and authority policies remain;
+  this correction does not rewrite already-terminal historical task records.
+- The earlier supersession repair preserves an explicitly superseded run through
+  Gateway completion publication. Required input-completion and settlement writes
+  must succeed before intentional non-delivery can clear a requester-settle wake.
+  Supersession does not conceal a required persistence failure.
+
+The reference also retains Discord voice controls and transcript ownership,
+goal synchronization, steering admission after preparation, scoped automation
+reasoning configuration, dreaming configuration and provider replay corrections.
+Voice policy remains distinct from installation and spoken-meeting acceptance;
+see [requested Discord voice meetings](../docs/13-delivery-and-control-surface.md#requested-discord-voice-meetings).
+
+Source qualification: The parent-error correction at `1ddb61f7367` reproduced four failing caller regressions, then passed 83 focused caller and terminal cases. Production core types, scoped lint, formatting and size rules passed for that change. A separate voice-fixture correction at `cd08148ce19` passed four integration cases and the previously failing Gateway test graph. The broad affected-test check had stopped at that fixture failure; a complete 20-graph pass is not claimed. The five-file progress correction at `c5f2dce454d1` reproduced five failures, then passed 61 focused tests and three existing delivery contracts. Core types, the two affected test graphs, scoped lint, formatting and size rules passed against its exact committed file hashes. The yielded-maintenance change at `6956a5bc6adc` passed focused caller, private-custody and authority-control regressions, core and affected test types, lint, formatting and size checks. Its fixture corrections preserve all input, ownership and delivery assertions. The retained-result repair at `71d3b4b2bb34` passed 43 focused native/task-graph cases and a final seven-case native/ACP/retained-result addendum, with core and affected types plus scoped static gates. The summary-sizing repair at `ebfc40747b3c` reproduced three planning failures, then passed 97 focused compaction cases and a final 20-case summary-planning suite including sparse-budget rejection. Core and affected types, typed lint, formatting and size gates passed. The admission-lifetime repair at `a3d27854992b` reproduced four meaningful failures, then passed 19 selected new, existing caller and orphan/retired-registry cases. Core and affected Gateway types, typed lint, formatting and both size ratchets passed. The existing two-read reactivation fixture failure was reproduced at the prior source and corrected with its assertions intact. The normal-close correction at `6b9059bc29c3` reproduced one failing active-stream loopback regression, then passed 681 provider-stream and existing retry-classification cases. Completion, cancellation, policy-denial and handshake controls passed; core/package types, typed lint, formatting and size gates also passed. The exact bounded build, staged import, config validation and native seal passed. Test groups overlap. Prior source reviews retain their dated scope; the final isolated-index export compared all 44,944 tracked entries, allowing only the two established fixture-label substitutions. The final public revision still requires its own hosted qualification.
+
+The reasoning-capability correction at `4e8c6dc647b1` reproduced five failures before the fix. Eight focused provider-policy, host-thinking and wire-reasoning test files passed afterward, together with production extension types, focused lint, formatting and diff checks. The prepared provider returned the declared efforts plus host Ultra, and Max passed unchanged to the provider. A broader extension test-type check still reports an existing Discord fixture argument error; a separate broader ChatGPT tool-inventory test also failed outside this change. These remain qualification gaps; the scoped results do not establish a full runtime-suite pass.
+
+Gateway activation: the exported `4e8c6dc647b164b00f798c85154eac539e891e3f` successor is pending exact activation. Preceding source `a3d27854992bd22173b51133cab60943aad62d56` activated at `2026-09-29T20:59:18.688929Z` in one native attempt with no rollback. Loaded service identities, health/readiness and bounded preservation checks passed. Config, auth order and 28 job definitions remained unchanged; the observed original channel sessions and previously cleared goal were preserved. That process's ScreenCapture route was verified at `2026-09-29T21:02:40.139259Z` and its protected binding installed at 21:05 UTC. This proves that capture route, not scheduled Journal sync, downstream ingestion or capture by a later process. The manifest retains the dated `6956` and `0b8` activation records and their original scope.
+
+Fresh ordinary-use acceptance: pending after exact successor activation. Earlier channel results retain their recorded source and scope; recovery eligibility, source checks and a sealed candidate do not establish delivered output or settle an earlier completion wake.
+
+Companion installation: signed build `2609000599`, app and bundled-worker source `a5043478a4e20882a289915f32954c715dcec18e`, is installed and launched on both the Mac Mini and MacBook Pro. The full installed inventory was accepted on each host with only the recorded OS-added app-root metadata difference. The MacBook's installed worker also passed config validation. Installation, credential entry, arbitrary vault-item retrieval and ScreenCapture have separate acceptance boundaries.
+
+The Gateway and native companions have separate source identities. Build 599's
+app and private worker are pinned to `a5043478a4e20882a289915f32954c715dcec18e`;
+exporting a later Gateway commit does not change that package. A signed package
+or transferred payload does not establish installation, an authenticated app
+connection, credential entry or ScreenCapture permission on either host.
+
+All earlier qualification sections below retain their recorded dates, sources and
+limits. Their build, installation and delivery results do not qualify this newer
+reference. The final public revision requires its own unchanged hosted
+reconstruction, native-check and build plan.
+
 ## September 27 recovery and credential corrections
 
-Reference `9c062db6a307f5189ac1a06c3f496114b2499d52` is a comment-only successor of
-activated Gateway source `0390422beea5265fa8e95e79f204f373e20345b1`. It adds
+The September 27 reference `9c062db6a307f5189ac1a06c3f496114b2499d52` was a comment-only successor of
+that checkpoint's activated Gateway source `0390422beea5265fa8e95e79f204f373e20345b1`. It added
 one adjacent `SAFETY` comment explaining the existing required-field guard for a
-private transcript target. Executable behavior is unchanged. The assertion,
+private transcript target. Executable behavior was unchanged by that comment-only correction. The assertion,
 formatting and file-size checks, plus 21 other inexpensive native-plan guards,
 passed locally. The [preceding hosted native run](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/36356647516)
 failed because that required explanation was absent; its failed artifact is
-preserved. The rule and baseline are unchanged. This source reference needs its
+preserved. The rule and baseline are unchanged. At that checkpoint the source reference still required its
 own complete hosted qualification. No new build, Gateway activation or native
 installation was performed for the comment correction; all live results below
 remain tied to `0390422beea5`, and native installation retains its separate source.
