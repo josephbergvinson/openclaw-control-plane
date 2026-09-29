@@ -110,6 +110,12 @@ def run(cmd: list[str], *, timeout: int = 120) -> CommandResult:
                 captured.append(text.strip())
         captured.append(f'command timed out after {timeout}s: {" ".join(cmd)}')
         return CommandResult(COMMAND_TIMEOUT_RETURNCODE, '\n'.join(captured).strip())
+    # Successful --json commands frame their payload on stdout. Healthy
+    # diagnostics on stderr can themselves contain JSON (for example database
+    # phase timings); appending them corrupts the payload. Failures retain both
+    # streams for diagnosis, and stderr alone can never supply a success result.
+    if proc.returncode == 0 and '--json' in cmd:
+        return CommandResult(proc.returncode, (proc.stdout or '').strip())
     output = '\n'.join(part for part in [(proc.stdout or '').strip(), (proc.stderr or '').strip()] if part).strip()
     return CommandResult(proc.returncode, output)
 

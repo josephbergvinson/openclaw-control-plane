@@ -253,18 +253,18 @@ Discord `/think ultra` remains available for automatic multi-agent orchestration
 the underlying provider effort is Max. Respect existing user/session choices and
 verify the effective runtime behavior rather than treating a selector as proof.
 
-Autonomous LLM jobs, hooks, heartbeat, active memory, dreaming and utility work use
-`openai/gpt-6-sol` with High reasoning. Set native `agentTurn` payload.model and
-payload.thinking explicitly for operator-owned jobs. For system-owned skill review
-jobs, preserve the projected payload and use supported execution-session model and
-thinking preferences. Heartbeat, dreaming and utility effort comes from the
-selected model’s existing `params.thinking`. Pure command jobs have no scheduler model/thinking;
-if an executable invokes an LLM internally, its inference owner follows the same
-background policy. Preserve deliberately disabled jobs and their existing scope.
+Scheduled LLM jobs, autonomous hooks, heartbeat and dreaming use Astra/xhigh.
+Set native `agentTurn` payload.model and payload.thinking explicitly for
+operator-owned jobs. For system-owned skill review jobs, preserve the projected
+payload and use supported execution-session model and thinking preferences.
+Heartbeat has its own thinking setting; each dreaming phase has an execution
+thinking setting. Active memory and utility calls retain Astra/Max. Pure command
+jobs have no scheduler model; nested LLM calls follow the owning task's policy.
+Preserve deliberately disabled jobs and their existing scope.
 
 Leave global subagent model/thinking pins unset so children inherit the initiating
 turn. Explicit user orchestration, including Ultra, keeps its requested settings;
-a background Sol/High parent passes those settings to its children. A user-task
+a scheduled Astra/xhigh parent passes those settings to its children. A user-task
 continuation carried by a heartbeat remains user work. Do not silently use the
 interactive model when a configured background route is unavailable.
 

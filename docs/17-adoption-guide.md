@@ -124,7 +124,9 @@ configuration. If adopting the reference's native compaction triggers, review th
 any earlier byte-threshold and memory-flush-margin overrides explicitly.
 
 The profile uses `openai/gpt-6-astra` for the main agent and image understanding,
-`ultra` for main reasoning and `max` for subagents. Generation uses
+`max` for ordinary reasoning, inherited by subagents. Explicit `/think ultra`
+remains available. Scheduled agent turns, heartbeat and dreaming use Astra/xhigh;
+active memory and utility helpers retain Astra/Max. Generation uses
 `openai/gpt-image-2.5-flare`. It includes the alternate Codex-backed model mapping,
 local memory search, compaction and session settings described in
 [configuration](../config/README.md). Check account availability and native runtime
