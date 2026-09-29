@@ -35,14 +35,77 @@ This presentation choice changes neither task execution nor final delivery.
 
 A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
 
-Candidate `24e9bfe5431` addresses a later gap in that lifecycle: a worker could
+## Approved company Discord reply surfaces
+
+A company channel can be both a registered read source and an explicitly approved
+reply surface. Source registration alone does not create an inbound agent binding
+or permission to post. When the operator approves another reply channel, align
+its exact guild/channel route, live company-agent binding, sender/mention controls,
+channel prompt and company workspace policy. Verify the bot's effective View
+Channel and Send Messages permissions, plus Send Messages in Threads when used;
+category or member overrides can block replies despite correct routing. Preserve
+the intended teammate permissions and company context. Verify an ordinary allowed
+mention receives its response in that channel; a configuration readback alone does
+not prove delivery.
+
+## Requested Discord voice meetings
+
+The configured operator preference is to take meeting minutes when asked to join
+a registered company voice room. Announce to participants that the bot is recording
+for meeting notes, then use `transcripts` with the `discord-voice` provider to join
+silently and capture that meeting. An explicit request to join without recording
+uses native `message` action `voice-join` instead; that action remains connection-only.
+Ordinary team-server membership does not authorize unattended recording or broaden
+other teammates' authority. Run voice controls and capture start/stop in the
+authenticated requesting agent; delegate note drafting only after capture ends,
+and do not assume a background worker inherits the caller’s live meeting authority.
+
+For “join me” or “hop in voice”, resolve the authenticated requester’s current room
+with native `message` action `voice-status`, using the current `guildId` and their
+`userId`. Verify the returned room before joining. Ask which room only when the
+requester is not in voice or the intended target remains ambiguous.
+
+This workflow requires a selected runtime that exposes those message actions and
+the transcript provider. The policy templates are not a runtime implementation,
+and the earlier September 21 reference results below do not qualify this feature.
+
+Bind the installation's verified operator identity and company guilds. Enable
+`channels.discord.voice.enabled`; keep voice states enabled, allow the intended
+voice rooms, and verify the bot's actual Connect permission. Enable transcripts
+and configure a working batch audio-transcription backend, including an existing
+local CLI backend when suitable. A missing `voice` block does not enable voice.
+Allowlisting a company's text channel alone need not admit its voice room. Keep
+text participation and teammate tool authority scoped to their intended uses.
+
+Before requested capture, tell the participants that the bot is taking and saving
+meeting notes. Save the returned exact capture selector. The operator can then ask
+to stop and deliver the minutes: stop that capture, wait for finalization, inspect
+its notes, and deliver decisions, action owners, deadlines and open questions in
+the originating conversation. Manual capture does not automatically detect the end
+of a meeting, and the transcript provider does not automatically send its notes
+to Discord. Do not install an occupancy-based recurring recorder to implement a
+single requested meeting.
+
+A capture-only connection may leave automatically when capture stops; do not
+promise continued presence. When asked to leave, first stop and deliver any active
+capture, then use `voice-leave` if the task's connection remains and verify it left.
+A capture attached to a pre-existing conversation must not disconnect that owner.
+Qualification should cover a plain-language join and leave, rejected unauthorized
+control, a bounded sample capture with speech, stopping the exact capture, readable
+notes delivered to the originating conversation, and final connection cleanup.
+An enabled configuration or a successful join alone does not prove transcription
+or minutes delivery.
+
+## September 23 requester presentation repair
+
+Source `24e9bfe5431` addressed a gap in that lifecycle: a worker could
 resume its original requester without the presentation route used for ordinary
 incoming messages. The model kept working while typing, progress and narration
 were absent. The repair carries current run/session/destination authority through
 the internal resume and reuses the channel's configured progress card. Private
 worker completion prompts are excluded from narration. Progress does not acquire
 final-delivery custody; stale, replaced or cancelled owners cannot send delayed
-updates. Ninety focused cases pass across the agent and Discord owners. The
+updates. Ninety focused cases passed across the agent and Discord owners. The
 September 23 source `5b5942def95c` retained this repair and passed its
 [dated hosted qualification](../runtime/README.md#september-23-qualified-source).
 Later runtime and live channel receipts retain their separate scope.

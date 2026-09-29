@@ -56,9 +56,15 @@ versions. CI reads those values from the same manifest and verifies the annotate
 tag and reconstructed tree before running the source checks and build. A version
 label alone does not identify the custom changes.
 
-The [9.5 upgrade source map](docs/20-runtime-source-changes.md#september-22-upgrade)
-describes preserved task ownership and steering, native credential entry, recovery
-reporting and diagnostic corrections. Source implementation and tests do not prove
+The [September 29 source map](docs/20-runtime-source-changes.md#september-29-continuation-and-activity-corrections)
+describes the current reference `4e8c6dc647b164b00f798c85154eac539e891e3f`: preserved task ownership
+and steering, bounded Activity recaps, child-result continuation, structured
+provider-failure handling, useful progress updates and preemptible maintenance
+during yielded idle periods, canonical retained-task-result lookup and summary sizing
+that charges only content sent to the summary model. Admitted runs retain their
+existing ownership through required preparation and terminal persistence. Premature
+normal WebSocket closure retains the existing bounded transport-recovery path. Declared OpenAI reasoning capabilities now expose Max for new models, with optional Max-based Ultra orchestration. It also
+retains the earlier voice controls, native credential entry and recovery corrections. Source implementation and tests do not prove
 that a gateway, companion or account interaction has been upgraded. The manifest
 records exported source and deployed component identities separately: a source
 candidate can be newer than the active gateway. Each new installation requires its
