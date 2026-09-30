@@ -30,6 +30,19 @@ RESOLVER = ROOT / "scripts" / "resolve_capability.py"
 
 
 class ResolveCapabilityTests(unittest.TestCase):
+    def test_auth_guidance_uses_observed_human_presence_not_a_passkey_label(self) -> None:
+        payload = self.run_resolver(
+            "--system", "github", "--intent", "read", "--portfolio", "company-beta",
+            "--required-operation", "repo-read",
+        )
+        gate = payload["browser_fallback_gate"]
+        self.assertIn("observed_native_password_fallback", gate["agent_handled_auth_steps"])
+        self.assertIn("provider_required_physical_biometric_or_security_key", gate["human_only_auth_gates"])
+        self.assertIn("mfa_without_supported_secure_route", gate["human_only_auth_gates"])
+        self.assertIn("captcha", gate["human_only_auth_gates"])
+        self.assertNotIn("passkey_biometric_or_security_key", gate["human_only_auth_gates"])
+        self.assertIn("observed password fallback", " ".join(payload["constraints"]))
+
     def _with_route_binding(self, args: tuple[str, ...]) -> list[str]:
         bound = list(args)
         if "--system" not in bound:
@@ -1035,7 +1048,7 @@ class ResolveCapabilityTests(unittest.TestCase):
         self.assertIn("native_operation_unsupported", gate["matched_predicates"])
         self.assertFalse(gate["automatic_user_profile_fallback_allowed"])
         self.assertEqual(gate["browser_secret_entry"], "opaque_secret_broker_only")
-        self.assertIn("one_time_2fa_or_mfa", gate["human_only_auth_gates"])
+        self.assertIn("mfa_without_supported_secure_route", gate["human_only_auth_gates"])
         self.assertFalse(payload["execution_guard"]["allowed"])
 
     def test_generic_authenticated_ui_predicate_is_provider_neutral(self) -> None:
@@ -3925,10 +3938,11 @@ class ResolveCapabilityTests(unittest.TestCase):
                         preferred, json.dumps(signal | inflated)
                     )
                 )
-        self.assertIsNone(
+        self.assertEqual(
             resolver["parse_exact_probe_signal"](
-                preferred, json.dumps(signal), "unexpected stderr"
-            )
+                preferred, json.dumps(signal), "diagnostic stderr"
+            ),
+            (("read",), ("sites-list",)),
         )
 
     def test_gog_oauth_probe_executes_fixed_auth_list_and_binds_exact_account(
@@ -4528,13 +4542,26 @@ class ResolveCapabilityTests(unittest.TestCase):
                             json.dumps(wrong_digest),
                         )
                     )
-                self.assertIsNone(
+                self.assertEqual(
                     resolver["parse_exact_probe_signal"](
                         preferred,
                         json.dumps(case["signal"]),
-                        "unexpected stderr",
-                    )
+                        "[config] warnings: optional plugin unavailable\n",
+                    ),
+                    resolver["parse_exact_probe_signal"](
+                        preferred, json.dumps(case["signal"])
+                    ),
                 )
+                evidence, diagnostics = resolver["run_exact_registered_probe"](
+                    preferred,
+                    lambda _argv, _timeout: result_type(
+                        returncode=1,
+                        stdout=json.dumps(case["signal"]),
+                        stderr="provider command failed",
+                    ),
+                )
+                self.assertIsNone(evidence)
+                self.assertEqual(diagnostics["result"], "blocked_exact_probe_failed")
                 if case["name"] == 'personal-data-neon-readonly':
                     strict_boolean_fields = (
                         ("custody", "physical_workspace_verified"),
@@ -5262,6 +5289,52 @@ class ResolveCapabilityTests(unittest.TestCase):
                             )
                         )
 
+    def test_mercury_structured_probe_ignores_diagnostics_without_inflating_readiness(self) -> None:
+        resolver = runpy.run_path(str(RESOLVER))
+        preferred = resolver["resolve"](
+            "mercury", "read", requested_principal="company-beta",
+            requested_account=_operator_binding("services.mercury.organization_name"),
+            required_operation="capability-probe",
+        )["preferred_lane"]
+        tools = sorted(resolver["MERCURY_COMPANY_BETA_TOOL_NAMES"])
+        signal = {
+            "generatedAt": "2026-09-30T00:00:00Z",
+            "servers": {"mercury-company-beta": {
+                "launch": "https://mcp.mercury.com/mcp", "tools": len(tools),
+                "codexApprovalMode": "auto", "requestTimeoutMs": 60_000,
+                "supportsParallelToolCalls": True,
+                "listChanged": {"prompts": False, "resources": False, "tools": True},
+            }},
+            "tools": tools, "diagnostics": [],
+        }
+        diagnostic = "[config] warnings: optional plugin unavailable\n"
+        result_type = resolver["ProbeCommandResult"]
+        evidence, diagnostics = resolver["run_exact_registered_probe"](
+            preferred, lambda *_: result_type(
+                returncode=0, stdout=json.dumps(signal), stderr=diagnostic,
+            ),
+        )
+        self.assertEqual(diagnostics["result"], "passed")
+        self.assertEqual(evidence.evidence_operations, ("capability-probe",))
+        for override in (
+            {"diagnostics": [{"error": "unauthorized"}]},
+            {"tools": tools[:-1]},
+            {"servers": {"wrong-server": signal["servers"]["mercury-company-beta"]}},
+        ):
+            with self.subTest(override=override):
+                self.assertIsNone(resolver["parse_exact_probe_signal"](
+                    preferred, json.dumps(signal | override), diagnostic,
+                ))
+        for invalid_result in (
+            result_type(returncode=1, stdout=json.dumps(signal), stderr=diagnostic),
+            result_type(returncode=0, stdout="not json", stderr=diagnostic),
+        ):
+            evidence, diagnostics = resolver["run_exact_registered_probe"](
+                preferred, lambda *_: invalid_result,
+            )
+            self.assertIsNone(evidence)
+            self.assertNotEqual(diagnostics["result"], "passed")
+
     def test_github_exact_probe_accepts_active_keyring_identity_from_stderr(
         self,
     ) -> None:
@@ -5378,6 +5451,28 @@ class ResolveCapabilityTests(unittest.TestCase):
             ),
             (("read",), ("identity-read",)),
         )
+
+        trusted_file = str(Path(_operator_binding("paths.host_home")) / ".config/gh/hosts.yml")
+        trusted_file_metadata = redacted_metadata.replace(
+            "(keyring)", "(" + trusted_file + ")"
+        )
+        self.assertEqual(
+            resolver["parse_exact_probe_signal"](
+                preferred, "", trusted_file_metadata
+            ),
+            (("read",), ("identity-read",)),
+        )
+        for invalid in (
+            trusted_file_metadata.replace(_operator_binding("identifiers.github_username"), "someone-else"),
+            trusted_file_metadata.replace("Active account: true", "Active account: false"),
+            trusted_file_metadata.replace(trusted_file, "/tmp/hosts.yml"),
+            trusted_file_metadata.replace(trusted_file, "environment"),
+            trusted_file_metadata.replace("gho_************************************", "gho_plaintext-example"),
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(
+                    resolver["parse_exact_probe_signal"](preferred, "", invalid)
+                )
 
         oversized = result_type(
             returncode=0,
@@ -5553,12 +5648,15 @@ class ResolveCapabilityTests(unittest.TestCase):
                         json.dumps(invalid),
                     )
                 )
-                self.assertIsNone(
+                self.assertEqual(
                     resolver["parse_exact_probe_signal"](
                         preferred,
                         json.dumps(case["signal"]),
-                        "unexpected provider diagnostics",
-                    )
+                        "provider diagnostic stderr",
+                    ),
+                    resolver["parse_exact_probe_signal"](
+                        preferred, json.dumps(case["signal"])
+                    ),
                 )
                 if case["name"] == "trello":
                     invalid = json.loads(json.dumps(case["signal"]))
@@ -5782,12 +5880,13 @@ class ResolveCapabilityTests(unittest.TestCase):
                         json.dumps(invalid),
                     )
                 )
-                self.assertIsNone(
+                self.assertEqual(
                     resolver["parse_exact_probe_signal"](
                         preferred,
                         json.dumps(signal),
-                        "unexpected provider diagnostics",
-                    )
+                        "provider diagnostic stderr",
+                    ),
+                    (("read",), ("account-read",)),
                 )
                 for field, value in (
                     ("uid", 0 if os.getuid() != 0 else 1),

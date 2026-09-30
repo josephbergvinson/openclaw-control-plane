@@ -259,25 +259,28 @@ Invoke the checked activator from its supported independent process boundary. Do
 
 ## Model and reasoning policy
 
-Interactive work defaults to `openai/gpt-6-astra` with Max reasoning. An explicit
-Discord `/think ultra` remains available for automatic multi-agent orchestration;
-the underlying provider effort is Max. Respect existing user/session choices and
-verify the effective runtime behavior rather than treating a selector as proof.
+Use `openai/gpt-6.1-sol` with Max reasoning for interactive work and LLM-backed
+background work, with no automatic model fallback. An explicit Discord
+`/think ultra` enables automatic multi-agent orchestration using underlying Max.
+Verify the effective model and effort on the actual requesting surface.
 
-Scheduled LLM jobs, autonomous hooks, heartbeat and dreaming use Astra/xhigh.
 Set native `agentTurn` payload.model and payload.thinking explicitly for
 operator-owned jobs. For system-owned skill review jobs, preserve the projected
 payload and use supported execution-session model and thinking preferences.
-Heartbeat has its own thinking setting; each dreaming phase has an execution
-thinking setting. Active memory and utility calls retain Astra/Max. Pure command
-jobs have no scheduler model; nested LLM calls follow the owning task's policy.
-Preserve deliberately disabled jobs and their existing scope.
+Heartbeat has its own thinking setting; all three dreaming phases have execution
+thinking settings. Active memory and utility calls use the same GPT-6.1 Sol/Max
+policy. Pure command jobs have no scheduler model; inspect any nested LLM calls.
+Keep intentionally disabled jobs disabled and preserve schedule and delivery scope.
 
 Leave global subagent model/thinking pins unset so children inherit the initiating
-turn. Explicit user orchestration, including Ultra, keeps its requested settings;
-a scheduled Astra/xhigh parent passes those settings to its children. A user-task
-continuation carried by a heartbeat remains user work. Do not silently use the
-interactive model when a configured background route is unavailable.
+turn, including deliberately selected Ultra. A user-task continuation carried by
+a heartbeat remains user work. When an all-surface model change is authorized,
+inspect stale agent, session and task overrides through their native owners rather
+than assuming the default reaches them. Do not silently switch model or lower
+reasoning effort when the configured route fails.
+
+Image generation, local embedding and speech use their specialized providers;
+the LLM policy does not substitute a chat model for those capabilities.
 
 ## Schedulers, monitoring and retained state
 

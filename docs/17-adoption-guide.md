@@ -123,11 +123,11 @@ configuration. If adopting the reference's native compaction triggers, review th
 [two-key deletion patch](../config/README.md#existing-compaction-overrides) to remove
 any earlier byte-threshold and memory-flush-margin overrides explicitly.
 
-The profile uses `openai/gpt-6-astra` for the main agent and image understanding,
+The profile uses `openai/gpt-6.1-sol` for the main agent and image understanding,
 `max` for ordinary reasoning, inherited by subagents. Explicit `/think ultra`
-remains available. Scheduled agent turns, heartbeat and dreaming use Astra/xhigh;
-active memory and utility helpers retain Astra/Max. Generation uses
-`openai/gpt-image-2.5-flare`. It includes the alternate Codex-backed model mapping,
+remains available. Scheduled agent turns, heartbeat and dreaming use GPT-6.1 Sol/Max;
+active memory and utility helpers retain GPT-6.1 Sol/Max. Generation uses
+`openai/gpt-image-2.5-flare`. The profile includes explicit ChatGPT-route metadata,
 local memory search, compaction and session settings described in
 [configuration](../config/README.md). Check account availability and native runtime
 selection on an actual request; a saved model ID is not proof of execution.
@@ -144,7 +144,7 @@ bundled llama.cpp setup using the same pinned CLI and native state directory:
 Select **Local llama.cpp**, then **Managed local server**. Decline the chat-model
 proposal and accept the separate **embedding-only setup**. Native setup installs
 the managed server and embedding model and writes its command, arguments and
-loopback endpoint. The selected Astra chat model should remain unchanged. The
+loopback endpoint. The selected GPT-6.1 Sol chat model should remain unchanged. The
 reference supplies the canonical EmbeddingGemma URI; a bare cache filename from
 another installation would require that file to exist locally. See the
 [official llama.cpp setup guide](https://docs.openclaw.ai/plugins/llama-cpp).
@@ -160,7 +160,7 @@ Verify the resulting configuration and exercise a known, nonsecret memory source
 "$node_executable" "$source_checkout/openclaw.mjs" memory search "QUESTION ABOUT A KNOWN NONSECRET MEMORY FACT" --agent main --max-results 3 --json
 ```
 
-Confirm that Astra remains selected, deep status reports local embedding readiness,
+Confirm that GPT-6.1 Sol remains selected, deep status reports local embedding readiness,
 and retrieval returns the expected source with no stale or unavailable status. An
 empty corpus cannot prove retrieval. The [memory CLI guide](https://docs.openclaw.ai/cli/memory)
 describes indexing and status. These steps initialize the adopter's local service;
