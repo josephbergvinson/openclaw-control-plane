@@ -2,15 +2,12 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-6-astra",
+        "primary": "openai/gpt-6.1-sol",
         "fallbacks": []
       },
       "modelPolicy": {
         "allow": [
-          "openai/gpt-5.6-sol",
-          "openai/gpt-5.5",
-          "openai/gpt-6-astra",
-          "openai/gpt-6-sol"
+          "openai/gpt-6.1-sol"
         ]
       },
       "thinkingDefault": "max",
@@ -38,7 +35,7 @@
         "runTimeoutSeconds": 0
       },
       "imageModel": {
-        "primary": "openai/gpt-6-astra",
+        "primary": "openai/gpt-6.1-sol",
         "fallbacks": []
       },
       "mediaModels": {
@@ -50,29 +47,16 @@
       "systemAgent": {
         "agentId": "main"
       },
-      "utilityModel": "openai/gpt-6-astra",
+      "utilityModel": "openai/gpt-6.1-sol",
       "verboseDefault": "off",
       "workspace": "${operator:paths.workspace}",
       "models": {
-        "openai/gpt-5.6-sol": {
-          "agentRuntime": {
-            "id": "codex"
-          }
-        },
-        "openai/gpt-6-astra": {
+        "openai/gpt-6.1-sol": {
           "agentRuntime": {
             "id": "openclaw"
           },
           "params": {
             "thinking": "max"
-          }
-        },
-        "openai/gpt-6-sol": {
-          "agentRuntime": {
-            "id": "openclaw"
-          },
-          "params": {
-            "thinking": "high"
           }
         }
       },
@@ -83,9 +67,9 @@
         "mode": "off"
       },
       "heartbeat": {
-        "model": "openai/gpt-6-astra",
+        "model": "openai/gpt-6.1-sol",
         "isolatedSession": true,
-        "thinking": "xhigh"
+        "thinking": "max"
       }
     }
   },
@@ -160,21 +144,21 @@
         },
         "config": {
           "dreaming": {
-            "model": "openai/gpt-6-astra",
+            "model": "openai/gpt-6.1-sol",
             "phases": {
               "light": {
                 "execution": {
-                  "thinking": "xhigh"
+                  "thinking": "max"
                 }
               },
               "deep": {
                 "execution": {
-                  "thinking": "xhigh"
+                  "thinking": "max"
                 }
               },
               "rem": {
                 "execution": {
-                  "thinking": "xhigh"
+                  "thinking": "max"
                 }
               }
             }
@@ -205,7 +189,7 @@
       "active-memory": {
         "enabled": true,
         "config": {
-          "model": "openai/gpt-6-astra",
+          "model": "openai/gpt-6.1-sol",
           "thinking": "max"
         }
       }
@@ -224,6 +208,46 @@
     },
     "fs": {
       "workspaceOnly": false
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openai": {
+        "baseUrl": "https://chatgpt.com/backend-api",
+        "api": "openai-chatgpt-responses",
+        "models": [
+          {
+            "id": "gpt-6.1-sol",
+            "name": "GPT-6.1 Sol",
+            "api": "openai-chatgpt-responses",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "cost": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite": 2.5
+            },
+            "contextWindow": 872000,
+            "contextTokens": 272000,
+            "maxTokens": 128000,
+            "compat": {
+              "supportedReasoningEfforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "supportsTemperature": false
+            }
+          }
+        ]
+      }
     }
   }
 }
