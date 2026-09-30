@@ -616,19 +616,20 @@ def _validate_terminal_candidate_seal(candidate: dict[str, Any]) -> None:
         raise ActivationError("terminal activation candidate seal provenance drift")
 
 
-def _read_screen_capture_retirement_json(path: Path, label: str) -> tuple[dict[str, Any], bytes, os.stat_result]:
-    """Read a small immutable owner record without opening a device or FIFO."""
+def _read_screen_capture_retirement_json(path: Path, label: str, *,
+                                         maximum_bytes: int = 256 * 1024) -> tuple[dict[str, Any], bytes, os.stat_result]:
+    """Read an immutable owner record within its native record-type bound."""
     before = os.lstat(path)
     if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
             or before.st_uid != os.getuid() or stat.S_IMODE(before.st_mode) != 0o400
-            or before.st_size > 256 * 1024 or path.resolve(strict=True) != path):
+            or before.st_size > maximum_bytes or path.resolve(strict=True) != path):
         raise ActivationError(f"{label} identity drift")
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         opened = os.fstat(descriptor)
         if _screen_capture_file_identity(opened) != _screen_capture_file_identity(before):
             raise ActivationError(f"{label} changed before reading")
-        payload = os.read(descriptor, 256 * 1024 + 1)
+        payload = os.read(descriptor, maximum_bytes + 1)
         after = os.fstat(descriptor)
     finally:
         os.close(descriptor)
@@ -765,7 +766,8 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
         if _screen_capture_file_identity(os.lstat(lock)) != _screen_capture_file_identity(lock_info):
             raise ActivationError("ScreenCapture activation lock changed during opening")
         if os.path.lexists(path):
-            result, payload, _ = _read_screen_capture_retirement_json(path, "current ScreenCapture activation")
+            result, payload, _ = _read_screen_capture_retirement_json(
+                path, "current ScreenCapture activation", maximum_bytes=MAX_FILE_BYTES)
             snapshot = result.get("snapshot", {})
             if not isinstance(snapshot, dict):
                 raise ActivationError("ScreenCapture restore snapshot is invalid")
@@ -824,9 +826,11 @@ def _screen_capture_activation_result(path: Path, expected_sha256: str | None,
         release_identities = retirement_release_identities(receipt)
         result_path = generation / path.name
         fence_path = generation / START_CONSUMED_NAME
-        if any(os.lstat(item).st_size > 256 * 1024 for item in (result_path, fence_path)):
+        if (os.lstat(result_path).st_size > MAX_FILE_BYTES
+                or os.lstat(fence_path).st_size > 256 * 1024):
             raise ActivationError("ScreenCapture retired activation exceeds bound")
-        result, payload, result_info = _read_screen_capture_retirement_json(result_path, "retired ScreenCapture activation")
+        result, payload, result_info = _read_screen_capture_retirement_json(
+            result_path, "retired ScreenCapture activation", maximum_bytes=MAX_FILE_BYTES)
         fence, fence_payload, fence_info = _read_screen_capture_retirement_json(fence_path, "retired ScreenCapture start fence")
         for key, actual_path, actual_payload, info in (
                 ("result", result_path, payload, result_info),

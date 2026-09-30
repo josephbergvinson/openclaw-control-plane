@@ -56,8 +56,27 @@ versions. CI reads those values from the same manifest and verifies the annotate
 tag and reconstructed tree before running the source checks and build. A version
 label alone does not identify the custom changes.
 
+The [September 30 source map](docs/20-runtime-source-changes.md#september-30-recovery-steering-and-delivery)
+describes reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed`. Follow-up messages can
+reach the current execution after recovery publishes its exact owner. Original
+requester authority and child-result delivery survive restart and cleanup without
+replaying committed work. Discord thread and voice lookup follow the configured
+account and channel policy. Native verification keeps ownership of child processes
+until cleanup finishes.
+
+The complete patch still covers the pinned official release through this reference.
+Its final review includes 129 changed paths since the September 29 reference,
+including all 107 changes since the deployed `d10b9c4` predecessor. Dialogue and
+automation defaults use GPT-6.1 Sol at Max, with manual Ultra and no automatic
+fallback. The [runtime qualification](runtime/README.md#september-30-recovery-steering-and-delivery)
+records the source checks, all 18 requester-wake and 32 voice E2E cases, and the
+reviewed complete aggregate build. Source and fixture results have separate scope
+from an actual channel reply, spoken meeting or provider account interaction.
+
+On September 30, native activation selected the exact `30ea` source and verified both loaded services, health and readiness. Fresh checks preserved configuration, all 28 job definitions, auth orders, approvals, schemas, original session IDs and goal hashes. A new capture verified the current gateway process. This is activation and preservation evidence: ordinary-use steering consistency, process-offline Discord catch-up, account workflows, spoken meeting minutes and the next natural Journal cycle remain separate acceptance checks.
+
 The [September 29 source map](docs/20-runtime-source-changes.md#september-29-continuation-and-activity-corrections)
-describes the current reference `4e8c6dc647b164b00f798c85154eac539e891e3f`: preserved task ownership
+describes the September 29 reference `4e8c6dc647b164b00f798c85154eac539e891e3f`: preserved task ownership
 and steering, bounded Activity recaps, child-result continuation, structured
 provider-failure handling, useful progress updates and preemptible maintenance
 during yielded idle periods, canonical retained-task-result lookup and summary sizing
