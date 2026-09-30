@@ -13,9 +13,51 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## September 30 recovery steering and delivery
+
+Current reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed` lets follow-up input
+reach the current execution after its exact recovered owner publishes. It preserves
+the original requester, session, run and task generation through that transition.
+A child result keeps durable delivery custody across restart and cleanup, including
+a new result from the same child after the resumed parent yields again. Earlier
+committed results are not replayed. Research handoffs retain the original
+requester's permitted tools; private delivery and teammate restrictions remain
+separately enforced.
+
+Discord reconciles permitted active threads when the account connects and resolves
+the requester's voice room using current account and channel policy. Native check
+leases retain the owned descendants until cleanup finishes. These corrections use
+the existing execution, delivery and verification owners rather than adding a new
+reply transport or broadening account access.
+
+The final source review contains all 129 changes since the September 29 reference
+`4e8c6dc647b164b00f798c85154eac539e891e3f`, including the 107 changes since deployed
+predecessor `d10b9c46aabbbe0d492490a4ed48305b8bf9fcc1`. The complete patch still
+contains all 1,106 changed paths from the pinned official release, with only the
+same two fixture-label substitutions. Dialogue and automation defaults use
+GPT-6.1 Sol at Max, manual Ultra remains available, and there is no automatic
+model fallback.
+
+The [qualification record](../runtime/README.md#september-30-recovery-steering-and-delivery)
+records 1,880 passing owning cases, the final 256 affected caller cases with overlap,
+all 18 requester-wake and 32 voice E2E cases, and the native source checks. The
+complete aggregate, including UI, was accepted through reviewed reconciliation
+`742ef3dfc1c23e5c034068c7110975a0540012dfe2c22345c94ed02bc9832a4b` after verifying
+all 16 phases, physical join, bounded resource history and unchanged source-bound
+build metadata. The original monitor failure remains recorded. That source and
+build evidence does not prove live steering, spoken meeting minutes or persistent
+access to every provider account.
+
+On September 30, native activation selected the exact `30ea` source and verified both loaded services, health and readiness. Fresh checks preserved configuration, all 28 job definitions, auth orders, approvals, schemas, original session IDs and goal hashes. A new capture verified the current gateway process. This is activation and preservation evidence: ordinary-use steering consistency, process-offline Discord catch-up, account workflows, spoken meeting minutes and the next natural Journal cycle remain separate acceptance checks.
+
+The exact published revision still needs the existing five hosted gates. Native
+Gateway activation and channel delivery have their own evidence. Companion build
+599 retains its separately recorded `a504` source and installation scope. All
+earlier sections below preserve their dated source, counts and acceptance limits.
+
 ## September 29 continuation and activity corrections
 
-Current reference `4e8c6dc647b164b00f798c85154eac539e891e3f` retains the complete runtime source
+The September 29 reference `4e8c6dc647b164b00f798c85154eac539e891e3f` retains the complete runtime source
 and adds bounded Activity recaps, frozen-cohort completion dependencies, ordinary
 child settlement after a parent assistant error, and preservation of structured
 provider-error status for the existing failure classifier. The final prompt correction

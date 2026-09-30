@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from test_openclaw_runtime_activate import activate_module as activation, fixture, run, simulate_release_remount
+from test_openclaw_runtime_activate import FakeBackend, activate_module as activation, fixture, run, simulate_release_remount
 from test_screen_capture_continuity import capture_binding
 
 
@@ -43,6 +43,32 @@ def test_original_retirement_preserves_current_capture_without_new_probe(fixture
     assert all(p.read_bytes() == data for p, data in before.items())
     assert not fixture.paths.result.exists()
 
+
+
+def test_large_native_activation_receipt_preserves_capture_after_retirement(fixture, capture_binding):
+    _, _, database, source, _ = capture_binding
+    backend = FakeBackend(fixture)
+    backend.command_evidence.extend(activation.expected_stopped_command_evidence(fixture.paths) * 300)
+    assert run(fixture, backend)["outcome"] == "activated"
+    payload = fixture.paths.result.read_bytes()
+    assert 256 * 1024 < len(payload) < activation.MAX_FILE_BYTES
+    proof = json.loads(source.read_text())
+    proof["activationReceiptSha256"] = hashlib.sha256(payload).hexdigest()
+    source.write_text(json.dumps(proof))
+    binding = fixture.root / "large-retirement-bound-capture.json"
+    activation.enroll_screen_capture_binding(
+        fixture.paths, source, hashlib.sha256(source.read_bytes()).hexdigest(), database, binding,
+    )
+    archive = fixture.paths.result.parent / "archive" / "large-native-activation"
+    activation.retire_terminal_receipts(fixture.paths, archive)
+    before = {p: p.read_bytes() for p in [binding, *archive.iterdir()]}
+    result = activation.verify_screen_capture_binding(
+        binding, fixture.paths.node, require_current_process=True,
+    )
+    assert result["effectiveCaptureVerifiedForCurrentProcess"] is True
+    assert result["scheduledSyncProven"] is False
+    assert all(p.read_bytes() == data for p, data in before.items())
+    assert not fixture.paths.result.exists()
 
 def test_retirement_does_not_rescue_changed_process(fixture, retired_capture, monkeypatch):
     binding, _, _ = retired_capture
@@ -153,7 +179,9 @@ def test_oversized_archive_record_is_rejected_before_body_read(fixture, retired_
     binding, archive, _ = retired_capture
     oversized = archive / name
     oversized.chmod(0o600)
-    oversized.write_bytes(b"x" * (256 * 1024 + 1))
+    limit = activation.MAX_FILE_BYTES if name == "activation-result.json" else 256 * 1024
+    with oversized.open("wb") as stream:
+        stream.truncate(limit + 1)
     oversized.chmod(0o400)
     real_open = os.open
 

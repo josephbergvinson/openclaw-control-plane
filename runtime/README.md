@@ -11,6 +11,75 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## September 30 recovery steering and delivery
+
+Reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed` contains the complete runtime
+patch from the pinned official release. The publication review covers all 129
+changed paths since `4e8c6dc647b164b00f798c85154eac539e891e3f`, including all 107
+changes since the deployed `d10b9c46aabbbe0d492490a4ed48305b8bf9fcc1` predecessor.
+The upstream-to-reference patch covers 1,106 changed paths. Reconstruction still
+normalizes only the two established company labels in one test fixture; production
+source and every other tracked blob and file mode match the exact reference.
+
+The changes address concrete continuity failures:
+
+- Follow-up input can wait for its exact recovered run to publish, then steer the
+  current execution instead of waiting behind an owner that has already changed.
+  The original requester, session, run and task generation remain bound.
+- Child completions keep durable delivery custody through restart and transcript
+  cleanup. A resumed parent can yield again and receive a new result from the same
+  child without replaying an earlier committed completion.
+- A research handoff retains the original requester's permitted tools at the
+  existing continuation owner. Private delivery and teammate restrictions retain
+  their separate authority checks.
+- Discord reconciles permitted active threads after connection and resolves the
+  requester's voice room through the current account and channel policy.
+- Native verification leases retain the owned process tree until physical cleanup
+  completes. Existing compiler, typed lint and source-size checks remain in place.
+
+Dialogue and automation defaults use GPT-6.1 Sol at Max with no automatic model
+fallback. Manual Ultra remains available through the existing reasoning control.
+These defaults do not replace explicit caller settings or alter account authority.
+
+Source qualification: all 1,880 cases in the 20 whole owning files passed, with no
+failures, skips, todos, missing files or duplicate file execution. After the final
+byte-preserving two-predicate extraction, all 256 cases in the four affected caller
+files passed. Those groups overlap. Production core and affected test/package type
+checks, scoped typed lint, formatting and whitespace checks passed. The native
+line-cap, suppression, assertion-safety and environment-budget checks passed
+against both the prior reference and the official upstream; no gate was excluded
+or new baseline allowance introduced.
+
+All 18 requester-wake E2E cases and all 32 cases in the two voice E2E files passed
+against this exact clean source, using the native configuration and one worker,
+without test-name filtering. The source-bound qualification receipt SHA-256 is
+`0e3d4363ab06b2840dc653d16393d9abbc8c09116a2a202d2e082baba36d2a8f`.
+These are runtime and transport fixtures; they do not establish live Discord
+steering or the spoken join, record, leave and minutes flow on either server.
+
+The complete native aggregate build, including UI, exited zero and completed all
+16 phases once. Its original monitor receipt retained
+`runner_inspection_failed_ActivationError_cleanup_unverified`; that failure record
+was not rewritten. Independent read-only reconciliation verified physical join,
+no surviving owned processes or native lease, 151 resource samples at pressure 2
+or lower, and the three unchanged build metadata files bound to this source. Root
+accepted that exact completed aggregate through immutable reconciliation SHA-256
+`742ef3dfc1c23e5c034068c7110975a0540012dfe2c22345c94ed02bc9832a4b`.
+The exact historical process-inspection exception was not recorded. This accepts
+the build; staging parity, offline validation, sealing, activation, preservation
+and live delivery remain separate evidence.
+
+On September 30, native activation selected the exact `30ea` source and verified both loaded services, health and readiness. Fresh checks preserved configuration, all 28 job definitions, auth orders, approvals, schemas, original session IDs and goal hashes. A new capture verified the current gateway process. This is activation and preservation evidence: ordinary-use steering consistency, process-offline Discord catch-up, account workflows, spoken meeting minutes and the next natural Journal cycle remain separate acceptance checks.
+
+The final public revision requires its own hosted qualification: reference checks,
+the complete native plan, the aggregate build, the combined gate and adopted-source
+steering. Earlier hosted results qualify only their recorded revisions. Companion
+build `2609000599` retains its separate `a504` app and private-worker source; this
+Gateway reference does not rebuild or replace those companions. Persistent account
+access, ordinary-use replies and voice meeting minutes retain their own acceptance
+requirements. Earlier dated sections below remain historical records, including
+their source identities, counts and then-pending status.
+
 ## September 29 continuation and activity corrections
 
 Reference `4e8c6dc647b164b00f798c85154eac539e891e3f` includes the complete retained runtime delta
