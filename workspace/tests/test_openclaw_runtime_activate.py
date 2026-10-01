@@ -3331,6 +3331,145 @@ def test_snapshot_archive_accepts_appledouble_for_exact_surface(
     )
 
 
+def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture):
+    state = fixture.paths.predecessor_state_dir
+    regular = state / "hardlink-source"
+    linked = state / "hardlink-copy"
+    regular.write_bytes(b"native stopped snapshot hardlink\n")
+    os.link(regular, linked)
+    relative_link = state / "relative-state-link"
+    relative_link.symlink_to(regular.name)
+    absolute_link = state / "absolute-state-link"
+    absolute_link.symlink_to("/private/snapshot-test-target")
+    archive = fixture.root / "native-hardlink-snapshot.tar"
+    subprocess.run(
+        [
+            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf",
+            str(archive), "-C", "/",
+            *(str(path).lstrip("/") for path in (
+                state, fixture.paths.gateway_plist,
+                fixture.paths.node_plist, fixture.paths.current_link,
+            )),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    with tarfile.open(archive) as captured:
+        pair = [captured.getmember(str(path).lstrip("/")) for path in (regular, linked)]
+        regular_member = next(member for member in pair if member.isfile())
+        hardlink_member = next(member for member in pair if member.islnk())
+        assert hardlink_member.linkname == regular_member.name
+        assert hardlink_member.size == 0
+        assert captured.getmember(str(relative_link).lstrip("/")).issym()
+        assert captured.getmember(str(absolute_link).lstrip("/")).issym()
+
+    activate_module.validate_snapshot_archive_members(
+        fixture.paths, archive, str(fixture.predecessor)
+    )
+    restored = fixture.root / "restored-native-hardlinks"
+    restored.mkdir()
+    subprocess.run(
+        [
+            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-xpf",
+            str(archive), "-C", str(restored),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    restored_regular = restored / str(regular).lstrip("/")
+    restored_linked = restored / str(linked).lstrip("/")
+    assert restored_regular.read_bytes() == regular.read_bytes() == restored_linked.read_bytes()
+    assert restored_regular.stat().st_ino == restored_linked.stat().st_ino
+    for path in (relative_link, absolute_link, fixture.paths.current_link):
+        assert os.readlink(restored / str(path).lstrip("/")) == os.readlink(path)
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "absolute-target", "outside-target", "sibling-prefix-target",
+        "parent-traversal-target", "dot-target", "empty-component-target",
+        "empty-target", "forward-target", "directory-target", "symlink-target",
+        "hardlink-chain", "self-target", "hardlink-payload",
+        "descendant-below-hardlink", "descendant-before-hardlink",
+        "target-below-symlink", "gateway-hardlink", "current-hardlink", "fifo",
+    ],
+)
+def test_snapshot_archive_rejects_unsafe_state_hardlinks(fixture: Fixture, case: str):
+    state = str(fixture.paths.predecessor_state_dir).lstrip("/")
+    source = f"{state}/linked"
+    target = f"{state}/target"
+    regular = (target, tarfile.REGTYPE, "", b"target bytes")
+    linked = (source, tarfile.LNKTYPE, target, b"")
+    entries = [regular, linked]
+    unsafe_targets = {
+        "absolute-target": f"/{target}",
+        "outside-target": "private/outside",
+        "sibling-prefix-target": f"{state}-sibling/target",
+        "parent-traversal-target": f"{state}/../target",
+        "dot-target": f"{state}/./target",
+        "empty-component-target": f"{state}//target",
+        "empty-target": "",
+    }
+    if case in unsafe_targets:
+        entries[1] = (source, tarfile.LNKTYPE, unsafe_targets[case], b"")
+    elif case == "forward-target":
+        entries.reverse()
+    elif case == "directory-target":
+        entries[0] = (target, tarfile.DIRTYPE, "", b"")
+    elif case == "symlink-target":
+        entries[0] = (target, tarfile.SYMTYPE, "relative-target", b"")
+    elif case == "hardlink-chain":
+        entries = [
+            (f"{state}/regular", tarfile.REGTYPE, "", b"target bytes"),
+            (target, tarfile.LNKTYPE, f"{state}/regular", b""), linked,
+        ]
+    elif case == "self-target":
+        entries = [(source, tarfile.LNKTYPE, source, b"")]
+    elif case == "hardlink-payload":
+        entries[1] = (source, tarfile.LNKTYPE, target, b"x")
+    elif case in ("descendant-below-hardlink", "descendant-before-hardlink"):
+        child = (f"{source}/child", tarfile.REGTYPE, "", b"child bytes")
+        entries.insert(2 if case == "descendant-below-hardlink" else 1, child)
+    elif case == "target-below-symlink":
+        entries = [
+            (f"{state}/alias", tarfile.SYMTYPE, "/private/snapshot-test-target", b""),
+            (f"{state}/alias/target", tarfile.REGTYPE, "", b"target bytes"),
+            (source, tarfile.LNKTYPE, f"{state}/alias/target", b""),
+        ]
+    elif case in ("gateway-hardlink", "current-hardlink"):
+        source = str(
+            fixture.paths.gateway_plist if case == "gateway-hardlink"
+            else fixture.paths.current_link
+        ).lstrip("/")
+        entries[1] = (source, tarfile.LNKTYPE, target, b"")
+    elif case == "fifo":
+        entries = [(source, tarfile.FIFOTYPE, "", b"")]
+
+    archive = fixture.root / f"unsafe-hardlink-{case}.tar"
+    surfaces = [
+        (state, tarfile.DIRTYPE, "", b""),
+        (str(fixture.paths.gateway_plist).lstrip("/"), tarfile.REGTYPE, "", b"gateway"),
+        (str(fixture.paths.node_plist).lstrip("/"), tarfile.REGTYPE, "", b"node"),
+        (str(fixture.paths.current_link).lstrip("/"), tarfile.SYMTYPE, str(fixture.predecessor), b""),
+    ]
+    if case in ("gateway-hardlink", "current-hardlink"):
+        surfaces = [entry for entry in surfaces if entry[0] != source]
+    with tarfile.open(archive, "w") as output:
+        for name, kind, linkname, payload in surfaces + entries:
+            member = tarfile.TarInfo(name)
+            member.type = kind
+            member.linkname = linkname
+            member.size = len(payload)
+            output.addfile(member, io.BytesIO(payload) if payload else None)
+
+    with pytest.raises(activate_module.ActivationError, match="archive inventory drift"):
+        activate_module.validate_snapshot_archive_members(
+            fixture.paths, archive, str(fixture.predecessor)
+        )
+
+
 @pytest.mark.parametrize(
     ("target", "accepted"),
     [

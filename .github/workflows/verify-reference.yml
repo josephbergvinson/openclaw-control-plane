@@ -185,6 +185,10 @@ jobs:
             src/cron/trigger-script.refresh-scope.test.ts \
             src/infra/exec-host.test.ts \
             extensions/codex/src/app-server/dynamic-tools.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-session-boundary.orphan-custody.test.ts \
+            src/agents/command/session-preparation.private-completion.test.ts \
+            src/auto-reply/reply/agent-runner-source-admission.test.ts \
+            src/agents/subagents/registry/subagent-registry-requester-yield.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
       - name: Verify account transport and quota recovery
         id: quota
@@ -277,7 +281,7 @@ jobs:
           pnpm test:serial src/agents/embedded-agent-subscribe.handlers.tools.test.ts \
             --testNamePattern 'tracks only owned follow-up sends for requester settlement \(owned=(true|false)\)' \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-receipts.log"
-      - name: Verify requester continuation after follow-up
+      - name: Verify requester continuation and steering after follow-up
         id: continuation
         working-directory: ${{ runner.temp }}/openclaw-reference
         env:
@@ -287,6 +291,7 @@ jobs:
           set -o pipefail
           node scripts/run-vitest.mjs run \
             src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts \
+            src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-continuation.log"
       - name: Preserve follow-up qualification evidence
         if: always() && steps.followup.outcome != 'skipped'

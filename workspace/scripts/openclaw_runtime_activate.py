@@ -1283,7 +1283,8 @@ def validate_snapshot_archive_members(
         raise ActivationError("stopped snapshot archive inventory drift")
 
     seen: set[str] = set()
-    symlink_members: set[str] = set()
+    link_members: set[str] = set()
+    regular_members: set[str] = set()
     try:
         with tarfile.open(archive_path, mode="r:*") as archive:
             for member in archive:
@@ -1299,7 +1300,7 @@ def validate_snapshot_archive_members(
                         or name in appledouble_roots
                         or name.startswith(f"{state_root}/")
                     )
-                    or not (member.isdir() or member.isfile() or member.issym())
+                    or not (member.isdir() or member.isfile() or member.issym() or member.islnk())
                 ):
                     raise ActivationError(
                         "stopped snapshot archive inventory drift"
@@ -1341,17 +1342,35 @@ def validate_snapshot_archive_members(
                         raise ActivationError(
                             "stopped snapshot archive inventory drift"
                         )
+                if member.islnk():
+                    # bsdtar preserves state hardlinks; only an earlier regular
+                    # member in this same state root may supply their inode.
+                    target = member.linkname
+                    if (
+                        not name.startswith(f"{state_root}/")
+                        or member.size != 0
+                        or not target
+                        or target.startswith("/")
+                        or any(part in ("", ".", "..") for part in target.split("/"))
+                        or not target.startswith(f"{state_root}/")
+                        or target not in regular_members
+                    ):
+                        raise ActivationError(
+                            "stopped snapshot archive inventory drift"
+                        )
                 seen.add(name)
-                if member.issym():
-                    symlink_members.add(name)
+                if member.isfile():
+                    regular_members.add(name)
+                if member.issym() or member.islnk():
+                    link_members.add(name)
     except (OSError, tarfile.TarError, UnicodeError) as exc:
         raise ActivationError("stopped snapshot archive inventory drift") from exc
 
     if not exact_roots.issubset(seen):
         raise ActivationError("stopped snapshot archive inventory drift")
     if any(
-        candidate.startswith(f"{symlink}/")
-        for symlink in symlink_members
+        candidate.startswith(f"{link}/")
+        for link in link_members
         for candidate in seen
     ):
         raise ActivationError("stopped snapshot archive inventory drift")
