@@ -253,9 +253,41 @@ def run_child(
     return ChildResult(name=name, returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
+def retire_completed_activation(*, apply: bool) -> str | None:
+    """Retire terminal controls through the activator's locked, checked API.
+
+    This never starts, restores, or restarts a runtime. Preview leaves all
+    controls untouched. A pending/invalid operation blocks payload cleanup.
+    """
+    if not apply:
+        return None
+    try:
+        from . import openclaw_runtime_activate as activation
+    except ImportError:
+        import openclaw_runtime_activate as activation
+    paths = activation.live_paths()
+    if not os.path.lexists(paths.result):
+        if os.path.lexists(activation._start_fence_path(paths)):
+            raise ValueError('activation start exists without a terminal result')
+        return None
+    record, _, _ = activation.read_json(paths.result, 'daily terminal activation result')
+    if (record.get('outcome') != 'activated' or record.get('restoreRequired') is not False
+            or record.get('statesVisited') != ['preflight', 'apply', 'verify', 'terminal']
+            or record.get('error') is not None):
+        raise ValueError('activation is not a completed successful operation')
+    archive = paths.result.parent / 'archive' / f'daily-retention-{uuid.uuid4().hex}'
+    activation.retire_terminal_receipts(paths, archive)
+    return str(archive / activation.RETIREMENT_RECEIPT_NAME)
+
+
 def run_steps(*, apply: bool = False) -> list[ChildResult]:
+    try:
+        activation_receipt = retire_completed_activation(apply=apply)
+    except Exception as exc:
+        return [ChildResult(name, 1, stderr=f'activation retirement blocked: {type(exc).__name__}: {exc}')
+                for name in ('host_storage', 'runtime_releases', 'runtime_promotions', 'approval_a')]
     child_args = ['--apply'] if apply else []
-    return [
+    results = [
         run_child(
             'host_storage', HOST_STORAGE_SCRIPT,
             [*child_args, '--json', '--budget-seconds', '480'],
@@ -291,6 +323,12 @@ def run_steps(*, apply: bool = False) -> list[ChildResult]:
             command_prefix=ROOT_PYTHON_PREFIX,
         ),
     ]
+    if activation_receipt:
+        child = results[1]
+        results[1] = ChildResult(child.name, child.returncode,
+            child.stdout + f'\nACTIVATION_RETIREMENT_REPORT: {activation_receipt}\n',
+            child.stderr, child.timed_out)
+    return results
 
 
 DEFAULT_RUN_STEPS = run_steps

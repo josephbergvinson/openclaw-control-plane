@@ -124,6 +124,20 @@ Restoring after a successful activation is a distinct explicit mode because effe
 may have occurred after startup. Never delete the result or start fence merely to
 make another attempt fit the same namespace.
 
+Completed activation history survives an APFS remount through stable volume UUID
+and inode bindings. The original device number remains a historical observation.
+For an older terminal record without a UUID, a changed device number is admitted
+only by this locked retirement owner after verifying the registered data volume,
+the same physical read-only release inode, its full sealed content inventory,
+candidate seal and snapshot provenance. Original result, fence, seal and snapshot
+bytes are preserved. New retirement receipts carry the stable bindings used by
+the existing ScreenCapture-history and release-retention readers. Unverifiable
+legacy archive history stays ineligible; it does not grant deletion authority.
+This does not requalify a capture process or make an old seal, stopped snapshot,
+bootstrap or process identity usable for a new lifecycle operation. Those checks
+still require their exact current-incarnation identities and fresh stopped state.
+
+
 Release and promotion retention preserve selected releases, rollback references,
 active operations and unknown layouts. Their dry-run reports must be read before
 applying a deletion. Unknown ownership means preserve until resolved.
@@ -138,6 +152,13 @@ scheduler, Python and Peekaboo route; a process or activation change invalidates
 the earlier behavioral evidence. The [manual acceptance procedure](../workspace/runbooks/runtime-activation.md#journal-capture-acceptance-and-permission-continuity)
 provides that refresh without exporting, ingesting or replaying Journal data.
 Scheduled synchronization remains a separate acceptance claim.
+
+After a checked rollback, fresh capture acceptance can use the existing successful
+`restored` receipt. The shared resolver binds it to the exact failed activation,
+start fence, selected predecessor and current gateway process; a stopped or
+incomplete restore cannot qualify. The failed activation remains intact. Native
+terminal-receipt retirement preserves an established binding only through the
+latest matching immutable receipt set, without extending it to a later process.
 
 A successful activation receipt proves the checks represented in that receipt. It
 does not establish every user workflow. After changes to delivery, run a real channel

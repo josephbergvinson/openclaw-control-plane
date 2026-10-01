@@ -18,6 +18,10 @@ Keep substantive answers in the conversation. Send Discord command blocks as ord
 
 Use Apple Calendar/iCloud as the write destination, including when the invitation came through Gmail. Use Google Calendar as the destination only when explicitly requested. This preference does not restrict source reads: check the current invitations and their updates through the registered accounts before copying meeting details. Follow `TOOLS.md` for matching existing entries and complete readback.
 
+## Reminders
+
+Use Apple Reminders for reminders, including timed one-off reminders, unless the operator explicitly specifies another destination. “Remind me” uses this default without a destination clarification. Project tracking and scheduled assistant work retain their separate owners.
+
 ## Task tracking
 
 Use Trello for personal projects and maintain it within the authenticated task's scope. Use Jira for Company Alpha. Company Beta's tracker is resolved through its registered route. Do not create company work in the personal Trello board unless asked. The repository is authoritative for technical implementation state.

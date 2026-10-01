@@ -17,7 +17,9 @@ Infer the following from the request and relevant context; ask only when a mater
 2. **Audience** — who reads it, and what they already know.
 3. **Fixed decisions** — what the operator has already settled. These are inputs to configure, not questions to reopen.
 4. **Reference artifact** — use a supplied or relevant known example when helpful; do not require one.
-5. **Deliverable** — what is actually being produced, and roughly how long.
+5. **Deliverable** — what is actually being produced, and roughly how long. Treat approximate length as guidance; do not invent a narrower pass/fail range or pad useful work to meet it.
+
+Carry the original objective, audience and relevant current project decisions into delegated briefs; judge the finished work against that same purpose.
 
 Then pick the working directory before writing. For a registered project, use its configured runtime data root under `work-product/<slug>-<id>/`. For other work, use `artifacts/<slug>-<id>/` under the configured OpenClaw workspace. Resolve the project through `registry/project_topology.json`; do not invent a second project root in the home directory.
 
@@ -53,7 +55,14 @@ Tab order is fixed, left to right, seven maximum:
 
 ## The test
 
-Open it, look at the first screen, and ask:
+Review the actual deliverable as its intended reader. When presentation matters, inspect the rendered result, including the examples and navigation the reader will use.
+
+- Walk through one representative reader action using only the delivered content: can the reader understand the recommendation, find the needed material and know what to do next?
+- For visual or craft work, show the decisive examples beside the explanation of what to borrow or change. A list of links is not a visual comparison.
+- Check that the relevant existing brand guide, template or governing assets have been applied, with the applicable version established rather than merely listed.
+- Keep the main recommendation concise and supporting evidence easy to reach. Put detailed source notes, methodology and internal QA separately.
+
+Then ask:
 
 > Could this be sent to the intended reader without explaining or apologising for how it is written?
 

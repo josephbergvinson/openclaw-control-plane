@@ -110,6 +110,12 @@ def run(cmd: list[str], *, timeout: int = 120) -> CommandResult:
                 captured.append(text.strip())
         captured.append(f'command timed out after {timeout}s: {" ".join(cmd)}')
         return CommandResult(COMMAND_TIMEOUT_RETURNCODE, '\n'.join(captured).strip())
+    # Successful --json commands frame their payload on stdout. Healthy
+    # diagnostics on stderr can themselves contain JSON (for example database
+    # phase timings); appending them corrupts the payload. Failures retain both
+    # streams for diagnosis, and stderr alone can never supply a success result.
+    if proc.returncode == 0 and '--json' in cmd:
+        return CommandResult(proc.returncode, (proc.stdout or '').strip())
     output = '\n'.join(part for part in [(proc.stdout or '').strip(), (proc.stderr or '').strip()] if part).strip()
     return CommandResult(proc.returncode, output)
 
@@ -571,21 +577,26 @@ def public_security_problem(json_output: str | None, text_output: str, blocker: 
         'security.trust_model.cross_agent_session_access_default': 'shared access to conversations between agents',
         'fs.unencrypted_state_volume': 'unencrypted local data storage',
         'models.weak_tier': 'configured model tier',
+        'channels.discord.allowlisted_groups.broad_members': 'broad member access in allowlisted Discord groups',
     }
+    # Presentation-only fallback for known rendered titles, never acceptance.
+    check_ids_by_title = {
+        title: key for key, (_, title) in ACCEPTED_SECURITY_FINDINGS.items()
+    }
+    check_ids_by_title['Discord allowlisted groups have broad member access'] = (
+        'channels.discord.allowlisted_groups.broad_members'
+    )
     descriptions: list[str] = []
     unaccepted = unaccepted_security_findings(findings or [])
     for finding in unaccepted[:3]:
-        check_id = finding.check_id or next(
-            (key for key, (_, title) in ACCEPTED_SECURITY_FINDINGS.items() if title == finding.title),
-            '',
-        )
+        check_id = finding.check_id or check_ids_by_title.get(finding.title, '')
         subject = subjects.get(check_id, 'an unrecognized security finding')
         severity = {'critical': 'critical', 'warn': 'warning'}.get(finding.severity, 'unrecognized severity')
         descriptions.append(f'{subject} ({severity})')
     if len(unaccepted) > 3:
         descriptions.append(f'{len(unaccepted) - 3} additional findings')
     detail = ', '.join(descriptions) or 'an unrecognized security finding'
-    return f'the security audit found new or changed findings: {detail}'
+    return f'the security audit found issues requiring review: {detail}'
 
 
 def public_failure_message(
@@ -615,10 +626,17 @@ def public_failure_message(
     if not problems:
         problems.append('one or more required checks did not complete')
     detail = '; '.join(problems)
-    return (
-        f"OpenClaw's {audit_name} needs attention: {detail}. "
-        'No healthy result was recorded; inspect the affected check before relying on scheduled delivery.'
-    )
+    if (
+        security_problems and gateway_ok and status_ok
+        and (not weekly or deep_security_ok) and not task_maintenance_blocker
+    ):
+        outcome = (
+            'The operational checks passed, but the audit remains failed pending security review. '
+            'Message delivery was not tested.'
+        )
+    else:
+        outcome = 'No healthy result was recorded; inspect the affected check before relying on scheduled delivery.'
+    return f"OpenClaw's {audit_name} needs attention: {detail}. {outcome}"
 
 
 MAINTENANCE_JOB_IDS = dict(OPERATOR.get('scheduler.maintenance_job_ids', {}))
@@ -651,7 +669,10 @@ def maintenance_problems(openclaw_bin: str, *, now_ms: int | None = None) -> lis
         if not isinstance(last, (int, float)) or isinstance(last, bool) or last > current + 5 * 60 * 1000 or current - last > 27 * 3600 * 1000:
             problems.append(f'{label} has no recent run')
         elif state.get('lastRunStatus') != 'ok':
-            problems.append(f'{label} did not finish successfully')
+            # Headroom exits nonzero for completed capacity warnings too. This
+            # scheduler record cannot distinguish those from execution failure.
+            outcome = 'needs attention' if label == 'storage headroom' else 'did not finish successfully'
+            problems.append(f'{label} {outcome}')
         elif state.get('lastDeliveryStatus') != 'delivered':
             problems.append(f'{label} has no confirmed report delivery')
     return problems

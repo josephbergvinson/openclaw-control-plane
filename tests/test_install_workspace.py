@@ -43,6 +43,52 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual(0o600, (self.destination / "operator.json").stat().st_mode & 0o777)
         self.assertTrue((self.destination / "installation-manifest.json").is_file())
 
+    def test_rendered_model_policy_uses_one_model_without_fallback(self):
+        files = INSTALLER.make_plan(self.destination)
+        config = json.loads(files[Path("config/openclaw.json")][0])
+        defaults = config["agents"]["defaults"]
+        model = "openai/gpt-6.1-sol"
+        self.assertEqual({"primary": model, "fallbacks": []}, defaults["model"])
+        self.assertEqual({"primary": model, "fallbacks": []}, defaults["imageModel"])
+        self.assertEqual([model], defaults["modelPolicy"]["allow"])
+        self.assertEqual([model], list(defaults["models"]))
+        self.assertEqual("max", defaults["thinkingDefault"])
+        self.assertEqual("max", defaults["models"][model]["params"]["thinking"])
+        self.assertEqual("openclaw", defaults["models"][model]["agentRuntime"]["id"])
+        self.assertEqual(model, defaults["utilityModel"])
+        self.assertEqual(model, defaults["heartbeat"]["model"])
+        self.assertEqual("max", defaults["heartbeat"]["thinking"])
+        self.assertTrue(defaults["heartbeat"]["isolatedSession"])
+        self.assertNotIn("model", defaults["subagents"])
+        self.assertNotIn("thinking", defaults["subagents"])
+        plugins = config["plugins"]["entries"]
+        dreaming = plugins["memory-core"]["config"]["dreaming"]
+        self.assertEqual(model, dreaming["model"])
+        for phase in ("light", "deep", "rem"):
+            self.assertEqual("max", dreaming["phases"][phase]["execution"]["thinking"])
+        active_memory = plugins["active-memory"]["config"]
+        self.assertEqual(model, active_memory["model"])
+        self.assertEqual("max", active_memory["thinking"])
+
+    def test_rendered_chatgpt_model_metadata_preserves_route_limits(self):
+        files = INSTALLER.make_plan(self.destination)
+        config = json.loads(files[Path("config/openclaw.json")][0])
+        provider = config["models"]["providers"]["openai"]
+        self.assertEqual("https://chatgpt.com/backend-api", provider["baseUrl"])
+        self.assertEqual("openai-chatgpt-responses", provider["api"])
+        self.assertNotIn("apiKey", provider)
+        self.assertEqual(1, len(provider["models"]))
+        model = provider["models"][0]
+        self.assertEqual("gpt-6.1-sol", model["id"])
+        self.assertEqual("openai-chatgpt-responses", model["api"])
+        self.assertEqual(["text", "image"], model["input"])
+        self.assertEqual(872000, model["contextWindow"])
+        self.assertEqual(272000, model["contextTokens"])
+        self.assertEqual(128000, model["maxTokens"])
+        self.assertFalse(model["compat"]["supportsTemperature"])
+        self.assertEqual(["low", "medium", "high", "xhigh", "max"],
+                         model["compat"]["supportedReasoningEfforts"])
+
     def test_existing_destination_is_untouched(self):
         self.destination.mkdir()
         sentinel = self.destination / "existing.txt"
@@ -56,7 +102,10 @@ class WorkspaceInstallTests(unittest.TestCase):
         files = INSTALLER.make_plan(self.destination)
         names = set(files)
         self.assertIn(Path("REFERENCE.md"), names)
-        self.assertIn(Path("runtime/openclaw-2026.9.3-reference.patch"), names)
+        manifest_path = Path("runtime/manifest.json")
+        self.assertIn(manifest_path, names)
+        manifest = json.loads(files[manifest_path][0])
+        self.assertIn(manifest_path.parent / manifest["patch"]["file"], names)
         self.assertIn(Path("scripts/reconstruct_runtime.py"), names)
         self.assertIn(Path("scripts/materialize_host.py"), names)
         for name, (payload, _mode) in files.items():
@@ -79,6 +128,16 @@ class WorkspaceInstallTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(self.destination / "scripts/reconstruct_runtime.py"), "--help"], capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue((self.destination / "runtime/manifest.json").is_file())
+
+    def test_installed_calendar_lifecycle_preserves_app_ownership(self):
+        INSTALLER.install(self.destination, INSTALLER.make_plan(self.destination))
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests",
+             "-p", "test_apple_calendar_lifecycle.py"],
+            cwd=self.destination, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Ran 0 tests", result.stderr)
 
     def test_installed_git_policy_ignores_private_state_and_keeps_source_trackable(self):
         INSTALLER.install(self.destination, INSTALLER.make_plan(self.destination))
