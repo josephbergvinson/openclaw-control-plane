@@ -13,6 +13,65 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 1 requester authority, helper admission and MCP discovery
+
+Reference `3063571d0390f2e0fe48226035fe6581149cebae`, source tree
+`5a72ac3b5e98d2a6d951ad72109ce1a9ae53df41`, covers twelve reviewed paths relative
+to `1ce74af1fa354698f71eebfb96a033aeeda83b80`. Ten paths retain the qualified
+`8ba000f21065c3eaf04bab1ffa92e427d9ed5634` authority/helper bytes. OpenClaw carries
+the authenticated requester's owner status into the current request, including
+fresh input and plain or hydrated chat steering. This fact comes from admitted
+command authority; names, quoted messages and earlier turns cannot supply it.
+A later non-owner turn receives its own current authority. Existing tool and
+permission checks still apply.
+
+Setup and conversational helpers select their runtime independently of the turn
+that invoked them. They leave the parent's prepared-model and plugin-generation
+scopes while retaining the authenticated Gateway caller. Autonomous embedded
+execution remains separately owned.
+
+The MCP OAuth provider declines incomplete or conflicting cached first-use
+discovery before a registered client or token exists. This lets the maintained SDK
+discover the recovered protected resource's advertised authorization issuer, such
+as `/agent-auth`, after a failed login cached the legacy root fallback. Established
+credentials retain their issuer and refresh checks; requester identity, other
+requesters' stores and lease ownership remain intact. The change uses the existing
+provider entrypoint and SDK discovery path, without a direct production store repair.
+
+The retained authority/helper qualification passed 34 steering/reply-context cases,
+307 auto-reply cases, 29 helper/generation cases and six isolated authenticated
+Gateway cases. These counts describe their recorded runs, including sibling guards.
+Full core types, Gateway-other and messaging test types, typed lint on the ten
+changed authority/helper paths, formatting and whitespace checks passed.
+
+The final MCP qualification passed all 34 cases in both whole existing OAuth owner
+suites, full production types and maintained agents-root test types, native targeted
+lint, formatting and whitespace checks. Actual SDK regressions failed before the
+repair and passed afterward; independent review of the moved issuer fixture found
+no blocking issue. The final root source review binds the twelve committed file
+hashes. Earlier fixture, selector and watchdog outcomes retain their original scope;
+a complete repository type/lint aggregate and a live provider login are not claimed.
+
+The first 8ba build stopped under its competing-process guard. Its later aggregate
+build completed in 275.41 seconds; staging, offline validation and sealing passed.
+That candidate was never activated. C10 remains the actual Gateway predecessor.
+The final C12 aggregate build, including UI, completed once in 260.277 seconds
+and physically joined with no surviving owned processes. Physical staging, offline
+validation and sealing passed for this exact source. One native activation
+completed successfully with no rollback attempt; Gateway and Node loaded the exact
+sealed C12 release and native health/readiness checks passed. Fresh process
+readback confirmed their exact release and process identities. The explicit
+scheduler-route Journal capture was renewed for the current Gateway process
+without changing its protected code identity or recorded permission; the temporary
+job and owned Journal window were cleaned up. Custody comparison preserved config,
+auth ordering, job definitions, approval bindings, companion generations, scoped
+session goals and original inputs. An absent scoped session remains explicitly
+unchanged. Matching-head hosted checks and fresh ordinary-use Finance,
+OAuth and wallet acceptance remain pending. The existing five hosted jobs will check
+the complete native plan and build, with the changed Gateway, auto-reply and MCP
+owner suites in the existing runtime-build job. Source qualification does not
+establish a live account workflow, spoken meeting minutes or a natural Journal cycle.
+
 ## October 1 requester and goal usage ownership
 
 Reference `1ce74af1fa354698f71eebfb96a033aeeda83b80` adds four reviewed paths to

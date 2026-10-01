@@ -190,6 +190,19 @@ jobs:
             src/auto-reply/reply/agent-runner-source-admission.test.ts \
             src/agents/subagents/registry/subagent-registry-requester-yield.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
+          pnpm test:serial \
+            src/gateway/server-methods/chat-send-message-injection.test.ts \
+            src/gateway/server-methods/chat-send-message-injection.isolated-gateway.test.ts \
+            src/gateway/server-methods/system-agent-nested-inference.integration.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-qa-authority-gateway.log"
+          pnpm test:serial \
+            src/auto-reply/reply/inbound-meta.test.ts \
+            src/auto-reply/reply/get-reply-run.media-only.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-qa-authority-auto-reply.log"
+          pnpm test:serial \
+            src/agents/mcp-oauth.test.ts \
+            src/agents/mcp-oauth-refresh-issuer.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-mcp-discovery.log"
       - name: Verify account transport and quota recovery
         id: quota
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -301,6 +314,9 @@ jobs:
           path: |
             ${{ runner.temp }}/reference-build-source.txt
             ${{ runner.temp }}/reference-followup-unit.log
+            ${{ runner.temp }}/reference-qa-authority-gateway.log
+            ${{ runner.temp }}/reference-qa-authority-auto-reply.log
+            ${{ runner.temp }}/reference-mcp-discovery.log
             ${{ runner.temp }}/reference-followup-terminal.log
             ${{ runner.temp }}/reference-followup-receipts.log
             ${{ runner.temp }}/reference-followup-continuation.log

@@ -14,7 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current October 1 reference is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. It retains the preceding recovery, steering, result-delivery and voice-store fixes. The final changes preserve requester wrappers and import goal usage through its existing entry owner, with a deterministic fixture setup that keeps the original admission bounds. The exact source is loaded by the native Gateway and Node; activation, current-process capture and state preservation are verified. Exact-head hosted qualification and broader ordinary-use acceptance remain separate. The dated sections below retain their original source and results.
+The October 1 reference source is `3063571d0390f2e0fe48226035fe6581149cebae`.
+It combines authenticated requester authority, independent helper admission and
+MCP discovery recovery. The final affected-owner source qualification passed.
+Its aggregate build, including UI, completed in 260.277 seconds and physically
+joined without surviving owned processes. Staging, offline validation and sealing
+passed. One native activation of this exact source completed successfully, with
+Gateway and Node loaded from its sealed release and health/readiness accepted. Its
+recorded predecessor is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. A fresh process
+readback, current-process Journal capture and preservation comparison passed.
+Matching-head hosted qualification and fresh ordinary-use Finance, OAuth and wallet
+acceptance remain pending. Dated sections retain their original source and results.
 
 ## How it works
 
