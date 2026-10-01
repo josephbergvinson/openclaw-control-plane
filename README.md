@@ -14,17 +14,19 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The October 1 reference source is `3063571d0390f2e0fe48226035fe6581149cebae`.
-It combines authenticated requester authority, independent helper admission and
-MCP discovery recovery. The final affected-owner source qualification passed.
-Its aggregate build, including UI, completed in 260.277 seconds and physically
-joined without surviving owned processes. Staging, offline validation and sealing
-passed. One native activation of this exact source completed successfully, with
-Gateway and Node loaded from its sealed release and health/readiness accepted. Its
-recorded predecessor is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. A fresh process
-readback, current-process Journal capture and preservation comparison passed.
-Matching-head hosted qualification and fresh ordinary-use Finance, OAuth and wallet
-acceptance remain pending. Dated sections retain their original source and results.
+The October 1 reference source is `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
+Its 52 reviewed paths since `3063571d0390f2e0fe48226035fe6581149cebae` retain
+requester reconnect, useful recovery progress and intentional cancellation, and
+repair timeout ownership, retained FIFO steering, MCP catalog recovery and startup
+publication. The exact-source aggregate build, including UI, completed in 253.509
+seconds and physically joined. Staging, offline validation and sealing passed.
+Native activation completed at 21:59:12 UTC on October 1; Gateway and Node loaded
+the exact sealed source and passed health/readiness checks. Current-process capture
+and preservation of original inputs, goals, job definitions and authority bindings
+were verified separately. Fresh ordinary-use Finance reconnect and continuation
+on this final source remain pending, along with matching-revision hosted checks.
+Earlier requester OAuth refresh/query acceptance belongs to the recorded C15 source.
+Dated qualifications and other acceptance limits retain their original scope.
 
 ## How it works
 

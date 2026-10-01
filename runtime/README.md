@@ -11,17 +11,75 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
-The October 1 reference source is `3063571d0390f2e0fe48226035fe6581149cebae`.
-It combines authenticated requester authority, independent helper admission and
-MCP discovery recovery. The final affected-owner source qualification passed.
-Its aggregate build, including UI, completed in 260.277 seconds and physically
-joined without surviving owned processes. Staging, offline validation and sealing
-passed. One native activation of this exact source completed successfully, with
-Gateway and Node loaded from its sealed release and health/readiness accepted. Its
-recorded predecessor is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. A fresh process
-readback, current-process Journal capture and preservation comparison passed.
-Matching-head hosted qualification and fresh ordinary-use Finance, OAuth and wallet
-acceptance remain pending. Dated sections retain their original source and results.
+The October 1 reference source is `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
+Its 52 reviewed paths since `3063571d0390f2e0fe48226035fe6581149cebae` retain
+requester reconnect, useful recovery progress and intentional cancellation, and
+repair timeout ownership, retained FIFO steering, MCP catalog recovery and startup
+publication. The exact-source aggregate build, including UI, completed in 253.509
+seconds and physically joined. Staging, offline validation and sealing passed.
+Native activation completed at 21:59:12 UTC on October 1; Gateway and Node loaded
+the exact sealed source and passed health/readiness checks. Current-process capture
+and preservation of original inputs, goals, job definitions and authority bindings
+were verified separately. Fresh ordinary-use Finance reconnect and continuation
+on this final source remain pending, along with matching-revision hosted checks.
+Earlier requester OAuth refresh/query acceptance belongs to the recorded C15 source.
+Dated qualifications and other acceptance limits retain their original scope.
+
+## October 1 timeout, retained steering and requester recovery
+
+Reference `abcf0e16c9ed22923f397ab4fad4708d93f22098`, source tree
+`67123000d1c8008a18ce7e9e4aa9f40c5d273aeb`, covers 52 reviewed paths since
+`3063571d0390f2e0fe48226035fe6581149cebae`. The full patch still reconstructs
+the pinned official release through this exact source, with only the two existing
+test-label normalizations.
+
+The source retains the C15 recovery-notice visibility, current-request authority,
+intentional cancellation and requester reconnect changes. A current timeout stays
+the authoritative terminal cause after progress has been delivered. The default
+visible failure uses ordinary language while exact diagnostics remain internal;
+explicit owner action guidance and completed final-message delivery keep their
+existing semantics.
+
+Retained admitted input can retry against the exact published native or Codex
+backend in FIFO order, without another incoming message or duplicate source
+adoption. Incompatible prepared MCP catalogs retain their normal next-turn path.
+The existing injection guards recheck runtime ownership, executable catalog and
+canonical authorization class after asynchronous preparation. Compatible token
+refresh remains usable; source authority and accepted or indeterminate input
+keep their existing custody rules.
+
+An all-failed empty MCP catalog joins the existing bounded discovery recovery
+when due. Usable catalogs keep their current fast path. HTTP diagnostics preserve
+a valid numeric status while redacting response bodies and URL queries. Startup
+publication initializes the typed registration before synchronous target projection
+and captures the exact registration afterward, preserving currentness and
+accepted-profile checks. The real native preparation regression reproduced the
+observed ReferenceError before the correction.
+
+The preceding 35-path source qualification passed 760 cases in 37 whole owner
+files. The startup correction then passed 60 cases in three whole owner files;
+these are separate recorded runs. Required affected production and test types,
+typed lint, formatting and unchanged official size/environment guards passed.
+The failed pre-fix regression and resolved lint failure remain recorded. Exact
+source review and final qualification bind the committed bytes; no full native
+repository type/lint aggregate is inferred from the affected-owner checks.
+
+The exact aggregate build, including UI, completed in 253.509 seconds and
+physically joined. Staging, offline validation and sealing passed. One native
+activation completed at 21:59:12 UTC on October 1 with Gateway and Node loaded
+from this exact source, and health/readiness accepted. Current-process Journal
+capture and custody comparison preserved original inputs, goals, configuration,
+all 28 job definitions, auth ordering, approval bindings and companion generations.
+An absent scoped session remained absent. This does not prove a natural Journal
+cycle or upgrade the separately recorded companion source.
+
+The original requester completed an authenticated status query through automatic
+OAuth refresh after token expiry on the earlier C15 source. That result remains
+C15 evidence. Fresh ordinary-use Finance reconnect and continuation on this final
+source remain pending. All five existing hosted jobs must qualify the exact new
+public revision; the C12 hosted failure and earlier green results retain their
+original identities. Wallet, spoken meeting minutes and natural Journal sync
+retain their separate acceptance gates. Older dated sections below are unchanged.
 
 ## October 1 requester authority, helper admission and MCP discovery
 
