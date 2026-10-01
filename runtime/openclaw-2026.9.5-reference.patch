@@ -3784,29 +3784,29 @@ index 12f8459a9729f1aa2c139b02ac9ef92b89c2f655..f8bb20470025cc3668733f58393fab57
  src/cron/service/ops.test.ts
  src/cron/service/timer.regression.test.ts
 diff --git a/docs/.generated/config-baseline.counts.json b/docs/.generated/config-baseline.counts.json
-index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..221d8e4ead2364d38ac1acbee3be741fcb982968 100644
+index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..77ac686a900d3e2c23743d889c039ba0343ad6be 100644
 --- a/docs/.generated/config-baseline.counts.json
 +++ b/docs/.generated/config-baseline.counts.json
 @@ -1,5 +1,5 @@
  {
 -  "core": 2444,
-+  "core": 2445,
++  "core": 2447,
    "channel": 3740,
 -  "plugin": 4215
-+  "plugin": 4238
++  "plugin": 4241
  }
 diff --git a/docs/.generated/config-baseline.sha256 b/docs/.generated/config-baseline.sha256
-index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..18a2e70a0c38bfae2a7edb4503bc7028c8a0aaa8 100644
+index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..b18a503dff00addab5f5b05ead8f4dc7296b1334 100644
 --- a/docs/.generated/config-baseline.sha256
 +++ b/docs/.generated/config-baseline.sha256
 @@ -1,4 +1,4 @@
 -e5439a58c999507588ef9150bd94b7019d09ab52eec604c8412e92e07f0a4f1f  config-baseline.json
 -58ecbfff559bdeb12c9c6d3459ccb009106e13d736383319074c84a7675df425  config-baseline.core.json
-+373ac68bdca26ed6f98d85d51cf8d5131964d2ee135e8e27bfe53ff996815055  config-baseline.json
-+f03f2eca9c9fc30b7676a4a74ad48829f1244e90f19e23c1f2a6f4c166a1b98d  config-baseline.core.json
++2f14eccc98bfc492d7c17a732990b3ebaf65a82beaa833dde5798445b8db67e5  config-baseline.json
++53dda6657e6951fbbabe014c59b7a6c7706be44228bc36b73a23528b0ec44a72  config-baseline.core.json
  51c84b118b136dfff84993e3cee0ff76ee06b614842b125d0fde110635fc10b8  config-baseline.channel.json
 -77b840d74238b0d797785d7575fd155629a2aa27213f33a3bd9eb6fa22537aed  config-baseline.plugin.json
-+3ab31563c822efe41544615a0361d18bdc62c3bad76de2852e59c87744387beb  config-baseline.plugin.json
++14242d051ba0e9367cfcf2b4ce3e600b6502e3c4f30b4e32aeb4f3d75c15d7ab  config-baseline.plugin.json
 diff --git a/docs/automation/cron-jobs/managing-jobs.md b/docs/automation/cron-jobs/managing-jobs.md
 index 8fadee4b5cf5e340bc76e1355b2396c1e2b265df..d1650960d4d58af0d9f6a92d237a150b7bc41516 100644
 --- a/docs/automation/cron-jobs/managing-jobs.md
@@ -32181,6 +32181,404 @@ index 068c84e1d2dfd3cfced11fb76f1090837a506b80..72a80990ab7d01d38fb2e8501609d072
    trackInternalModelRunTarget: (target: AgentRunSessionTarget | undefined) => void;
 +  presentation?: AgentAttemptPresentationCallbacks;
  };
+diff --git a/src/agents/command/session-preparation.private-completion.test.ts b/src/agents/command/session-preparation.private-completion.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f3c341161cdea063a947a397cbfd28f291ffc769
+--- /dev/null
++++ b/src/agents/command/session-preparation.private-completion.test.ts
+@@ -0,0 +1,392 @@
++import path from "node:path";
++import { assert, describe, expect, it, vi } from "vitest";
++import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
++import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
++import { prepareAgentRunDispatch } from "../../gateway/agent-turn/agent-run-admission-phase.js";
++import { releasePreparedAgentRunUserTurn } from "../../gateway/agent-turn/agent-run-user-turn.js";
++import { createDirectChatContext } from "../../gateway/server-chat.agent-events.test-helpers.js";
++import {
++  createAgentEventHandler,
++  createChatRunState,
++  createSessionEventSubscriberRegistry,
++  createSessionMessageSubscriberRegistry,
++} from "../../gateway/server-chat.js";
++import { persistGatewaySessionLifecycleEvent } from "../../gateway/session-lifecycle-state.js";
++import {
++  emitAgentEvent,
++  getAgentEventLifecycleGeneration,
++  onAgentRuntimeEvent,
++  withAgentRunLifecycleGeneration,
++} from "../../infra/agent-events.js";
++import { clearAgentRunContext } from "../../infra/agent-run-registry.js";
++import { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
++import { createNonExitingRuntime } from "../../runtime.js";
++import {
++  beginSessionWorkAdmission,
++  type SessionWorkAdmissionLease,
++} from "../../sessions/session-lifecycle-admission.js";
++import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { prepareSystemAgentRunAdmission } from "../admitted-run-context.js";
++import { runWithAgentCommandRecoveryOwner } from "../agent-command-recovery-owner.js";
++import { buildAgentRunTerminalOutcome } from "../agent-run-terminal-outcome.js";
++import { runAcpAgentCommand } from "./acp-execution.js";
++import { prepareEmbeddedSessionState } from "./session-preparation.js";
++import type { AgentCommandOpts } from "./types.js";
++
++const recoveryScheduler = vi.hoisted(() => ({ schedule: vi.fn() }));
++
++// This fixture represents the Gateway host inside a Vitest thread; retain the
++// real native Workers so task reads use the actual broker and SQLite actor.
++vi.mock("node:worker_threads", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("node:worker_threads")>()),
++  isMainThread: true,
++}));
++
++vi.mock("../main-session-recovery/main-session-recovery-owner-release.js", () => ({
++  scheduleMainSessionRecoveryPendingTarget: recoveryScheduler.schedule,
++}));
++// Provider discovery is outside this proof. Admission, private-input validation,
++// transcript custody, event routing, lifecycle persistence and release are real.
++vi.mock("../prepared-model-runtime.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../prepared-model-runtime.js")>()),
++  loadPublishedGatewayReplyDispatchRuntime: async () => ({
++    config: {},
++    agentId: "main",
++    agentDir: "/fixture/agent",
++    workspaceDir: "/fixture/workspace",
++  }),
++  acquireAgentRunPreparedModelRuntime: async () => ({
++    [Symbol.asyncDispose]: async () => {},
++  }),
++}));
++vi.mock("../../skills/discovery/agent-filter.js", () => ({
++  resolveEffectiveAgentSkillFilter: () => undefined,
++}));
++vi.mock("./runtime-loaders.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("./runtime-loaders.js")>()),
++  loadSkillsRuntime: async () => ({
++    getRemoteSkillEligibility: () => ({}),
++    resolveReusableWorkspaceSkillSnapshot: () => ({ snapshot: undefined, shouldRefresh: false }),
++  }),
++  loadExecDefaultsRuntime: async () => ({
++    resolveNodeExecEligibility: () => ({ canExec: false }),
++  }),
++}));
++
++describe("private completion recovery projection", () => {
++  it.each([
++    { sourceTool: "subagent_settle", privateCompletion: true, backend: "embedded" },
++    { sourceTool: "subagent_announce", privateCompletion: true, backend: "embedded" },
++    { sourceTool: "subagent_settle", privateCompletion: true, backend: "acp" },
++    { sourceTool: "subagent_settle", privateCompletion: false, backend: "embedded" },
++    { sourceTool: "sessions_send", privateCompletion: false, backend: "embedded" },
++  ])(
++    "retains original recovery only for validated private completion ($sourceTool/$privateCompletion/$backend)",
++    async ({ sourceTool, privateCompletion, backend }) => {
++      recoveryScheduler.schedule.mockClear();
++      await withOpenClawTestState({ label: "private-completion-recovery" }, async (state) => {
++        await state.writeConfig({});
++        const target = {
++          sessionAgentId: "main",
++          isNewSession: false,
++          sessionId: "interrupted-session",
++          sessionKey: "agent:main:private-completion-recovery",
++          storePath: path.join(state.sessionsDir(), "sessions.json"),
++        };
++        await replaceSessionEntry(target, {
++          sessionId: target.sessionId,
++          updatedAt: 100,
++          status: "running",
++          abortedLastRun: true,
++          restartRecoveryDeliverySourceRunId: "channel-user:original-music-request",
++          restartRecoveryRuns: [{ runId: "interrupted-user-run", lifecycleGeneration: "old" }],
++        });
++        const lifecycleGeneration = getAgentEventLifecycleGeneration();
++        let heldRecoveryRuns = [{ runId: "interrupted-user-run", lifecycleGeneration: "old" }];
++        const opts: AgentCommandOpts = {
++          message: "Process the child privately; NO_REPLY if no visible reply is owed.",
++          runId: "announce:requester-settle:completion",
++          deliver: false,
++          skipInitialSessionTouch: true,
++          preserveUserFacingSessionModelState: true,
++          sourceReplyDeliveryMode: "automatic",
++          inputProvenance: {
++            kind: "inter_session",
++            sourceSessionKey: "agent:main:subagent:completed-child",
++            sourceChannel: "internal",
++            sourceTool,
++          },
++        };
++        const runId = opts.runId ?? "announce:requester-settle:completion";
++        const context = createDirectChatContext();
++        let workAdmission: SessionWorkAdmissionLease | undefined;
++        let runAbort:
++          | NonNullable<Awaited<ReturnType<typeof prepareAgentRunDispatch>>>["activeRunAbort"]
++          | undefined;
++        const persistence: Promise<void>[] = [];
++        const chatRunState = createChatRunState();
++        const handler = createAgentEventHandler({
++          broadcast: vi.fn(),
++          broadcastToConnIds: vi.fn(),
++          nodeHasSessionSubscribers: () => false,
++          nodeSendToSession: vi.fn(),
++          chatRunState,
++          agentRunSeq: new Map(),
++          toolEventRecipients: chatRunState.toolEventRecipients,
++          sessionMessageSubscribers: createSessionMessageSubscriberRegistry(),
++          sessionEventSubscribers: createSessionEventSubscriberRegistry(),
++          clearAgentRunContext,
++          resolveSessionKeyForRun: () => {
++            throw new Error("The command event lost its captured session owner");
++          },
++          persistGatewaySessionLifecycleEventForEvent: (event) => {
++            const pending = persistGatewaySessionLifecycleEvent(event);
++            persistence.push(pending);
++            return pending;
++          },
++        });
++        const terminal = vi.fn();
++        const unsubscribe = onAgentRuntimeEvent((event) => {
++          handler(event);
++          if (event.runId === runId && event.stream === "lifecycle" && event.data.phase === "end") {
++            terminal(event);
++          }
++        });
++        const io = { emitAcceptance: vi.fn(), emitFinal: vi.fn() };
++        try {
++          const prepared = await withAgentRunLifecycleGeneration(lifecycleGeneration, async () => {
++            const admitted = await prepareAgentRunDispatch({
++              promptedAt: Date.now(),
++              request: {
++                message: opts.message,
++                idempotencyKey: runId,
++                sessionKey: target.sessionKey,
++                expectedExistingSessionId: target.sessionId,
++                deliver: false,
++                sourceReplyDeliveryMode: "automatic",
++              },
++              cfg: {},
++              sessionEntry: loadSessionEntry(target),
++              resolvedSessionKey: target.sessionKey,
++              activeSessionAgentId: "main",
++              delivery: {
++                activeSessionAgentId: "main",
++                deliver: false,
++                deliveryPlan: {
++                  baseDelivery: { mode: "implicit", channel: "webchat" },
++                  resolvedChannel: "webchat",
++                },
++                resolvedChannel: "webchat",
++                deliveryTargetMode: undefined,
++                resolvedAccountId: undefined,
++                resolvedTo: undefined,
++              },
++              allowModelOverride: false,
++              lifecycleGeneration,
++              getAdmittedSessionId: () => target.sessionId,
++              suppressVisibleSessionEffects: false,
++              inputProvenance: opts.inputProvenance,
++              isOneShotModelRun: false,
++              isRestartRecoveryResumeRun: false,
++              canUseInternalRuntimeHandoff: true,
++              message: opts.message,
++              effectiveTranscriptInputText: opts.message,
++              images: [],
++              offloadedRefs: [],
++              onUserTurnMediaPersisted: () => {},
++              requestedPromptPersistenceSuppression: false,
++              ...(privateCompletion ? { privateCompletion: true } : {}),
++              runId,
++              agentDedupeKeys: [`agent:${runId}`],
++              context,
++              client: null,
++              io,
++              abortForLifecycleRotation: () => false,
++              acquireGatewayWorkAdmission: async (scope) => {
++                workAdmission = await beginSessionWorkAdmission({
++                  scope,
++                  identities: [target.sessionKey, target.sessionId],
++                  assertAllowed: () => {},
++                });
++              },
++              assertGatewayWorkAdmissionAllowed: () => {},
++              hasGatewayAdmissionOutcome: () => false,
++              respondToGatewayAdmissionOutcome: () => false,
++              admissionAgentId: () => "main",
++              getGatewayWorkAdmission: () => workAdmission,
++              setAdmittedRunAbort: (value) => {
++                runAbort = value;
++              },
++              getAdmittedRunAbort: () => runAbort,
++              markAgentRunAccepted: () => {},
++            });
++            expect(io.emitAcceptance).toHaveBeenCalledWith(
++              [true, expect.objectContaining({ runId, status: "accepted" }), undefined],
++              { runId },
++            );
++            assert(admitted);
++            await runWithAgentCommandRecoveryOwner({
++              lifecycleGeneration,
++              mode: "claim",
++              opts,
++              prepare: async () => target,
++              run: async () => {
++                const held = loadSessionEntry(target);
++                assert(held?.mainRestartRecovery?.foregroundClaims);
++                expect(
++                  Object.values(held.mainRestartRecovery.foregroundClaims.runIdsByClaimId ?? {}),
++                ).toContain(runId);
++                heldRecoveryRuns = structuredClone(held.restartRecoveryRuns ?? []);
++                expect(heldRecoveryRuns).toContainEqual({
++                  runId: "interrupted-user-run",
++                  lifecycleGeneration: "old",
++                });
++                assert(admitted.userTurn.recorder);
++                opts.userTurnTranscriptRecorder = admitted.userTurn.recorder;
++                if (backend === "acp") {
++                  const manager = getAcpSessionManager();
++                  const backendTurn = vi
++                    .spyOn(manager, "runTurn")
++                    .mockImplementation(async (input) => {
++                      await input.onBeforePrompt?.();
++                      await input.onEvent?.({
++                        type: "done",
++                        status: "completed",
++                        stopReason: "end_turn",
++                      });
++                    });
++                  const runtimeAdmission = prepareSystemAgentRunAdmission(
++                    {},
++                    runId,
++                    "main",
++                    "private-completion-test",
++                  );
++                  try {
++                    await runAcpAgentCommand({
++                      preparedRunAdmission: runtimeAdmission,
++                      cfg: {},
++                      deps: {},
++                      runtime: createNonExitingRuntime(),
++                      opts,
++                      outboundSession: buildOutboundSessionContext({
++                        cfg: {},
++                        agentId: "main",
++                        sessionKey: target.sessionKey,
++                      }),
++                      ...target,
++                      sessionEntry: held,
++                      body: opts.message,
++                      transcriptBody: opts.message,
++                      suppressVisibleSessionEffects: false,
++                      provenance: "system",
++                      workspaceDir: state.workspaceDir,
++                      runId,
++                      lifecycleGeneration,
++                      acpManager: manager,
++                      acpResolution: {
++                        kind: "ready",
++                        sessionKey: target.sessionKey,
++                        agentId: "main",
++                        meta: {
++                          backend: "fixture",
++                          agent: "main",
++                          runtimeSessionName: "fixture",
++                          mode: "persistent",
++                          state: "idle",
++                          lastActivityAt: 1,
++                        },
++                      },
++                      trackInternalModelRunTarget: () => {},
++                    });
++                    expect(backendTurn).toHaveBeenCalledOnce();
++                  } finally {
++                    backendTurn.mockRestore();
++                    runtimeAdmission.close();
++                  }
++                } else {
++                  await prepareEmbeddedSessionState({
++                    cfg: {},
++                    opts,
++                    ...target,
++                    lifecycleGeneration,
++                    runId,
++                    workspaceDir: state.workspaceDir,
++                    executionWorkspaceDir: state.workspaceDir,
++                    watchSkills: false,
++                    isSubagentLaneTurn: false,
++                    suppressVisibleSessionEffects: false,
++                    sessionStateActor: { actorType: "system" },
++                  });
++                  expect(await admitted.userTurn.recorder.persistApproved()).toMatchObject({
++                    appended: true,
++                  });
++                  admitted.userTurn.recorder.completeProcessing?.(
++                    buildAgentRunTerminalOutcome({ status: "ok" }),
++                  );
++                  emitAgentEvent({
++                    runId,
++                    lifecycleGeneration,
++                    stream: "lifecycle",
++                    data: {
++                      phase: "end",
++                      endedAt: Date.now(),
++                      executionSettled: true,
++                    },
++                  });
++                }
++                await Promise.all(persistence);
++                expect(terminal).toHaveBeenCalledOnce();
++                if (privateCompletion) {
++                  admitted.userTurn.recorder.completeProcessing?.(
++                    buildAgentRunTerminalOutcome({ status: "ok" }),
++                  );
++                  expect(admitted.userTurn.recorder.getProcessingCompletion?.()).toMatchObject({
++                    status: "ok",
++                    reason: "completed",
++                  });
++                }
++              },
++            });
++            return admitted;
++          });
++          try {
++            const stored = loadSessionEntry(target);
++            assert(stored);
++            if (privateCompletion) {
++              expect(stored.abortedLastRun).toBe(true);
++              expect(stored.restartRecoveryRuns).toEqual(heldRecoveryRuns);
++              expect(stored.mainRestartRecovery?.foregroundClaims).toBeUndefined();
++              expect(recoveryScheduler.schedule).toHaveBeenCalledExactlyOnceWith({
++                agentId: "main",
++                sessionId: target.sessionId,
++                sessionKey: target.sessionKey,
++                storePath: target.storePath,
++              });
++              expect(persistence).toHaveLength(0);
++            } else {
++              expect(stored.abortedLastRun).toBe(false);
++              expect(stored.mainRestartRecovery).toBeUndefined();
++              expect(recoveryScheduler.schedule).toHaveBeenCalledExactlyOnceWith(undefined);
++              expect(persistence).toHaveLength(1);
++            }
++            expect(stored.restartRecoveryDeliverySourceRunId).toBe(
++              "channel-user:original-music-request",
++            );
++          } finally {
++            releasePreparedAgentRunUserTurn(prepared.userTurn, "interrupted");
++            await prepared.preparedModelRuntimeLease[Symbol.asyncDispose]();
++            prepared.releaseCallerAuthority?.();
++            prepared.activeRunAbort.cleanup();
++            prepared.activeGatewayWorkAdmission.release();
++          }
++        } finally {
++          runAbort?.cleanup();
++          workAdmission?.release();
++          unsubscribe();
++          handler.dispose();
++          clearAgentRunContext(runId);
++        }
++      });
++    },
++  );
++});
 diff --git a/src/agents/command/session-preparation.ts b/src/agents/command/session-preparation.ts
 index f9331b00a41c84407a2b4568a8b3fdb6dfb4ed42..ae1f139e4c95b9bf5f9704b6acd900775d7891b4 100644
 --- a/src/agents/command/session-preparation.ts
@@ -36094,6 +36492,22 @@ index 0000000000000000000000000000000000000000..946882d5806f3dc9e3497b4b2a6372c5
 +    );
 +  };
 +}
+diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts
+index 892e503bc8a82307a0e99f02f6add414ffa2d077..a5813226cb4f89ad429e0dcbbc92a9b4ab8a3a4f 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts
+@@ -394,8 +394,9 @@ function shouldDropStaleInternalOrphanedUserPrompt(params: {
+  * present in the active prompt.
+  *
+  * External user leaves are eligible to remain canonical (`removeLeaf: false`).
+- * Session repair preserves them only for producer-tagged main-session restart
+- * recovery; ordinary repair replaces them with the merged prompt. Empty or stale
++ * Session repair preserves them when a prepared source owns the next write or
++ * producer-tagged main-session restart recovery retains the current turn. Without
++ * either owner, repair replaces them with the merged prompt. Empty or stale
+  * internal leaves are always detached.
+  */
+ export function mergeOrphanedTrailingUserPrompt(params: {
 diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts
 index 5aeb66a676d46b6c16419d773c49b1b3516e54d5..c5fea85c1308c422a3668a257e6656ebe6d65028 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts
@@ -37017,6 +37431,175 @@ index 1b2e509462c8db45d942f8f129f9cafb1ab26fd4..f073049698fedf28f6e7315dbefafda0
      return { action: "proceed" };
    }
    const hasCodexAppServerTimeoutOutcome = Boolean(
+diff --git a/src/agents/embedded-agent-runner/run/attempt-session-boundary.orphan-custody.test.ts b/src/agents/embedded-agent-runner/run/attempt-session-boundary.orphan-custody.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..96d8851ff7f22b90d3163951bc32226815afe5e6
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run/attempt-session-boundary.orphan-custody.test.ts
+@@ -0,0 +1,148 @@
++import path from "node:path";
++import { assert, describe, expect, it } from "vitest";
++import { upsertSessionEntryCore } from "../../../config/sessions/session-accessor.js";
++import type { InputProvenance } from "../../../sessions/input-provenance.js";
++import type { PersistedUserTurnMessage } from "../../../sessions/user-turn-transcript.types.js";
++import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
++import { Agent } from "../../runtime/index.js";
++import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
++import { SessionManager } from "../../sessions/session-manager.js";
++import { prepareEmbeddedAttemptSessionBoundary } from "./attempt-session-prepare.js";
++
++const musicRequestText = "Make the music more punchy and momentous, and fit it to the video.";
++const musicRequest: PersistedUserTurnMessage = {
++  role: "user",
++  content: musicRequestText,
++  timestamp: 1,
++  idempotencyKey: "channel-user:music-correction",
++  __openclaw: {
++    senderIsOwner: true,
++    senderId: "requester",
++    transport: { channel: "discord", messageId: "music-correction" },
++  },
++};
++
++const completionProvenance: InputProvenance = {
++  kind: "inter_session",
++  sourceSessionKey: "agent:main:subagent:old-child",
++  sourceChannel: "internal",
++  sourceTool: "subagent_settle",
++};
++
++const privateCompletionText =
++  "Every child has settled. Process the old result privately; reply NO_REPLY if done.";
++const privateCompletion: PersistedUserTurnMessage = {
++  role: "user",
++  display: false,
++  content: privateCompletionText,
++  timestamp: 2,
++  idempotencyKey: "announce:requester-settle:old-child:user",
++  provenance: completionProvenance,
++  __openclaw: { senderIsOwner: false },
++};
++
++describe("prepared completion orphan custody", () => {
++  it("retains an authenticated request across a prepared private completion and restart", async () => {
++    await withOpenClawTestState({ label: "prepared-completion-orphan" }, async (state) => {
++      const target = {
++        agentId: "main",
++        sessionId: "music-session",
++        sessionKey: "agent:main:music-session",
++        storePath: path.join(state.sessionsDir(), "sessions.json"),
++      };
++      await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++      const seed = SessionManager.open(target, state.workspaceDir);
++      const sourceEntryId = seed.appendMessage(musicRequest);
++      const manager = guardSessionManager(SessionManager.open(target, state.workspaceDir), {
++        runId: "private-completion",
++        inputProvenance: completionProvenance,
++        preparedUserTurnMessage: privateCompletion,
++      });
++      const activeSession = {
++        agent: new Agent({ initialState: { messages: manager.buildSessionContext().messages } }),
++      };
++      const boundary = await prepareEmbeddedAttemptSessionBoundary({
++        activeSession,
++        attempt: {
++          inputProvenance: completionProvenance,
++          prompt: privateCompletionText,
++          trigger: "user",
++        },
++        getUserTranscriptContexts: () => undefined,
++        isRawModelRun: false,
++        preparedUserTurnMessage: privateCompletion,
++        sessionManager: manager,
++        setActiveSessionSystemPrompt: (prompt) => {
++          activeSession.agent.state.systemPrompt = prompt;
++        },
++      });
++      assert(boundary.orphanRepair);
++      expect(boundary.orphanRepair.contextEnginePrompt).toContain(musicRequestText);
++
++      // Use the real prepared-message writer: a model-only merged prompt cannot
++      // replace the private completion's accepted source bytes or principal.
++      manager.appendMessage({
++        role: "user",
++        content: boundary.orphanRepair.contextEnginePrompt,
++        timestamp: privateCompletion.timestamp,
++      });
++      const reopened = SessionManager.open(target, state.workspaceDir);
++      const messages = reopened.buildSessionContext().messages;
++      expect(messages).toEqual([musicRequest, privateCompletion]);
++      expect(reopened.getBranch().filter((entry) => entry.id === sourceEntryId)).toHaveLength(1);
++      expect(messages.filter((message) => message.role === "user")).toHaveLength(2);
++    });
++  });
++
++  it("still detaches a stale internal orphan instead of replaying it as a user request", async () => {
++    await withOpenClawTestState({ label: "prepared-completion-internal-orphan" }, async (state) => {
++      const target = {
++        agentId: "main",
++        sessionId: "internal-session",
++        sessionKey: "agent:main:internal-session",
++        storePath: path.join(state.sessionsDir(), "sessions.json"),
++      };
++      await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++      const seed = SessionManager.open(target, state.workspaceDir);
++      const staleCompletion: PersistedUserTurnMessage = {
++        ...privateCompletion,
++        content: "Old child result that must not become the new request.",
++        idempotencyKey: "announce:stale-child:user",
++      };
++      const staleEntryId = seed.appendMessage(staleCompletion);
++      const manager = guardSessionManager(SessionManager.open(target, state.workspaceDir), {
++        runId: "private-completion",
++        inputProvenance: completionProvenance,
++        preparedUserTurnMessage: privateCompletion,
++      });
++      const activeSession = {
++        agent: new Agent({ initialState: { messages: manager.buildSessionContext().messages } }),
++      };
++      const boundary = await prepareEmbeddedAttemptSessionBoundary({
++        activeSession,
++        attempt: {
++          inputProvenance: completionProvenance,
++          prompt: privateCompletionText,
++          trigger: "user",
++        },
++        getUserTranscriptContexts: () => undefined,
++        isRawModelRun: false,
++        preparedUserTurnMessage: privateCompletion,
++        sessionManager: manager,
++        setActiveSessionSystemPrompt: (prompt) => {
++          activeSession.agent.state.systemPrompt = prompt;
++        },
++      });
++      assert(boundary.orphanRepair);
++      expect(boundary.orphanRepair.removeLeaf).toBe(true);
++      manager.appendMessage({
++        role: "user",
++        content: boundary.orphanRepair.contextEnginePrompt,
++        timestamp: privateCompletion.timestamp,
++      });
++      const reopened = SessionManager.open(target, state.workspaceDir);
++      expect(reopened.getBranch().some((entry) => entry.id === staleEntryId)).toBe(false);
++      expect(reopened.buildSessionContext().messages).toEqual([privateCompletion]);
++    });
++  });
++});
+diff --git a/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts b/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
+index 9c54c10763ab9a4a126ca333d188e5fe05067ecc..e27124c7a32522274f1226859cf9422c4e5c1ffa 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
+@@ -400,7 +400,10 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
+     : resolveOrphanRepairPlan({
+         sessionManager,
+         prompt: attempt.prompt,
++        // A prepared source replaces merged runtime text during persistence.
++        // Keep the external leaf durable rather than transferring it model-only.
+         preserveLeaf:
++          input.preparedUserTurnMessage !== undefined ||
+           attempt.skipPreparedUserTurnMessage === true ||
+           isMainSessionRestartRecoveryInputProvenance(attempt.inputProvenance),
+         trigger: attempt.trigger,
 diff --git a/src/agents/embedded-agent-runner/run/attempt-settle.ts b/src/agents/embedded-agent-runner/run/attempt-settle.ts
 index 26031dae0c372e3aa64eea6b3e6382b5ddc3aba6..b4ac8cae4a814faa4744c46bf9d4cd533c913cbb 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-settle.ts
@@ -52560,6 +53143,179 @@ index 0000000000000000000000000000000000000000..a82544d423c2001dc8a4e184e49ea110
 +    },
 +  );
 +}
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.delivery-window.test-harness.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.delivery-window.test-harness.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..938f0c9c6b87cf0614e05e231ff8bef5ef66dec9
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle.delivery-window.test-harness.ts
+@@ -0,0 +1,167 @@
++import { expect, it, vi } from "vitest";
++import { getActiveGatewayRootWorkCount } from "../../../process/gateway-work-admission.js";
++import { createDeferredCore } from "../../../shared/deferred.js";
++import { SUBAGENT_ENDED_REASON_COMPLETE } from "./subagent-lifecycle-events.js";
++import type {
++  SubagentLifecycleController,
++  SubagentLifecycleOptions,
++} from "./subagent-registry-lifecycle.js";
++import {
++  createRunEntry,
++  waitForLifecycleState,
++} from "./subagent-registry-lifecycle.test-fixtures.js";
++import type { SubagentRunRecord } from "./subagent-registry.types.js";
++
++type AnnounceFlowOutcome = Awaited<ReturnType<SubagentLifecycleOptions["runSubagentAnnounceFlow"]>>;
++
++// Register within the lifecycle suite to retain its real controller, mocks, and hooks.
++export function registerCompletionDeliveryWindowCases({
++  createLifecycleController,
++  completionDeliveryMocks,
++}: {
++  createLifecycleController: (
++    params: {
++      entry: SubagentRunRecord;
++      runs?: Map<string, SubagentRunRecord>;
++    } & Partial<SubagentLifecycleOptions>,
++  ) => SubagentLifecycleController;
++  completionDeliveryMocks: { blockSubagentCompletionDelivery: ReturnType<typeof vi.fn> };
++}): void {
++  it("admits a held parent completion before starting its delivery window", async () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(4_000_000);
++    const entry = createRunEntry({
++      completionTarget: "parent",
++      requesterTurnRunId: "held-requester-turn",
++      expectsCompletionMessage: true,
++      endedAt: Date.now(),
++      completion: { required: true, resultText: "retained review result" },
++      delivery: { status: "pending" },
++      outcome: { status: "ok" },
++    });
++    let deliverySignal: AbortSignal | undefined;
++    const runSubagentAnnounceFlow = vi.fn<SubagentLifecycleOptions["runSubagentAnnounceFlow"]>(
++      async (params) => {
++        deliverySignal = params.signal;
++        expect(deliverySignal?.aborted).toBe(false);
++        params.onDeliveryResult?.({ delivered: true, path: "direct" });
++        return "delivered";
++      },
++    );
++    const controller: SubagentLifecycleController = createLifecycleController({
++      entry,
++      runSubagentAnnounceFlow,
++      resumeSubagentRun: (runId) => {
++        expect(runId).toBe(entry.runId);
++        controller.startSubagentAnnounceCleanupFlow(runId, entry);
++      },
++    });
++    try {
++      expect(controller.startSubagentAnnounceCleanupFlow(entry.runId, entry)).toBe(false);
++      await vi.advanceTimersByTimeAsync(40 * 60_000);
++      expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
++      expect(entry.completion?.resultText).toBe("retained review result");
++      expect(
++        controller.settleRequesterTurnAfterSessionSpawns({
++          requesterSessionKey: entry.requesterSessionKey,
++          requesterTurnRunId: "held-requester-turn",
++          requesterYielded: false,
++          acceptedSessionSpawns: [
++            {
++              runId: entry.runId,
++              childSessionKey: entry.childSessionKey,
++              expectsCompletionMessage: true,
++            },
++          ],
++        }),
++      ).toBe(true);
++      await vi.advanceTimersByTimeAsync(0);
++      await waitForLifecycleState(() => expect(runSubagentAnnounceFlow).toHaveBeenCalledOnce());
++      expect(deliverySignal?.aborted).toBe(false);
++      await waitForLifecycleState(() => expect(entry.delivery?.status).toBe("delivered"));
++      expect(entry.delivery?.windowStartedAt).toBe(6_400_000);
++      expect(entry.delivery?.deadlineAt).toBe(8_200_000);
++    } finally {
++      controller.clearScheduledResumeTimers();
++      vi.useRealTimers();
++    }
++  });
++
++  it.each([
++    { name: "original window", required: true, redriven: false, replaced: false },
++    { name: "explicit retry window", required: true, redriven: true, replaced: false },
++    { name: "retired owner", required: true, redriven: false, replaced: true },
++    { name: "optional completion window", required: false, redriven: false, replaced: false },
++  ])(
++    "bounds a pending completion handoff by its $name",
++    async ({ required, redriven, replaced }) => {
++      vi.useFakeTimers();
++      vi.setSystemTime(2_000_000);
++      const deadlineAt = Date.now() + (redriven ? 3_000 : 1_000);
++      const entry = createRunEntry({
++        endedAt: Date.now() - (required ? 30 : 5) * 60_000 + 1_000,
++        endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
++        expectsCompletionMessage: required ? true : undefined,
++        completion: { required, resultText: "final answer" },
++        delivery: {
++          status: "pending",
++          ...(redriven ? { windowStartedAt: Date.now(), deadlineAt } : {}),
++        },
++        outcome: { status: "ok" },
++        retainAttachmentsOnKeep: true,
++      });
++      const pendingHandoff = createDeferredCore<AnnounceFlowOutcome>();
++      let deliverySignal: AbortSignal | undefined;
++      const runSubagentAnnounceFlow = vi.fn<SubagentLifecycleOptions["runSubagentAnnounceFlow"]>(
++        (params) => {
++          deliverySignal = params.signal;
++          params.signal?.addEventListener(
++            "abort",
++            () => pendingHandoff.reject(params.signal?.reason),
++            {
++              once: true,
++            },
++          );
++          return pendingHandoff.promise;
++        },
++      );
++      const runs = new Map([[entry.runId, entry]]);
++      const controller = createLifecycleController({ entry, runs, runSubagentAnnounceFlow });
++      try {
++        expect(controller.startSubagentAnnounceCleanupFlow(entry.runId, entry)).toBe(true);
++        await waitForLifecycleState(() => expect(runSubagentAnnounceFlow).toHaveBeenCalledOnce());
++        const successor = replaced ? createRunEntry({ runId: entry.runId }) : undefined;
++        if (successor) {
++          runs.set(entry.runId, successor);
++        }
++
++        await vi.advanceTimersByTimeAsync(deadlineAt - Date.now() - 1);
++        expect(entry.delivery?.status).toBe("pending");
++        expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
++        await vi.advanceTimersByTimeAsync(1);
++
++        expect(deliverySignal?.aborted).toBe(true);
++        await waitForLifecycleState(() => expect(getActiveGatewayRootWorkCount()).toBe(0));
++        if (successor) {
++          expect(runs.get(entry.runId)).toBe(successor);
++          expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
++        } else if (!required) {
++          expect(entry.delivery?.status).toBe("failed");
++          expect(entry.cleanupCompletedAt).toBeTypeOf("number");
++          expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
++        } else {
++          expect(entry.delivery?.status).toBe("suspended");
++          expect(entry.delivery?.suspendedReason).toBe("expiry");
++          expect(entry.completion?.resultText).toBe("final answer");
++          expect(entry.cleanupHandled).toBe(false);
++          expect(entry.cleanupCompletedAt).toBeUndefined();
++        }
++      } finally {
++        pendingHandoff.resolve("retryable");
++        await vi.advanceTimersByTimeAsync(0);
++        controller.clearScheduledResumeTimers();
++        vi.useRealTimers();
++      }
++    },
++  );
++}
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.test-fixtures.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.test-fixtures.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..7784b967eabd61a1e71959f437ca5831ff36ff33
@@ -52765,7 +53521,7 @@ index 0000000000000000000000000000000000000000..7784b967eabd61a1e71959f437ca5831
 +  return controller.completeSubagentRun(makeSubagentCompletion(entry, overrides));
 +}
 diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
-index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9cf402b35 100644
+index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..896f6e50f0720730ad547c223fa2aedbe965bf2d 100644
 --- a/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry-lifecycle.test.ts
 @@ -65,6 +65,7 @@ import {
@@ -52776,11 +53532,12 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  import {
    SUBAGENT_ENDED_REASON_COMPLETE,
    SUBAGENT_ENDED_REASON_ERROR,
-@@ -78,10 +79,28 @@ import {
+@@ -78,10 +79,29 @@ import {
    subagentRegistryDeps,
  } from "./subagent-registry-deps.js";
  import { loadPendingFinalDeliveryPayload } from "./subagent-registry-lifecycle-delivery.js";
 +import { registerCronRequesterYieldBatchCases } from "./subagent-registry-lifecycle.cron-yield.test-harness.js";
++import { registerCompletionDeliveryWindowCases } from "./subagent-registry-lifecycle.delivery-window.test-harness.js";
  import {
    SubagentLifecycleController,
    type SubagentLifecycleOptions,
@@ -52805,7 +53562,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  import { subagentRuns } from "./subagent-registry-memory.js";
  import { getLatestSubagentRunByChildSessionKeyFromRuns } from "./subagent-registry-queries.js";
  import {
-@@ -96,15 +115,12 @@ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.j
+@@ -96,15 +116,12 @@ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.j
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
  
  type LifecycleControllerParams = SubagentLifecycleOptions;
@@ -52821,7 +53578,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  
  describe("subagent recovery session-effect ownership", () => {
    it("does not treat an ordinary run generation as a recovery suppression receipt", () => {
-@@ -142,10 +158,6 @@ describe("subagent recovery session-effect ownership", () => {
+@@ -142,10 +159,6 @@ describe("subagent recovery session-effect ownership", () => {
    });
  });
  
@@ -52832,7 +53589,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  const taskExecutorMocks = vi.hoisted(() => ({
    completeTaskRunByRunId: vi.fn(),
    failTaskRunByRunId: vi.fn(),
-@@ -294,38 +306,6 @@ vi.mock("./subagent-registry-helpers.js", () => ({
+@@ -294,38 +307,6 @@ vi.mock("./subagent-registry-helpers.js", () => ({
    updateSubagentArchiveAtMs: () => false,
  }));
  
@@ -52871,7 +53628,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  describe("pending final delivery payload", () => {
    it("uses the authoritative completion reply after a retry payload was captured", () => {
      const staleTerminalReply = { disposition: "visible", text: "child result" } as const;
-@@ -353,130 +333,6 @@ describe("pending final delivery payload", () => {
+@@ -353,130 +334,6 @@ describe("pending final delivery payload", () => {
    });
  });
  
@@ -53002,7 +53759,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  function hasDeliveredTaskStatusUpdate(runId: string): boolean {
    return taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId.mock.calls.some(([arg]) => {
      const record = arg as { runId?: unknown; deliveryStatus?: unknown } | undefined;
-@@ -484,15 +340,6 @@ function hasDeliveredTaskStatusUpdate(runId: string): boolean {
+@@ -484,15 +341,6 @@ function hasDeliveredTaskStatusUpdate(runId: string): boolean {
    });
  }
  
@@ -53018,7 +53775,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  function createLifecycleController({
    entry,
    runs = new Map([[entry.runId, entry]]),
-@@ -541,14 +388,6 @@ function createLifecycleController({
+@@ -541,14 +389,6 @@ function createLifecycleController({
    return new SubagentLifecycleController(params);
  }
  
@@ -53033,7 +53790,92 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
  async function runNoReplyMirrorScenario(params: {
    timestamp: number;
    text?: string;
-@@ -5308,6 +5147,7 @@ describe("subagent registry lifecycle hardening", () => {
+@@ -4457,83 +4297,7 @@ describe("subagent registry lifecycle hardening", () => {
+     expect(Number.isNaN(entry.cleanupCompletedAt)).toBe(false);
+   });
+ 
+-  it.each([
+-    { name: "original window", required: true, redriven: false, replaced: false },
+-    { name: "explicit retry window", required: true, redriven: true, replaced: false },
+-    { name: "retired owner", required: true, redriven: false, replaced: true },
+-    { name: "optional completion window", required: false, redriven: false, replaced: false },
+-  ])(
+-    "bounds a pending completion handoff by its $name",
+-    async ({ required, redriven, replaced }) => {
+-      vi.useFakeTimers();
+-      vi.setSystemTime(2_000_000);
+-      const deadlineAt = Date.now() + (redriven ? 3_000 : 1_000);
+-      const entry = createRunEntry({
+-        endedAt: Date.now() - (required ? 30 : 5) * 60_000 + 1_000,
+-        endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
+-        expectsCompletionMessage: required ? true : undefined,
+-        completion: { required, resultText: "final answer" },
+-        delivery: {
+-          status: "pending",
+-          ...(redriven ? { windowStartedAt: Date.now(), deadlineAt } : {}),
+-        },
+-        outcome: { status: "ok" },
+-        retainAttachmentsOnKeep: true,
+-      });
+-      const pendingHandoff = createDeferredCore<AnnounceFlowOutcome>();
+-      let deliverySignal: AbortSignal | undefined;
+-      const runSubagentAnnounceFlow = vi.fn<LifecycleControllerParams["runSubagentAnnounceFlow"]>(
+-        (params) => {
+-          deliverySignal = params.signal;
+-          params.signal?.addEventListener(
+-            "abort",
+-            () => pendingHandoff.reject(params.signal?.reason),
+-            {
+-              once: true,
+-            },
+-          );
+-          return pendingHandoff.promise;
+-        },
+-      );
+-      const runs = new Map([[entry.runId, entry]]);
+-      const controller = createLifecycleController({ entry, runs, runSubagentAnnounceFlow });
+-      try {
+-        expect(controller.startSubagentAnnounceCleanupFlow(entry.runId, entry)).toBe(true);
+-        await waitForLifecycleState(() => expect(runSubagentAnnounceFlow).toHaveBeenCalledOnce());
+-        const successor = replaced ? createRunEntry({ runId: entry.runId }) : undefined;
+-        if (successor) {
+-          runs.set(entry.runId, successor);
+-        }
+-
+-        await vi.advanceTimersByTimeAsync(deadlineAt - Date.now() - 1);
+-        expect(entry.delivery?.status).toBe("pending");
+-        expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
+-        await vi.advanceTimersByTimeAsync(1);
+-
+-        expect(deliverySignal?.aborted).toBe(true);
+-        await waitForLifecycleState(() => expect(getActiveGatewayRootWorkCount()).toBe(0));
+-        if (successor) {
+-          expect(runs.get(entry.runId)).toBe(successor);
+-          expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
+-        } else if (!required) {
+-          expect(entry.delivery?.status).toBe("failed");
+-          expect(entry.cleanupCompletedAt).toBeTypeOf("number");
+-          expect(completionDeliveryMocks.blockSubagentCompletionDelivery).not.toHaveBeenCalled();
+-        } else {
+-          expect(entry.delivery?.status).toBe("suspended");
+-          expect(entry.delivery?.suspendedReason).toBe("expiry");
+-          expect(entry.completion?.resultText).toBe("final answer");
+-          expect(entry.cleanupHandled).toBe(false);
+-          expect(entry.cleanupCompletedAt).toBeUndefined();
+-        }
+-      } finally {
+-        pendingHandoff.resolve("retryable");
+-        await vi.advanceTimersByTimeAsync(0);
+-        controller.clearScheduledResumeTimers();
+-        vi.useRealTimers();
+-      }
+-    },
+-  );
++  registerCompletionDeliveryWindowCases({ createLifecycleController, completionDeliveryMocks });
+ 
+   it("suspends successful keep-mode final delivery after its deadline", async () => {
+     const persistOrThrow = vi.fn();
+@@ -5308,6 +5072,7 @@ describe("subagent registry lifecycle hardening", () => {
  
  describe("requester settle wake trigger", () => {
    beforeEach(() => {
@@ -53041,7 +53883,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
      mockBlockedCompletionDeliveryOwner();
      helperMocks.safeRemoveAttachmentsDir.mockClear();
      helperMocks.logAnnounceGiveUp.mockClear();
-@@ -5759,6 +5599,12 @@ describe("requester settle wake trigger", () => {
+@@ -5759,6 +5524,12 @@ describe("requester settle wake trigger", () => {
      await waitForLifecycleState(() => expect(settleWake).toHaveBeenCalledOnce());
    });
  
@@ -53054,7 +53896,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
    it("keeps a yielded completion parked until its requester turn settles", async () => {
      const entry = createRunEntry({
        requesterTurnRunId: "run-requester",
-@@ -5809,6 +5655,7 @@ describe("requester settle wake trigger", () => {
+@@ -5809,6 +5580,7 @@ describe("requester settle wake trigger", () => {
      "closed-in-flight",
      "throwing-in-flight",
      "closed-rearmed",
@@ -53062,7 +53904,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
    ] as const)(
      "credits a yielded handoff only from settled delivery evidence: %s",
      async (ownership) => {
-@@ -5822,6 +5669,10 @@ describe("requester settle wake trigger", () => {
+@@ -5822,6 +5594,10 @@ describe("requester settle wake trigger", () => {
            rearmGeneration: 1,
          },
        });
@@ -53073,7 +53915,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
        let gatewayOpen = true;
        const gatewayContext = {};
        if (ownership !== "unbound") {
-@@ -5853,6 +5704,7 @@ describe("requester settle wake trigger", () => {
+@@ -5853,6 +5629,7 @@ describe("requester settle wake trigger", () => {
        );
        const controller = createLifecycleController({
          entry,
@@ -53081,7 +53923,7 @@ index 1e8cc4c41123dd4a7db15053a9af0e6ba45c75a7..960203ec46d5bab8e6acdaedda2244b9
          maybeWakeRequesterAfterAllChildrenSettled,
          runSubagentAnnounceFlow,
        });
-@@ -5878,18 +5730,48 @@ describe("requester settle wake trigger", () => {
+@@ -5878,18 +5655,48 @@ describe("requester settle wake trigger", () => {
        if (ownership === "closed-rearmed") {
          entry.requesterSettleWake!.rearmGeneration = 2;
        }
@@ -53836,7 +54678,7 @@ index 578a40dde50ad75424f11ddfb28f56926beddeea..e065d8046b09110132b1a4dc2ac215f2
    publishSubagentRunsAfterAtomicStore(params.runs, params.changedRunIds, deferredObserverEvents);
    publishTaskRecordAfterAtomicStore(params.task.next, {
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
-index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80054cb8f2 100644
+index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..3a47529e98ee575c2401e3edc73b20b4b13766b0 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
 @@ -1,5 +1,6 @@
@@ -53846,7 +54688,7 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
  import {
    consumeRequesterFinalAttachment,
    registerRequesterFinalAttachment,
-@@ -31,11 +32,18 @@ function makeRun(runId: string, requesterTurnYielded = true): SubagentRunRecord
+@@ -31,14 +32,72 @@ function makeRun(runId: string, requesterTurnYielded = true): SubagentRunRecord
  }
  
  function accepted(entry: SubagentRunRecord) {
@@ -53870,7 +54712,61 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
  }
  
  describe("settleRequesterTurnAfterSessionSpawns", () => {
-@@ -297,6 +305,147 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
++  it.each([
++    { status: "pending" as const, windowStartedAt: 2_000, deadlineAt: 5_000 },
++    { status: "pending" as const, attemptCount: 1 },
++    { status: "suspended" as const, suspendedAt: 3_000 },
++    { status: "delivered" as const, deliveredAt: 3_000 },
++  ])("preserves an existing delivery attempt when its requester ends ($status)", (delivery) => {
++    const before = structuredClone(delivery);
++    const child = {
++      ...makeRun("run-child", false),
++      completionTarget: "parent" as const,
++      delivery,
++    };
++    expect(
++      settleRequesterTurnAfterSessionSpawns({
++        requesterSessionKey: REQUESTER,
++        requesterTurnRunId: REQUESTER_TURN,
++        requesterYielded: false,
++        acceptedSessionSpawns: [accepted(child)],
++        runs: new Map([[child.runId, child]]),
++        persistOrThrow: () => undefined,
++        schedule: () => undefined,
++      }),
++    ).toBe(true);
++    expect(child.delivery).toEqual(before);
++  });
++
++  it("rolls back the initial delivery window when requester release cannot persist", () => {
++    const child = {
++      ...makeRun("run-child", false),
++      completionTarget: "parent" as const,
++      delivery: { status: "pending" as const },
++    };
++    const before = structuredClone(child);
++    const schedule = vi.fn();
++    expect(() =>
++      settleRequesterTurnAfterSessionSpawns({
++        requesterSessionKey: REQUESTER,
++        requesterTurnRunId: REQUESTER_TURN,
++        requesterYielded: false,
++        acceptedSessionSpawns: [accepted(child)],
++        runs: new Map([[child.runId, child]]),
++        persistOrThrow: () => {
++          throw new Error("storage unavailable");
++        },
++        schedule,
++      }),
++    ).toThrow("storage unavailable");
++    expect(child).toEqual(before);
++    expect(schedule).not.toHaveBeenCalled();
++  });
++
+   it.each([false, true])(
+     "publishes a nested requester's pause with its wake batch (persistence failure: %s)",
+     (failPersistence) => {
+@@ -297,6 +356,147 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
      },
    );
  
@@ -54018,7 +54914,7 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
    it("retires a completed yielded batch whose requester already produced its final", () => {
      const entry = makeRun("run-child");
      entry.cleanupCompletedAt = 2_100;
-@@ -511,17 +660,27 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
+@@ -511,17 +711,27 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
      expect(schedule).toHaveBeenCalledExactlyOnceWith(alpha.runId, alpha, "settle");
    });
  
@@ -54054,7 +54950,7 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
        const persistOrThrow = vi.fn();
        const schedule = vi.fn();
  
-@@ -541,7 +700,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
+@@ -541,7 +751,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
            requesterSessionKey: REQUESTER,
            requesterTurnRunId: REQUESTER_TURN,
            requesterYielded,
@@ -54063,7 +54959,7 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
            runs,
            persistOrThrow,
            schedule,
-@@ -563,6 +722,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
+@@ -563,6 +773,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
        expect(inline.requesterTurnRunId).toBe(REQUESTER_TURN);
        expect(inline.requesterTurnYielded).toBeUndefined();
        expect(inline.requesterSettleWake).toBeUndefined();
@@ -54072,10 +54968,16 @@ index a4c9ba49160b77a8d5d0afafe1a278a77b6fc76d..863fff42a84da6267b77034d276eeb80
    );
  
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-index 431d300062a7e709a469aa11f9a172e4d8a7636f..123997b722494242813398705a30eb81342ff510 100644
+index 431d300062a7e709a469aa11f9a172e4d8a7636f..d25fe7d1ab35ee1b26352dd59e266d39d1488db7 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-@@ -10,6 +10,13 @@ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.j
+@@ -6,10 +6,19 @@ import {
+   promoteRequesterCronAuthority,
+ } from "../requester-cron-authority.js";
+ import { promoteRequesterFinalAttachment } from "../requester-final-attachment.js";
++import { ensureDeliveryState, getDeliveryAttemptCount } from "./subagent-delivery-state.js";
++import { ANNOUNCE_COMPLETION_HARD_EXPIRY_MS } from "./subagent-registry-helpers.js";
+ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.js";
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
  import { compareSubagentRunGeneration } from "./subagent-run-generation.js";
  
@@ -54089,7 +54991,7 @@ index 431d300062a7e709a469aa11f9a172e4d8a7636f..123997b722494242813398705a30eb81
  /** Persists explicit yield intent before the requester run is aborted. */
  export function markRequesterTurnYieldedInRuns(params: {
    requesterSessionKey: string;
-@@ -72,30 +79,52 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -72,30 +81,52 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
    const spawnsByRunId = new Map(
      params.acceptedSessionSpawns.map((spawn) => [spawn.runId, spawn] as const),
    );
@@ -54148,6 +55050,29 @@ index 431d300062a7e709a469aa11f9a172e4d8a7636f..123997b722494242813398705a30eb81
        (params.requesterYielded && entry.requesterTurnYielded !== true)
      ) {
        return false;
+@@ -185,6 +216,22 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
+     }
+   } else {
+     for (const entry of entries) {
++      // This parent held the result before any handoff could be admitted.
++      // Start its initial window with the atomic release, never renew a retry.
++      if (
++        !params.requesterYielded &&
++        entry.completionTarget === "parent" &&
++        typeof entry.execution.endedAt === "number" &&
++        entry.suppressCompletionDelivery !== true &&
++        (entry.delivery === undefined || entry.delivery.status === "pending") &&
++        getDeliveryAttemptCount(entry) === 0 &&
++        entry.delivery?.windowStartedAt === undefined &&
++        entry.delivery?.deadlineAt === undefined
++      ) {
++        const delivery = ensureDeliveryState(entry);
++        delivery.windowStartedAt = Date.now();
++        delivery.deadlineAt = delivery.windowStartedAt + ANNOUNCE_COMPLETION_HARD_EXPIRY_MS;
++      }
+       if (entry.delivery) {
+         delete entry.delivery.requesterVisibleFinal;
+       }
 diff --git a/src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts b/src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts
 index 2736e8def9c42d9ca4c05ce2ec7e6984b8af5956..0a4068b7490c6b9da977d12e554b9f373ccec223 100644
 --- a/src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts
@@ -62185,17 +63110,24 @@ index eadc6ecca49bf01c7d0fe225284dc12d595e2b90..d076bf24334d364cce4627a1de4904a4
          (params.shouldSurfaceToControlUi
            ? renderControlUiAgentFailureCopy(message)
 diff --git a/src/auto-reply/reply/agent-runner-execute.ts b/src/auto-reply/reply/agent-runner-execute.ts
-index 48a69db3b6a78321faeb5055249ec0be4fd831ac..2194d250e7a551ab942ad790b1bb186195d04125 100644
+index 48a69db3b6a78321faeb5055249ec0be4fd831ac..2b55b5f58a4f87de50e2329fa3e0d517f459d9f7 100644
 --- a/src/auto-reply/reply/agent-runner-execute.ts
 +++ b/src/auto-reply/reply/agent-runner-execute.ts
-@@ -1,5 +1,6 @@
+@@ -1,10 +1,13 @@
  import crypto from "node:crypto";
  import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 +import { preemptEmbeddedBackgroundForUserAdmission } from "../../agents/embedded-agent-runner/runs.js";
  import type { OpenClawConfig } from "../../config/config.js";
  import type { SessionEntry } from "../../config/sessions.js";
  import { withBeforeAgentReplyObserver } from "../../plugins/before-agent-reply.js";
-@@ -206,6 +207,9 @@ export async function executePreparedReplyAgentRun(
+ import { getGatewayContextResolver } from "../../plugins/runtime/gateway-request-scope.js";
+ import { readPendingUserTurnTranscriptAdmission } from "../../sessions/user-turn-transcript-admission.js";
++import { buildRunUserTurnIdempotencyKey } from "../../sessions/user-turn-transcript.js";
++import { isInternalMessageChannel } from "../../utils/message-channel.js";
+ import { setReplyPayloadMetadata } from "../reply-payload.js";
+ import type { OriginatingChannelType } from "../templating.js";
+ import { SILENT_REPLY_TOKEN } from "../tokens.js";
+@@ -206,6 +209,9 @@ export async function executePreparedReplyAgentRun(
          storePath,
          isHeartbeat,
          replyOperation,
@@ -62205,7 +63137,7 @@ index 48a69db3b6a78321faeb5055249ec0be4fd831ac..2194d250e7a551ab942ad790b1bb1861
        }),
      );
      setActiveSessionEntry(flushed.sessionEntry);
-@@ -232,6 +236,14 @@ export async function executePreparedReplyAgentRun(
+@@ -232,6 +238,14 @@ export async function executePreparedReplyAgentRun(
        isHeartbeat,
        abortSignal: replyOperation.abortSignal,
        beforeCompaction: checkpointMemory,
@@ -62220,6 +63152,50 @@ index 48a69db3b6a78321faeb5055249ec0be4fd831ac..2194d250e7a551ab942ad790b1bb1861
        onCompactionStart: () => replyOperation.setPhase("preflight_compacting"),
        onSessionIdChanged: (sessionId) => replyOperation.updateSessionId(sessionId),
        onCompactionNotice: sendDirectCompactionNotice,
+@@ -466,6 +480,9 @@ export function createReplyAgentRestartRecoveryController(
+     storePath,
+   } = context;
+ 
++  const admissionRunId =
++    normalizeOptionalString(sessionCtx.MessageSid) ??
++    normalizeOptionalString(sessionCtx.MessageSidFull);
+   const restartRecoverySameChannelThreadRequired = restartRecoverySourceTurnId
+     ? buildThreadingToolContext({
+         sessionCtx,
+@@ -481,9 +498,7 @@ export function createReplyAgentRestartRecoveryController(
+     isArmed: isRestartRecoveryArmed,
+   } = createReplyRestartRecoveryClaimController({
+     lifecycleGeneration: replyOperation.lifecycleGeneration,
+-    admissionRunId:
+-      normalizeOptionalString(sessionCtx.MessageSid) ??
+-      normalizeOptionalString(sessionCtx.MessageSidFull),
++    admissionRunId,
+     getEntry: () =>
+       sessionKey
+         ? (activeSessionStore?.[sessionKey] ?? getActiveSessionEntry())
+@@ -544,8 +559,20 @@ export function createReplyAgentRestartRecoveryController(
+   });
+   const admitUserTurnWithSourceBinding: typeof admitUserTurn = async (...args) => {
+     const result = await admitUserTurn(...args);
+-    if (result === "admitted" && restartRecoverySourceTurnId) {
+-      replyRunRegistry.bindSourceTurnId(replyOperation, restartRecoverySourceTurnId);
++    if (result === "admitted") {
++      // Gateway inputs retain their native admitted run key; channel inputs
++      // retain their route-scoped source key. Neither is a backend run guess.
++      const admittedSourceTurnId =
++        restartRecoverySourceTurnId ??
++        (isInternalMessageChannel(sessionCtx.Provider) &&
++        admissionRunId &&
++        args[0]?.getAdmissionReceipt()?.idempotencyKey ===
++          buildRunUserTurnIdempotencyKey(admissionRunId)
++          ? admissionRunId
++          : undefined);
++      if (admittedSourceTurnId) {
++        replyRunRegistry.bindSourceTurnId(replyOperation, admittedSourceTurnId);
++      }
+     }
+     return result;
+   };
 diff --git a/src/auto-reply/reply/agent-runner-execution-auth-failures.test.ts b/src/auto-reply/reply/agent-runner-execution-auth-failures.test.ts
 index d76f132ef8ef0e612da859ed3f328b0fa401ae4f..09075a3da4fa4897be28801f436d7f2a5a281675 100644
 --- a/src/auto-reply/reply/agent-runner-execution-auth-failures.test.ts
@@ -65475,6 +66451,283 @@ index 00e1b3701095098d238141051a3af7404960a381..2c1834bae4aa646c2c6bc7358293787b
        pendingInputAuthorityFingerprint: hasRouteOnlyAuthorityMismatch
          ? activeToolAuthorityFingerprint
          : undefined,
+diff --git a/src/auto-reply/reply/agent-runner-source-admission.test.ts b/src/auto-reply/reply/agent-runner-source-admission.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3b3fe8c09df7fd9f20b1107d3734559fe09c67b5
+--- /dev/null
++++ b/src/auto-reply/reply/agent-runner-source-admission.test.ts
+@@ -0,0 +1,271 @@
++/** Native CUI input admission must bind the source used by the steering fence. */
++import { join } from "node:path";
++import { afterEach, expect, it, vi } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
++import type { SessionEntry } from "../../config/sessions/types.js";
++import { resolveChatSendOriginatingRoute } from "../../gateway/server-methods/chat-origin-routing.js";
++import { createChatSendMessageInjectionStarter } from "../../gateway/server-methods/chat-send-message-injection.js";
++import { prepareChatSendUserTurn } from "../../gateway/server-methods/chat-send-user-turn.js";
++import {
++  createUserTurnTranscriptRecorder,
++  type UserTurnInput,
++} from "../../sessions/user-turn-transcript.js";
++import { resolveCommandAuthorization } from "../command-auth.js";
++import { createReplyAgentRestartRecoveryController } from "./agent-runner-execute.js";
++import { finalizeInboundContext } from "./inbound-context.js";
++import type { FollowupRun } from "./queue.js";
++import { createReplyOperation, replyRunRegistry } from "./reply-run-registry.js";
++import {
++  prepareReplyToolAuthority,
++  resolveInboundReplyToolAuthorityOverlay,
++} from "./reply-tool-authority.js";
++import { readChannelSourceTurnId, shouldMintChannelSourceTurnId } from "./source-turn-id.js";
++
++// Model the runtime host inside the test thread, preserving real native SQLite workers.
++vi.mock("node:worker_threads", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("node:worker_threads")>()),
++  isMainThread: true,
++}));
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++async function makeSessionFixture(overrides: Partial<SessionEntry>) {
++  const sessionEntry: SessionEntry = { sessionId: "session", updatedAt: Date.now(), ...overrides };
++  const sessionStore = { main: sessionEntry };
++  const storePath = join(tempDirs.make("openclaw-cui-source-admission-"), "sessions.json");
++  await replaceSessionEntry({ storePath, sessionKey: "main" }, sessionEntry);
++  return { sessionEntry, sessionStore, storePath };
++}
++function requireStoredSessionEntry(storePath: string) {
++  const entry = loadSessionEntry({ storePath, sessionKey: "main", readConsistency: "latest" });
++  if (!entry) {
++    throw new Error("expected the native session entry");
++  }
++  return entry;
++}
++
++it.each<{
++  label: string;
++  accepts: boolean;
++  fence?: Partial<SessionEntry>;
++  receiptSourceId?: string;
++  externalProvider?: boolean;
++  fullMessageSid?: boolean;
++}>([
++  { label: "an older terminal tombstone", accepts: true },
++  { label: "normalized MessageSidFull admission", accepts: true, fullMessageSid: true },
++  {
++    label: "the exact current-source tombstone",
++    accepts: false,
++    fence: { restartRecoveryTerminalRunIds: ["fresh-control-ui-source"] },
++  },
++  {
++    label: "an ambiguous pending terminal receipt",
++    accepts: false,
++    fence: { restartRecoveryDeliveryReceiptState: "terminal-pending" },
++  },
++  {
++    label: "a delivered terminal receipt",
++    accepts: false,
++    fence: { restartRecoveryDeliveryReceiptState: "delivered-terminal" },
++  },
++  {
++    label: "an unresolved terminal tool call",
++    accepts: false,
++    fence: { restartRecoveryDeliveryToolCallId: "terminal-send" },
++  },
++  { label: "a mismatched durable input receipt", accepts: false, receiptSourceId: "other-source" },
++  { label: "an external provider's message id", accepts: false, externalProvider: true },
++])("retains native Control UI admission fencing with $label", async (testCase) => {
++  const sourceRunId = "fresh-control-ui-source";
++  const { sessionEntry, sessionStore, storePath } = await makeSessionFixture({
++    status: "running",
++    restartRecoveryTerminalRunIds: ["earlier-control-ui-source"],
++  });
++  const sourceInput = {
++    text: "continue the existing task",
++    timestamp: Date.now(),
++    idempotencyKey: `${testCase.receiptSourceId ?? sourceRunId}:user`,
++  };
++  let inputPromise: Promise<UserTurnInput> = Promise.resolve(sourceInput);
++  const prepared = prepareChatSendUserTurn({
++    request: { inboundMessage: sourceInput.text, suppressCommandInterpretation: false },
++    session: { agentId: "main", clientRunId: sourceRunId, sessionKey: "main", cfg: {} },
++    admission: {
++      originatingRoute: resolveChatSendOriginatingRoute({
++        sessionKey: "main",
++        entry: sessionEntry,
++      }),
++    },
++    attachments: {
++      explicitOriginTargetsPlugin: false,
++      imageOrder: [],
++      mediaPathOffloadPaths: [],
++      mediaPathOffloadTypes: [],
++      mediaPathOffloadWorkspaceDir: undefined,
++      offloadedRefs: [],
++      parsedImages: [],
++      parsedMessage: sourceInput.text,
++      prepareAttachmentsMs: undefined,
++    },
++    client: null,
++    logGateway: { warn: vi.fn() } as never,
++    userTurn: {
++      baseInput: sourceInput,
++      setInputPromise: (input) => {
++        inputPromise = input;
++      },
++    },
++  });
++  const sessionCtx = prepared.ctx;
++  // Gateway inputs have native run identities. They must not acquire a
++  // synthetic channel-user identity to get past a terminal-delivery fence.
++  expect(sessionCtx.MessageSid).toBe(sourceRunId);
++  expect(shouldMintChannelSourceTurnId(sessionCtx.Provider)).toBe(false);
++  expect(readChannelSourceTurnId(sessionCtx)).toBeUndefined();
++  if (testCase.externalProvider) {
++    sessionCtx.Provider = "discord";
++  }
++  if (testCase.fullMessageSid) {
++    sessionCtx.MessageSid = undefined;
++    sessionCtx.MessageSidFull = `  ${sourceRunId}  `;
++  }
++  const { originatingChannel, toolsAllow, disableTools, ...inboundRunAuthority } =
++    resolveInboundReplyToolAuthorityOverlay({
++      ctx: finalizeInboundContext(sessionCtx),
++      sessionEntry,
++      senderIsOwner: resolveCommandAuthorization({
++        ctx: sessionCtx,
++        cfg: {},
++        commandAuthorized: sessionCtx.CommandAuthorized === true,
++      }).senderIsOwner,
++      disableTools: false,
++    });
++  const followupRun = {
++    originatingChannel,
++    toolsAllow,
++    disableTools,
++    run: {
++      ...inboundRunAuthority,
++      agentId: "main",
++      sessionId: "session",
++      workspaceDir: "/tmp",
++      config: {},
++      provider: "openai",
++      model: "gpt-5.5",
++    },
++  } as FollowupRun;
++  const active = createReplyOperation({
++    sessionKey: "main",
++    sessionId: "session",
++    resetTriggered: false,
++  });
++  const queueMessage = vi.fn(async () => {});
++  // The real authority projection must agree before the identity seam can be
++  // tested through actual injection admission rather than a mocked queue.
++  active.bindToolAuthoritySnapshot(prepareReplyToolAuthority(followupRun));
++  active.bindToolAuthorityRoute({ provider: "openai", model: "gpt-5.5" });
++  active.setPhase("running");
++  active.attachBackend({
++    kind: "embedded",
++    runId: sourceRunId,
++    cancel: () => {},
++    messageInjection: { isAvailable: () => true, queueMessage },
++  });
++  let entry = sessionEntry;
++  const recorder = createUserTurnTranscriptRecorder({
++    input: await inputPromise,
++    target: {
++      agentId: "main",
++      cwd: "/tmp",
++      sessionEntry,
++      sessionId: "session",
++      sessionKey: "main",
++      sessionStore,
++      storePath,
++    },
++  });
++  try {
++    const controller = createReplyAgentRestartRecoveryController({
++      activeSessionStore: sessionStore,
++      cfg: {},
++      followupRun,
++      getActiveSessionEntry: () => entry,
++      opts: undefined,
++      replyOperation: active,
++      restartRecoverySourceTurnId: readChannelSourceTurnId(sessionCtx),
++      runtimePolicySessionKey: undefined,
++      sessionCtx,
++      sessionKey: "main",
++      setActiveSessionEntry: (next) => {
++        entry = next;
++      },
++      storePath,
++    });
++    await expect(controller.admitUserTurn(recorder)).resolves.toBe("admitted");
++    expect(recorder.hasPersisted()).toBe(true);
++    expect(recorder.getAdmissionReceipt()?.idempotencyKey).toBe(sourceInput.idempotencyKey);
++    const target = replyRunRegistry.resolveCurrentMessageInjectionTarget("main");
++    expect(target?.runId).toBe(sourceRunId);
++    expect(target?.sourceTurnId).toBe(
++      testCase.externalProvider || testCase.receiptSourceId ? undefined : sourceRunId,
++    );
++    if (testCase.fence) {
++      entry = { ...entry, ...testCase.fence, updatedAt: Date.now() };
++      await replaceSessionEntry({ storePath, sessionKey: "main" }, entry);
++      sessionStore.main = entry;
++    }
++    const logGateway = { warn: vi.fn() };
++    const steerRecorder = createUserTurnTranscriptRecorder({
++      input: { text: "give a brief status and continue", idempotencyKey: "fresh-steer:user" },
++      target: {
++        agentId: "main",
++        cwd: "/tmp",
++        sessionEntry: entry,
++        sessionId: "session",
++        sessionKey: "main",
++        sessionStore,
++        storePath,
++      },
++    });
++    const attempt = createChatSendMessageInjectionStarter({
++      target,
++      abortSignal: new AbortController().signal,
++      request: {
++        p: {
++          sessionKey: "main",
++          message: "give a brief status and continue",
++          idempotencyKey: "fresh-steer",
++          queueMode: "steer",
++        },
++        rawMessage: "give a brief status and continue",
++        supportsTaskSuggestions: false,
++      },
++      session: { cfg: {}, entry, clientRunId: "fresh-steer", sessionKey: "main", storePath },
++      turn: {
++        ctx: finalizeInboundContext(sessionCtx),
++        isInternalTextSlashCommandTurn: false,
++        replyOptionImages: undefined,
++        replyOptionMedia: undefined,
++      },
++      imageOrder: [],
++      userTurnTranscriptRecorder: steerRecorder,
++      logGateway: logGateway as never,
++    })();
++    if (testCase.accepts) {
++      expect(attempt, "a durably admitted fresh CUI source must remain steerable").toBeDefined();
++      await expect(attempt?.acceptance).resolves.toBe(true);
++      expect(queueMessage).toHaveBeenCalledOnce();
++      expect(logGateway.warn).not.toHaveBeenCalled();
++    } else {
++      expect(attempt).toBeUndefined();
++      expect(queueMessage).not.toHaveBeenCalled();
++      expect(logGateway.warn).toHaveBeenCalledOnce();
++    }
++    expect(requireStoredSessionEntry(storePath).restartRecoveryTerminalRunIds).toEqual(
++      testCase.fence?.restartRecoveryTerminalRunIds ?? ["earlier-control-ui-source"],
++    );
++  } finally {
++    active.complete();
++  }
++});
 diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.auth-rotation.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.auth-rotation.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..b1a06c5e5764fc4b4759a5676a8b00ba5eaad0ae
@@ -68209,10 +69462,10 @@ index 0000000000000000000000000000000000000000..9e60aa679cf6faad88cfc31107ef408d
 +  bootstrapContextRunKind?: string;
 +};
 diff --git a/src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts b/src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts
-index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e78f365c5c 100644
+index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..003666dde35b2c7eff95c9039443f638eead8270 100644
 --- a/src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts
 +++ b/src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts
-@@ -38,14 +38,23 @@ import {
+@@ -38,14 +38,24 @@ import {
    replaceSessionEntry,
  } from "../../config/sessions/session-accessor.js";
  import type { TypingMode } from "../../config/types.js";
@@ -68237,10 +69490,11 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
 +  requireStoredSessionEntry,
 +  runHookBackedEmbeddedAgent,
 +} from "./agent-runner.runreplyagent.e2e.test-fixtures.js";
++import { registerAgentRunnerSteeringRejectionCases } from "./agent-runner.steering-rejection.test-harness.js";
  import { resolveActiveExplicitSteerSessionKey } from "./explicit-steer-routing.js";
  import type { InternalGetReplyOptions } from "./get-reply.types.js";
  import {
-@@ -66,8 +75,8 @@ import {
+@@ -66,8 +76,8 @@ import {
  import {
    clearReplyRunForResetBySessionId,
    createReplyOperation,
@@ -68250,7 +69504,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  } from "./reply-run-registry.js";
  import { testing as replyRunTesting } from "./reply-run-registry.test-support.js";
  import { bindReplyOperationTyping } from "./reply-run-typing.js";
-@@ -77,28 +86,6 @@ import { consumeReplyUsageState } from "./reply-usage-state.js";
+@@ -77,28 +87,6 @@ import { consumeReplyUsageState } from "./reply-usage-state.js";
  import { buildChannelSourceTurnId, setChannelSourceTurnId } from "./source-turn-id.js";
  import { createMockTypingController } from "./test-helpers.js";
  
@@ -68279,7 +69533,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  const state = vi.hoisted(() => ({
    beforeAgentReplyHasHooksMock: vi.fn(),
    beforeAgentReplyRunMock: vi.fn(),
-@@ -125,34 +112,8 @@ const parkedSteer = vi.hoisted(() => {
+@@ -125,34 +113,8 @@ const parkedSteer = vi.hoisted(() => {
  
  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
  
@@ -68314,7 +69568,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  async function createSessionStoreFile(entry: SessionEntry, sessionKey = "main"): Promise<string> {
    const dir = tempDirs.make("openclaw-agent-runner-");
    const storePath = join(dir, "sessions.json");
-@@ -160,14 +121,6 @@ async function createSessionStoreFile(entry: SessionEntry, sessionKey = "main"):
+@@ -160,14 +122,6 @@ async function createSessionStoreFile(entry: SessionEntry, sessionKey = "main"):
    return storePath;
  }
  
@@ -68329,7 +69583,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  async function makeSessionFixture<SessionKey extends string = "main">(
    overrides: Partial<SessionEntry> = {},
    sessionKey: SessionKey = "main" as SessionKey,
-@@ -182,46 +135,9 @@ async function makeSessionFixture<SessionKey extends string = "main">(
+@@ -182,46 +136,9 @@ async function makeSessionFixture<SessionKey extends string = "main">(
    return { sessionEntry, sessionStore, storePath };
  }
  
@@ -68376,7 +69630,25 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  let runReplyAgentPromise:
    | Promise<(typeof import("./agent-runner.js"))["runReplyAgent"]>
    | undefined;
-@@ -391,6 +307,7 @@ function createMinimalRun(params?: {
+@@ -276,11 +193,15 @@ vi.mock("../../channels/plugins/index.js", async (importOriginal) => ({
+ }));
+ 
+ vi.mock("../../agents/embedded-agent-runner/runs.js", async (importOriginal) => {
+-  const { clearActiveEmbeddedRun, setActiveEmbeddedRun } =
+-    await importOriginal<typeof import("../../agents/embedded-agent-runner/runs.js")>();
++  const {
++    clearActiveEmbeddedRun,
++    resolveCurrentEmbeddedMessageInjectionTarget,
++    setActiveEmbeddedRun,
++  } = await importOriginal<typeof import("../../agents/embedded-agent-runner/runs.js")>();
+   return {
+     // Queue admission is controlled here; logical-turn registration and retirement stay real.
+     clearActiveEmbeddedRun,
++    resolveCurrentEmbeddedMessageInjectionTarget,
+     setActiveEmbeddedRun,
+     formatEmbeddedAgentQueueFailureSummary: () => "test queue rejection",
+     queueEmbeddedAgentMessageWithOutcomeAsync: async (
+@@ -391,6 +312,7 @@ function createMinimalRun(params?: {
    bindActiveAuthority?: boolean;
    attachSteerBackend?: boolean;
    activeBackendRunId?: string;
@@ -68384,7 +69656,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
  }) {
    const typing = createMockTypingController();
    const opts = params?.opts;
-@@ -471,19 +388,23 @@ function createMinimalRun(params?: {
+@@ -471,19 +393,23 @@ function createMinimalRun(params?: {
        if (operation && params?.attachSteerBackend !== false) {
          operation.attachBackend({
            kind: "embedded",
@@ -68418,7 +69690,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
                const result = (await state.queueEmbeddedAgentMessageMock(
                  operation.sessionId,
                  prompt,
-@@ -538,85 +459,139 @@ function createMinimalRun(params?: {
+@@ -538,85 +464,139 @@ function createMinimalRun(params?: {
    };
  }
  
@@ -68633,7 +69905,61 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
    it("queues instead of steering when privilege facts differ on the active route", async () => {
      const activeRoute = { provider: "openai", model: "gpt-fallback" };
      const { followupRun, run } = createMinimalRun({
-@@ -5049,7 +5024,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
+@@ -1668,48 +1648,11 @@ describe("runReplyAgent active steering", () => {
+     expect(typing.cleanup).toHaveBeenCalledTimes(1);
+   });
+ 
+-  it.each([
+-    "no_active_run",
+-    "not_streaming",
+-    "stale_run",
+-    "compacting",
+-    "image_input_unsupported",
+-    "source_reply_delivery_mode_mismatch",
+-    "task_suggestion_delivery_mode_mismatch",
+-    "transcript_commit_wait_unsupported",
+-    "runtime_rejected",
+-  ] as const)("queues a follow-up when active steering fails with %s", async (reason) => {
+-    state.beforeAgentReplyHasHooksMock.mockImplementation(
+-      (hookName) => hookName === "before_agent_reply",
+-    );
+-    state.beforeAgentReplyRunMock.mockResolvedValue(undefined);
+-    state.runEmbeddedAgentMock.mockImplementationOnce(runHookBackedEmbeddedAgent);
+-    state.queueEmbeddedAgentMessageMock.mockReturnValueOnce({
+-      queued: false,
+-      sessionId: "session",
+-      reason,
+-      gatewayHealth: "live",
+-    });
+-    const onAdopted = vi.fn();
+-    const onBlockReply = vi.fn();
+-    const { run } = createMinimalRun({
+-      opts: { onBlockReply, turnAdoptionLifecycle: { onAdopted } },
+-      isActive: true,
+-      shouldSteer: true,
+-      shouldFollowup: true,
+-      resolvedQueueMode: "steer",
+-    });
+-
+-    await expect(run()).resolves.toBeUndefined();
+-
+-    expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
+-    expect(vi.mocked(scheduleFollowupDrain)).toHaveBeenCalled();
+-    expect(state.beforeAgentReplyRunMock).not.toHaveBeenCalled();
+-    expect(state.runEmbeddedAgentMock).not.toHaveBeenCalled();
+-    expect(onBlockReply).not.toHaveBeenCalled();
+-    expect(onAdopted).not.toHaveBeenCalled();
+-    expect(parkedSteer.fallback).toHaveBeenCalledOnce();
+-    expect(parkedSteer.consume).not.toHaveBeenCalled();
++  registerAgentRunnerSteeringRejectionCases({
++    createMinimalRun,
++    createReplyOperation,
++    parkedSteer,
++    state,
+   });
+ 
+   it("adopts and consumes non-handoff unconfirmed steering without replay", async () => {
+@@ -5049,7 +4992,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
      const { run } = createMinimalRun({ currentInboundEventKind: "room_event" });
  
      await expect(run()).resolves.toMatchObject({
@@ -68642,7 +69968,7 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
        isError: true,
        replyToId: "msg",
      });
-@@ -5071,7 +5046,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
+@@ -5071,7 +5014,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
      const { run } = createMinimalRun();
  
      await expect(run()).resolves.toMatchObject({
@@ -68651,6 +69977,103 @@ index e9e3bbf61e8496dc24545f5afa6f900bda8689e6..6288707c344f453243e671725b0fa2e7
        isError: true,
        replyToId: "msg",
      });
+diff --git a/src/auto-reply/reply/agent-runner.steering-rejection.test-harness.ts b/src/auto-reply/reply/agent-runner.steering-rejection.test-harness.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e14ca74dd3a863022dd77a1d669bb49bc8d9a649
+--- /dev/null
++++ b/src/auto-reply/reply/agent-runner.steering-rejection.test-harness.ts
+@@ -0,0 +1,91 @@
++import { expect, it, vi } from "vitest";
++import { runHookBackedEmbeddedAgent } from "./agent-runner.runreplyagent.e2e.test-fixtures.js";
++import type { InternalGetReplyOptions } from "./get-reply.types.js";
++import { enqueueFollowupRun, scheduleFollowupDrain } from "./queue.js";
++import type { createReplyOperation } from "./reply-run-registry.js";
++
++type SteeringRejectionRunParams = {
++  opts?: InternalGetReplyOptions;
++  isActive?: boolean;
++  shouldSteer?: boolean;
++  shouldFollowup?: boolean;
++  resolvedQueueMode?: string;
++};
++
++type SteeringRejectionHarnessParams = {
++  createMinimalRun: (params: SteeringRejectionRunParams) => { run: () => Promise<unknown> };
++  createReplyOperation: typeof createReplyOperation;
++  parkedSteer: {
++    fallback: ReturnType<typeof vi.fn>;
++    consume: ReturnType<typeof vi.fn>;
++  };
++  state: {
++    beforeAgentReplyHasHooksMock: ReturnType<typeof vi.fn>;
++    beforeAgentReplyRunMock: ReturnType<typeof vi.fn>;
++    runEmbeddedAgentMock: ReturnType<typeof vi.fn<typeof runHookBackedEmbeddedAgent>>;
++    queueEmbeddedAgentMessageMock: ReturnType<typeof vi.fn>;
++  };
++};
++
++export function registerAgentRunnerSteeringRejectionCases({
++  createMinimalRun,
++  createReplyOperation,
++  parkedSteer,
++  state,
++}: SteeringRejectionHarnessParams): void {
++  it.each([
++    "no_active_run",
++    "not_streaming",
++    "stale_run",
++    "compacting",
++    "image_input_unsupported",
++    "source_reply_delivery_mode_mismatch",
++    "task_suggestion_delivery_mode_mismatch",
++    "transcript_commit_wait_unsupported",
++    "runtime_rejected",
++  ] as const)("queues a follow-up when active steering fails with %s", async (reason) => {
++    const active = createReplyOperation({
++      sessionKey: "main",
++      sessionId: "session",
++      resetTriggered: false,
++    });
++    active.setPhase("running");
++    try {
++      state.beforeAgentReplyHasHooksMock.mockImplementation(
++        (hookName) => hookName === "before_agent_reply",
++      );
++      state.beforeAgentReplyRunMock.mockResolvedValue(undefined);
++      state.runEmbeddedAgentMock.mockImplementationOnce(runHookBackedEmbeddedAgent);
++      state.queueEmbeddedAgentMessageMock.mockReturnValueOnce({
++        queued: false,
++        sessionId: "session",
++        reason,
++        gatewayHealth: "live",
++      });
++      const onAdopted = vi.fn();
++      const onBlockReply = vi.fn();
++      const { run } = createMinimalRun({
++        opts: { onBlockReply, turnAdoptionLifecycle: { onAdopted } },
++        isActive: true,
++        shouldSteer: true,
++        shouldFollowup: true,
++        resolvedQueueMode: "steer",
++      });
++
++      await expect(run()).resolves.toBeUndefined();
++
++      expect(state.queueEmbeddedAgentMessageMock).toHaveBeenCalledOnce();
++      expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
++      expect(state.beforeAgentReplyRunMock).not.toHaveBeenCalled();
++      expect(state.runEmbeddedAgentMock).not.toHaveBeenCalled();
++      expect(onBlockReply).not.toHaveBeenCalled();
++      expect(onAdopted).not.toHaveBeenCalled();
++      expect(parkedSteer.fallback).toHaveBeenCalledOnce();
++      expect(parkedSteer.consume).not.toHaveBeenCalled();
++      active.complete();
++      expect(vi.mocked(scheduleFollowupDrain)).toHaveBeenCalled();
++    } finally {
++      active.complete();
++    }
++  });
++}
 diff --git a/src/auto-reply/reply/bash-command.stop.test.ts b/src/auto-reply/reply/bash-command.stop.test.ts
 index fdb810ea402b54460cf1a01def0e76121ea79af5..9f9e5f0d5c369427b08879b5fbae5f54a16dafe1 100644
 --- a/src/auto-reply/reply/bash-command.stop.test.ts
@@ -78023,7 +79446,7 @@ index 0000000000000000000000000000000000000000..8dd98228af573e264c694b4b8011222c
 +  });
 +}
 diff --git a/src/auto-reply/reply/reply-run-registry.contracts.ts b/src/auto-reply/reply/reply-run-registry.contracts.ts
-index 9824a85a210aa8f8799109a3dd3dc5a079e02926..93f63f287479d6e94db3367e1162676706557768 100644
+index 9824a85a210aa8f8799109a3dd3dc5a079e02926..d6ba50ca7c81557cbf22ddafe1d524d4585e5aa6 100644
 --- a/src/auto-reply/reply/reply-run-registry.contracts.ts
 +++ b/src/auto-reply/reply/reply-run-registry.contracts.ts
 @@ -1,7 +1,9 @@
@@ -78091,7 +79514,8 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..93f63f287479d6e94db3367e11626767
  export type ReplyMessageInjectionTarget = {
 -  readonly [replyMessageInjectionTargetOperation]: ReplyOperation;
    readonly runId?: string;
-   /** Channel source-turn identity of the owning run (see the registry's `sourceTurnByKey`). */
+-  /** Channel source-turn identity of the owning run (see the registry's `sourceTurnByKey`). */
++  /** Admitted source identity: a channel source key or a native Gateway run id. */
    readonly sourceTurnId?: string;
 -};
 +} & (
@@ -91004,7 +92428,7 @@ index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca1
    | {
        kind: "script-failure";
 diff --git a/src/gateway/agent-turn/agent-run-admission-phase.ts b/src/gateway/agent-turn/agent-run-admission-phase.ts
-index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d0630c55c 100644
+index 964026f7483b39473c3e5acccea7f3403ab00aa0..d70bedda1826481d83307aca1dde5d5622893cad 100644
 --- a/src/gateway/agent-turn/agent-run-admission-phase.ts
 +++ b/src/gateway/agent-turn/agent-run-admission-phase.ts
 @@ -21,16 +21,13 @@ import {
@@ -91039,7 +92463,14 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
  import { assertParentSubagentResumeSuccessorCurrent } from "../session-subagent-resume.js";
  import { loadSessionEntry, resolveSessionModelRef } from "../session-utils.js";
  import { consumeSubagentCompletionToolHandoff } from "../subagent-completion-tool-handoff.js";
-@@ -68,32 +61,12 @@ import {
+@@ -62,38 +55,19 @@ import { createAgentRunAdmissionRevalidator } from "./agent-run-admission-revali
+ import { prepareAgentRunTaskTracking } from "./agent-run-task-tracking.js";
+ import {
+   prepareAgentRunUserTurn,
++  projectPreparedAgentRunUserTurnLifecycle,
+   recordAgentRunUserTurnParticipant,
+   reconcileAgentRunUserTurnCompletion,
+   releasePreparedAgentRunUserTurn,
    releasePreparedAgentRunUserTurnAfterFailure,
    type PreparedAgentRunUserTurn,
  } from "./agent-run-user-turn.js";
@@ -91078,7 +92509,7 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
  
  export async function prepareAgentRunDispatch(params: {
    assertAdmissionCurrent?: () => void;
-@@ -241,6 +214,7 @@ export async function prepareAgentRunDispatch(params: {
+@@ -241,6 +215,7 @@ export async function prepareAgentRunDispatch(params: {
        }).storePath
      : `agent:${params.activeSessionAgentId}`;
    let operationalRunInstance: OperationalRunInstanceRef | undefined;
@@ -91086,7 +92517,7 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
    try {
      await params.acquireGatewayWorkAdmission(lifecycleStorePath);
      params.assertGatewayWorkAdmissionAllowed();
-@@ -268,7 +242,12 @@ export async function prepareAgentRunDispatch(params: {
+@@ -268,7 +243,12 @@ export async function prepareAgentRunDispatch(params: {
              config: params.cfgForAgent ?? params.cfg,
            }),
            isAbortable: () => isEmbeddedAgentRunAbortableForRunId(params.runId),
@@ -91100,7 +92531,7 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
            controlUiVisible,
            kind: "agent",
            lifecycleGeneration: params.lifecycleGeneration,
-@@ -323,6 +302,32 @@ export async function prepareAgentRunDispatch(params: {
+@@ -323,6 +303,32 @@ export async function prepareAgentRunDispatch(params: {
    if (!activeRunAbort.registered) {
      activeGatewayWorkAdmission.release();
    } else {
@@ -91133,7 +92564,7 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
      retainEmbeddedAgentRunAbortabilityForRunId(params.runId);
      if (params.pendingChatRun) {
        params.context.addChatRun(params.runId, {
-@@ -330,15 +335,6 @@ export async function prepareAgentRunDispatch(params: {
+@@ -330,15 +336,6 @@ export async function prepareAgentRunDispatch(params: {
          clientRunId: params.runId,
        });
      }
@@ -91149,7 +92580,7 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
      params.io.emitStartOwner?.(params.runId, activeRunAbort.entry);
    }
  
-@@ -440,7 +436,12 @@ export async function prepareAgentRunDispatch(params: {
+@@ -440,7 +437,12 @@ export async function prepareAgentRunDispatch(params: {
      params.restoredCronContinuation === undefined
        ? consumeSubagentCompletionToolHandoff({
            handoffId: params.client?.internal?.delegatedToolPolicyHandoffId,
@@ -91163,6 +92594,14 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..b23e01118d437ac487915f06fc41043d
            sourceSessionId: completionEvent?.childSessionId,
            targetSessionKey: params.resolvedSessionKey,
            targetSessionId: params.getAdmittedSessionId(),
+@@ -602,6 +604,7 @@ export async function prepareAgentRunDispatch(params: {
+       releasePreparedAgentRunUserTurn(userTurn, parentResume ? "cancelled" : "interrupted");
+     }
+   }
++  projectPreparedAgentRunUserTurnLifecycle(userTurn, params, runContextClaimId);
+   const accepted = {
+     runId: params.runId,
+     sessionKey: params.resolvedSessionKey,
 diff --git a/src/gateway/agent-turn/agent-run-dispatch.ts b/src/gateway/agent-turn/agent-run-dispatch.ts
 index 7ff5729b09288cf3f1c6db19eac2963a5254a360..de58bc813582558edbf2bad57848b53cf7a1386f 100644
 --- a/src/gateway/agent-turn/agent-run-dispatch.ts
@@ -91321,10 +92760,18 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..ff4aeb1aad829a7cde17e8947fd431bc
                  abortSignal: prepared.activeRunAbort.controller.signal,
                  lifecycleGeneration: params.lifecycleGeneration,
 diff --git a/src/gateway/agent-turn/agent-run-user-turn.ts b/src/gateway/agent-turn/agent-run-user-turn.ts
-index ae7809bf8c6a9a16b882181bbf4f9790060dbc5d..f36edc1c38bfb0e708b9ae0e9fa39040e2a81d99 100644
+index ae7809bf8c6a9a16b882181bbf4f9790060dbc5d..0c15d61bdeacd85ee89dd018c3dc55fdcb90b1e3 100644
 --- a/src/gateway/agent-turn/agent-run-user-turn.ts
 +++ b/src/gateway/agent-turn/agent-run-user-turn.ts
-@@ -33,10 +33,12 @@ import {
+@@ -14,6 +14,7 @@ import type { ExecElevatedDefaults } from "../../agents/bash-tools.exec-types.js
+ import { runAgentHarnessBeforeMessageWriteHook } from "../../agents/harness/hook-helpers.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import { registerAgentRunContext } from "../../infra/agent-run-registry.js";
+ import { deleteMediaBuffer } from "../../media/store.js";
+ import {
+   isCompletionReportInputProvenance,
+@@ -33,10 +34,12 @@ import {
    type ChatImageContent,
    type OffloadedRef,
  } from "../chat-attachments.js";
@@ -91337,7 +92784,29 @@ index ae7809bf8c6a9a16b882181bbf4f9790060dbc5d..f36edc1c38bfb0e708b9ae0e9fa39040
  import { loadSessionEntry } from "../session-utils.js";
  import { formatForLog } from "../ws-log.js";
  import {
-@@ -229,10 +231,13 @@ export async function prepareAgentRunUserTurn(params: {
+@@ -60,6 +63,21 @@ export type PreparedAgentRunUserTurn = {
+   releaseProcessingAbortObserver?: () => void;
+ };
+ 
++export function projectPreparedAgentRunUserTurnLifecycle(
++  userTurn: PreparedAgentRunUserTurn,
++  params: { runId: string; lifecycleGeneration: string },
++  runContextClaimId: string | undefined,
++): void {
++  if (userTurn.privateCompletion) {
++    // A validated private input must not consume an interrupted user's recovery.
++    registerAgentRunContext(
++      params.runId,
++      { lifecycleGeneration: params.lifecycleGeneration, projectSessionLifecycle: false },
++      runContextClaimId,
++    );
++  }
++}
++
+ export function reconcileAgentRunUserTurnCompletion(
+   userTurn: PreparedAgentRunUserTurn,
+   accepted: { runId: string },
+@@ -229,10 +247,13 @@ export async function prepareAgentRunUserTurn(params: {
            inputProvenance: params.inputProvenance,
            internalEvents: params.request.internalEvents,
          }));
@@ -91352,7 +92821,7 @@ index ae7809bf8c6a9a16b882181bbf4f9790060dbc5d..f36edc1c38bfb0e708b9ae0e9fa39040
        !suppressPromptPersistence
      ) {
        const persistedMedia = await persistInboundImagesForTranscript({
-@@ -270,6 +275,15 @@ export async function prepareAgentRunUserTurn(params: {
+@@ -270,6 +291,15 @@ export async function prepareAgentRunUserTurn(params: {
          trackInputCompletion: params.privateCompletion,
          input,
          target: () => {
