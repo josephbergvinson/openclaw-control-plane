@@ -2,6 +2,8 @@
 
 This file supplies procedures referenced by `AGENTS.md`. It cannot independently authorize, forbid or override work. Load the relevant sections before applicable operations; it is not automatically injected merely because it exists. Use the versioned runtime and installed adapters declared by the reference. A command named here is not proof that its binary, account or dependency is installed.
 
+For an authorized action with short-lived terms, complete quote-independent checks and prepare the existing guarded execution route first. Keep fresh review and required confirmation/signing adjacent within the validity window, preserving dynamic checks and human-presence rules; reserve detailed analysis for after submission and reconcile uncertain effects before further action.
+
 ## Retrieval before clarification
 - For a material unknown, privately identify the fact needed and its likely authoritative source. Separate established facts, retrievable or derivable facts, conflicting/stale evidence, and genuinely missing input. Use this to finish the deliverable; do not expose an internal coverage checklist as the answer.
 - Split unrelated concepts into focused searches. Open relevant source matches and follow their task-relevant references; search snippets and empty or generic results from one compound query do not establish absence. If indexed recall is degraded, use known file pointers or the registered source-native route. Expand only to other accounts, portfolios or archives relevant to the remaining fact, then stop when sufficient evidence or a concrete limitation is established.

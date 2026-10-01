@@ -49,6 +49,7 @@ USER_HOME = Path((str(OPERATOR.require_path('paths.host_home'))))
 XCODE_OUTPUTS = ('Build/Intermediates.noindex', 'ModuleCache.noindex', 'Index.noindex',
                  'SDKStatCaches.noindex', 'CompilationCache.noindex')
 QUARANTINE_PREFIX = '.openclaw-prune-'
+SCRATCH_RETENTION_DAYS = 7
 NPM_LOG_KIND = 'npm-debug-log'
 NPM_LOG_NAME = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{3}Z-debug-\d+\.log')
 
@@ -135,26 +136,42 @@ def xcode_candidates(parent: Path, *, temporary: bool) -> list[tuple[Path, str, 
     return [entry for entry in result if not is_recovery_path(entry[0])]
 
 
+def test_scratch_roots() -> list[Path]:
+    roots = [OPERATOR.require_path('paths.temp_root')]
+    if OWC.is_mount():
+        roots.append(OPERATOR.require_path('paths.pytest_temp_root'))
+    return roots
+
+
+def test_scratch_kind(path: Path) -> str | None:
+    roots = test_scratch_roots()
+    if path.parent in roots and any(fnmatch.fnmatchcase(path.name, pattern) for pattern in
+            ('openclaw-test-home-*', 'openclaw-autoreview-trufflehog.*')):
+        return 'test-scratch'
+    pytest_name = 'pytest-of-' + OPERATOR.require_string('identifiers.host_user')
+    if (path.parent.name == pytest_name and path.parent.parent in roots
+            and re.fullmatch(r'pytest-\d+', path.name)):
+        return 'pytest-scratch'
+    return None
+
+
 def bounded_candidates() -> list[tuple[Path, str, Path, int]]:
     result = xcode_candidates(Path('/private/tmp'), temporary=True)
     result += xcode_candidates(USER_HOME / 'Library/Developer/Xcode/DerivedData', temporary=False)
     if OWC.is_mount():
         result += xcode_candidates(OPERATOR.require_path('paths.xcode_derived_data'), temporary=False)
-    temp_roots = [Path((str(OPERATOR.require_path('paths.temp_root'))))]
-    if OWC.is_mount():
-        temp_roots.append(OPERATOR.require_path('paths.pytest_temp_root'))
-    for root in temp_roots:
+    for root in test_scratch_roots():
         if not root.is_dir() or root.is_symlink():
             continue
         for p in root.iterdir():
             if any(fnmatch.fnmatchcase(p.name, pattern) for pattern in
                    ('openclaw-test-home-*', 'openclaw-autoreview-trufflehog.*')):
-                result.append((p, 'test-scratch', p, 7))
+                result.append((p, 'test-scratch', p, SCRATCH_RETENTION_DAYS))
         pytest = root / ('pytest-of-' + OPERATOR.require_string('identifiers.host_user'))
         if pytest.is_dir() and not pytest.is_symlink():
             for p in pytest.iterdir():
                 if re.fullmatch(r'pytest-\d+', p.name):
-                    result.append((p, 'pytest-scratch', p, 7))
+                    result.append((p, 'pytest-scratch', p, SCRATCH_RETENTION_DAYS))
     # One audited, version-isolated Node format at this exact physical root.
     node_root = node_compile_cache.ROOT
     if OWC.is_mount() and node_root.is_dir() and node_root.resolve() == node_root:
@@ -502,6 +519,56 @@ def entry_fingerprint(value: os.stat_result, *, after_rename: bool = False) -> t
             getattr(value, 'st_birthtime', None), getattr(value, 'st_flags', 0))
 
 
+@contextmanager
+def capture_scratch_directory(path: Path, expected: os.stat_result, cutoff: float,
+                              deadline: float | None, *, recovery_original: Path | None = None):
+    """Temporarily admit owner write on one stale, owned scratch inode.
+
+    Darwin also requires write permission on a directory being renamed. Keep
+    its no-follow fd through capture/rollback; surviving permissions are restored
+    on that inode, never on a replacement pathname or an outside parent.
+    """
+    with anchored_parent(path) as anchor:
+        fd = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor.fd)
+        captured = None
+        changed = False
+        mode = stat.S_IMODE(expected.st_mode)
+        try:
+            check_deadline(deadline)
+            anchor.verify()
+            named = os.stat(path.name, dir_fd=anchor.fd, follow_symlinks=False)
+            if (entry_fingerprint(named) != entry_fingerprint(expected)
+                    or entry_fingerprint(os.fstat(fd)) != entry_fingerprint(expected)):
+                raise ValueError('scratch directory changed before permission admission')
+            validate_entry(expected, expected.st_dev, cutoff)
+            if not stat.S_ISDIR(expected.st_mode) or getattr(expected, 'st_flags', 0):
+                raise ValueError('flagged or non-directory scratch preserved')
+            if mode & 0o500 != 0o500:
+                raise ValueError('scratch directory lacks owner read or search permission')
+            if not mode & 0o200:
+                os.fchmod(fd, mode | 0o200)
+                changed = True
+            writable = os.fstat(fd)
+            with capture_entry(path, file_identity(expected), directory=True,
+                               recovery_original=recovery_original) as captured:
+                if (entry_fingerprint(os.fstat(captured.fd), after_rename=True)
+                        != entry_fingerprint(writable, after_rename=True)):
+                    raise ValueError('scratch directory changed during capture')
+                yield captured
+        finally:
+            try:
+                if changed and (captured is None or not captured.removed):
+                    current = os.fstat(fd)
+                    if (file_identity(current) != file_identity(expected)
+                            or current.st_uid != os.getuid() or getattr(current, 'st_flags', 0)
+                            or stat.S_IMODE(current.st_mode) != (mode | 0o200)):
+                        raise ValueError('scratch directory changed before permission restoration')
+                    if current.st_nlink:
+                        os.fchmod(fd, mode)
+            finally:
+                os.close(fd)
+
+
 def _unlink_captured_leaf(captured: CapturedEntry, expected_stat: os.stat_result,
                           deadline: float | None, deletion_owner: CapturedEntry,
                           *, link_target: str | None = None) -> bool:
@@ -553,7 +620,8 @@ def remove_captured_leaf(captured: CapturedEntry, expected_stat: os.stat_result,
 def remove_captured_tree(captured: CapturedEntry, cutoff: float, deadline: float | None,
                          *, entry_validator: Callable[[str, os.stat_result, bool], None] | None = None,
                          captured_leaf_validator: Callable[[CapturedEntry, str], None] | None = None,
-                         progress: Callable[[], None] | None = None) -> None:
+                         progress: Callable[[], None] | None = None,
+                         writable_scratch: bool = False) -> None:
     """Exclusively capture every entry before removing its private bound name.
 
     A concurrent publisher can replace a public child name after stat. Capturing
@@ -603,12 +671,17 @@ def remove_captured_tree(captured: CapturedEntry, cutoff: float, deadline: float
             value = os.stat(name, dir_fd=current.fd, follow_symlinks=False)
             validate(child_relative, value, False)
             link_target = os.readlink(name, dir_fd=current.fd) if stat.S_ISLNK(value.st_mode) else None
-            with capture_entry(current.path / name, file_identity(value),
-                               directory=stat.S_ISDIR(value.st_mode),
-                               symlink=stat.S_ISLNK(value.st_mode),
-                               recovery_original=captured.original_path / child_relative) as child:
+            scratch_directory = writable_scratch and stat.S_ISDIR(value.st_mode)
+            context = (capture_scratch_directory(current.path / name, value, cutoff, deadline,
+                        recovery_original=captured.original_path / child_relative) if scratch_directory else
+                       capture_entry(current.path / name, file_identity(value),
+                                     directory=stat.S_ISDIR(value.st_mode),
+                                     symlink=stat.S_ISLNK(value.st_mode),
+                                     recovery_original=captured.original_path / child_relative))
+            with context as child:
                 opened = os.fstat(child.fd)
-                if entry_fingerprint(opened, after_rename=True) != entry_fingerprint(value, after_rename=True):
+                if (not scratch_directory and entry_fingerprint(opened, after_rename=True)
+                        != entry_fingerprint(value, after_rename=True)):
                     raise ValueError('captured child changed before removal')
                 validate(child_relative, opened, True)
                 if stat.S_ISDIR(opened.st_mode):
@@ -671,6 +744,14 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                 raise ValueError('preserved recovery quarantine')
             is_node = candidate.kind == node_compile_cache.KIND
             is_npm_log = candidate.kind == NPM_LOG_KIND
+            is_scratch = candidate.kind in ('test-scratch', 'pytest-scratch')
+            if is_scratch:
+                if (candidate.min_age_days != SCRATCH_RETENTION_DAYS or activity != p
+                        or test_scratch_kind(p) != candidate.kind):
+                    raise ValueError('unclassified test scratch retention policy')
+                before_scratch = p.lstat()
+                if file_identity(before_scratch) != (candidate.device, candidate.inode):
+                    raise ValueError('scratch directory changed after discovery')
             if is_npm_log:
                 if candidate.min_age_days != 14 or activity != p or candidate.leaf_fingerprint is None:
                     raise ValueError('unclassified npm log retention policy')
@@ -689,8 +770,10 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
             if p.resolve() != p or activity.resolve() != activity:
                 raise ValueError('path redirected after discovery')
             check_deadline(deadline)
-            with capture_entry(p, (candidate.device, candidate.inode), directory=not is_npm_log) as captured:
-                cutoff = time.time() - candidate.min_age_days * 86400
+            cutoff = time.time() - candidate.min_age_days * 86400
+            context = (capture_scratch_directory(p, before_scratch, cutoff, deadline) if is_scratch else
+                       capture_entry(p, (candidate.device, candidate.inode), directory=not is_npm_log))
+            with context as captured:
                 if is_npm_log:
                     captured_log = os.fstat(captured.fd)
                     if entry_fingerprint(captured_log, after_rename=True) != entry_fingerprint(before_log, after_rename=True):
@@ -724,7 +807,7 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                 elif is_node:
                     remove_node_cache(captured, leaves, cutoff, deadline)
                 else:
-                    remove_captured_tree(captured, cutoff, deadline)
+                    remove_captured_tree(captured, cutoff, deadline, writable_scratch=is_scratch)
             # A new object at the original path belongs to another worker and
             # remains untouched. The removed captured inode is the effect proof.
             removed.append({'path': str(captured.path), 'original_path': str(p),
@@ -734,6 +817,7 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             skipped.append({'path': str(p), 'reason': str(error),
                             'partially_removed': bool(captured and captured.deleted_entries),
+                            'removed_entries': captured.deleted_entries if captured else 0,
                             'error': isinstance(error, (OSError, subprocess.SubprocessError))
                                      or bool(captured and captured.deleted_entries)
                                      or 'inspection' in str(error)})
