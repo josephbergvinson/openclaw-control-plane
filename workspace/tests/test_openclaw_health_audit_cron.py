@@ -1032,3 +1032,73 @@ def test_maintenance_receipts_reject_future_timestamp_and_malformed_state():
     jobs[1]["state"] = ["broken"]
     with mock.patch.object(cron, "run", side_effect=[cron.CommandResult(0, '{"enabled": true}'), cron.CommandResult(0, json.dumps({"jobs": jobs}))]):
         assert cron.maintenance_problems("fixture", now_ms=now) == ["daily retention has no recent run", "workspace cleanup has an unreadable run record"]
+
+def test_maintenance_headroom_nonzero_result_does_not_claim_noncompletion():
+    """A completed capacity warning and execution failure both remain alerts."""
+    now = 100_000_000
+    for diagnostic in (
+        'Storage needs attention: internal disk 27.8 GiB free (warning). Safe cleanup completed.',
+        'private execution diagnostic token=fixture-secret',
+    ):
+        jobs = [dict(id=job_id, enabled=True, state=dict(
+            lastRunAtMs=now, lastRunStatus='ok', lastDeliveryStatus='delivered',
+        )) for job_id in cron.MAINTENANCE_JOB_IDS]
+        jobs[0]['state']['lastRunStatus'] = 'error'
+        headroom = next(job for job in jobs if cron.MAINTENANCE_JOB_IDS[job['id']] == 'storage headroom')
+        headroom['state'].update(lastRunStatus='error', lastDiagnosticSummary=diagnostic)
+        results = [cron.CommandResult(0, '{"enabled": true}'),
+                   cron.CommandResult(0, json.dumps({'jobs': jobs}))]
+        with mock.patch.object(cron, 'run', side_effect=results) as runner:
+            problems = cron.maintenance_problems('fixture', now_ms=now)
+        assert problems == ['daily retention did not finish successfully', 'storage headroom needs attention']
+        assert runner.call_count == 2
+        assert diagnostic not in '; '.join(problems)
+
+
+def test_headroom_attention_keeps_daily_and_weekly_health_audits_failed():
+    """The wording correction keeps the failing health result and success noise."""
+    for weekly in (False, True):
+        for headroom_status in ('error', 'ok'):
+            jobs = [dict(id=job_id, enabled=True, state=dict(
+                lastRunAtMs=int(cron.time.time() * 1000),
+                lastRunStatus='ok', lastDeliveryStatus='delivered',
+            )) for job_id in cron.MAINTENANCE_JOB_IDS]
+            headroom = next(job for job in jobs if cron.MAINTENANCE_JOB_IDS[job['id']] == 'storage headroom')
+            headroom['state'].update(
+                lastRunStatus=headroom_status,
+                lastDiagnosticSummary='private diagnostic token=fixture-secret',
+            )
+            responses = {
+                ('gateway', 'status'): GATEWAY_STATUS_OK,
+                ('status', '--deep'): STATUS_DEEP_OK,
+                ('security', 'audit', '--json'): SECURITY_AUDIT_ACCEPTED,
+                ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_ACCEPTED,
+                ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
+                ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+                ('cron', 'status', '--json'): json.dumps({'enabled': True, 'triggersEnabled': True}),
+                ('cron', 'list', '--all', '--json'): json.dumps({'jobs': jobs}),
+            }
+
+            def fake_run(command, **kwargs):
+                return cron.CommandResult(0, responses[tuple(command[1:])])
+
+            with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/fixture-openclaw'), \
+                 mock.patch.object(cron, 'run', side_effect=fake_run) as runner:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cron.main((['--weekly'] if weekly else []) + ['--maintenance'])
+            output = buf.getvalue().strip()
+            audit_name = 'weekly deep health audit' if weekly else 'daily health audit'
+            if headroom_status == 'error':
+                assert rc == 1
+                assert output == (
+                    f"OpenClaw's {audit_name} needs attention: storage headroom needs attention. "
+                    'Runtime checks and task-ledger maintenance passed.'
+                )
+            else:
+                assert rc == 0
+                assert output.startswith(f"OpenClaw's {audit_name} passed.")
+                assert 'needs attention' not in output
+            assert 'private diagnostic' not in output
+            assert 'fixture-secret' not in output
+            assert runner.call_count == 7 + int(weekly)

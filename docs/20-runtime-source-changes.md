@@ -13,9 +13,39 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 1 requester and goal usage ownership
+
+Reference `1ce74af1fa354698f71eebfb96a033aeeda83b80` adds four reviewed paths to
+`bf52af01846674545f90d8a2aa9adeb6201811f7`. Context-accepting requester-final
+implementations have distinct names so the canonical registry wrappers keep their
+existing role. Goal usage imports the same patch function through its existing
+entry owner and imports its scope as a type. Function bodies, accounting, writer
+fences and public APIs stay unchanged.
+
+The goal-operation fixture seeds the canonical entry before measurement through
+its existing synchronous owner. This separates asynchronous fixture maintenance
+from the admission measurement. The original query, byte and row bounds and all
+authority assertions remain intact; this is test isolation rather than a production
+performance optimization.
+
+All 14 goal-operation cases, 23 goal-usage cases and 28 requester caller cases
+passed. Scoped types, typed lint, import-cycle and graph-boundary checks passed.
+The complete source-bound build, including UI, completed once. Offline validation,
+sealing and one native activation then verified both loaded services, health,
+readiness, current-process capture and preservation. Earlier local whole-type and
+whole-lint watchdog outcomes remain recorded. The complete native plan, including
+those whole checks, must pass on the final public revision in the existing five
+hosted jobs before merge; no guard or timeout was waived.
+
+A live Company Beta check verified a reply to an explicit mention and a direct
+reply with the mention switched off, in the same channel. Natural Journal sync,
+spoken meeting minutes, provider flows and general steering consistency remain
+separate acceptance requirements. Historical results below retain their dated
+scope and do not qualify a later source automatically.
+
 ## September 30 recovery steering and delivery
 
-Current reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed` lets follow-up input
+The September 30 reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed` lets follow-up input
 reach the current execution after its exact recovered owner publishes. It preserves
 the original requester, session, run and task generation through that transition.
 A child result keeps durable delivery custody across restart and cleanup, including
