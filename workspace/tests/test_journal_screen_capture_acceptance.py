@@ -81,7 +81,7 @@ def pending_capture(tmp_path, monkeypatch):
              "activationReceiptSha256": hashlib.sha256(active.read_bytes()).hexdigest()}
     probe.save(tmp_path / "capture.json", proof)
     monkeypatch.setattr(probe, "identity", lambda pid: process)
-    monkeypatch.setattr(probe.activation, "live_paths", lambda: SimpleNamespace(result=active))
+    monkeypatch.setattr(probe.activation, "live_paths", lambda: SimpleNamespace(result=active, node=Path(process[1])))
     return tmp_path, digest, active
 
 
@@ -106,6 +106,6 @@ def test_process_change_requires_fresh_manual_capture(pending_capture, monkeypat
 def test_activation_change_requires_fresh_manual_capture(pending_capture):
     root, digest, active = pending_capture
     active.write_text('{"outcome":"activated","generation":2}')
-    with pytest.raises(probe.activation.ActivationError, match="activation changed"):
+    with pytest.raises(probe.activation.ActivationError, match="lifecycle changed"):
         probe.accept(root, digest)
     assert not (root / "acceptance.json").exists()

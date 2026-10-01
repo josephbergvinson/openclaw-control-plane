@@ -424,7 +424,7 @@ class OpenClawRetentionApplyBoundaryTests(unittest.TestCase):
             cron.RUNTIME_PROMOTION_APPLY_ENV: inherited_apply,
             cron.APPROVAL_A_APPLY_ENV: inherited_apply,
         }
-        with mock.patch.dict(os.environ, inherited, clear=False):
+        with mock.patch.dict(os.environ, inherited, clear=False), mock.patch.object(cron, 'retire_completed_activation', return_value=None):
             with mock.patch.object(
                 cron.subprocess,
                 'run',

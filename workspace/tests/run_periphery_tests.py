@@ -40,6 +40,7 @@ TESTS = [
     'test_openclaw_runtime_activate.py', 'test_openclaw_runtime_release_retention.py',
     'test_openclaw_runtime_promotion_retention.py', 'test_openclaw_approval_a_retention.py',
     'test_runtime_activation_portability.py', 'test_screen_capture_continuity.py',
+    'test_screen_capture_retired_receipt.py', 'test_screen_capture_restored_receipt.py',
     'test_journal_screen_capture_acceptance.py',
 ]
 

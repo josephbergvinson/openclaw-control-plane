@@ -940,3 +940,31 @@ def test_main_repair_counts_each_installed_plist_once(tmp_path, monkeypatch, cap
     assert report["checked"] == 1
     assert report["healthy"] is True
     assert report["missing"] == []
+
+
+def test_disabled_legacy_native_launcher_is_intentionally_untriggered(tmp_path):
+    label = "ai.openclaw.mac"
+    payload = launch_agent(label, include_trigger=False)
+    payload.update(Disabled=True, RunAtLoad=False)
+    path = write_plist(tmp_path / f"{label}.plist", payload)
+    assert guard.check(path) == []
+
+
+@pytest.mark.parametrize("label,disabled", [("ai.openclaw.mac", False),
+                                           ("ai.openclaw.mac", None),
+                                           ("com.openclaw.other", True)])
+def test_legacy_launcher_retirement_does_not_hide_untriggered_active_jobs(tmp_path, label, disabled):
+    payload = launch_agent(label, include_trigger=False)
+    payload.update(Disabled=disabled, RunAtLoad=False)
+    if disabled is None:
+        payload.pop("Disabled")
+    path = write_plist(tmp_path / f"{label}.plist", payload)
+    assert NO_OPERATIVE_TRIGGER in guard.check(path)
+
+
+def test_disabled_native_launcher_still_validates_executable(tmp_path):
+    label = "ai.openclaw.mac"
+    payload = launch_agent(label, program_arguments=[str(tmp_path / "missing")], include_trigger=False)
+    payload.update(Disabled=True, RunAtLoad=False)
+    path = write_plist(tmp_path / f"{label}.plist", payload)
+    assert guard.check(path)

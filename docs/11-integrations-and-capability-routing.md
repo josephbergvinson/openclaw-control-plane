@@ -68,6 +68,12 @@ A Gmail browser fragment is not necessarily an API message ID. Resolve it throug
 
 For Notion, read current page blocks or data-source records through the registered bounded reader. For an issue, inspect the exact issue and relevant newer comments. For analytics, discover visible saved questions and use the supported bounded saved-query operation. Current provider readers are preferable to recursive filesystem searches of old exports. A saved-query route does not silently authorize arbitrary SQL or an analytics mutation.
 
+## Documentation MCP read contracts
+
+The existing [Company Alpha documentation adapter](../workspace/scripts/company_alpha_docs_mcp_adapter.py) pins the full ordered remote tool inventory and exposes only its two configured read tools. Its [configuration](../workspace/config/company_alpha_docs_mcp.json) hashes the names, input schemas, annotations and execution metadata of those dispatchable reads. A changed read contract or added, missing, duplicated or reordered inventory entry stops dispatch before provider calls or fallback.
+
+Prose changes inside the blocked feedback tool do not disable independent reads and never make feedback dispatchable. Adopters supply their endpoint, exact tool mappings and approved read-contract digest through the existing operator configuration. Refreshing that contract requires a reviewed source change; this portable configuration does not provision or activate a remote account.
+
 ## Subject-scoped personal data
 
 Personal recall uses the registered Personal Data Project reader when a missing or changing fact needs database evidence. Stable preferences can come from established context. For a current or date-scoped claim, bind the actual subject, database/schema, table and time window before reading; profile-version records and daily context answer different questions.

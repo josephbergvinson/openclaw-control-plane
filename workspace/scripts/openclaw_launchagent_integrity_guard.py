@@ -439,7 +439,13 @@ def check(path: Path) -> list[str]:
     if label == GATEWAY_LABEL:
         problems.extend(_gateway_direct_owner_problems(data))
 
-    if label not in INTENTIONALLY_UNTRIGGERED and not _has_operative_trigger(data):
+    # Native companion launches now belong to LaunchServices. Keep the retired
+    # legacy launcher disabled while validating its executable and all other fields.
+    retired_native_launcher = (label == "ai.openclaw.mac"
+                               and data.get("Disabled") is True
+                               and data.get("RunAtLoad") is False)
+    if (label not in INTENTIONALLY_UNTRIGGERED and not retired_native_launcher
+            and not _has_operative_trigger(data)):
         problems.append("no operative trigger configured; job can never run")
 
     return problems

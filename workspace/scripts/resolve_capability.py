@@ -390,6 +390,9 @@ GITHUB_PROBE_ARGV = (
     "--hostname",
     "github.com",
 )
+GITHUB_TRUSTED_CREDENTIAL_STORES = frozenset(
+    {"keyring", str(Path(_operator_binding("paths.host_home")) / ".config/gh/hosts.yml")}
+)
 HEDERA_SIGNER_ROUTE_PROBES = {
     "openclaw-hedera-mainnet-test-signer-probe": {
         "route_id": "openclaw-hedera-mainnet-test-signer",
@@ -2127,7 +2130,8 @@ def _parse_github_auth_status_signal(
     target_blocks = [
         (position, index)
         for position, (index, account, credential_store) in enumerate(login_blocks)
-        if account == _operator_binding('identifiers.github_username') and credential_store == "keyring"
+        if account == _operator_binding('identifiers.github_username')
+        and credential_store in GITHUB_TRUSTED_CREDENTIAL_STORES
     ]
     if len(hostname_lines) != 1 or len(target_blocks) != 1:
         return None
@@ -2525,20 +2529,10 @@ def parse_exact_probe_signal(
     probe_id = preferred.get("probe_id")
     if probe_id == GITHUB_PROBE_ID:
         return _parse_github_auth_status_signal(preferred, stdout, stderr)
-    if (
-        probe_id in {CLOUDFLARE_PROBE_ID, TRELLO_PROBE_ID}
-        or probe_id in HEDERA_SIGNER_ROUTE_PROBES
-        or probe_id in {
-            X_API_PROBE_ID,
-            MERCURY_COMPANY_BETA_PROBE_ID,
-            PERSONAL_DATA_NEON_PROBE_ID,
-            JIRA_COMPANY_ALPHA_PROBE_ID,
-            GIGABRAIN_PROBE_ID,
-            GOOGLE_SEARCH_CONSOLE_PERSONAL_PROBE_ID,
-        }
-        or probe_id in DISCORD_SOURCE_ROUTE_PROBES
-    ) and stderr.strip():
-        return None
+    # JSON probes report their result on stdout; CLI admission/config diagnostics
+    # on stderr do not invalidate an exact successful provider response. The
+    # caller still rejects failed exits, timeouts and oversized output, and each
+    # parser below binds identity, operation and provider success independently.
     try:
         payload = loads_json_strict(
             stdout,
@@ -5429,7 +5423,7 @@ def resolve(
             "A ready personal/default route must not satisfy a named workspace/account route.",
             "Use persistent profile=openclaw as the autonomous default; after a registered browser-fallback predicate, stock extension profile=chrome is the automatic existing signed-in tab route.",
             "Navigate managed UI adaptively from observed state; route bindings must not prescribe ephemeral refs or deterministic click chains.",
-            "CAPTCHA, passkey/biometric/security-key, one-time 2FA/MFA, password reset/change/recovery, and unexpected privilege are human-only gates.",
+            "Stop for CAPTCHA, provider-required physical biometric/security-key presence, verification without a supported secure route, password reset/change/recovery, or unexpected privilege. A passkey label alone is not a human-only gate: inspect the current native prompt and use its observed password fallback through the supported opaque credential route when available.",
         ],
         "failure_report_template": "Checked <system> native route <route_id>: <pass|failed|blocked>; checked managed profile=openclaw: <pass|failed|blocked|not_attempted_reason>; checked stock extension profile=chrome when an existing signed-in tab was required: <pass|failed|not_attempted_reason>.",
         "execution_guard": {

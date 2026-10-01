@@ -1,6 +1,6 @@
 # OpenClaw Control Plane
 
-A reproducible reference for a customized **OpenClaw 2026.9.3** installation: runtime
+A reproducible reference for a customized **OpenClaw** installation: runtime
 changes, substantial agent instructions, integration routing, release management and
 host operations for a persistent single-operator assistant.
 
@@ -13,6 +13,8 @@ records before saying it is done.
 Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
+
+The current October 1 reference is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. It retains the preceding recovery, steering, result-delivery and voice-store fixes. The final changes preserve requester wrappers and import goal usage through its existing entry owner, with a deterministic fixture setup that keeps the original admission bounds. The exact source is loaded by the native Gateway and Node; activation, current-process capture and state preservation are verified. Exact-head hosted qualification and broader ordinary-use acceptance remain separate. The dated sections below retain their original source and results.
 
 ## How it works
 
@@ -29,14 +31,14 @@ flowchart TD
     Evidence --> Gateway
     Host[Host services and maintenance] --> Gateway
     Host --> Releases[Sealed releases and runtime selection]
-    Host --> Recovery[Local archives, Backblaze and container recovery]
+    Host --> Recovery[Local archives, optional offsite and container recovery]
 ```
 
 Start with [the introduction](docs/00-start-here.md) for the complete request flow.
 
 ## What is included
 
-- **The complete runtime delta:** 603 changed paths from the official release,
+- **The complete runtime delta:** all changed paths from the pinned official release,
   including regression tests. The reconstruction helper verifies the patch checksum
   and resulting Git tree. Production source is unchanged from the pinned source;
   two labels in one test fixture are normalized.
@@ -50,28 +52,48 @@ Start with [the introduction](docs/00-start-here.md) for the complete request fl
 - **Configuration and adoption guidance:** model preferences, context behavior,
   source layout, account setup, operational definitions and acceptance steps.
 
-The runtime [manifest](runtime/manifest.json) pins official commit
-`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, deployed gateway source
-`18b432ca2f83a107b1bc329cedf2221f20e61639` and reconstructed reference
-`18b432ca2f83a107b1bc329cedf2221f20e61639`. The reference includes the active-child
-follow-up correction and retains the earlier runtime and Mac companion changes.
-Its gateway is activated; historical companion acceptance stays separate.
-The manifest also pins the public
-reconstruction tree and Node.js 24.16.0 / pnpm 12.3.4. A version label alone does not identify these custom changes.
+The runtime [manifest](runtime/manifest.json) is the authority for the official tag,
+custom source commit, normalized tree, patch checksum and exact Node.js/pnpm
+versions. CI reads those values from the same manifest and verifies the annotated
+tag and reconstructed tree before running the source checks and build. A version
+label alone does not identify the custom changes.
 
-The earlier `daf5771a7d86` reference passed local source checks, focused regressions, a complete
-build and fresh reconstruction with full source parity. Activation and a bounded live
-check of a follow-up to the same child, requester continuation and Discord delivery
-also passed, followed by hosted qualification at public commit `9a04c7f`. The
-[repair record](runtime/README.md#september-21-follow-up-repair)
-retains the scope of each result.
+The [September 30 source map](docs/20-runtime-source-changes.md#september-30-recovery-steering-and-delivery)
+describes reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed`. Follow-up messages can
+reach the current execution after recovery publishes its exact owner. Original
+requester authority and child-result delivery survive restart and cleanup without
+replaying committed work. Discord thread and voice lookup follow the configured
+account and channel policy. Native verification keeps ownership of child processes
+until cleanup finishes.
 
-The [active-child follow-up correction](runtime/README.md#active-child-follow-up-correction)
-is committed and included in the patch. Its 279 focused tests and native changed-source
-checks, full build and activation passed. A bounded live check of active and
-completed child follow-ups also passed. A second live check retained a real tool
-error through a successful yield and delivered one final response without a stale
-warning. Hosted qualification of this source remains pending.
+The complete patch still covers the pinned official release through this reference.
+Its final review includes 129 changed paths since the September 29 reference,
+including all 107 changes since the deployed `d10b9c4` predecessor. Dialogue and
+automation defaults use GPT-6.1 Sol at Max, with manual Ultra and no automatic
+fallback. The [runtime qualification](runtime/README.md#september-30-recovery-steering-and-delivery)
+records the source checks, all 18 requester-wake and 32 voice E2E cases, and the
+reviewed complete aggregate build. Source and fixture results have separate scope
+from an actual channel reply, spoken meeting or provider account interaction.
+
+On September 30, native activation selected the exact `30ea` source and verified both loaded services, health and readiness. Fresh checks preserved configuration, all 28 job definitions, auth orders, approvals, schemas, original session IDs and goal hashes. A new capture verified the current gateway process. This is activation and preservation evidence: ordinary-use steering consistency, process-offline Discord catch-up, account workflows, spoken meeting minutes and the next natural Journal cycle remain separate acceptance checks.
+
+The [September 29 source map](docs/20-runtime-source-changes.md#september-29-continuation-and-activity-corrections)
+describes the September 29 reference `4e8c6dc647b164b00f798c85154eac539e891e3f`: preserved task ownership
+and steering, bounded Activity recaps, child-result continuation, structured
+provider-failure handling, useful progress updates and preemptible maintenance
+during yielded idle periods, canonical retained-task-result lookup and summary sizing
+that charges only content sent to the summary model. Admitted runs retain their
+existing ownership through required preparation and terminal persistence. Premature
+normal WebSocket closure retains the existing bounded transport-recovery path. Declared OpenAI reasoning capabilities now expose Max for new models, with optional Max-based Ultra orchestration. It also
+retains the earlier voice controls, native credential entry and recovery corrections. Source implementation and tests do not prove
+that a gateway, companion or account interaction has been upgraded. The manifest
+records exported source and deployed component identities separately: a source
+candidate can be newer than the active gateway. Each new installation requires its
+own loaded-process and user-path evidence; earlier acceptance retains its dated scope.
+
+The [runtime package](runtime/README.md) preserves earlier repair and acceptance
+records under their original source identities. Those historical results do not
+qualify a newer manifest, native app or installation.
 
 ## Start using the reference
 
@@ -114,7 +136,7 @@ helpers and adoption acceptance are separate evidence.
 | [16 Security and trust model](docs/16-security-and-trust-model.md) | Define credentials, audience and tool boundaries. |
 | [17 Adoption guide](docs/17-adoption-guide.md) | Reconstruct and qualify an installation. |
 | [18 Architecture evolution](docs/18-architecture-evolution.md) | Understand the direction and tradeoffs. |
-| [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, Backblaze, Docker/OrbStack and adjacent software. |
+| [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, optional historical Backblaze templates, Docker/OrbStack and adjacent software. |
 | [20 Runtime source changes](docs/20-runtime-source-changes.md) | Inspect the complete patch and source map. |
 
 ## Scope and evidence

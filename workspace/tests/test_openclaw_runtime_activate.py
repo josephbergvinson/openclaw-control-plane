@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -354,6 +355,11 @@ class StoppedRestoreBackend(FakeBackend):
 
 @pytest.fixture
 def fixture(tmp_path: Path, monkeypatch) -> Fixture:
+    # The real Darwin volume query is an environmental boundary. These owner
+    # tests also run on Linux; remount tests vary this UUID explicitly below.
+    if hasattr(activate_module, "_history_volume_guard"):
+        monkeypatch.setattr(activate_module._history_volume_guard(), "read_volume_uuid",
+                            lambda _: "11111111-2222-3333-4444-555555555555")
     releases = tmp_path / "runtime" / "Releases"
     releases.mkdir(parents=True)
     predecessor = make_release(
@@ -986,6 +992,149 @@ def test_terminal_receipt_retirement_moves_exact_pair_and_preserves_inodes(fixtu
     assert receipt["startFence"]["path"] == str(archived_fence)
     retirement = archive_dir / activate_module.RETIREMENT_RECEIPT_NAME
     assert stat.S_IMODE(retirement.stat().st_mode) == 0o400
+
+
+def simulate_release_remount(fixture, monkeypatch):
+    original = os.lstat
+    releases = {fixture.candidate, fixture.predecessor}
+    current_device = original(fixture.candidate).st_dev + 4
+
+    def remounted(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if Path(path) in releases:
+            values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+            values["st_dev"] = current_device
+            return SimpleNamespace(**values)
+        return info
+
+    monkeypatch.setattr(os, "lstat", remounted)
+    if hasattr(activate_module, "_history_volume_guard"):
+        guard = activate_module._history_volume_guard()
+        monkeypatch.setattr(guard, "normalize_contract", lambda _: {
+            "mountPoint": str(fixture.root), "volumeUuid": "11111111-2222-3333-4444-555555555555"})
+        monkeypatch.setattr(guard, "volume_metadata", lambda _: {
+            "available": True, "mounted": True, "mountDevice": current_device,
+            "volumeUuid": "11111111-2222-3333-4444-555555555555"})
+    return current_device
+
+
+def test_terminal_receipt_retirement_revalidates_legacy_release_after_remount(fixture, monkeypatch):
+    result = run(fixture)
+    original = {path: path.read_bytes() for path in (
+        fixture.paths.result, fixture.paths.result.with_name(activate_module.START_CONSUMED_NAME),
+        fixture.seal, fixture.snapshot)}
+    current_device = simulate_release_remount(fixture, monkeypatch)
+    archive = fixture.paths.result.parent / "archive" / "after-remount"
+
+    retired = activate_module.retire_terminal_receipts(fixture.paths, archive)
+
+    assert retired["outcome"] == "activated"
+    identity = retired["releaseIdentities"]["selected"]
+    assert identity["device"] == current_device != result["candidate"]["device"]
+    assert identity["inode"] == result["candidate"]["inode"]
+    assert identity["volumeUuid"] == "11111111-2222-3333-4444-555555555555"
+    assert identity["recordSha256"] == activate_module.sha256_bytes(activate_module.canonical_json_bytes(result["candidate"]))
+    for path, payload in original.items():
+        assert (path if path in (fixture.seal, fixture.snapshot) else archive / path.name).read_bytes() == payload
+
+
+@pytest.mark.parametrize("corruption", ["volume", "inode", "inventory", "seal", "snapshot", "missing-volume"])
+def test_terminal_receipt_remount_rejects_unproven_identity_before_moving(fixture, monkeypatch, corruption):
+    run(fixture)
+    simulate_release_remount(fixture, monkeypatch)
+    guard = activate_module._history_volume_guard()
+    if corruption == "volume":
+        monkeypatch.setattr(guard, "read_volume_uuid", lambda _: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
+    elif corruption == "missing-volume":
+        monkeypatch.setattr(guard, "read_volume_uuid", lambda _: "")
+    elif corruption == "inventory":
+        notice = fixture.candidate / "NOTICE"
+        notice.chmod(0o644); notice.write_text("changed bytes"); notice.chmod(0o444)
+    elif corruption == "inode":
+        prior = os.lstat
+        def replaced_inode(path, *args, **kwargs):
+            info = prior(path, *args, **kwargs)
+            if Path(path) == fixture.candidate:
+                values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+                values["st_ino"] += 1
+                return SimpleNamespace(**values)
+            return info
+        monkeypatch.setattr(os, "lstat", replaced_inode)
+    else:
+        path = fixture.seal if corruption == "seal" else fixture.snapshot
+        path.chmod(0o600); path.write_text(path.read_text() + " "); path.chmod(0o400)
+    before = fixture.paths.result.read_bytes()
+    fence = fixture.paths.result.with_name(activate_module.START_CONSUMED_NAME)
+    fence_before = fence.read_bytes()
+    archive = fixture.paths.result.parent / "archive" / "unproven-remount"
+    with pytest.raises(activate_module.ActivationError):
+        activate_module.retire_terminal_receipts(fixture.paths, archive)
+    assert not archive.exists()
+    assert fixture.paths.result.read_bytes() == before and fence.read_bytes() == fence_before
+
+
+def test_remount_does_not_relax_candidate_seal_mutation_admission(fixture, monkeypatch):
+    simulate_release_remount(fixture, monkeypatch)
+    with pytest.raises(activate_module.ActivationError, match="seal surface drift"):
+        activate_module.validate_candidate_seal(fixture.paths, fixture.candidate, CANDIDATE_COMMIT, fixture.seal)
+
+
+def test_retirement_rolls_back_moves_if_mount_changes_during_archival(fixture, monkeypatch):
+    run(fixture)
+    fence = fixture.paths.result.with_name(activate_module.START_CONSUMED_NAME)
+    before = {path: path.read_bytes() for path in (fixture.paths.result, fence)}
+    original_rename = os.rename
+    archive = fixture.paths.result.parent / "archive" / "racing-mount"
+    def rename_and_remount(source, destination):
+        original_rename(source, destination)
+        if source == fixture.paths.result:
+            simulate_release_remount(fixture, monkeypatch)
+    monkeypatch.setattr(os, "rename", rename_and_remount)
+    with pytest.raises(activate_module.ActivationError, match="changed during retirement"):
+        activate_module.retire_terminal_receipts(fixture.paths, archive)
+    assert all(path.read_bytes() == payload for path, payload in before.items())
+    assert not (archive / activate_module.RETIREMENT_RECEIPT_NAME).exists()
+
+
+def test_daily_retention_reaches_children_after_legacy_remount_retirement(fixture, monkeypatch):
+    from scripts import openclaw_retention_cleanup_cron as cron
+    from scripts import openclaw_runtime_activate as live_owner
+    run(fixture)
+    simulate_release_remount(fixture, monkeypatch)
+    monkeypatch.setattr(live_owner, "live_paths", lambda: fixture.paths)
+    calls = []
+    def child(name, *args, **kwargs):
+        calls.append(name)
+        return cron.ChildResult(name, 0)
+    monkeypatch.setattr(cron, "run_child", child)
+    results = cron.run_steps(apply=True)
+    assert {row.name for row in results} == {"host_storage", "runtime_releases", "runtime_promotions", "approval_a"}
+    assert len(calls) == 4 and all(row.returncode == 0 for row in results)
+    assert "ACTIVATION_RETIREMENT_REPORT:" in results[1].stdout
+    assert not fixture.paths.result.exists()
+
+
+def test_release_retention_consumes_durable_retirement_identity(fixture, monkeypatch):
+    from scripts import openclaw_runtime_release_retention as retention
+    run(fixture)
+    archive = fixture.paths.result.parent / "archive" / "retention-history"
+    activate_module.retire_terminal_receipts(fixture.paths, archive)
+    simulate_release_remount(fixture, monkeypatch)
+    monkeypatch.setattr(retention, "effective_activation_result_path", lambda: fixture.paths.result)
+    from scripts.operator_contract import OperatorContract
+    configured = {section: retention.OPERATOR.get(section, {}) for section in ("paths", "runtime", "identifiers")}
+    configured["paths"]["runtime_releases_root"] = str(fixture.paths.releases_root)
+    monkeypatch.setattr(retention, "OPERATOR", OperatorContract(configured))
+    monkeypatch.setattr(retention, "LAST_PROMOTION_OPERATION_CLASSIFICATIONS", [])
+    assert retention.collect_unfinished_release_refs() == []
+    assert retention.LAST_TERMINAL_ARCHIVE_NOTES == []
+    path = archive / activate_module.RETIREMENT_RECEIPT_NAME
+    receipt = json.loads(path.read_text())
+    receipt["result"]["volumeUuid"] = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    path.chmod(0o600); path.write_text(json.dumps(receipt)); path.chmod(0o400)
+    refs = retention.collect_unfinished_release_refs()
+    assert {row.path for row in refs} == {fixture.candidate, fixture.predecessor}
+    assert retention.LAST_TERMINAL_ARCHIVE_NOTES
 
 
 def test_terminal_receipt_retirement_archives_historical_different_profile_binding(
@@ -3182,6 +3331,145 @@ def test_snapshot_archive_accepts_appledouble_for_exact_surface(
     )
 
 
+def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture):
+    state = fixture.paths.predecessor_state_dir
+    regular = state / "hardlink-source"
+    linked = state / "hardlink-copy"
+    regular.write_bytes(b"native stopped snapshot hardlink\n")
+    os.link(regular, linked)
+    relative_link = state / "relative-state-link"
+    relative_link.symlink_to(regular.name)
+    absolute_link = state / "absolute-state-link"
+    absolute_link.symlink_to("/private/snapshot-test-target")
+    archive = fixture.root / "native-hardlink-snapshot.tar"
+    subprocess.run(
+        [
+            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf",
+            str(archive), "-C", "/",
+            *(str(path).lstrip("/") for path in (
+                state, fixture.paths.gateway_plist,
+                fixture.paths.node_plist, fixture.paths.current_link,
+            )),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    with tarfile.open(archive) as captured:
+        pair = [captured.getmember(str(path).lstrip("/")) for path in (regular, linked)]
+        regular_member = next(member for member in pair if member.isfile())
+        hardlink_member = next(member for member in pair if member.islnk())
+        assert hardlink_member.linkname == regular_member.name
+        assert hardlink_member.size == 0
+        assert captured.getmember(str(relative_link).lstrip("/")).issym()
+        assert captured.getmember(str(absolute_link).lstrip("/")).issym()
+
+    activate_module.validate_snapshot_archive_members(
+        fixture.paths, archive, str(fixture.predecessor)
+    )
+    restored = fixture.root / "restored-native-hardlinks"
+    restored.mkdir()
+    subprocess.run(
+        [
+            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-xpf",
+            str(archive), "-C", str(restored),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    restored_regular = restored / str(regular).lstrip("/")
+    restored_linked = restored / str(linked).lstrip("/")
+    assert restored_regular.read_bytes() == regular.read_bytes() == restored_linked.read_bytes()
+    assert restored_regular.stat().st_ino == restored_linked.stat().st_ino
+    for path in (relative_link, absolute_link, fixture.paths.current_link):
+        assert os.readlink(restored / str(path).lstrip("/")) == os.readlink(path)
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "absolute-target", "outside-target", "sibling-prefix-target",
+        "parent-traversal-target", "dot-target", "empty-component-target",
+        "empty-target", "forward-target", "directory-target", "symlink-target",
+        "hardlink-chain", "self-target", "hardlink-payload",
+        "descendant-below-hardlink", "descendant-before-hardlink",
+        "target-below-symlink", "gateway-hardlink", "current-hardlink", "fifo",
+    ],
+)
+def test_snapshot_archive_rejects_unsafe_state_hardlinks(fixture: Fixture, case: str):
+    state = str(fixture.paths.predecessor_state_dir).lstrip("/")
+    source = f"{state}/linked"
+    target = f"{state}/target"
+    regular = (target, tarfile.REGTYPE, "", b"target bytes")
+    linked = (source, tarfile.LNKTYPE, target, b"")
+    entries = [regular, linked]
+    unsafe_targets = {
+        "absolute-target": f"/{target}",
+        "outside-target": "private/outside",
+        "sibling-prefix-target": f"{state}-sibling/target",
+        "parent-traversal-target": f"{state}/../target",
+        "dot-target": f"{state}/./target",
+        "empty-component-target": f"{state}//target",
+        "empty-target": "",
+    }
+    if case in unsafe_targets:
+        entries[1] = (source, tarfile.LNKTYPE, unsafe_targets[case], b"")
+    elif case == "forward-target":
+        entries.reverse()
+    elif case == "directory-target":
+        entries[0] = (target, tarfile.DIRTYPE, "", b"")
+    elif case == "symlink-target":
+        entries[0] = (target, tarfile.SYMTYPE, "relative-target", b"")
+    elif case == "hardlink-chain":
+        entries = [
+            (f"{state}/regular", tarfile.REGTYPE, "", b"target bytes"),
+            (target, tarfile.LNKTYPE, f"{state}/regular", b""), linked,
+        ]
+    elif case == "self-target":
+        entries = [(source, tarfile.LNKTYPE, source, b"")]
+    elif case == "hardlink-payload":
+        entries[1] = (source, tarfile.LNKTYPE, target, b"x")
+    elif case in ("descendant-below-hardlink", "descendant-before-hardlink"):
+        child = (f"{source}/child", tarfile.REGTYPE, "", b"child bytes")
+        entries.insert(2 if case == "descendant-below-hardlink" else 1, child)
+    elif case == "target-below-symlink":
+        entries = [
+            (f"{state}/alias", tarfile.SYMTYPE, "/private/snapshot-test-target", b""),
+            (f"{state}/alias/target", tarfile.REGTYPE, "", b"target bytes"),
+            (source, tarfile.LNKTYPE, f"{state}/alias/target", b""),
+        ]
+    elif case in ("gateway-hardlink", "current-hardlink"):
+        source = str(
+            fixture.paths.gateway_plist if case == "gateway-hardlink"
+            else fixture.paths.current_link
+        ).lstrip("/")
+        entries[1] = (source, tarfile.LNKTYPE, target, b"")
+    elif case == "fifo":
+        entries = [(source, tarfile.FIFOTYPE, "", b"")]
+
+    archive = fixture.root / f"unsafe-hardlink-{case}.tar"
+    surfaces = [
+        (state, tarfile.DIRTYPE, "", b""),
+        (str(fixture.paths.gateway_plist).lstrip("/"), tarfile.REGTYPE, "", b"gateway"),
+        (str(fixture.paths.node_plist).lstrip("/"), tarfile.REGTYPE, "", b"node"),
+        (str(fixture.paths.current_link).lstrip("/"), tarfile.SYMTYPE, str(fixture.predecessor), b""),
+    ]
+    if case in ("gateway-hardlink", "current-hardlink"):
+        surfaces = [entry for entry in surfaces if entry[0] != source]
+    with tarfile.open(archive, "w") as output:
+        for name, kind, linkname, payload in surfaces + entries:
+            member = tarfile.TarInfo(name)
+            member.type = kind
+            member.linkname = linkname
+            member.size = len(payload)
+            output.addfile(member, io.BytesIO(payload) if payload else None)
+
+    with pytest.raises(activate_module.ActivationError, match="archive inventory drift"):
+        activate_module.validate_snapshot_archive_members(
+            fixture.paths, archive, str(fixture.predecessor)
+        )
+
+
 @pytest.mark.parametrize(
     ("target", "accepted"),
     [
@@ -4204,3 +4492,21 @@ def test_system_gateway_verification_rejects_generation_that_never_stabilizes(
 
     with pytest.raises(activate_module.ActivationError, match="stable gateway generation"):
         backend.verify(fixture.candidate, 1, 2)
+
+
+def test_daily_retention_rejects_invalid_terminal_without_starting_children(fixture, monkeypatch):
+    from scripts import openclaw_retention_cleanup_cron as cron
+    from scripts import openclaw_runtime_activate as live_owner
+    run(fixture)
+    result = json.loads(fixture.paths.result.read_text())
+    result["outcome"] = "snapshot_restore_required"
+    fixture.paths.result.chmod(0o600)
+    fixture.paths.result.write_text(json.dumps(result))
+    fixture.paths.result.chmod(0o400)
+    monkeypatch.setattr(live_owner, "live_paths", lambda: fixture.paths)
+    calls = []
+    monkeypatch.setattr(cron, "run_child", lambda *args, **kwargs: calls.append(args))
+    results = cron.run_steps(apply=True)
+    assert len(results) == 4 and all(row.returncode == 1 for row in results)
+    assert all("activation retirement blocked" in row.stderr for row in results)
+    assert calls == [] and fixture.paths.result.exists()

@@ -6,11 +6,13 @@ on:
     paths:
       - runtime/**
       - scripts/reconstruct_runtime.py
+      - scripts/runtime_ci_config.py
       - .github/workflows/steering-regression.yml
   pull_request:
     paths:
       - runtime/**
       - scripts/reconstruct_runtime.py
+      - scripts/runtime_ci_config.py
       - .github/workflows/steering-regression.yml
   workflow_dispatch:
 
@@ -24,16 +26,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the runtime manifest
+        id: runtime
+        run: python3 scripts/runtime_ci_config.py >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.16.0
+          node-version: ${{ steps.runtime.outputs.node }}
       - name: Install the pinned package manager
-        run: npm install --global pnpm@12.3.4
+        run: npm install --global "pnpm@${{ steps.runtime.outputs.pnpm }}"
       - name: Reconstruct the pinned runtime source
         env:
           RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-steering
         run: |
-          git clone --depth 1 --branch v2026.9.3 https://github.com/openclaw/openclaw.git "$RUNTIME_CHECKOUT"
+          git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
       - name: Install frozen runtime dependencies
         working-directory: ${{ runner.temp }}/openclaw-steering
@@ -66,7 +71,7 @@ jobs:
         working-directory: ${{ runner.temp }}/openclaw-steering
         run: |
           set +e
-          pnpm test:serial src/auto-reply/reply/followup-turn-admission.test.ts src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts src/auto-reply/reply/get-reply-run.media-only.test.ts src/auto-reply/reply/get-reply-run.prepared-metadata.test.ts src/auto-reply/reply/queue/state.test.ts src/auto-reply/reply/queue.in-flight.test.ts src/auto-reply/reply/queue.collect.test.ts src/auto-reply/reply/queue.drain-restart.test.ts src/auto-reply/reply/queue/drain.identity-guard.test.ts src/auto-reply/reply/reply-run-registry.test.ts src/auto-reply/reply/reply-run-registry.control-owner.test.ts src/cron/command-runner.test.ts 2>&1 | tee "$RUNNER_TEMP/candidate-owner-tests.log"
+          pnpm test:serial src/auto-reply/reply/session.gateway-authority.test.ts src/auto-reply/reply/followup-turn-admission.test.ts src/auto-reply/reply/followup-turn-admission.runtime-config.test.ts src/auto-reply/reply/agent-runner-utils.secret-resolution.test.ts src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts src/auto-reply/reply/agent-runner-steer-adoption.context.test.ts src/auto-reply/reply/get-reply-run.media-only.test.ts src/auto-reply/reply/get-reply-run.prepared-metadata.test.ts src/auto-reply/reply/queue/state.test.ts src/auto-reply/reply/queue.in-flight.test.ts src/auto-reply/reply/queue.collect.test.ts src/auto-reply/reply/queue.drain-restart.test.ts src/auto-reply/reply/queue/drain.identity-guard.test.ts src/auto-reply/reply/reply-run-registry.test.ts src/auto-reply/reply/reply-run-registry.control-owner.test.ts src/cron/command-runner.test.ts 2>&1 | tee "$RUNNER_TEMP/candidate-owner-tests.log"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
           printf '%s\n' "${pipeline_status[0]}" > "$RUNNER_TEMP/candidate-owner-tests.exit"

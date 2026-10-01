@@ -65,6 +65,17 @@ optional binding unset. Then run the explicit native acceptance below and set
 every later activation when using the Journal workflow. Do not unset it to bypass
 a failed prerequisite, or fabricate a first-install receipt or TCC grant.
 
+A checked restore can also establish the lifecycle prerequisite for a fresh
+capture. The same commands below require the native restore owner to report
+`restored`, with its exact failed-activation and start-fence hashes, the selected
+predecessor release, successful bootstrap checks and the current gateway process.
+`restored_stopped`, a failed bootstrap or an unbound restore does not qualify.
+Capture, visual acceptance, enrollment and current-process verification carry
+both the failed-activation and restore receipt hashes; keep the failed receipt.
+The native `retire-receipts` operation can subsequently archive the bound receipt
+set without invalidating that same process's evidence. A later lifecycle or
+process still requires a fresh capture, and none of this proves scheduled sync.
+
 Open the existing Journal app before invoking the capture. Read-only TCC log
 observation requires already configured noninteractive sudo access and fails
 before dispatch when unavailable. It does not prompt for credentials or change

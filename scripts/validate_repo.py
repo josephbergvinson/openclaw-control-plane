@@ -29,7 +29,6 @@ REQUIRED = {
     "SECURITY.md",
     "LICENSE",
     "runtime/manifest.json",
-    "runtime/openclaw-2026.9.3-reference.patch",
     "config/openclaw.preferences.json",
     "templates/WRITING.example.md",
     "docs/00-start-here.md",
@@ -229,6 +228,15 @@ def validate_tree() -> list[Finding]:
     for rel in sorted(REQUIRED):
         if not (ROOT / rel).is_file():
             findings.append(Finding(ROOT / rel, "required file missing"))
+    manifest_path = ROOT / "runtime/manifest.json"
+    try:
+        patch = json.loads(manifest_path.read_text())["patch"]["file"]
+        if not isinstance(patch, str) or Path(patch).name != patch or not patch.endswith(".patch"):
+            findings.append(Finding(manifest_path, "patch must name a runtime package file"))
+        elif not (ROOT / "runtime" / patch).is_file():
+            findings.append(Finding(ROOT / "runtime" / patch, "required manifest patch missing"))
+    except (OSError, ValueError, KeyError, TypeError):
+        findings.append(Finding(manifest_path, "runtime patch declaration unavailable"))
     for path in ROOT.rglob("*"):
         if any(part in SKIP_PARTS for part in path.parts):
             continue

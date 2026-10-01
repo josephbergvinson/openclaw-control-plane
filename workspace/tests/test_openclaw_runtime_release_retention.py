@@ -783,9 +783,11 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
                  mock.patch.object(retention, 'collect_launchagent_refs', return_value=[]), \
                  mock.patch.object(retention, 'collect_process_refs', return_value=[]), \
                  mock.patch.object(retention, 'collect_promotion_dependency_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_unfinished_release_refs', return_value=[]) as unfinished, \
                  mock.patch.object(retention, 'collect_symlink_refs', return_value=[]) as scan:
                 self.assertEqual(retention.collect_references(deadline=123.0), [])
 
+            unfinished.assert_called_once_with()
             scan.assert_called_once_with(
                 [cli_root],
                 required_roots=[cli_root],
