@@ -4617,18 +4617,20 @@ index ff8b0411f559e7a81a6f8fb3faa96be5b5160d8b..c0d725d899a967b5baceea1a0d8f9a49
    for host-managed exports. Companion plugins that enumerate those declared
    artifacts still use `listActiveMemoryPublicArtifacts(...)` from the retained
 diff --git a/docs/plugins/sdk-runtime.md b/docs/plugins/sdk-runtime.md
-index eca5cbd6bb9069053aa9f2d2fc3f70054d416117..523e849a5718ab69ae9caf6ba9161dd667cf6201 100644
+index eca5cbd6bb9069053aa9f2d2fc3f70054d416117..86a7ff012b107e59f9d8e21a9652e8ae733f089d 100644
 --- a/docs/plugins/sdk-runtime.md
 +++ b/docs/plugins/sdk-runtime.md
-@@ -185,6 +185,12 @@ unchanged, including any handles inside them.
+@@ -185,6 +185,14 @@ unchanged, including any handles inside them.
  Preparing another instance does not overwrite that instance's runtime. Calls
  outside managed instance scope retain the store's existing standalone behavior.
  
 +When a live manager shares callbacks with another capability instance, use
-+`wrapCurrentPluginInstance` from `openclaw/plugin-sdk/runtime-store` when creating
-+those callbacks. Invoking them enters their creating instance, keeps runtime
-+slots isolated, and rejects new work after that instance retires. Do not repair
-+an uninitialized caller slot by falling back to another instance's runtime.
++`bindCurrentInstance` on the store returned by `createPluginRuntimeStore` from
++`openclaw/plugin-sdk/runtime-store` when creating those callbacks. Binding captures
++the managed instance invoking that operation, even when the store was created
++at module load. Invoking the callbacks enters that instance, keeps runtime slots
++isolated, and rejects new work after that instance retires. Do not repair an
++uninitialized caller slot by falling back to another instance's runtime.
 +
  SDK helpers that return bare results retain their resources until the owning
  host closes. Callers do not need to dispose those results; see
@@ -16037,6 +16039,29 @@ index 8c582c805102044614405ff3e500118d0465cafa..18aa14c551d69029f9b9bef10ab84052
  }
  
  export function resolveThreadBindingPersonaFromRecord(record: ThreadBindingRecord): string {
+diff --git a/extensions/discord/src/runtime.ts b/extensions/discord/src/runtime.ts
+index dc1e54df20be2706ecdf96ea0a5f84b05c5fb299..ba2ce658099906980385e8e04dc5b29c01b68c66 100644
+--- a/extensions/discord/src/runtime.ts
++++ b/extensions/discord/src/runtime.ts
+@@ -3,6 +3,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
+ import { createPluginRuntimeStore } from "openclaw/plugin-sdk/runtime-store";
+ 
+ const {
++  bindCurrentInstance: bindDiscordRuntimeInstance,
+   setRuntime: setDiscordRuntime,
+   tryGetRuntime: getOptionalDiscordRuntime,
+   getRuntime: getDiscordRuntime,
+@@ -10,4 +11,9 @@ const {
+   pluginId: "discord",
+   errorMessage: "Discord runtime not initialized",
+ });
+-export { getDiscordRuntime, getOptionalDiscordRuntime, setDiscordRuntime };
++export {
++  bindDiscordRuntimeInstance,
++  getDiscordRuntime,
++  getOptionalDiscordRuntime,
++  setDiscordRuntime,
++};
 diff --git a/extensions/discord/src/send.existing-thread-receipts.test.ts b/extensions/discord/src/send.existing-thread-receipts.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..7c554f661d91cf7b592d97b6c8d96dbcbba8aa62
@@ -16699,17 +16724,14 @@ index 0000000000000000000000000000000000000000..6fe2d518b50529442be82915b554644c
 +  }
 +}
 diff --git a/extensions/discord/src/voice/voice-runtime.ts b/extensions/discord/src/voice/voice-runtime.ts
-index a336864d8e392b71164414199ac7737071f39f57..7a0e65b9e4f7f6dc7dfbf4e5e855b436d66135f6 100644
+index a336864d8e392b71164414199ac7737071f39f57..721614cd85763b293b4a0b9f0c446b15a79694eb 100644
 --- a/extensions/discord/src/voice/voice-runtime.ts
 +++ b/extensions/discord/src/voice/voice-runtime.ts
-@@ -1,9 +1,11 @@
- import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
- import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
- import { createSubsystemLogger, type RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-+import { wrapCurrentPluginInstance } from "openclaw/plugin-sdk/runtime-store";
+@@ -4,6 +4,8 @@ import { createSubsystemLogger, type RuntimeEnv } from "openclaw/plugin-sdk/runt
  import type { APIVoiceState, Client } from "../internal/discord.js";
  import { formatMention } from "../mentions.js";
  import type { DiscordLivePolicyReader } from "../monitor/live-policy.js";
++import { bindDiscordRuntimeInstance } from "../runtime.js";
 +import { authorizeDiscordVoiceIngress } from "./access.js";
  import { resolveDiscordVoiceEnabled } from "./config.js";
  import { DiscordVoiceMembershipTracker } from "./membership.js";
@@ -16755,7 +16777,7 @@ index a336864d8e392b71164414199ac7737071f39f57..7a0e65b9e4f7f6dc7dfbf4e5e855b436
  export class DiscordVoiceManager {
 +  // A capability-only plugin instance may call this monitor's shared manager.
 +  // Preserve the monitor's runtime and retirement checks across that boundary.
-+  private readonly runInOwner = wrapCurrentPluginInstance(<T>(run: () => T): T => run());
++  private readonly runInOwner = bindDiscordRuntimeInstance(<T>(run: () => T): T => run());
    private sessions = new Map<string, VoiceSessionEntry>();
    private readonly guildLifecycles = new Map<string, VoiceGuildLifecycle>();
    private nextGuildGeneration = 0;
@@ -17140,6 +17162,20 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..54bc5d842ce50aa62e991cb7a04a75ca
        const joinedConnection = voiceSdk.joinVoiceChannel({
          channelId,
          guildId,
+diff --git a/extensions/discord/src/voice/voice-test-mocks.test-support.ts b/extensions/discord/src/voice/voice-test-mocks.test-support.ts
+index 8b117dbc91f084035e00b287ed11431ca17de594..b3b2cae14026d9802a209b28ea104c08d80b921f 100644
+--- a/extensions/discord/src/voice/voice-test-mocks.test-support.ts
++++ b/extensions/discord/src/voice/voice-test-mocks.test-support.ts
+@@ -483,7 +483,8 @@ vi.mock("./participant-context.js", async () => {
+   };
+ });
+ 
+-vi.mock("../runtime.js", () => ({
++vi.mock("../runtime.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../runtime.js")>()),
+   getDiscordRuntime: () => ({
+     agent: {
+       runCommandFromIngress: agentCommandMock,
 diff --git a/extensions/discord/test-api.ts b/extensions/discord/test-api.ts
 index 3b8ed2371538216188c130684865dee5c303472d..999aaf664f2fe1ffa9bddc47ffc59a8a79739694 100644
 --- a/extensions/discord/test-api.ts
@@ -104702,21 +104738,116 @@ index 872d5591ef8d7a67f79f9d7225862b5760302ad8..bf9c8b3ceb20e80d5f3047faf73db763
  
  /** @deprecated The streaming.progress.render key was retired (#122927). */
  export type ChannelProgressDraftRenderMode = "rich" | "text";
+diff --git a/src/plugin-sdk/runtime-store.test.ts b/src/plugin-sdk/runtime-store.test.ts
+index 3a854aa1bf4f4a56ce3b532990183ce520a4a93a..85541b961f723b2e91ba424be10c7c3a44a81ff8 100644
+--- a/src/plugin-sdk/runtime-store.test.ts
++++ b/src/plugin-sdk/runtime-store.test.ts
+@@ -3,10 +3,54 @@
+  */
+ import { importFreshModule } from "openclaw/plugin-sdk/test-fixtures";
+ import { describe, expect, test } from "vitest";
++import { PluginInstance } from "../plugins/plugin-instance.js";
+ import { clearNamedPluginRuntimeStoresForTest } from "./runtime-store-registry.js";
+ import { createPluginRuntimeStore } from "./runtime-store.js";
+ 
+ describe("createPluginRuntimeStore", () => {
++  test.each(["legacy", "named"] as const)(
++    "binds shared callbacks to their creating instance with a %s store",
++    async (mode) => {
++      const store =
++        mode === "legacy"
++          ? createPluginRuntimeStore<string>("owned runtime not initialized")
++          : createPluginRuntimeStore<string>({
++              pluginId: "shared-callback-owner",
++              errorMessage: "owned runtime not initialized",
++            });
++      const current = new PluginInstance("shared-callback-owner");
++      const candidate = new PluginInstance("shared-callback-owner");
++      store.setRuntime("standalone");
++      try {
++        current.run(() => store.setRuntime("current"));
++        candidate.run(() => store.setRuntime("candidate"));
++        const currentRead = current.run(() => store.bindCurrentInstance(store.getRuntime));
++        const candidateRead = candidate.run(() => store.bindCurrentInstance(store.getRuntime));
++        const currentAsyncRead = current.run(() =>
++          store.bindCurrentInstance(async () => {
++            await Promise.resolve();
++            return store.getRuntime();
++          }),
++        );
++
++        expect(candidate.run(currentRead)).toBe("current");
++        expect(current.run(candidateRead)).toBe("candidate");
++        await expect(candidate.run(currentAsyncRead)).resolves.toBe("current");
++        expect(store.getRuntime()).toBe("standalone");
++
++        await current.dispose();
++        expect(() => candidate.run(currentRead)).toThrow("reloaded or disabled");
++        expect(() => candidate.run(currentAsyncRead)).toThrow("reloaded or disabled");
++        expect(candidate.run(candidateRead)).toBe("candidate");
++        expect(store.getRuntime()).toBe("standalone");
++      } finally {
++        await current.dispose();
++        await candidate.dispose();
++        store.clearRuntime();
++      }
++    },
++  );
++
+   test("shares runtime slots for the same plugin id", () => {
+     const firstStore = createPluginRuntimeStore<{ value: string }>({
+       pluginId: "shared-plugin",
 diff --git a/src/plugin-sdk/runtime-store.ts b/src/plugin-sdk/runtime-store.ts
-index 8e85c214bab1f08a13275a221ea4c3099093cdfe..6b0b99a2039dd67897d206662add885b7b576111 100644
+index 8e85c214bab1f08a13275a221ea4c3099093cdfe..4ac6301979ce2f0647cbc8e314fcfae124fcae32 100644
 --- a/src/plugin-sdk/runtime-store.ts
 +++ b/src/plugin-sdk/runtime-store.ts
-@@ -1,6 +1,9 @@
- import { getPluginInstanceRuntimeSlot } from "../plugins/plugin-instance-scope.js";
+@@ -1,6 +1,10 @@
+-import { getPluginInstanceRuntimeSlot } from "../plugins/plugin-instance-scope.js";
 -// Runtime store exports expose plugin runtime type contracts without loading runtime code.
++import {
++  getPluginInstanceRuntimeSlot,
++  wrapCurrentPluginInstance,
++} from "../plugins/plugin-instance-scope.js";
  import { getNamedPluginRuntimeStoreSlot } from "./runtime-store-registry.js";
 +
-+// Bind callbacks shared across capability graphs to the runtime instance that owns them.
-+export { wrapCurrentPluginInstance } from "../plugins/plugin-instance-scope.js";
 +// Runtime store exports expose plugin runtime type contracts without loading runtime code.
  export type { PluginRuntime } from "../plugins/runtime/types.js";
  type PluginRuntimeStoreKeyOptions = {
    /** Explicit global registry key for shared runtime slots. */
+@@ -46,6 +50,8 @@ function resolvePluginRuntimeStoreOptions(
+  * named slots so duplicate SDK module instances share the same plugin runtime.
+  */
+ export function createPluginRuntimeStore<T>(errorMessage: string): {
++  /** Bind shared callbacks to the managed instance invoking this operation. */
++  bindCurrentInstance: <V>(value: V) => V;
+   setRuntime: (next: T) => void;
+   clearRuntime: () => void;
+   tryGetRuntime: () => T | null;
+@@ -53,6 +59,8 @@ export function createPluginRuntimeStore<T>(errorMessage: string): {
+ };
+ /** Create a globally shared runtime slot keyed by plugin id or explicit registry key. */
+ export function createPluginRuntimeStore<T>(options: PluginRuntimeStoreOptions): {
++  /** Bind shared callbacks to the managed instance invoking this operation. */
++  bindCurrentInstance: <V>(value: V) => V;
+   setRuntime: (next: T) => void;
+   clearRuntime: () => void;
+   tryGetRuntime: () => T | null;
+@@ -60,6 +68,7 @@ export function createPluginRuntimeStore<T>(options: PluginRuntimeStoreOptions):
+ };
+ /** Implementation overload accepting either legacy error-message strings or structured options. */
+ export function createPluginRuntimeStore<T>(options: string | PluginRuntimeStoreOptions): {
++  bindCurrentInstance: <V>(value: V) => V;
+   setRuntime: (next: T) => void;
+   clearRuntime: () => void;
+   tryGetRuntime: () => T | null;
+@@ -80,6 +89,7 @@ export function createPluginRuntimeStore<T>(options: string | PluginRuntimeStore
+   const resolveSlot = () => getPluginInstanceRuntimeSlot(instanceKey) ?? defaultSlot;
+ 
+   return {
++    bindCurrentInstance: wrapCurrentPluginInstance,
+     setRuntime(next: T) {
+       resolveSlot().runtime = next;
+     },
 diff --git a/src/plugin-sdk/session-store-runtime-internal.ts b/src/plugin-sdk/session-store-runtime-internal.ts
 index 949d417353bb8e6efc8086b87f2fa0151b419903..4d2723842c6ce7e13a8609fb878a5d2dc83995e0 100644
 --- a/src/plugin-sdk/session-store-runtime-internal.ts

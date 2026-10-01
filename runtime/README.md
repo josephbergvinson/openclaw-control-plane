@@ -11,6 +11,8 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+The current October 1 reference is `bf52af01846674545f90d8a2aa9adeb6201811f7`. It includes the preceding recovery, steering and result-delivery fixes, with voice callbacks bound through the existing runtime-store operation and no added public SDK export. The exact source is selected by the native Gateway and Node; activation, current-process capture and state preservation are verified. Exact-head hosted qualification and ordinary-use acceptance remain separate from those checks. The dated September 30 sections below describe their original source.
+
 ## September 30 recovery steering and delivery
 
 Reference `30ea139bacf0ec56c5f07fe3eb35c27341f47fed` contains the complete runtime

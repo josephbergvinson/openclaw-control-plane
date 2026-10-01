@@ -854,3 +854,264 @@ class StoragePruneTests(unittest.TestCase):
             result = subprocess.run([sys.executable, '-c', program, tmp], capture_output=True,
                                     text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class ReadonlyTestScratchTests(unittest.TestCase):
+    """Exercise only private fixtures; never discover or prune the host temp root."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        self.scratch = self.base / 'ProjectData/.test-tmp/pytest-of-fixture-user/pytest-15'
+        self.frozen = self.scratch / 'test_failed_activation/runtime/Releases/openclaw-unrelated'
+        self.frozen.mkdir(parents=True)
+        (self.frozen / 'dist').mkdir()
+        (self.frozen / 'openclaw.mjs').write_bytes(b'frozen fixture')
+        (self.frozen / 'dist/fixture.js').write_bytes(b'frozen fixture')
+        self.addCleanup(self.restore_private_fixture_modes)
+        self.frozen.chmod(0o555)
+        (self.frozen / 'dist').chmod(0o555)
+        (self.frozen / 'openclaw.mjs').chmod(0o555)
+        (self.frozen / 'dist/fixture.js').chmod(0o444)
+        old = time.time() - 10 * 86400
+        for root, dirs, files in os.walk(self.scratch):
+            for name in dirs + files:
+                os.utime(Path(root) / name, (old, old), follow_symlinks=False)
+        os.utime(self.scratch, (old, old))
+        size, newest = prune.tree_facts(self.scratch, time.time() - 7 * 86400)
+        value = self.scratch.stat()
+        self.plan = prune.Candidate(str(self.scratch), 'pytest-scratch', str(self.scratch), 7,
+                                    value.st_dev, value.st_ino, newest, size)
+        operator = prune.OPERATOR.__class__({
+            'paths': {'temp_root': str(self.base / 'configured-scratch'),
+                      'pytest_temp_root': str(self.base / 'ProjectData/.test-tmp')},
+            'identifiers': {'host_user': 'fixture-user'},
+        })
+        for target, name, value in ((prune, 'OPERATOR', operator),
+                                    (prune, 'OWC', self.base),
+                                    (Path, 'is_mount', True),
+                                    (prune, 'activity_reason', None),
+                                    (prune, 'process_arguments', '')):
+            patch = mock.patch.object(target, name, return_value=value) if name not in ('OWC', 'OPERATOR') else mock.patch.object(target, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def restore_private_fixture_modes(self):
+        # Fixture teardown touches only this test's newly created private tree.
+        for root, dirs, _ in os.walk(self.base):
+            Path(root).chmod(0o700)
+            for name in dirs:
+                path = Path(root) / name
+                if not path.is_symlink():
+                    path.chmod(0o700)
+
+    def test_native_prune_removes_stale_frozen_fixture_and_preserves_neighbors(self):
+        outside = self.base / 'outside'
+        outside.write_bytes(b'preserve external target')
+        (self.frozen / 'dist').chmod(0o755)
+        link = self.frozen / 'dist/link'
+        link.symlink_to(outside)
+        os.utime(link, (self.plan.newest_mtime, self.plan.newest_mtime), follow_symlinks=False)
+        os.utime(link.parent, (self.plan.newest_mtime, self.plan.newest_mtime))
+        link.parent.chmod(0o555)
+        sibling = self.scratch.parent / 'pytest-current'
+        sibling.mkdir()
+        (sibling / 'keep').write_bytes(b'active neighbor')
+        removed, deferred = prune.apply_candidates([self.plan])
+        self.assertEqual(deferred, [])
+        self.assertEqual(len(removed), 1)
+        self.assertTrue(removed[0]['captured_inode_removed'])
+        self.assertFalse(self.scratch.exists())
+        self.assertEqual(outside.read_bytes(), b'preserve external target')
+        self.assertEqual((sibling / 'keep').read_bytes(), b'active neighbor')
+        self.assertFalse(list(self.base.rglob('.openclaw-prune-*')))
+
+    def test_native_capture_also_admits_readonly_scratch_root(self):
+        self.scratch.chmod(0o555)
+        removed, deferred = prune.apply_candidates([self.plan])
+        self.assertEqual(deferred, [])
+        self.assertEqual(len(removed), 1)
+        self.assertFalse(self.scratch.exists())
+
+    def test_unclassified_generic_tree_gets_no_permission_admission(self):
+        from dataclasses import replace
+        with mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+            removed, deferred = prune.apply_candidates([replace(self.plan, kind='xcode-generated')])
+        self.assertFalse(removed)
+        self.assertTrue(deferred[0]['error'])
+        self.assertIsInstance(deferred[0]['removed_entries'], int)
+        chmod.assert_not_called()
+        self.assertEqual(self.frozen.stat().st_mode & 0o777, 0o555)
+        self.assertTrue((self.frozen / 'openclaw.mjs').exists())
+
+    def test_scratch_kind_cannot_enable_permissions_for_other_policy_or_path(self):
+        from dataclasses import replace
+        for plan in (replace(self.plan, min_age_days=0),
+                     replace(self.plan, activity_root=str(self.scratch.parent)),
+                     replace(self.plan, path=str(self.frozen), activity_root=str(self.frozen))):
+            with self.subTest(plan=plan), mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+                removed, deferred = prune.apply_candidates([plan])
+                self.assertFalse(removed)
+                self.assertEqual(deferred[0]['reason'], 'unclassified test scratch retention policy')
+                chmod.assert_not_called()
+
+    def test_recent_scratch_root_refuses_old_admission_without_permission_update(self):
+        self.scratch.chmod(0o555)
+        os.utime(self.scratch, None)
+        with mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+            removed, deferred = prune.apply_candidates([self.plan])
+        self.assertFalse(removed)
+        self.assertEqual(deferred[0]['reason'], 'recent contents')
+        chmod.assert_not_called()
+        self.assertEqual(self.scratch.stat().st_mode & 0o777, 0o555)
+
+    def test_permission_admission_refuses_changed_owner_filesystem_or_flags(self):
+        from types import SimpleNamespace
+        expected = self.frozen.lstat()
+        fields = {name: getattr(expected, name) for name in
+                  ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink', 'st_size',
+                   'st_mtime', 'st_mtime_ns', 'st_ctime_ns')}
+        if hasattr(expected, 'st_birthtime'):
+            fields['st_birthtime'] = expected.st_birthtime
+        fields['st_flags'] = 0
+        real_fstat, real_stat = os.fstat, os.stat
+        for changed in ({'st_uid': os.getuid() + 1}, {'st_dev': expected.st_dev + 1}, {'st_flags': 2}):
+            fake = SimpleNamespace(**(fields | changed))
+            def fstat(fd):
+                value = real_fstat(fd)
+                return fake if value.st_ino == expected.st_ino else value
+            def entry_stat(*args, **kwargs):
+                value = real_stat(*args, **kwargs)
+                return fake if value.st_ino == expected.st_ino else value
+            with self.subTest(changed=changed), mock.patch.object(prune.os, 'fstat', side_effect=fstat), \
+                 mock.patch.object(prune.os, 'stat', side_effect=entry_stat), \
+                 mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+                # A fresh opened/named fingerprint must match the admitted one;
+                # neither a foreign replacement nor flags grant mode authority.
+                with self.assertRaises(ValueError):
+                    with prune.capture_scratch_directory(self.frozen, expected,
+                                                          time.time() - 7 * 86400, None):
+                        self.fail('permission admission must refuse')
+                chmod.assert_not_called()
+        self.assertEqual(self.frozen.stat().st_mode & 0o777, 0o555)
+
+    def test_matching_foreign_owner_or_flagged_inode_still_cannot_grant_permissions(self):
+        from types import SimpleNamespace
+        expected = self.frozen.lstat()
+        fields = {name: getattr(expected, name) for name in
+                  ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink', 'st_size',
+                   'st_mtime', 'st_mtime_ns', 'st_ctime_ns')}
+        if hasattr(expected, 'st_birthtime'):
+            fields['st_birthtime'] = expected.st_birthtime
+        fields['st_flags'] = 0
+        real_fstat, real_stat = os.fstat, os.stat
+        for changed in ({'st_uid': os.getuid() + 1}, {'st_flags': 2}):
+            fake = SimpleNamespace(**(fields | changed))
+            def fstat(fd):
+                value = real_fstat(fd)
+                return fake if value.st_ino == expected.st_ino else value
+            def entry_stat(*args, **kwargs):
+                value = real_stat(*args, **kwargs)
+                return fake if value.st_ino == expected.st_ino else value
+            with self.subTest(changed=changed), mock.patch.object(prune.os, 'fstat', side_effect=fstat), \
+                 mock.patch.object(prune.os, 'stat', side_effect=entry_stat), \
+                 mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+                with self.assertRaises(ValueError):
+                    with prune.capture_scratch_directory(self.frozen, fake,
+                                                          time.time() - 7 * 86400, None):
+                        self.fail('matching metadata cannot bypass owner or flags')
+                chmod.assert_not_called()
+        self.assertEqual(self.frozen.stat().st_mode & 0o777, 0o555)
+
+    def test_capture_failure_restores_original_directory_mode(self):
+        with mock.patch.object(prune, 'capture_entry', side_effect=PermissionError('fixture capture refused')):
+            with self.assertRaisesRegex(PermissionError, 'capture refused'):
+                with prune.capture_scratch_directory(self.frozen, self.frozen.lstat(),
+                                                      time.time() - 7 * 86400, None):
+                    self.fail('capture must fail')
+        self.assertEqual(self.frozen.stat().st_mode & 0o777, 0o555)
+        self.assertTrue((self.frozen / 'openclaw.mjs').exists())
+
+    def test_replaced_public_path_is_never_chmodded_by_restoration(self):
+        expected = self.frozen.lstat()
+        replacement = self.frozen
+        with self.assertRaisesRegex(OSError, 'exclusive restoration unavailable'):
+            with prune.capture_scratch_directory(self.frozen, expected,
+                                                  time.time() - 7 * 86400, None) as captured:
+                replacement.mkdir(mode=0o750)
+                (replacement / 'keep').write_bytes(b'replacement')
+                # The exclusive rollback preserves both original and replacement.
+                with mock.patch.object(prune, 'rename_exclusive', side_effect=OSError('fixture interruption')):
+                    raise OSError('fixture interruption')
+        self.assertEqual(replacement.stat().st_mode & 0o777, 0o750)
+        self.assertEqual((replacement / 'keep').read_bytes(), b'replacement')
+        payload = next(replacement.parent.glob('.openclaw-prune-*')) / 'payload'
+        self.assertEqual(payload.stat().st_mode & 0o777, 0o555)
+        self.assertEqual(prune.file_identity(payload.stat()), prune.file_identity(expected))
+        self.assertTrue((payload / 'openclaw.mjs').exists())
+
+    def test_partial_failure_receipt_restores_modes_and_refuses_recent_survivor(self):
+        import json
+        unlink = prune.os.unlink
+        expired = False
+        def remove(name, *args, **kwargs):
+            nonlocal expired
+            result = unlink(name, *args, **kwargs)
+            if name == 'payload':
+                expired = True
+            return result
+        def budget(_):
+            if expired:
+                raise TimeoutError('fixture execution budget exhausted')
+        with mock.patch.object(prune, 'ARTIFACT_ROOT', self.base / 'receipts'), \
+             mock.patch.object(prune, 'require_owc_identity'), \
+             mock.patch.object(prune, 'discover', return_value=([self.plan], [])), \
+             mock.patch.object(prune, 'disposable_simulators', return_value=([], [])), \
+             mock.patch.object(prune, 'oversized_logs', return_value=[]), \
+             mock.patch.object(prune, 'free_space', return_value={'internal': 40, 'owc': 50}), \
+             mock.patch.object(prune.os, 'unlink', side_effect=remove), \
+             mock.patch.object(prune, 'check_deadline', side_effect=budget):
+            result = prune.run(apply=True)
+        receipt = json.loads(Path(result['report']).read_text())
+        self.assertTrue(receipt['terminal'])
+        self.assertEqual(receipt['status'], 'partial')
+        self.assertEqual(len(receipt['errors']), 1)
+        self.assertTrue(receipt['deferred'][0]['partially_removed'])
+        self.assertEqual(receipt['deferred'][0]['removed_entries'], 1)
+        self.assertEqual(receipt['removed'], [])
+        self.assertEqual(receipt['reclaimed_allocated_bytes'], 0)
+        self.assertEqual(len(list(self.frozen.rglob('*.mjs'))) + len(list(self.frozen.rglob('*.js'))), 1)
+        self.assertEqual(self.frozen.stat().st_mode & 0o777, 0o555)
+        self.assertEqual((self.frozen / 'dist').stat().st_mode & 0o777, 0o555)
+        self.assertFalse(list(self.base.rglob('.openclaw-prune-*')))
+        self.assertGreater(self.scratch.stat().st_mtime, time.time() - 7 * 86400)
+        with mock.patch.object(prune, 'bounded_candidates', return_value=[
+                (self.scratch, 'pytest-scratch', self.scratch, 7)]):
+            candidates, skipped = prune.discover()
+        self.assertEqual(candidates, [])
+        self.assertEqual(skipped[0]['reason'], 'recent contents')
+        with mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+            removed, deferred = prune.apply_candidates([self.plan])
+        self.assertEqual(removed, [])
+        self.assertEqual(deferred[0]['reason'], 'recent contents')
+        self.assertFalse(deferred[0]['partially_removed'])
+        chmod.assert_not_called()
+
+    def test_configured_roots_username_and_seven_day_retention_are_preserved(self):
+        self.assertEqual(prune.SCRATCH_RETENTION_DAYS, 7)
+        self.assertEqual(prune.test_scratch_roots(), [self.base / 'configured-scratch',
+                                                    self.base / 'ProjectData/.test-tmp'])
+        self.assertEqual(prune.test_scratch_kind(self.scratch), 'pytest-scratch')
+        other_user = self.scratch.parent.with_name('pytest-of-other-user') / self.scratch.name
+        self.assertIsNone(prune.test_scratch_kind(other_user))
+        os.utime(self.scratch, (time.time() - 6 * 86400, time.time() - 6 * 86400))
+        with mock.patch.object(prune, 'bounded_candidates', return_value=[
+                (self.scratch, 'pytest-scratch', self.scratch, 7)]):
+            candidates, skipped = prune.discover()
+        self.assertEqual(candidates, [])
+        self.assertEqual(skipped[0]['reason'], 'recent contents')
+        with mock.patch.object(prune.os, 'fchmod', wraps=os.fchmod) as chmod:
+            removed, deferred = prune.apply_candidates([self.plan])
+        self.assertEqual(removed, [])
+        self.assertEqual(deferred[0]['reason'], 'recent contents')
+        chmod.assert_not_called()
