@@ -56342,7 +56342,7 @@ index e4f41719cf0dacdffd6013dfeb59556711973cc0..3d9fab9a63d96e1bf3cb05680f9758ae
  export function loadSubagentRegistryFromSqlite(): Map<string, SubagentRunRecord> {
    // Retired file-era runs are intentionally not recovered here: after SQLite
 diff --git a/src/agents/subagents/registry/subagent-registry.ts b/src/agents/subagents/registry/subagent-registry.ts
-index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..83aefd9955956353d79aa83c34ac239bf7aeb556 100644
+index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..4e7a6dcee375809a64efabaef84354a4affd8d2d 100644
 --- a/src/agents/subagents/registry/subagent-registry.ts
 +++ b/src/agents/subagents/registry/subagent-registry.ts
 @@ -16,10 +16,12 @@ import { prependAgentSteeringPrompt } from "../../agent-steering-queue.js";
@@ -56363,9 +56363,9 @@ index cec0daf68ef00988e1dc3b9e16372a3245fa1d2e..83aefd9955956353d79aa83c34ac239b
  } from "./subagent-registry-sweeper.js";
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
 +import {
-+  recordRequesterCompletedWait as recordCompletedWait,
-+  prepareRequesterSettleFinalClaims as prepareSettleFinalClaims,
-+  reconcileRequesterSettleFinal as reconcileSettleFinal,
++  recordRequesterCompletedWaitWithContext as recordCompletedWait,
++  prepareRequesterSettleFinalClaimsWithContext as prepareSettleFinalClaims,
++  reconcileRequesterSettleFinalWithContext as reconcileSettleFinal,
 +} from "./subagent-requester-final.js";
  import {
    resolveSubagentRunOrphanReason,
@@ -56524,7 +56524,7 @@ index 5a3bd747e6bffc960f547bc40c047f4d818120a1..36363eaa476a4ed3c0151849d4d41401
    /** Legacy persisted absolute paths are never used for cleanup. */
 diff --git a/src/agents/subagents/registry/subagent-requester-final.ts b/src/agents/subagents/registry/subagent-requester-final.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..7ecc1d545c931b4f9a9821f5ecdeadacd8f82fb1
+index 0000000000000000000000000000000000000000..859679e113e879ed93ae85983a920902a064eb2c
 --- /dev/null
 +++ b/src/agents/subagents/registry/subagent-requester-final.ts
 @@ -0,0 +1,383 @@
@@ -56679,7 +56679,7 @@ index 0000000000000000000000000000000000000000..7ecc1d545c931b4f9a9821f5ecdeadac
 +}
 +
 +/** A completed read is an observation, never a receipt or a request to synthesize another reply. */
-+export function recordRequesterCompletedWait(
++export function recordRequesterCompletedWaitWithContext(
 +  context: SubagentLifecycleWakeContext,
 +  requester: Requester,
 +  observedTasks: readonly TaskRecord[],
@@ -56722,7 +56722,7 @@ index 0000000000000000000000000000000000000000..7ecc1d545c931b4f9a9821f5ecdeadac
 +      continue;
 +    }
 +    reconciledSources.add(previous.sourceRunId);
-+    reconcileRequesterSettleFinal(context, previous);
++    reconcileRequesterSettleFinalWithContext(context, previous);
 +  }
 +  const seen = new Map(observedTasks.map((task) => [task.taskId, task]));
 +  const cfg = context.options.getRuntimeConfig();
@@ -56784,7 +56784,7 @@ index 0000000000000000000000000000000000000000..7ecc1d545c931b4f9a9821f5ecdeadac
 +  }
 +}
 +
-+export function prepareRequesterSettleFinalClaims(
++export function prepareRequesterSettleFinalClaimsWithContext(
 +  context: SubagentLifecycleWakeContext,
 +  requester: Requester,
 +  session: SessionEntry,
@@ -56818,7 +56818,7 @@ index 0000000000000000000000000000000000000000..7ecc1d545c931b4f9a9821f5ecdeadac
 +}
 +
 +/** Reuse the native batch owner only after the pending-final transaction recorded all-parts delivery. */
-+export function reconcileRequesterSettleFinal(
++export function reconcileRequesterSettleFinalWithContext(
 +  context: SubagentLifecycleWakeContext,
 +  requester: Requester,
 +  storePath?: string,
@@ -84695,9 +84695,30 @@ index 2b1927c7264b26022bd88233513b272d6cc3a0ff..b49a8fb5e0efe584b065cbfa668b9b53
      return undefined;
    }
 diff --git a/src/config/sessions/goals-operations.test.ts b/src/config/sessions/goals-operations.test.ts
-index 8319df1bd41d035aea5de367a3fc2165b88290dc..3287184726699c7b22442e56851748e54b98b0cc 100644
+index 8319df1bd41d035aea5de367a3fc2165b88290dc..81a4a8b0adf2342905973e98bf1fa28b7d6244c5 100644
 --- a/src/config/sessions/goals-operations.test.ts
 +++ b/src/config/sessions/goals-operations.test.ts
+@@ -61,9 +61,9 @@ describe("typed Goal operation persistence", () => {
+       updateMode: "none",
+     });
+ 
+-  beforeEach(async () => {
++  beforeEach(() => {
+     vi.spyOn(Date, "now").mockReturnValue(now);
+-    await upsertSessionEntryCore(scope(), {
++    replaceSessionEntrySync(scope(), {
+       sessionId,
+       updatedAt: now,
+       status: "done",
+@@ -79,7 +79,7 @@ describe("typed Goal operation persistence", () => {
+ 
+   it("commits the literal objective, exact intent identity, lifecycle and receipt together", async () => {
+     const skillsSnapshot = { prompt: "p".repeat(64 * 1024), skills: [] };
+-    await upsertSessionEntryCore(scope(), { ...loadSessionEntry(scope())!, skillsSnapshot });
++    replaceSessionEntrySync(scope(), { ...loadSessionEntry(scope())!, skillsSnapshot });
+     const identityMutation = vi.fn();
+     const unsubscribe = onSessionIdentityMutation(identityMutation);
+     onTestFinished(unsubscribe);
 @@ -329,7 +329,11 @@ describe("typed Goal operation persistence", () => {
    it("commits Resume with its hidden continuation and the shared fresh budget window", async () => {
      const goal = await createSessionGoal({ ...scope(), objective: "finish", tokenBudget: 20 });
@@ -84810,12 +84831,13 @@ index e12ac5868af78b56577eb3b54500de0cacf14b61..30e6cbc9302d7d9455afc2453d238f04
      next.tokenBudget !== undefined &&
 diff --git a/src/config/sessions/goals-usage.ts b/src/config/sessions/goals-usage.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4b3317a766e8bd47b30fdd0da098c2e40543e98d
+index 0000000000000000000000000000000000000000..5a2b0d34082856ea1a3e6dc39aaefe7093a44747
 --- /dev/null
 +++ b/src/config/sessions/goals-usage.ts
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +import { accountSessionGoalUsage } from "./goals-transitions.js";
-+import { patchSessionEntryCore, type SessionAccessScope } from "./session-accessor.js";
++import { patchSessionEntryCore } from "./session-accessor.entry.js";
++import type { SessionAccessScope } from "./session-accessor.types.js";
 +import type { InternalSessionEntry, SessionGoal } from "./types.js";
 +
 +/** One cursor over the owning run's existing cumulative usage, not another usage ledger. */

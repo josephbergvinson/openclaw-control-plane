@@ -669,7 +669,10 @@ def maintenance_problems(openclaw_bin: str, *, now_ms: int | None = None) -> lis
         if not isinstance(last, (int, float)) or isinstance(last, bool) or last > current + 5 * 60 * 1000 or current - last > 27 * 3600 * 1000:
             problems.append(f'{label} has no recent run')
         elif state.get('lastRunStatus') != 'ok':
-            problems.append(f'{label} did not finish successfully')
+            # Headroom exits nonzero for completed capacity warnings too. This
+            # scheduler record cannot distinguish those from execution failure.
+            outcome = 'needs attention' if label == 'storage headroom' else 'did not finish successfully'
+            problems.append(f'{label} {outcome}')
         elif state.get('lastDeliveryStatus') != 'delivered':
             problems.append(f'{label} has no confirmed report delivery')
     return problems

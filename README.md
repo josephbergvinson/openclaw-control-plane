@@ -14,7 +14,7 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current October 1 reference is `bf52af01846674545f90d8a2aa9adeb6201811f7`. It includes the preceding recovery, steering and result-delivery fixes, with voice callbacks bound through the existing runtime-store operation and no added public SDK export. The exact source is selected by the native Gateway and Node; activation, current-process capture and state preservation are verified. Exact-head hosted qualification and ordinary-use acceptance remain separate from those checks. The dated September 30 sections below describe their original source.
+The current October 1 reference is `1ce74af1fa354698f71eebfb96a033aeeda83b80`. It retains the preceding recovery, steering, result-delivery and voice-store fixes. The final changes preserve requester wrappers and import goal usage through its existing entry owner, with a deterministic fixture setup that keeps the original admission bounds. The exact source is loaded by the native Gateway and Node; activation, current-process capture and state preservation are verified. Exact-head hosted qualification and broader ordinary-use acceptance remain separate. The dated sections below retain their original source and results.
 
 ## How it works
 
