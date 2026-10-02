@@ -14,21 +14,28 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The October 2 reference source is `de4c172287e9707895d96a5a33aac18d59b96199`.
-When an MCP service requests sign-in in the native OpenClaw flow, successful
-sign-in can make its permitted tools available to the current request without
-resending the question. Requester identity and active-attempt ownership stay
-bound; revoked or stale tools are not published.
+The October 2 reference source is `ab9bbc63194b02f4e523f39855f70522882678b0`.
+Permitted MCP connections now follow authenticated task delegation and private
+result return, so a child can finish protected work and the original conversation
+can continue using its connection. The actual sender and existing tool permissions
+remain unchanged. Scheduled work uses its existing private creator identity for
+its current occurrence; stale or mismatched ownership cannot reuse it.
 
-This 25-path successor extends `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
-Affected-owner tests, shared host/plugin integrations, type checks, typed lint,
-formatting, dependency guards and source-size ratchets passed. The native
-aggregate build, staging, offline validation and seal passed. One native
-activation selected this source at 01:18:32 UTC on October 2; both loaded services,
-health/readiness, current-process capture and custody preservation passed.
-Exact-source export verification, ordinary-use Finance completion and all five
-hosted jobs remain separate acceptance gates.
-Dated qualifications and other acceptance limits retain their original scope.
+This 87-path successor extends `de4c172287e9707895d96a5a33aac18d59b96199`.
+The recorded source checks, native build, staging, offline validation and seal
+passed. One native activation selected the exact source at 07:59:12 UTC on October
+2; loaded services, health/readiness, current-process capture and original task
+custody passed. Isolated export reconstruction matched all 45,006 committed entries,
+with only the two established Company Alpha fixture labels normalized.
+
+The portable preferences enable a context precheck during a turn and inherit the
+turn's reasoning setting for compaction. The live installation received those two
+settings through its normal configuration patch without a restart. GPT-6.1 Sol,
+Max reasoning, no fallback and the manual Ultra option remain unchanged. Reduced
+latency and token usage still require live evidence. Ordinary Finance completion
+and all five hosted jobs remain separate acceptance gates. Dated predecessor and
+companion evidence retains its original scope.
+
 
 ## How it works
 

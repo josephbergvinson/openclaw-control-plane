@@ -236,6 +236,33 @@ jobs:
             src/agents/agent-bundle-mcp-harness.test.ts \
             src/agents/mcp-oauth-refresh-issuer.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-mcp-discovery.log"
+      - name: Verify authenticated task credential continuity
+        id: credential-continuity
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial \
+            extensions/codex/src/app-server/run-attempt.requester-continuity.test.ts \
+            src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts \
+            src/agents/embedded-agent-runner/run/run-attempt-dispatch.owner.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-mcp-continuity.test.ts \
+            src/agents/subagents/registry/subagent-registry-run-launch.requester-scope.test.ts \
+            src/agents/subagents/registry/subagent-registry.test.ts \
+            src/agents/subagents/spawn/subagent-spawn-gateway.test.ts \
+            src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts \
+            src/agents/tools/sessions-spawn-tool.requester-scope.test.ts \
+            src/cron/active-jobs.test.ts \
+            src/cron/isolated-agent/run.mcp-requester-scope.test.ts \
+            src/cron/store/run-receipt-store.test.ts \
+            src/cron/tools-allow-provenance.test.ts \
+            src/gateway/agent-runtime-identity-token.test.ts \
+            src/gateway/agent-turn/agent-run-admission-phase.requester-scope.test.ts \
+            src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts \
+            src/gateway/server-instance-runtime.test.ts \
+            src/gateway/subagent-completion-tool-handoff.test.ts \
+            src/plugins/compat/registry.test.ts \
+            test/scripts/plugin-boundary-report.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-credential-continuity.log"
       - name: Verify account transport and quota recovery
         id: quota
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -352,6 +379,7 @@ jobs:
             ${{ runner.temp }}/reference-qa-authority-gateway.log
             ${{ runner.temp }}/reference-qa-authority-auto-reply.log
             ${{ runner.temp }}/reference-mcp-discovery.log
+            ${{ runner.temp }}/reference-credential-continuity.log
             ${{ runner.temp }}/reference-followup-terminal.log
             ${{ runner.temp }}/reference-followup-receipts.log
             ${{ runner.temp }}/reference-followup-continuation.log
