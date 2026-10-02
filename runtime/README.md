@@ -11,21 +11,82 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
-The October 2 reference source is `de4c172287e9707895d96a5a33aac18d59b96199`.
-When an MCP service requests sign-in in the native OpenClaw flow, successful
-sign-in can make its permitted tools available to the current request without
-resending the question. Requester identity and active-attempt ownership stay
-bound; revoked or stale tools are not published.
+The October 2 reference source is `ab9bbc63194b02f4e523f39855f70522882678b0`.
+Permitted MCP connections now follow authenticated task delegation and private
+result return, so a child can finish protected work and the original conversation
+can continue using its connection. The actual sender and existing tool permissions
+remain unchanged. Scheduled work uses its existing private creator identity for
+its current occurrence; stale or mismatched ownership cannot reuse it.
 
-This 25-path successor extends `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
-Affected-owner tests, shared host/plugin integrations, type checks, typed lint,
-formatting, dependency guards and source-size ratchets passed. The native
-aggregate build, staging, offline validation and seal passed. One native
-activation selected this source at 01:18:32 UTC on October 2; both loaded services,
-health/readiness, current-process capture and custody preservation passed.
-Exact-source export verification, ordinary-use Finance completion and all five
-hosted jobs remain separate acceptance gates.
-Dated qualifications and other acceptance limits retain their original scope.
+This 87-path successor extends `de4c172287e9707895d96a5a33aac18d59b96199`.
+The recorded source checks, native build, staging, offline validation and seal
+passed. One native activation selected the exact source at 07:59:12 UTC on October
+2; loaded services, health/readiness, current-process capture and original task
+custody passed. Isolated export reconstruction matched all 45,006 committed entries,
+with only the two established Company Alpha fixture labels normalized.
+
+The portable preferences enable a context precheck during a turn and inherit the
+turn's reasoning setting for compaction. The live installation received those two
+settings through its normal configuration patch without a restart. GPT-6.1 Sol,
+Max reasoning, no fallback and the manual Ultra option remain unchanged. Reduced
+latency and token usage still require live evidence. Ordinary Finance completion
+and all five hosted jobs remain separate acceptance gates. Dated predecessor and
+companion evidence retains its original scope.
+
+
+## October 2 authenticated task credential continuity
+
+Reference `ab9bbc63194b02f4e523f39855f70522882678b0`, source tree
+`c1ff2d0394d9a00ea7d97ebaf1008ff5f7f43fa6`, retains the complete predecessor
+`de4c172287e9707895d96a5a33aac18d59b96199` and adds credential continuity through task
+delegation, queued launch admission, exact private result return and scheduled work.
+The complete committed predecessor delta contains 87 paths; 78 paths belong to the
+authenticated continuity qualification against `458f77254db7c3e3bf5525c1bdea352bcee5fb6f`.
+
+A delegated child can use the original requesting account's MCP connection while
+retaining its own sender and inherited tool limits. Admission validates and captures
+that credential scope before acknowledging acceptance. Execution then follows the
+child's own lifetime, so retiring the accepted source callback does not erase the
+connection. Private announce and settle return transfer only their exact single-use
+request tuple. Old anonymous rows, stale incarnations, mismatched destinations and
+model-supplied identity do not gain access.
+
+Scheduled turns obtain credentials from the existing private job creator provenance
+and current occurrence. Message permission remains independent. Public schedules
+and receipts expose neither private creator metadata nor executable callbacks.
+MCP acquisition, refresh and retained tool/resource operations recheck currentness;
+revoked scope cannot silently become a different account.
+
+Source qualification is a composed result. The original full invocation passed the
+native graph and four type suites before failing the unused-export check. An exact
+internal-test annotation resolved that ownership declaration. The final 31 native
+non-type commands passed, including format, both lint owners and all three actual
+Knip scans at zero. Twenty equivalent branch-bracing changes retained their runtime
+AST; the newly typed Cron fixture received a fresh native selected graph/type check.
+The affected five test owners passed 113 cases. Other recorded common, Cron and
+native component qualifications retain their separate scopes and are not added to
+a single test total. The original whole-run failure and later lint failure remain
+failed history.
+
+The native aggregate build, self-contained staging, offline validation and seal
+passed for the exact commit. The native activation selected it at 07:59:12 UTC on
+October 2 and verified both loaded services and readiness. Fresh capture and custody
+checks preserved all six original conversations, their goals and their received
+inputs. The isolated export reconstructed all 45,006 entries with exact blob/mode
+parity except the established two Company Alpha label substitutions. Its normalized
+tree is `fa2e24688651b325b97918ac44fa47f598eeebd2`.
+
+After the owners settled, the live installation received a normal configuration
+patch enabling `agents.defaults.compaction.midTurnPrecheck.enabled` and setting
+`agents.defaults.compaction.thinkingLevel` to `inherit`. The portable preferences
+include the same two settings. Existing context thresholds and GPT-6.1 Sol/Max,
+no-fallback and manual Ultra behavior remain unchanged. No restart was used, and
+reduced latency or provider token usage is not yet established.
+
+Fresh ordinary Finance child execution and exact private announce/settle protected
+tool return remain pending. Hosted reconstruction and all five existing jobs must
+pass at the final public revision. No completed Finance analysis, wallet, meeting,
+natural Journal or companion upgrade is implied by source or activation checks.
 
 ## October 2 requester sign-in continuation and test boundaries
 
