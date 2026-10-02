@@ -232,6 +232,40 @@ release consistent across the CLI, gateway, node and scheduler. Activation expec
 adopter-derived authentication order and extension bindings; its runbook describes
 how to establish those inputs without recording token values.
 
+## Scoped maintenance warnings and cache cleanup
+
+`maintenance.accepted_security_findings` keeps the existing exact severity/title
+acceptance for ordinary findings. The Discord broad-member warning additionally
+requires `maintenance.accepted_company_posture` and fresh scope proof; adding its
+check ID or rendered title to the ordinary mapping cannot bypass that proof.
+The optional company posture is absent or disabled by default. The example's
+CompanyAlpha identities are fictional: replace every identity, the workspace path
+and read-only tool namespace before explicitly enabling an accepted posture.
+This records a reporting disposition; it does not grant access or change native
+Discord, agent, memory or tool configuration.
+
+An enabled posture binds one guild, its wildcard and one exact channel, one owner,
+one company agent/workspace, exactly three distinct named engineering senders,
+and one read-only tool namespace. The health helper accepts only the warning's
+exact structured target detail, at WARN severity, after two equal bounded native
+config reads prove mention gating, company-only memory, workspace file access,
+private-session restrictions and owner-only elevation. It accepts either the
+read-only sender predecessor or the exact three-engineer tool successor. Changed
+accounts, targets, sender privileges, private-context controls, missing evidence,
+text-only audit output and higher or unknown severity remain blocking. Daily and
+weekly deep audits each collect their own fresh proof. Malformed enabled bindings
+fail explicitly instead of silently accepting the warning.
+
+The storage helper recognizes the audited public pnpm metadata layouts under
+`Library/Caches/pnpm/v11`, including the exact encoded npm registry directory,
+and dated OpenClaw Vitest generated-module caches under `.cache`. Only these
+new developer-cache kinds use 48-hour retention. Existing package downloads and
+npm logs retain their 14-day rule. Root and every child must be old enough, match
+the admitted format and inode inventory, and have no active producer or open
+handles. Cleanup rechecks them after capture and validates each leaf immediately
+before removal. Package stores, private registries, application/browser caches,
+source files and unknown layouts are outside this scope.
+
 ## Field inventory and staged host files
 
 [operator.example.json](operator.example.json) lists the bindings consumed by the

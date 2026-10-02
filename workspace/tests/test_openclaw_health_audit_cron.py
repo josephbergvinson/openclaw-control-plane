@@ -24,7 +24,7 @@ def security_audit_json(findings: list[tuple[str, str, str]]) -> str:
 
     summary = {'critical': 0, 'warn': 0, 'info': 0}
     for _, severity, _ in findings:
-        summary[severity] += 1
+        summary[severity] = summary.get(severity, 0) + 1
     return json.dumps(
         {
             'ts': 1786579113330,
@@ -88,6 +88,89 @@ SECURITY_AUDIT_DISCORD_BROAD_MEMBERS = security_audit_json(
     ACCEPTED_FIVE + [UNENCRYPTED_VOLUME, CROSS_AGENT_SESSIONS, DISCORD_BROAD_MEMBERS]
     + INFO_TWO + [('fixture.informational', 'info', 'Additional informational finding')]
 )
+
+COMPANY_DETAIL = (
+    'These allowlisted Discord targets have no effective users or roles restriction:\n'
+    '- channels.discord.guilds.222222222222222222.channels.*\n'
+    '- channels.discord.guilds.222222222222222222.channels.333333333333333333\n'
+    'groupPolicy="allowlist" limits guilds/channels, but all members of a listed target can still trigger the agent.'
+)
+COMPANY_DEFAULT_DETAIL = COMPANY_DETAIL.replace(
+    'channels.discord.guilds.', 'channels.discord.accounts.default.guilds.',
+)
+
+
+def company_alpha_audit_json(**overrides) -> str:
+    payload = json.loads(SECURITY_AUDIT_DISCORD_BROAD_MEMBERS)
+    finding = next(item for item in payload['findings'] if item['checkId'] == DISCORD_BROAD_MEMBERS[0])
+    finding['detail'] = COMPANY_DETAIL
+    finding.update(overrides)
+    payload['summary'] = cron.severity_counts(cron.parse_security_findings_json(json.dumps(payload)))
+    return json.dumps(payload)
+
+
+def company_alpha_config() -> dict:
+    """Minimal redacted config-get fixture; no tokens, prompts or provider data."""
+    return {
+        'channels.discord': {
+            'enabled': True,
+            'groupPolicy': 'allowlist',
+            'accounts': {'default': {'groupPolicy': 'allowlist'}},
+            'guilds': {
+                '444444444444444444': {'users': ['777777777777777777'], 'channels': {'*': {}}},
+                '222222222222222222': {
+                    'requireMention': True, 'ignoreOtherMentions': True,
+                    'channels': {
+                        '*': {'enabled': True, 'requireMention': True},
+                        '333333333333333333': {},
+                    },
+                },
+            },
+        },
+        'bindings': [
+            {'agentId': 'company-beta', 'match': {
+                'channel': 'discord', 'accountId': '*', 'guildId': '555555555555555555',
+                'peer': {'kind': 'channel', 'id': '666666666666666666'},
+            }},
+            {'agentId': 'company-alpha', 'match': {
+                'channel': 'discord', 'accountId': '*', 'guildId': '222222222222222222',
+            }},
+            {'agentId': 'main', 'match': {'channel': 'discord', 'accountId': '*'}},
+        ],
+        'agents.entries.company-alpha': {
+            'workspace': '/srv/company-alpha/coordination-workspace',
+            'groupChat': {'mentionPatterns': []},
+            'subagents': {'allowAgents': ['company-alpha']},
+            'memory': {'search': {
+                'enabled': True, 'rememberAcrossConversations': False,
+                'sources': ['memory'], 'extraPaths': [], 'experimental': {'sessionMemory': False},
+            }},
+            'tools': {
+                'deny': ['sessions', 'sessions_list', 'sessions_history', 'sessions_search', 'sessions_send',
+                         'conversations_list', 'conversations_send', 'conversations_turn', 'session_status'],
+                'toolsBySender': {
+                    'channel:discord:777777777777777777': {},
+                    '*': {'allow': ['read', 'ls', 'memory_search', 'memory_get', 'web_search', 'web_fetch',
+                                    'company-alpha-docs-readonly__*']},
+                },
+                'codeMode': False, 'fs': {'workspaceOnly': True},
+                'elevated': {'enabled': True, 'allowFrom': {'discord': ['777777777777777777']}},
+            },
+        },
+    }
+
+
+def company_alpha_engineering_config() -> dict:
+    config = company_alpha_config()
+    senders = config['agents.entries.company-alpha']['tools']['toolsBySender']
+    for sender in ('888888888888888881', '888888888888888882', '888888888888888883'):
+        senders[f'channel:discord:{sender}'] = {'allow': [
+            'read', 'ls', 'memory_search', 'memory_get', 'web_search', 'web_fetch',
+            'company-alpha-docs-readonly__*', 'edit', 'write', 'apply_patch', 'exec',
+            'process', 'sessions_spawn', 'agents_wait', 'sessions_yield', 'subagents',
+        ]}
+    return config
+
 
 SECURITY_ONLY_OUTCOME = (
     'The operational checks passed, but the audit remains failed pending security review. '
@@ -602,6 +685,375 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                     self.assertEqual(receipt['status'], 'completed' if expected_code == 0 else 'failed')
 
 
+class ScopedCompanyAlphaAcceptanceTests(unittest.TestCase):
+    def setUp(self):
+        from scripts.operator_contract import OperatorContract
+        policy = {
+            'enabled': True,
+            'owner_id': '777777777777777777',
+            'guild_id': '222222222222222222',
+            'channel_ids': ['*', '333333333333333333'],
+            'agent_id': 'company-alpha',
+            'workspace': '/srv/company-alpha/coordination-workspace',
+            'engineering_sender_ids': ['888888888888888881', '888888888888888882', '888888888888888883'],
+            'readonly_tool_namespace': 'company-alpha-docs-readonly__*',
+        }
+        self.policy = policy
+        patch = mock.patch.object(cron, 'OPERATOR', OperatorContract({
+            'maintenance': {'accepted_company_posture': policy},
+        }))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_absent_or_disabled_contract_keeps_the_company_warning_blocking(self):
+        from scripts.operator_contract import OperatorContract
+        for policy in (None, {'enabled': False}):
+            with self.subTest(policy=policy), mock.patch.object(cron, 'OPERATOR', OperatorContract({
+                'maintenance': {'accepted_company_posture': policy},
+            })), mock.patch.object(cron, 'run') as runner:
+                self.assertFalse(cron.verify_company_posture('/bin/openclaw', company_alpha_audit_json()))
+                self.assertIsNotNone(cron.classify_security(
+                    company_alpha_audit_json(), '', company_posture_verified=True,
+                )[1])
+                runner.assert_not_called()
+
+    def test_enabled_contract_rejects_missing_or_widened_bindings(self):
+        from scripts.operator_contract import OperatorContract
+        changes = [
+            ('enabled', 'yes'), ('owner_id', '*'), ('guild_id', '*'),
+            ('channel_ids', ['*']), ('channel_ids', ['*', '*']),
+            ('agent_id', '../main'), ('workspace', '<absolute-company-workspace>'),
+            ('workspace', '/srv/company-alpha/../private'),
+            ('engineering_sender_ids', ['888888888888888881'] * 3),
+            ('engineering_sender_ids', ['777777777777777777', '888888888888888882', '888888888888888883']),
+            ('readonly_tool_namespace', '*'), ('unexpected_scope', True),
+        ]
+        for field, value in changes:
+            policy = {**self.policy, field: value}
+            with self.subTest(field=field, value=value), mock.patch.object(cron, 'OPERATOR', OperatorContract({
+                'maintenance': {'accepted_company_posture': policy},
+            })), mock.patch.object(cron, 'run') as runner:
+                with self.assertRaises(ValueError):
+                    cron.verify_company_posture('/bin/openclaw', company_alpha_audit_json())
+                runner.assert_not_called()
+        for field in self.policy:
+            policy = dict(self.policy)
+            del policy[field]
+            with self.subTest(missing=field), mock.patch.object(cron, 'OPERATOR', OperatorContract({
+                'maintenance': {'accepted_company_posture': policy},
+            })), self.assertRaises(ValueError):
+                cron.verify_company_posture('/bin/openclaw', company_alpha_audit_json())
+
+    def test_unconditional_broad_mapping_cannot_bypass_scoped_proof(self):
+        with mock.patch.dict(cron.ACCEPTED_SECURITY_FINDINGS, {
+            DISCORD_BROAD_MEMBERS[0]: ('warn', DISCORD_BROAD_MEMBERS[2]),
+        }):
+            for output, rendered in ((company_alpha_audit_json(detail='changed target'), ''),
+                                     (None, f'Security audit\nWARN {DISCORD_BROAD_MEMBERS[2]}\n')):
+                self.assertIsNotNone(cron.classify_security(
+                    output, rendered, company_posture_verified=True,
+                )[1])
+
+    def test_changed_broad_mapping_title_is_not_fallback_acceptance_authority(self):
+        with mock.patch.dict(cron.ACCEPTED_SECURITY_FINDINGS, {
+            DISCORD_BROAD_MEMBERS[0]: ('warn', 'Changed broad-member title'),
+        }):
+            self.assertIsNotNone(cron.classify_security(
+                None, 'Security audit\nWARN Changed broad-member title\n',
+                company_posture_verified=True,
+            )[1])
+
+    def test_daily_and_deep_paths_each_collect_their_own_scoped_proof(self):
+        for weekly, changed_deep in ((False, False), (True, False), (True, True)):
+            with self.subTest(weekly=weekly, changed_deep=changed_deep):
+                config = company_alpha_engineering_config()
+                reads = []
+                deep_started = False
+                def fake_run(command, **kwargs):
+                    nonlocal deep_started
+                    args = tuple(command[1:])
+                    if args[:2] == ('config', 'get'):
+                        self.assertEqual(kwargs, {'timeout': 15})
+                        reads.append(args[2])
+                        value = json.loads(json.dumps(config[args[2]]))
+                        if deep_started and changed_deep and args[2] == 'channels.discord':
+                            value['guilds']['222222222222222222']['ignoreOtherMentions'] = False
+                        return cron.CommandResult(0, json.dumps(value))
+                    if args == ('security', 'audit', '--deep', '--json'):
+                        deep_started = True
+                    response = {
+                        ('gateway', 'status'): GATEWAY_STATUS_OK,
+                        ('status', '--deep'): STATUS_DEEP_OK,
+                        ('security', 'audit', '--json'): company_alpha_audit_json(),
+                        ('security', 'audit', '--deep', '--json'): company_alpha_audit_json(),
+                        ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
+                        ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+                    }[args]
+                    return cron.CommandResult(0, response)
+                with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
+                     mock.patch.object(cron, 'run', side_effect=fake_run), redirect_stdout(io.StringIO()) as output:
+                    rc = cron.main(['--weekly'] if weekly else [])
+                self.assertEqual(rc, 1 if changed_deep else 0)
+                self.assertEqual(reads, list(config) * (4 if weekly else 2))
+                self.assertNotIn(COMPANY_DETAIL, output.getvalue())
+                self.assertIn('needs attention' if changed_deep else 'health audit passed', output.getvalue())
+
+    def verify(self, config=None, audit=None):
+        config = company_alpha_config() if config is None else config
+        audit = company_alpha_audit_json() if audit is None else audit
+
+        def fake_run(command, **kwargs):
+            self.assertEqual(command[:3], ['/bin/openclaw', 'config', 'get'])
+            self.assertEqual(command[4:], ['--json'])
+            self.assertEqual(kwargs, {'timeout': 15})
+            return cron.CommandResult(0, json.dumps(config[command[3]]))
+
+        with mock.patch.object(cron, 'run', side_effect=fake_run):
+            return cron.verify_company_posture('/bin/openclaw', audit)
+
+    def assert_blocked(self, config, audit=None):
+        audit = company_alpha_audit_json() if audit is None else audit
+        verified = self.verify(config, audit)
+        self.assertFalse(verified)
+        for prefix in ('', 'deep_'):
+            _, blocker = cron.classify_security(audit, '', prefix=prefix, company_posture_verified=verified)
+            self.assertIsNotNone(blocker)
+
+    def test_approved_setup_is_accepted_only_with_fresh_scope_proof(self):
+        audit = company_alpha_audit_json()
+        self.assertTrue(self.verify())
+        self.assertNotIn(DISCORD_BROAD_MEMBERS[0], cron.ACCEPTED_SECURITY_FINDINGS)
+        for prefix in ('', 'deep_'):
+            self.assertIsNotNone(cron.classify_security(audit, '', prefix=prefix)[1])
+            self.assertEqual(
+                cron.classify_security(audit, '', prefix=prefix, company_posture_verified=self.verify()),
+                ('accepted_warnings_ignored=8 info=3', None),
+            )
+
+    def test_named_engineering_successor_requires_the_same_fresh_scoped_proof(self):
+        config = company_alpha_engineering_config()
+        for detail in (COMPANY_DETAIL, COMPANY_DEFAULT_DETAIL):
+            audit = company_alpha_audit_json(detail=detail)
+            verified = self.verify(config, audit)
+            self.assertTrue(verified)
+            for prefix in ('', 'deep_'):
+                self.assertIsNotNone(cron.classify_security(audit, '', prefix=prefix)[1])
+                self.assertEqual(
+                    cron.classify_security(audit, '', prefix=prefix, company_posture_verified=verified),
+                    ('accepted_warnings_ignored=8 info=3', None),
+                )
+        for changes in ({'severity': 'critical'}, {'severity': 'high'},
+                        {'detail': COMPANY_DETAIL.replace('222222222222222222', '111111111111111111')}):
+            self.assert_blocked(config, company_alpha_audit_json(**changes))
+
+    def test_engineering_sender_expansion_or_owner_elevation_is_not_accepted(self):
+        agent = 'agents.entries.company-alpha'
+        for sender in ('888888888888888881', '888888888888888882', '888888888888888883'):
+            for extra in ('browser', 'message', 'gateway', 'secrets', 'sessions_history'):
+                with self.subTest(sender=sender, extra=extra):
+                    config = company_alpha_engineering_config()
+                    config[agent]['tools']['toolsBySender'][f'channel:discord:{sender}']['allow'].append(extra)
+                    self.assert_blocked(config)
+            config = company_alpha_engineering_config()
+            config[agent]['tools']['toolsBySender'][f'channel:discord:{sender}'] = {}
+            self.assert_blocked(config)
+            config = company_alpha_engineering_config()
+            config[agent]['tools']['elevated']['allowFrom']['discord'].append(sender)
+            self.assert_blocked(config)
+        config = company_alpha_engineering_config()
+        senders = config[agent]['tools']['toolsBySender']
+        senders['channel:discord:111111111111111111'] = senders.pop('channel:discord:888888888888888883')
+        self.assert_blocked(config)
+
+    def test_engineering_successor_preserves_private_and_mention_boundaries(self):
+        agent = ('agents.entries.company-alpha',)
+        tools = (*agent, 'tools')
+        guild = ('channels.discord', 'guilds', '222222222222222222')
+        for path, value in (
+            ((*tools, 'toolsBySender', '*'), {'allow': ['exec', 'write']}),
+            ((*tools, 'deny'), []), ((*tools, 'fs', 'workspaceOnly'), False),
+            ((*agent, 'memory', 'search', 'sources'), ['memory', 'sessions']),
+            ((*agent, 'subagents', 'allowAgents'), ['company-alpha', 'main']),
+            ((*guild, 'requireMention'), False), ((*guild, 'ignoreOtherMentions'), False),
+            ((*guild, 'channels', '*', 'autoThread'), True),
+            (('channels.discord', 'accounts', 'other'), {'groupPolicy': 'allowlist'}),
+            (('bindings', 1, 'agentId'), 'main'),
+        ):
+            with self.subTest(path=path):
+                config = company_alpha_engineering_config()
+                target = config
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                self.assert_blocked(config)
+
+    def test_same_inherited_targets_in_the_sole_default_account_are_accepted(self):
+        audit = company_alpha_audit_json(detail=COMPANY_DEFAULT_DETAIL)
+        self.assertTrue(self.verify(audit=audit))
+        self.assertEqual(
+            cron.classify_security(audit, '', company_posture_verified=self.verify(audit=audit)),
+            ('accepted_warnings_ignored=8 info=3', None),
+        )
+        config = company_alpha_config()
+        config['channels.discord']['accounts']['other'] = {'groupPolicy': 'allowlist'}
+        self.assert_blocked(config, audit)
+
+    def test_detail_is_private_and_preserved_without_trimming(self):
+        finding = next(f for f in cron.parse_security_findings_json(company_alpha_audit_json())
+                       if f.check_id == DISCORD_BROAD_MEMBERS[0])
+        self.assertEqual(finding.detail, COMPANY_DETAIL)
+        self.assertNotIn(COMPANY_DETAIL, repr(finding))
+        for detail in (None, [], {}, 42):
+            finding = next(f for f in cron.parse_security_findings_json(company_alpha_audit_json(detail=detail))
+                           if f.check_id == DISCORD_BROAD_MEMBERS[0])
+            self.assertEqual(finding.detail, '')
+
+    def test_missing_unrecognized_or_expanded_finding_scope_never_qualifies(self):
+        details = [
+            '', None, [], 'detail text', COMPANY_DETAIL + '\nprivate diagnostic',
+            COMPANY_DETAIL.replace('222222222222222222', '111111111111111111'),
+            COMPANY_DETAIL.replace('333333333333333333', '111111111111111111'),
+            COMPANY_DETAIL.replace('channels.discord.guilds', 'channels.discord.accounts.other.guilds'),
+            COMPANY_DETAIL.replace('\ngroupPolicy=', '\n- channels.discord.guilds.1.channels.*\ngroupPolicy='),
+            COMPANY_DETAIL.replace('- channels.discord.guilds.222222222222222222.channels.*\n', ''),
+            COMPANY_DETAIL.replace('restriction:', 'restrictions:'),
+        ]
+        for detail in details:
+            with self.subTest(detail=detail):
+                audit = company_alpha_audit_json(detail=detail)
+                with mock.patch.object(cron, 'run') as runner:
+                    self.assertFalse(cron.verify_company_posture('/bin/openclaw', audit))
+                runner.assert_not_called()
+                self.assertIsNotNone(cron.classify_security(audit, '', company_posture_verified=True)[1])
+
+    def test_higher_unknown_severity_and_impostor_id_stay_blocking(self):
+        for changes in ({'severity': 'critical'}, {'severity': 'high'}, {'severity': ''},
+                        {'severity': None}, {'severity': 42}, {'checkId': 'unknown.check'}):
+            with self.subTest(changes=changes):
+                audit = company_alpha_audit_json(**changes)
+                self.assert_blocked(company_alpha_config(), audit)
+                self.assertIsNotNone(cron.classify_security(audit, '', company_posture_verified=True)[1])
+
+    def test_title_is_never_acceptance_authority_and_fallback_stays_blocking(self):
+        for title in ('private changed title', None):
+            self.assertIsNone(cron.classify_security(
+                company_alpha_audit_json(title=title), '', company_posture_verified=self.verify(),
+            )[1])
+        text = f'Security audit\nSummary: 0 critical · 1 warn · 0 info\nWARN {DISCORD_BROAD_MEMBERS[2]}\n{COMPANY_DETAIL}'
+        for output in (None, 'bad JSON'):
+            self.assertIsNotNone(cron.classify_security(output, text, company_posture_verified=True)[1])
+
+    def test_another_finding_is_not_absorbed_or_misdescribed(self):
+        payload = json.loads(company_alpha_audit_json())
+        payload['findings'].append({'checkId': 'new.check', 'severity': 'warn', 'title': 'private diagnostic'})
+        payload['summary']['warn'] += 1
+        audit = json.dumps(payload)
+        verified = self.verify(audit=audit)
+        _, blocker = cron.classify_security(audit, '', company_posture_verified=verified)
+        self.assertIn('new.check', blocker)
+        self.assertNotIn(DISCORD_BROAD_MEMBERS[0], blocker)
+        message = cron.public_security_problem(audit, '', blocker, company_posture_verified=verified)
+        self.assertIn('an unrecognized security finding', message)
+        self.assertNotIn('broad member access', message)
+        self.assertNotIn('private', message)
+
+    def test_an_additional_same_check_with_different_scope_stays_blocking(self):
+        payload = json.loads(company_alpha_audit_json())
+        payload['findings'].append({
+            'checkId': DISCORD_BROAD_MEMBERS[0], 'severity': 'warn', 'title': DISCORD_BROAD_MEMBERS[2],
+            'detail': COMPANY_DETAIL.replace('222222222222222222', '111111111111111111'),
+        })
+        payload['summary']['warn'] += 1
+        self.assertIsNotNone(cron.classify_security(json.dumps(payload), '', company_posture_verified=self.verify())[1])
+
+    def test_relaxed_or_missing_protective_fields_fail_closed(self):
+        discord = ('channels.discord',)
+        guild = (*discord, 'guilds', '222222222222222222')
+        agent = ('agents.entries.company-alpha',)
+        search = (*agent, 'memory', 'search')
+        tools = (*agent, 'tools')
+        changes = [
+            (discord, None), ((*discord, 'groupPolicy'), 'open'), ((*discord, 'allowBots'), True),
+            ((*discord, 'accounts'), {'other': {'groupPolicy': 'allowlist'}}),
+            ((*discord, 'accounts'), {'default': {'groupPolicy': 'open'}}),
+            ((*discord, 'accounts'), {'default': {'groupPolicy': 'allowlist', 'guilds': {}}}),
+            (guild, None), ((*guild, 'requireMention'), False), ((*guild, 'ignoreOtherMentions'), False),
+            ((*guild, 'channels', '*', 'requireMention'), False),
+            ((*guild, 'channels', '333333333333333333', 'requireMention'), False),
+            ((*guild, 'channels', '333333333333333333', 'ignoreOtherMentions'), False),
+            ((*guild, 'channels', '*', 'autoThread'), True),
+            ((*guild, 'channels', '333333333333333333', 'autoThread'), True),
+            ((*guild, 'channels', '111111111111111111'), {}),
+            ((*discord, 'guilds', '111111111111111111'), {'channels': {'*': {}}}),
+            ((*discord, 'guilds', '444444444444444444', 'channels', '*', 'users'), []),
+            ((*discord, 'guilds', '444444444444444444', 'channels', '*', 'roles'), ['*']),
+            (agent, None), ((*agent, 'workspace'), '/Users/private'),
+            ((*agent, 'groupChat'), {'mentionPatterns': ['.*']}),
+            ((*agent, 'subagents', 'allowAgents'), ['company-alpha', 'main']),
+            ((*search, 'rememberAcrossConversations'), True), ((*search, 'sources'), ['memory', 'sessions']),
+            ((*search, 'extraPaths'), ['/Users/private']), ((*search, 'experimental', 'sessionMemory'), True),
+            (tools, None), ((*tools, 'deny'), []), ((*tools, 'codeMode'), True),
+            ((*tools, 'fs', 'workspaceOnly'), False),
+            ((*tools, 'toolsBySender', '*'), {}),
+            ((*tools, 'toolsBySender', '*', 'allow'), ['*']),
+            ((*tools, 'toolsBySender', 'id:teammate'), {}),
+            ((*tools, 'elevated', 'allowFrom', 'discord'), ['*']),
+            (('bindings',), []), (('bindings', 1, 'agentId'), 'main'),
+            (('bindings', 1, 'match', 'accountId'), 'other'),
+            (('bindings', 1, 'match', 'channel'), 'Discord'),
+            (('bindings', 1, 'session'), {'groupScope': 'main'}),
+        ]
+        for path, value in changes:
+            with self.subTest(path=path, value=value):
+                config = company_alpha_config()
+                target = config
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                self.assert_blocked(config)
+        for path in (guild + ('requireMention',), guild + ('ignoreOtherMentions',),
+                     search + ('extraPaths',), search + ('experimental',), tools + ('toolsBySender',),
+                     tools + ('codeMode',), tools + ('elevated',), tools + ('fs',), agent + ('workspace',)):
+            with self.subTest(missing=path):
+                config = company_alpha_config()
+                target = config
+                for key in path[:-1]:
+                    target = target[key]
+                del target[path[-1]]
+                self.assert_blocked(config)
+
+    def test_competing_and_duplicate_company_bindings_are_ambiguous(self):
+        for match in (
+            {'channel': 'discord', 'accountId': '*', 'peer': {'kind': 'channel', 'id': '*'}},
+            {'channel': 'discord', 'accountId': '*', 'guildId': '222222222222222222', 'roles': ['123']},
+            {'channel': 'discord', 'accountId': 'other'},
+        ):
+            config = company_alpha_config()
+            config['bindings'].insert(0, {'agentId': 'main', 'match': match})
+            self.assert_blocked(config)
+        config = company_alpha_config()
+        config['bindings'].append(config['bindings'][1])
+        self.assert_blocked(config)
+
+    def test_failed_malformed_or_changing_config_reads_never_accept(self):
+        values = list(company_alpha_config().values())
+        for position in range(6):
+            for bad in (cron.CommandResult(1, 'private diagnostic'),
+                        cron.CommandResult(124, 'private timeout'),
+                        cron.CommandResult(0, 'not JSON'), cron.CommandResult(0, 'null')):
+                with self.subTest(position=position, bad=bad):
+                    results = [cron.CommandResult(0, json.dumps(value)) for value in values * 2]
+                    results[position] = bad
+                    with mock.patch.object(cron, 'run', side_effect=results):
+                        self.assertFalse(cron.verify_company_posture('/bin/openclaw', company_alpha_audit_json()))
+        # Even an individually acceptable change during collection is ambiguous.
+        changed = company_alpha_config()
+        changed['bindings'][1]['comment'] = 'changed during read'
+        results = [cron.CommandResult(0, json.dumps(value)) for value in values + list(changed.values())]
+        with mock.patch.object(cron, 'run', side_effect=results):
+            self.assertFalse(cron.verify_company_posture('/bin/openclaw', company_alpha_audit_json()))
+
+
 class GatewayStatusParsingTests(unittest.TestCase):
     def test_current_connectivity_probe_label_is_healthy(self) -> None:
         self.assertTrue(cron.gateway_status_healthy(GATEWAY_STATUS_OK))
@@ -734,7 +1186,7 @@ class SecurityFindingsAreNamedAndAcceptedPerSeverity(unittest.TestCase):
         self.assertEqual(len(findings), 11)
         self.assertEqual(
             cron.unaccepted_security_findings(findings),
-            [cron.SecurityFinding(*DISCORD_BROAD_MEMBERS)],
+            [cron.SecurityFinding(*DISCORD_BROAD_MEMBERS, detail='detail text')],
         )
         self.assertNotIn(DISCORD_BROAD_MEMBERS[0], cron.ACCEPTED_SECURITY_FINDINGS)
         for prefix in ('', 'deep_'):

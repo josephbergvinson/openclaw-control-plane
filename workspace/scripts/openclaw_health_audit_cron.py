@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 try:
     from openclaw_cli_common import build_openclaw_env, resolve_openclaw_bin
@@ -35,6 +35,55 @@ def _accepted_security_findings() -> dict[str, tuple[str, str]]:
 
 
 ACCEPTED_SECURITY_FINDINGS = _accepted_security_findings()
+
+# A broad-member warning is never accepted check-wide. An adopter may opt in
+# to one exact company posture; absent or disabled policy accepts none of it.
+COMPANY_BROAD_MEMBERS = 'channels.discord.allowlisted_groups.broad_members'
+
+
+def _accepted_company_posture() -> dict | None:
+    key = 'maintenance.accepted_company_posture'
+    policy = OPERATOR.get(key)
+    if policy is None:
+        return None
+    if not isinstance(policy, dict) or type(policy.get('enabled')) is not bool:
+        raise ValueError('accepted_company_posture must explicitly set enabled')
+    if policy['enabled'] is False:
+        return None
+    required = {'enabled', 'owner_id', 'guild_id', 'channel_ids', 'agent_id',
+                'workspace', 'engineering_sender_ids', 'readonly_tool_namespace'}
+    if set(policy) != required:
+        raise ValueError('accepted_company_posture requires exact scoped bindings')
+    for name in ('owner_id', 'guild_id'):
+        if not isinstance(policy[name], str) or not policy[name].isdigit():
+            raise ValueError('accepted_company_posture requires exact Discord identities')
+    channels = policy['channel_ids']
+    if (not isinstance(channels, list) or len(channels) != 2 or channels[0] != '*'
+            or not isinstance(channels[1], str) or not channels[1].isdigit()):
+        raise ValueError('accepted_company_posture requires wildcard and exact channel targets')
+    senders = policy['engineering_sender_ids']
+    if (not isinstance(senders, list) or len(senders) != 3
+            or any(not isinstance(sender, str) or not sender.isdigit() for sender in senders)
+            or len(set(senders)) != 3 or policy['owner_id'] in senders):
+        raise ValueError('accepted_company_posture requires three distinct named engineers')
+    agent = OPERATOR.require_string(key + '.agent_id')
+    if re.fullmatch(r'[a-z][a-z0-9_-]*', agent) is None:
+        raise ValueError('accepted_company_posture requires an exact agent identity')
+    policy['workspace'] = str(OPERATOR.require_path(key + '.workspace'))
+    namespace = OPERATOR.require_string(key + '.readonly_tool_namespace')
+    if re.fullmatch(r'[a-z][a-z0-9_-]*__\*', namespace) is None:
+        raise ValueError('accepted_company_posture requires one read-only tool namespace')
+    return policy
+
+
+def company_scope_detail(policy: dict, *, default_account: bool = False) -> str:
+    prefix = 'channels.discord.accounts.default.guilds.' if default_account else 'channels.discord.guilds.'
+    return (
+        'These allowlisted Discord targets have no effective users or roles restriction:\n'
+        + '\n'.join(f'- {prefix}{policy["guild_id"]}.channels.{channel}' for channel in policy['channel_ids'])
+        + '\ngroupPolicy="allowlist" limits guilds/channels, but all members of a listed target can still trigger the agent.'
+    )
+
 
 # 'info' is the only severity it is safe to stay quiet about. Anything else —
 # including a severity band the CLI grows after this script was written — is
@@ -64,6 +113,8 @@ class SecurityFinding:
     check_id: str
     severity: str
     title: str
+    # Scope evidence is private, never part of the public alert or repr.
+    detail: str = field(default='', repr=False)
 
     @property
     def identifier(self) -> str:
@@ -171,7 +222,11 @@ def parse_security_findings_json(output: str | None) -> list[SecurityFinding] | 
             continue
         title = item.get('title')
         severity = item.get('severity')
-        if not isinstance(title, str) or not isinstance(severity, str):
+        if item.get('checkId') == COMPANY_BROAD_MEMBERS:
+            # Missing severity is unknown, not a reason to drop this finding.
+            title = title if isinstance(title, str) else ''
+            severity = severity if isinstance(severity, str) else ''
+        elif not isinstance(title, str) or not isinstance(severity, str):
             continue
         check_id = item.get('checkId')
         findings.append(
@@ -179,6 +234,7 @@ def parse_security_findings_json(output: str | None) -> list[SecurityFinding] | 
                 check_id=check_id if isinstance(check_id, str) else '',
                 severity=severity.strip().lower(),
                 title=title.strip(),
+                detail=item.get('detail') if isinstance(item.get('detail'), str) else '',
             )
         )
     return findings
@@ -225,16 +281,187 @@ def unrecognized_severity_total(counts: dict[str, int]) -> int:
     return sum(count for severity, count in counts.items() if severity not in KNOWN_SEVERITIES)
 
 
-def unaccepted_security_findings(findings: list[SecurityFinding]) -> list[SecurityFinding]:
+def company_warning_in_scope(finding: SecurityFinding) -> bool:
+    policy = _accepted_company_posture()
+    if policy is None:
+        return False
+    # A changed renderer, extra account/target, missing detail, or escalation
+    # needs review. Titles (including the rendered-text fallback) prove no scope.
+    return (
+        finding.check_id == COMPANY_BROAD_MEMBERS
+        and finding.severity == 'warn'
+        and finding.detail in (company_scope_detail(policy), company_scope_detail(policy, default_account=True))
+    )
+
+
+def company_posture_matches(discord: object, bindings: object, agent: object) -> bool:
+    """Conservative checks of the approved config, not a general policy engine."""
+    policy = _accepted_company_posture()
+    if policy is None:
+        return False
+    if not isinstance(discord, dict) or not isinstance(bindings, list) or not isinstance(agent, dict):
+        return False
+    if discord.get('groupPolicy') != 'allowlist' or discord.get('allowBots', False) is not False:
+        return False
+    # The approved effective snapshot has only this default-account policy.
+    # Extra accounts or account-level overrides need their own disposition.
+    if discord.get('accounts', {}) not in ({}, {'default': {'groupPolicy': 'allowlist'}}):
+        return False
+    guilds = discord.get('guilds')
+    guild = guilds.get(policy['guild_id']) if isinstance(guilds, dict) else None
+    if not isinstance(guild, dict) or guild.get('requireMention') is not True or guild.get('ignoreOtherMentions') is not True:
+        return False
+    channels = guild.get('channels')
+    if not isinstance(channels, dict) or set(channels) != set(policy['channel_ids']):
+        return False
+    for channel in channels.values():
+        if not isinstance(channel, dict):
+            return False
+        if channel.get('requireMention', guild['requireMention']) is not True:
+            return False
+        if channel.get('ignoreOtherMentions', guild['ignoreOtherMentions']) is not True:
+            return False
+        # Discord intentionally bypasses requireMention in bot-owned automatic
+        # threads, so enabling this would relax the accepted mention-only scope.
+        if channel.get('autoThread', False) is not False:
+            return False
+    # Guard against broad access added after the finding was collected. Other
+    # guilds remain outside this acceptance and must retain member restrictions,
+    # using the audit's channel-over-guild users/roles inheritance rule.
+    for guild_id, other in guilds.items():
+        if guild_id == policy['guild_id']:
+            continue
+        if not isinstance(other, dict) or not isinstance(other.get('channels', {}), dict):
+            return False
+        for channel in list(other.get('channels', {}).values()) or [{}]:
+            if not isinstance(channel, dict):
+                return False
+            if channel.get('enabled') is False:
+                continue
+            members = []
+            for key in ('users', 'roles'):
+                entries = channel.get(key)
+                if entries is None:
+                    entries = other.get(key, [])
+                if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+                    return False
+                members.extend(entries)
+            if not members or any(entry.strip() == '*' for entry in members):
+                return False
+
+    approved_match = {'channel': 'discord', 'accountId': '*', 'guildId': policy['guild_id']}
+    approved_bindings = 0
+    for binding in bindings:
+        if not isinstance(binding, dict) or not isinstance(binding.get('match'), dict):
+            return False
+        match = binding['match']
+        if not isinstance(match.get('channel'), str) or match['channel'] != match['channel'].strip().lower():
+            return False
+        if match.get('channel') != 'discord':
+            continue
+        # Unrelated exact guild bindings cannot match the company. An unscoped
+        # peer/role/account binding could divert it and must not be overlooked.
+        guild_id = match.get('guildId')
+        if isinstance(guild_id, str) and guild_id.isdigit() and guild_id != policy['guild_id']:
+            continue
+        if match == approved_match and binding.get('agentId') == policy['agent_id']:
+            if set(binding) - {'agentId', 'match', 'comment'}:
+                return False
+            approved_bindings += 1
+        elif match != {'channel': 'discord', 'accountId': '*'} or binding.get('agentId') != 'main':
+            return False
+    if approved_bindings != 1:
+        return False
+
+    if agent.get('workspace') != policy['workspace']:
+        return False
+    if agent.get('groupChat') != {'mentionPatterns': []}:
+        return False
+    subagents = agent.get('subagents')
+    if not isinstance(subagents, dict) or subagents.get('allowAgents') != [policy['agent_id']]:
+        return False
+    memory = agent.get('memory')
+    search = memory.get('search') if isinstance(memory, dict) else None
+    if not isinstance(search, dict) or search.get('rememberAcrossConversations') is not False:
+        return False
+    if search.get('sources') != ['memory'] or search.get('extraPaths') != []:
+        return False
+    if search.get('experimental') != {'sessionMemory': False}:
+        return False
+    tools = agent.get('tools')
+    if not isinstance(tools, dict) or tools.get('codeMode') is not False or tools.get('fs') != {'workspaceOnly': True}:
+        return False
+    required_denies = (
+        'sessions', 'sessions_list', 'sessions_history', 'sessions_search', 'sessions_send',
+        'conversations_list', 'conversations_send', 'conversations_turn', 'session_status',
+    )
+    denies = tools.get('deny')
+    if not isinstance(denies, list) or not all(name in denies for name in required_denies):
+        return False
+    approved_sender_tools = {
+        f'channel:discord:{policy["owner_id"]}': {},
+        '*': {'allow': ['read', 'ls', 'memory_search', 'memory_get', 'web_search', 'web_fetch', policy['readonly_tool_namespace']]},
+    }
+    # The optional named-engineer successor adds only these authenticated
+    # engineering senders. It does not expand the wildcard or owner elevation.
+    engineering_sender_tools = {
+        **approved_sender_tools,
+        **{
+            f'channel:discord:{sender}': {'allow': [
+                *approved_sender_tools['*']['allow'],
+                'edit', 'write', 'apply_patch', 'exec', 'process', 'sessions_spawn',
+                'agents_wait', 'sessions_yield', 'subagents',
+            ]}
+            for sender in policy['engineering_sender_ids']
+        },
+    }
+    if tools.get('toolsBySender') not in (approved_sender_tools, engineering_sender_tools):
+        return False
+    return tools.get('elevated') == {'enabled': True, 'allowFrom': {'discord': [policy['owner_id']]}}
+
+
+def verify_company_posture(openclaw_bin: str, json_output: str | None) -> bool:
+    policy = _accepted_company_posture()
+    if policy is None:
+        return False
+    if not any(company_warning_in_scope(finding) for finding in parse_security_findings_json(json_output) or []):
+        return False
+    # Supported config get reads are redacted and path-bounded. Do not log the
+    # snapshots or command errors. Two equal reads detect changes during this
+    # multi-path collection; missing, failed or mixed evidence stays blocking.
+    snapshots = []
+    for _ in range(2):
+        snapshot = []
+        for path in ('channels.discord', 'bindings', f'agents.entries.{policy["agent_id"]}'):
+            result = run([openclaw_bin, 'config', 'get', path, '--json'], timeout=15)
+            if result.returncode != 0:
+                return False
+            try:
+                snapshot.append(json.loads(result.output))
+            except (ValueError, TypeError):
+                return False
+        snapshots.append(snapshot)
+    return snapshots[0] == snapshots[1] and company_posture_matches(*snapshots[1])
+
+
+def unaccepted_security_findings(
+    findings: list[SecurityFinding], *, company_posture_verified: bool = False,
+) -> list[SecurityFinding]:
     """Reportable findings the operator has not already ruled on at that severity."""
 
     def is_accepted(finding: SecurityFinding) -> bool:
+        if company_posture_verified and company_warning_in_scope(finding):
+            return True
+        if (finding.check_id == COMPANY_BROAD_MEMBERS
+                or (not finding.check_id and finding.title == 'Discord allowlisted groups have broad member access')):
+            return False
         if finding.check_id:
             accepted = ACCEPTED_SECURITY_FINDINGS.get(finding.check_id)
             return accepted is not None and accepted[0] == finding.severity
         return any(
-            accepted_severity == finding.severity and accepted_title == finding.title
-            for accepted_severity, accepted_title in ACCEPTED_SECURITY_FINDINGS.values()
+            check_id != COMPANY_BROAD_MEMBERS
+            and accepted_severity == finding.severity and accepted_title == finding.title
+            for check_id, (accepted_severity, accepted_title) in ACCEPTED_SECURITY_FINDINGS.items()
         )
 
     unaccepted = [
@@ -281,6 +508,7 @@ def classify_security(
     *,
     prefix: str = '',
     max_len: int = SECURITY_BLOCKER_MAX_LEN,
+    company_posture_verified: bool = False,
 ) -> tuple[str, str | None]:
     """(note, blocker) for the security audit, naming what is unaccepted.
 
@@ -342,7 +570,7 @@ def classify_security(
     # A silent downgrade to the rendered output would hide the fact that the
     # names below are best-effort, so the fallback says so even on a clean run.
     degraded = '' if source == 'json' else f' source={source}'
-    unaccepted = unaccepted_security_findings(findings)
+    unaccepted = unaccepted_security_findings(findings, company_posture_verified=company_posture_verified)
     if not unaccepted:
         return f'accepted_warnings_ignored={counts["warn"]} info={info}{degraded}', None
 
@@ -560,7 +788,9 @@ def emit(message: str, *, exit_code: int = 0) -> int:
     return exit_code
 
 
-def public_security_problem(json_output: str | None, text_output: str, blocker: str) -> str:
+def public_security_problem(
+    json_output: str | None, text_output: str, blocker: str, *, company_posture_verified: bool = False,
+) -> str:
     """Describe classified failures without copying provider titles or details."""
     if SECURITY_BLOCKER_STEM not in blocker:
         return 'the security audit result was incomplete'
@@ -587,7 +817,7 @@ def public_security_problem(json_output: str | None, text_output: str, blocker: 
         'channels.discord.allowlisted_groups.broad_members'
     )
     descriptions: list[str] = []
-    unaccepted = unaccepted_security_findings(findings or [])
+    unaccepted = unaccepted_security_findings(findings or [], company_posture_verified=company_posture_verified)
     for finding in unaccepted[:3]:
         check_id = finding.check_id or check_ids_by_title.get(finding.title, '')
         subject = subjects.get(check_id, 'an unrecognized security finding')
@@ -710,14 +940,19 @@ def main(argv: list[str] | None = None) -> int:
     # is kept only as the fallback argument.
     security_audit = run([openclaw_bin, 'security', 'audit', '--json'], timeout=90)
     security_json = security_audit.output if security_audit.returncode == 0 else None
+    company_posture_verified = verify_company_posture(openclaw_bin, security_json)
     _, security_blocker = classify_security(
         security_json,
         status.output,
+        company_posture_verified=company_posture_verified,
     )
     security_problems: list[str] = []
     if security_blocker:
         blockers.append(security_blocker)
-        security_problems.append(public_security_problem(security_json, status.output, security_blocker))
+        security_problems.append(public_security_problem(
+            security_json, status.output, security_blocker,
+            company_posture_verified=company_posture_verified,
+        ))
 
     deep_security_ok = True
     if args.weekly:
@@ -726,17 +961,20 @@ def main(argv: list[str] | None = None) -> int:
             deep_security_ok = False
             blockers.append('security_audit_deep_unavailable')
         else:
+            deep_company_posture_verified = verify_company_posture(openclaw_bin, deep_security.output)
             # The 'deep_' scope is built into the blocker rather than prefixed
             # afterwards, so the names still fit inside emit()'s 120-char trim.
             _, deep_blocker = classify_security(
                 deep_security.output,
                 deep_security.output,
                 prefix='deep_',
+                company_posture_verified=deep_company_posture_verified,
             )
             if deep_blocker:
                 blockers.append(deep_blocker)
                 security_problems.append(public_security_problem(
                     deep_security.output, deep_security.output, deep_blocker,
+                    company_posture_verified=deep_company_posture_verified,
                 ))
 
     _, task_maintenance_blocker = run_task_ledger_maintenance(openclaw_bin)
