@@ -17311,10 +17311,18 @@ index 8b117dbc91f084035e00b287ed11431ca17de594..b3b2cae14026d9802a209b28ea104c08
      agent: {
        runCommandFromIngress: agentCommandMock,
 diff --git a/extensions/discord/test-api.ts b/extensions/discord/test-api.ts
-index 3b8ed2371538216188c130684865dee5c303472d..999aaf664f2fe1ffa9bddc47ffc59a8a79739694 100644
+index 3b8ed2371538216188c130684865dee5c303472d..7f80958d0089497187d5a7ec324748130f9c9f90 100644
 --- a/extensions/discord/test-api.ts
 +++ b/extensions/discord/test-api.ts
-@@ -13,3 +13,11 @@ export const loadDiscordVoiceTestHarness = () =>
+@@ -3,6 +3,7 @@ export { createDiscordDraftPreviewController } from "./src/monitor/message-handl
+ export { RequestClient } from "./src/internal/discord.js";
+ export {
+   discordVoiceTranscriptsSourceProvider,
++  getDiscordVoiceManager,
+   setDiscordTranscriptsVoiceManager,
+ } from "./src/voice/transcripts-source.js";
+ 
+@@ -13,3 +14,11 @@ export const loadDiscordVoiceTestHarness = () =>
  // Gateway capture proof keeps routing/admission real; only transport edges are substituted.
  export const loadDiscordGatewayCaptureFixture = () =>
    import("./src/voice/voice-gateway-capture.test-support.js");
@@ -21430,6 +21438,14 @@ index 19f9844011327a82cc2ce911432e3ae45987dc07..83940f6a389ae8715aaa084b50a3b24e
        const result = await tool.execute("sessions-unavailable", {
          query: "favorite food",
          corpus: "sessions",
+diff --git a/extensions/memory-core/test-api.ts b/extensions/memory-core/test-api.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..536b89f61fe1fa38935c31b3397cf3cec60e75ea
+--- /dev/null
++++ b/extensions/memory-core/test-api.ts
+@@ -0,0 +1,2 @@
++// Memory Core test API exposes the real registry for host/plugin integration proofs.
++export { MemoryManagerRegistry } from "./src/memory/manager-registry.js";
 diff --git a/extensions/openai/thinking-policy.test.ts b/extensions/openai/thinking-policy.test.ts
 index 19091c27d32d25d4a1b315b782e8be33d3bd385f..3ca23789016aa2a8301d15b31e29111efbbac7da 100644
 --- a/extensions/openai/thinking-policy.test.ts
@@ -25998,45 +26014,73 @@ index 2bf76c3e65c0e7cccd8b72838f794eb8e0fc39d2..30b66d03f21ee5273db2f2e24ceb6774
  export function hasAcceptedSessionSpawn(
    acceptedSessionSpawns?: readonly AcceptedSessionSpawn[],
 diff --git a/src/agents/agent-bundle-mcp-catalog-recovery.test-support.ts b/src/agents/agent-bundle-mcp-catalog-recovery.test-support.ts
-index ba5c8d97080669e71060e760623926ba20ffabfe..56a8315e3aebba8cb04e2219ee1947bbe3c92c59 100644
+index ba5c8d97080669e71060e760623926ba20ffabfe..f4adc5d37cd5cd59cb00f26eab24b9272133ea95 100644
 --- a/src/agents/agent-bundle-mcp-catalog-recovery.test-support.ts
 +++ b/src/agents/agent-bundle-mcp-catalog-recovery.test-support.ts
-@@ -1,7 +1,10 @@
+@@ -1,9 +1,13 @@
  import http from "node:http";
  import { createDeferred } from "../../test/helpers/promise.js";
  
 -export async function startCatalogRecoveryMcpServer(label: string) {
 +export async function startCatalogRecoveryMcpServer(
 +  label: string,
-+  options?: { failFirstList?: boolean },
++  options?: { failFirstList?: boolean; failRecoveryList?: boolean; holdFirstList?: boolean },
 +) {
    let sessionGeneration = 0;
    let listCount = 0;
++  let callCount = 0;
    let maxActiveLists = 0;
-@@ -83,6 +86,10 @@ export async function startCatalogRecoveryMcpServer(label: string) {
+   let hangCalls = true;
+   let callReceived = createDeferred();
+@@ -62,6 +66,7 @@ export async function startCatalogRecoveryMcpServer(label: string) {
+       const rawSessionId = request.headers["mcp-session-id"];
+       const sessionId = typeof rawSessionId === "string" ? rawSessionId : "missing";
+       if (message.method === "tools/call") {
++        callCount += 1;
+         callReceived.resolve();
+         callReceived = createDeferred();
+         if (hangCalls) {
+@@ -83,7 +88,14 @@ export async function startCatalogRecoveryMcpServer(label: string) {
        }
        if (message.method === "tools/list") {
          listCount += 1;
-+        if (listCount === 1 && options?.failFirstList) {
+-        if (listCount === 1) {
++        if (
++          (listCount === 1 && options?.failFirstList) ||
++          (listCount > 1 && options?.failRecoveryList)
++        ) {
 +          response.writeHead(503).end("synthetic catalog unavailable");
 +          return;
 +        }
-         if (listCount === 1) {
++        if (listCount === 1 && !options?.holdFirstList) {
            response.setHeader("content-type", "application/json");
            response.setHeader("mcp-session-id", sessionId);
+           response.writeHead(200).end(
+@@ -122,6 +134,8 @@ export async function startCatalogRecoveryMcpServer(label: string) {
+     nextCall: () => callReceived.promise,
+     recoveryListStarted: recoveryListStarted.promise,
+     maxActiveLists: () => maxActiveLists,
++    listCount: () => listCount,
++    callCount: () => callCount,
+     allowCalls: () => {
+       hangCalls = false;
+     },
 diff --git a/src/agents/agent-bundle-mcp-combined.ts b/src/agents/agent-bundle-mcp-combined.ts
-index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2e749bf7d 100644
+index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..b019997946820c713217b5402ff8d8e5316c9c7a 100644
 --- a/src/agents/agent-bundle-mcp-combined.ts
 +++ b/src/agents/agent-bundle-mcp-combined.ts
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,10 @@
  import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
  import { runTasksWithConcurrency } from "../utils/run-with-concurrency.js";
  import { getSessionMcpRequestSignal } from "./agent-bundle-mcp-request-context.js";
-+import { sessionMcpRuntimeOwners } from "./agent-bundle-mcp-runtime-owner.js";
++import {
++  captureMcpRequesterConnectRefreshCurrent,
++  sessionMcpRuntimeOwners,
++} from "./agent-bundle-mcp-runtime-owner.js";
  import type {
    McpCatalogTool,
    McpServerCatalog,
-@@ -19,12 +20,15 @@ function compareCatalogTools(left: McpCatalogTool, right: McpCatalogTool): numbe
+@@ -19,12 +23,16 @@ function compareCatalogTools(left: McpCatalogTool, right: McpCatalogTool): numbe
    );
  }
  
@@ -26044,17 +26088,18 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2
 +async function loadCurrentCatalog(
 +  part: SessionMcpRuntime,
 +  waitForRecovery: boolean,
++  retryFailedServerNames?: readonly string[],
 +): Promise<McpToolCatalog> {
    if (part.retiredCatalog) {
      return part.retiredCatalog;
    }
    try {
 -    const catalog = await part.getCatalog();
-+    const catalog = await part.getCatalog({ waitForRecovery });
++    const catalog = await part.getCatalog({ waitForRecovery, retryFailedServerNames });
      return part.retiredCatalog ?? catalog;
    } catch (error) {
      // Revocation can close a transport while discovery awaits it. Preserve the
-@@ -90,6 +94,12 @@ export function createCombinedSessionMcpRuntime(params: {
+@@ -90,6 +98,13 @@ export function createCombinedSessionMcpRuntime(params: {
      return params.parts[0]!;
    }
    const parts = params.parts;
@@ -26064,10 +26109,11 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2
 +    configFingerprint: part.configFingerprint,
 +    requesterConnect: part.requesterConnect,
 +  }));
++  const requesterConnectGenerations = parts.map(captureMcpRequesterConnectRefreshCurrent);
    // Empty partitions still own run/view leases; populated ones carry reused server leases.
    let activeLeases = 0;
    let disposal: Promise<void> | undefined;
-@@ -118,13 +128,23 @@ export function createCombinedSessionMcpRuntime(params: {
+@@ -118,13 +133,23 @@ export function createCombinedSessionMcpRuntime(params: {
          (part.retiredCatalog ?? part.peekCatalog()) === mergedSourceCatalogs?.[index],
      );
  
@@ -26084,7 +26130,7 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2
 +    // Healthy peers preserve a useful surface while failed children recover.
 +    // Propagate that choice through nested static/requester partitions.
 +    const waitForRecovery =
-+      options?.waitForRecovery !== false &&
++      options?.waitForRecovery ??
 +      !parts.some(
 +        (part) =>
 +          Object.keys((part.retiredCatalog ?? part.peekCatalog())?.servers ?? {}).length > 0,
@@ -26092,16 +26138,20 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2
      const inFlight = (async () => {
        let loaded: Array<{ catalog: McpToolCatalog; cached: boolean } | undefined> = [];
        // Replay once when a completed catalog invalidates while siblings await I/O.
-@@ -136,7 +156,7 @@ export function createCombinedSessionMcpRuntime(params: {
+@@ -136,7 +161,11 @@ export function createCombinedSessionMcpRuntime(params: {
              if (previous && (!previous.cached || part.retiredCatalog || part.peekCatalog())) {
                return previous;
              }
 -            const catalog = await loadCurrentCatalog(part);
-+            const catalog = await loadCurrentCatalog(part, waitForRecovery);
++            const catalog = await loadCurrentCatalog(
++              part,
++              waitForRecovery,
++              options?.retryFailedServerNames,
++            );
              return { catalog, cached: part.peekCatalog() !== null };
            }),
            limit: 6,
-@@ -198,6 +218,17 @@ export function createCombinedSessionMcpRuntime(params: {
+@@ -198,6 +227,19 @@ export function createCombinedSessionMcpRuntime(params: {
      workspaceDir: params.workspaceDir,
      agentDir: params.agentDir,
      configFingerprint: parts.map((part) => part.configFingerprint).join(":"),
@@ -26116,6 +26166,8 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..dcc272ec5bbe2d63996a471bc88b88e2
 +          part.requesterConnect === admittedRequesterConnect &&
 +          (!admittedRequesterConnect || admittedRequesterConnect.isCurrent?.() === true),
 +      ),
++    isRequesterConnectGenerationCurrent: () =>
++      disposal === undefined && requesterConnectGenerations.every((isCurrent) => isCurrent()),
      ...(requesterConnect ? { requesterConnect } : {}),
      isRequesterScopedServer(serverName) {
        // Owner map is populated by the catalog load that exposed the tool.
@@ -26263,19 +26315,149 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..075a6eb0a31f82f09b3c9c30853f486d
        advertisedTools: filteredAdvertised,
        dispose: async () => {
          if (disposed) {
+diff --git a/src/agents/agent-bundle-mcp-manager-install.ts b/src/agents/agent-bundle-mcp-manager-install.ts
+index ec49f19680f5a0ae94b7e980398c9a0788d56e14..63ec700dd2525ecc5e6bbc237a6868a078f6bc47 100644
+--- a/src/agents/agent-bundle-mcp-manager-install.ts
++++ b/src/agents/agent-bundle-mcp-manager-install.ts
+@@ -211,6 +211,40 @@ export function createSessionMcpRuntimeManagerInstall(
+       requesterConnect,
+     );
+     const existing = store.runtimesBySessionId.get(params.runtimeKey);
++    const previousOwner = existing && sessionMcpRuntimeOwners.get(existing);
++    const previousGeneration = previousOwner?.requesterConnectGeneration;
++    const generationFingerprint = JSON.stringify({
++      config: params.fullScopedFingerprint,
++      workspaceDir: params.workspaceDir,
++      agentDir: params.agentDir,
++      requesterScope: params.requesterScope,
++      publicOrigin: params.cfg?.gateway?.publicOrigin,
++    });
++    const publication = store.configReload;
++    const generationIdentity =
++      previousOwner?.isCurrent() &&
++      previousGeneration?.isCurrent() &&
++      previousGeneration.configFingerprint === generationFingerprint
++        ? previousGeneration.identity
++        : {};
++    const rememberGeneration = (runtime: SessionMcpRuntime) => {
++      const owner = sessionMcpRuntimeOwners.get(runtime);
++      if (owner) {
++        owner.requesterConnectGeneration = {
++          configFingerprint: generationFingerprint,
++          identity: generationIdentity,
++          isCurrent: () => {
++            const current = store.runtimesBySessionId.get(params.runtimeKey);
++            const currentOwner = current && sessionMcpRuntimeOwners.get(current);
++            return (
++              store.configReload === publication &&
++              currentOwner?.isCurrent() === true &&
++              currentOwner.requesterConnectGeneration?.identity === generationIdentity
++            );
++          },
++        };
++      }
++    };
+     const meta = store.connectionMetaByRuntimeKey.get(params.runtimeKey);
+     // Full-set + within revalidation window: skip resolver I/O.
+     // Revocation/rotation takes effect within MCP_CONNECTION_REVALIDATE_MS even for
+@@ -219,6 +253,7 @@ export function createSessionMcpRuntimeManagerInstall(
+       meta !== undefined && store.now() - meta.resolvedAt < MCP_CONNECTION_REVALIDATE_MS;
+     if (withinRevalidateWindow && existing && matchesRuntime(existing, params, scopedFingerprint)) {
+       reconcileReusableRetirement(params, existing);
++      rememberGeneration(existing);
+       existing.markUsed();
+       return existing;
+     }
+@@ -241,7 +276,7 @@ export function createSessionMcpRuntimeManagerInstall(
+       }
+       return undefined;
+     }
+-    return await installRequesterRuntime({
++    const runtime = await installRequesterRuntime({
+       runtimeKey: params.runtimeKey,
+       configReloadAtAdmission: params.configReloadAtAdmission,
+       sessionId: params.sessionId,
+@@ -259,6 +294,8 @@ export function createSessionMcpRuntimeManagerInstall(
+       toolOverrides: params.toolOverrides,
+       toolDenylist: params.toolDenylist,
+     });
++    rememberGeneration(runtime);
++    return runtime;
+   };
+ 
+   return {
+diff --git a/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts b/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
+index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d958abd2bef 100644
+--- a/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
++++ b/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
+@@ -11,10 +11,12 @@ import {
+ } from "./code-mode.test-support.js";
+ 
+ const oauthStatus = vi.hoisted(() => vi.fn());
++const oauthStatusSync = vi.hoisted(() => vi.fn());
+ const startAuthorization = vi.hoisted(() => vi.fn());
+ 
+ vi.mock("./mcp-oauth.js", () => ({
+   readMcpOAuthCredentialsStatus: oauthStatus,
++  readMcpOAuthCredentialsStatusSync: oauthStatusSync,
+   startMcpOAuthAuthorization: startAuthorization,
+ }));
+ 
+@@ -77,6 +79,7 @@ describe("requester MCP connect runtime", () => {
+ 
+   beforeEach(() => {
+     oauthStatus.mockReset().mockResolvedValue({ state: "unauthenticated" });
++    oauthStatusSync.mockReset().mockReturnValue({ state: "unauthenticated" });
+     startAuthorization.mockReset().mockResolvedValue({
+       status: "redirect",
+       authorizationUrl: "https://auth.example/authorize?state=opaque",
+@@ -141,7 +144,10 @@ describe("requester MCP connect runtime", () => {
+         status: "redirect",
+         authorizationUrl: "https://auth.example/authorize?state=opaque",
+       })
+-      .mockResolvedValueOnce({ status: "authorized" });
++      .mockImplementationOnce(async () => {
++        oauthStatusSync.mockReturnValue({ state: "authorized" });
++        return { status: "authorized" };
++      });
+     const codeMode = createCodeModeHarness();
+     applyCodeModeCatalog({
+       tools: [...codeMode.tools, ...disconnected.tools],
+@@ -165,11 +171,17 @@ describe("requester MCP connect runtime", () => {
+         isError: false,
+       },
+       connected: {
+-        content: [{ type: "text", text: expect.stringContaining('"calendar" is connected') }],
++        content: [
++          {
++            type: "text",
++            text: 'MCP server "calendar" is connected. Its tools become available on the next message.',
++          },
++        ],
+         isError: false,
+       },
+     });
+     expect(disconnected.tools[0]?.resultContentSource).toBe("network");
++    expect(disconnected.takeRequesterConnectRefresh?.()).toBeUndefined();
+     await disconnected.dispose();
+ 
+     oauthStatus.mockResolvedValue({ state: "authorized" });
 diff --git a/src/agents/agent-bundle-mcp-materialize.ts b/src/agents/agent-bundle-mcp-materialize.ts
-index 046fdc35ca6d2bf0b49825d96e4e86056d970511..abc4d6dbcdcde979dbfc2abbc5c9ab1b4067a664 100644
+index 046fdc35ca6d2bf0b49825d96e4e86056d970511..65233851d55bdf07f853db87937935ac14e3dcf9 100644
 --- a/src/agents/agent-bundle-mcp-materialize.ts
 +++ b/src/agents/agent-bundle-mcp-materialize.ts
-@@ -20,6 +20,7 @@ import {
+@@ -20,6 +20,10 @@ import {
    runWithSessionMcpRequestSignal,
  } from "./agent-bundle-mcp-request-context.js";
  import { mergeMcpConnectCatalog } from "./agent-bundle-mcp-requester-connect.js";
-+import { captureMcpSteeringCatalogCurrent } from "./agent-bundle-mcp-runtime-owner.js";
++import {
++  captureMcpRequesterConnectRefreshCurrent,
++  captureMcpSteeringCatalogCurrent,
++} from "./agent-bundle-mcp-runtime-owner.js";
  import type {
    BundleMcpToolRuntime,
    McpCatalogTool,
-@@ -32,7 +33,7 @@ import {
+@@ -32,7 +36,7 @@ import {
    setMcpCodeModeGuestResult,
    setMcpCodeModeGuestResultFromAgentResult,
  } from "./mcp-content.js";
@@ -26284,16 +26466,56 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..abc4d6dbcdcde979dbfc2abbc5c9ab1b
  import { buildMcpAppCanvasPayload, fetchMcpAppView } from "./mcp-ui-resource.js";
  import { recordAgentCleanupFailure } from "./run-cleanup-timeout.js";
  import type { AgentToolResult } from "./runtime/index.js";
-@@ -477,7 +478,7 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -431,9 +435,15 @@ export async function materializeBundleMcpToolsForRun(params: {
+   /** Transfer the lease admitted by the manager before returning this runtime. */
+   releaseLease?: () => void;
+   disposeRuntime?: () => Promise<void>;
++  retryFailedServerNames?: readonly string[];
++  /** Only the native next-turn owner consumes this materialization's connect signal. */
++  nativeRequesterConnectContinuation?: boolean;
+ }): Promise<BundleMcpToolRuntime> {
+   const runtime = params.runtime;
+   let disposal: Promise<void> | undefined;
++  const requesterConnectRefreshPending = new Set<string>();
++  let requesterConnectRefreshConsumed = false;
++  const refreshCurrent = captureMcpRequesterConnectRefreshCurrent(runtime);
+   let allowedAppToolsByServer: Map<string, Set<string>> | undefined;
+   let releaseLease: (() => void) | undefined;
+   const dispose = async () => {
+@@ -466,7 +476,11 @@ export async function materializeBundleMcpToolsForRun(params: {
+   try {
+     releaseLease = params.releaseLease ?? runtime.acquireLease?.();
+     runtime.markUsed();
+-    const catalog = await runtime.getCatalog();
++    const catalog = await runtime.getCatalog(
++      params.retryFailedServerNames
++        ? { waitForRecovery: true, retryFailedServerNames: params.retryFailedServerNames }
++        : undefined,
++    );
+     const reservedToolNames = params.reservedToolNames
+       ? Array.from(params.reservedToolNames)
+       : undefined;
+@@ -477,8 +491,17 @@ export async function materializeBundleMcpToolsForRun(params: {
        reservedToolNames,
        createExecute: (tool) => (toolCallId: string, input: unknown, signal?: AbortSignal) =>
          runWithSessionMcpRequestSignal(signal, async () => {
 -          if (!Object.hasOwn(catalog.servers, tool.serverName)) {
+-            const connect = runtime.requesterConnect?.createExecute(tool.serverName);
 +          if (tool.oauthConnectBootstrap === true) {
-             const connect = runtime.requesterConnect?.createExecute(tool.serverName);
++            const connect = runtime.requesterConnect?.createExecute(
++              tool.serverName,
++              params.nativeRequesterConnectContinuation
++                ? () => {
++                    if (disposal === undefined && refreshCurrent()) {
++                      requesterConnectRefreshPending.add(tool.serverName);
++                    }
++                  }
++                : undefined,
++            );
              if (connect) {
                return setMcpCodeModeGuestResultFromAgentResult(await connect(toolCallId, input));
-@@ -579,24 +580,20 @@ export async function materializeBundleMcpToolsForRun(params: {
+             }
+@@ -579,24 +602,32 @@ export async function materializeBundleMcpToolsForRun(params: {
        reservedToolNames,
      });
  
@@ -26305,7 +26527,19 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..abc4d6dbcdcde979dbfc2abbc5c9ab1b
      return {
        tools,
        appTools,
-+      isSteeringCatalogCurrent: () => disposal === undefined && catalogCurrent(),
++      isSteeringCatalogCurrent: () =>
++        disposal === undefined && requesterConnectRefreshPending.size === 0 && catalogCurrent(),
++      isRequesterConnectRefreshCurrent: () => disposal === undefined && refreshCurrent(),
++      takeRequesterConnectRefresh: () => {
++        if (requesterConnectRefreshPending.size === 0 || requesterConnectRefreshConsumed) {
++          return undefined;
++        }
++        if (disposal !== undefined || !refreshCurrent()) {
++          throw new Error("MCP requester connect preparation is no longer current");
++        }
++        requesterConnectRefreshConsumed = true;
++        return [...requesterConnectRefreshPending];
++      },
        ...(catalog.diagnostics && catalog.diagnostics.length > 0
          ? { diagnostics: catalog.diagnostics }
          : {}),
@@ -26405,10 +26639,36 @@ index a8329e5b2be92bae0f033727f6bee83d65040989..cb8a88293f79887a656552c09d292062
    const { manager, config, params } = await fixture();
    const original = await manager.getOrCreate({ ...params, cfg: config() });
 diff --git a/src/agents/agent-bundle-mcp-requester-connect.ts b/src/agents/agent-bundle-mcp-requester-connect.ts
-index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b187b3e553 100644
+index 7b616c45500101bfda8ba9f7650f63ee88531664..73883c702f08ef5b0cb190ed7f86b37889cff33a 100644
 --- a/src/agents/agent-bundle-mcp-requester-connect.ts
 +++ b/src/agents/agent-bundle-mcp-requester-connect.ts
-@@ -75,8 +75,8 @@ function buildRequesterConnectCatalog(
+@@ -12,6 +12,7 @@ import type { AgentToolResult } from "./runtime/index.js";
+ async function connectRequesterOAuthServer(params: {
+   serverName: string;
+   publicOrigin?: string;
++  onAuthorized?: () => void;
+   authorize: (
+     redirectUrl: string,
+   ) => ReturnType<(typeof import("./mcp-oauth.js"))["startMcpOAuthAuthorization"]>;
+@@ -27,11 +28,16 @@ async function connectRequesterOAuthServer(params: {
+   }
+   const result = await params.authorize(new URL("/oauth/mcp/callback", params.publicOrigin).href);
+   if (result.status === "authorized") {
++    params.onAuthorized?.();
+     return {
+       content: [
+         {
+           type: "text",
+-          text: `MCP server "${params.serverName}" is connected. Its tools become available on the next message.`,
++          text:
++            `MCP server "${params.serverName}" is connected. ` +
++            (params.onAuthorized
++              ? "Its available tools are refreshed before you continue this task."
++              : "Its tools become available on the next message."),
+         },
+       ],
+       details: { mcpServer: params.serverName },
+@@ -75,8 +81,8 @@ function buildRequesterConnectCatalog(
        serverName,
        safeServerName: safeServerNamesByServer.get(serverName) ?? serverName,
        toolName: "connect",
@@ -26419,26 +26679,42 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b1
        inputSchema: Type.Object({}),
        oauthConnectBootstrap: true,
      })),
-@@ -94,6 +94,7 @@ export async function createRequesterMcpConnect(params: {
+@@ -92,8 +98,12 @@ export async function createRequesterMcpConnect(params: {
+   cfg?: OpenClawConfig;
+   configFingerprint: string;
  }): Promise<RequesterMcpConnect | undefined> {
-   const servers = new Map<string, () => Promise<AgentToolResult<unknown>>>();
+-  const servers = new Map<string, () => Promise<AgentToolResult<unknown>>>();
++  const servers = new Map<
++    string,
++    (onAuthorized?: () => void) => Promise<AgentToolResult<unknown>>
++  >();
    const authorizedServerNames: string[] = [];
 +  const authorizationChecks: Array<() => boolean> = [];
    for (const serverName of [...params.serverNames].toSorted((a, b) => a.localeCompare(b))) {
      const resolved = resolveMcpTransportConfig(serverName, params.mcpServers[serverName], {
        logWarnings: false,
-@@ -109,22 +110,27 @@ export async function createRequesterMcpConnect(params: {
+@@ -109,22 +119,36 @@ export async function createRequesterMcpConnect(params: {
        import("./mcp-oauth-identity.js"),
        import("./mcp-oauth.js"),
      ]);
+-    servers.set(serverName, () =>
 +    const requesterIdentity = identity.requesterMcpOAuthIdentity(
 +      serverName,
 +      resolved.url,
 +      params.requesterScope,
 +    );
-     servers.set(serverName, () =>
++    servers.set(serverName, (onAuthorized) =>
        connectRequesterOAuthServer({
          serverName,
++        onAuthorized: onAuthorized
++          ? () => {
++              if (
++                oauth.readMcpOAuthCredentialsStatusSync(requesterIdentity).state === "authorized"
++              ) {
++                onAuthorized();
++              }
++            }
++          : undefined,
          publicOrigin: params.cfg?.gateway?.publicOrigin,
          authorize: (redirectUrl) =>
 -          oauth.startMcpOAuthAuthorization(
@@ -26463,7 +26739,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b1
        authorizedServerNames.push(serverName);
      }
    }
-@@ -139,12 +145,19 @@ export async function createRequesterMcpConnect(params: {
+@@ -139,12 +163,22 @@ export async function createRequesterMcpConnect(params: {
    return {
      catalog: buildRequesterConnectCatalog(servers.keys(), params.safeServerNamesByServer),
      authorizedServerNames,
@@ -26475,7 +26751,11 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b1
 +      }
 +    },
      configFingerprint,
-     createExecute: (serverName) => servers.get(serverName),
+-    createExecute: (serverName) => servers.get(serverName),
++    createExecute: (serverName, onAuthorized) => {
++      const connect = servers.get(serverName);
++      return connect ? async () => await connect(onAuthorized) : undefined;
++    },
    };
  }
  
@@ -26484,7 +26764,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b1
  export function mergeMcpConnectCatalog(
    liveCatalog: McpToolCatalog,
    requesterConnect?: RequesterMcpConnect,
-@@ -153,12 +166,17 @@ export function mergeMcpConnectCatalog(
+@@ -153,12 +187,17 @@ export function mergeMcpConnectCatalog(
    if (!connectCatalog) {
      return liveCatalog;
    }
@@ -26505,7 +26785,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..32dadfbac429c3b8164777959db7f5b1
      return liveCatalog;
    }
    return {
-@@ -167,14 +185,22 @@ export function mergeMcpConnectCatalog(
+@@ -167,14 +206,22 @@ export function mergeMcpConnectCatalog(
      servers: {
        ...liveCatalog.servers,
        ...Object.fromEntries(
@@ -26859,10 +27139,10 @@ index 0000000000000000000000000000000000000000..e0d8c282255f59ad86b99105ef535444
 +  });
 +});
 diff --git a/src/agents/agent-bundle-mcp-runtime-owner.ts b/src/agents/agent-bundle-mcp-runtime-owner.ts
-index cc890413dbf0cc16e31afa10081c3c9d7c151aab..538bb979aaf1ed2544d330c61d5e04384b652e42 100644
+index cc890413dbf0cc16e31afa10081c3c9d7c151aab..3e38a863a12b7e1e26352fa65d4bd763b29b1548 100644
 --- a/src/agents/agent-bundle-mcp-runtime-owner.ts
 +++ b/src/agents/agent-bundle-mcp-runtime-owner.ts
-@@ -1,6 +1,14 @@
+@@ -1,10 +1,24 @@
 +import { stableStringify } from "@openclaw/normalization-core/stable-stringify";
 +import { getPluginToolMeta } from "../plugins/tool-metadata.js";
  import { resolveGlobalSingleton } from "../shared/global-singleton.js";
@@ -26878,7 +27158,17 @@ index cc890413dbf0cc16e31afa10081c3c9d7c151aab..538bb979aaf1ed2544d330c61d5e0438
  
  type SessionMcpRuntimeOwner = {
    hasServers: () => boolean;
-@@ -15,3 +23,53 @@ export const sessionMcpRuntimeOwners = resolveGlobalSingleton(
+   isCurrent: () => boolean;
++  /** Manager/key/config generation; authorization successors retain this witness. */
++  requesterConnectGeneration?: {
++    configFingerprint: string;
++    identity: object;
++    isCurrent: () => boolean;
++  };
+   replace: (params: Parameters<CreateSessionMcpRuntime>[0]) => SessionMcpRuntime;
+   reload: (params: SessionMcpConfigReload) => Promise<void>;
+   retireUnusedServers: (retainedServerNames: ReadonlySet<string>) => Promise<void>;
+@@ -15,3 +29,82 @@ export const sessionMcpRuntimeOwners = resolveGlobalSingleton(
    Symbol.for("openclaw.sessionMcpRuntimeOwners"),
    () => new WeakMap<SessionMcpRuntime, SessionMcpRuntimeOwner>(),
  );
@@ -26932,8 +27222,37 @@ index cc890413dbf0cc16e31afa10081c3c9d7c151aab..538bb979aaf1ed2544d330c61d5e0438
 +    }
 +  };
 +}
++
++/** Captures runtime ownership without pinning the catalog that connect will replace. */
++export function captureMcpRequesterConnectRefreshCurrent(
++  runtime: SessionMcpRuntime,
++): () => boolean {
++  const owner = sessionMcpRuntimeOwners.get(runtime);
++  const generation = owner?.requesterConnectGeneration;
++  const partitionCurrent =
++    runtime.isRequesterConnectGenerationCurrent ?? runtime.isSteeringCatalogCurrent;
++  const configFingerprint = runtime.configFingerprint;
++  const requesterConnect = runtime.requesterConnect;
++  const requesterScope = stableStringify(runtime.requesterScope);
++  return () => {
++    try {
++      return (
++        runtime.configFingerprint === configFingerprint &&
++        runtime.requesterConnect === requesterConnect &&
++        stableStringify(runtime.requesterScope) === requesterScope &&
++        (owner
++          ? generation
++            ? generation.isCurrent()
++            : sessionMcpRuntimeOwners.get(runtime) === owner && owner.isCurrent()
++          : partitionCurrent?.() === true)
++      );
++    } catch {
++      return false;
++    }
++  };
++}
 diff --git a/src/agents/agent-bundle-mcp-runtime.ts b/src/agents/agent-bundle-mcp-runtime.ts
-index 4d40c90c2a2b6975d708c82dc547d91a3375006f..fe62dc4b1b89ae7ef61f560b43cf79455bff9c84 100644
+index 4d40c90c2a2b6975d708c82dc547d91a3375006f..8b77faa44bd93b81cb9766c461edca67dab8b8e9 100644
 --- a/src/agents/agent-bundle-mcp-runtime.ts
 +++ b/src/agents/agent-bundle-mcp-runtime.ts
 @@ -55,7 +55,13 @@ import {
@@ -27006,7 +27325,18 @@ index 4d40c90c2a2b6975d708c82dc547d91a3375006f..fe62dc4b1b89ae7ef61f560b43cf7945
  function isMcpMethodNotFoundError(error: unknown): boolean {
    if (isRecord(error) && error.code === ErrorCode.MethodNotFound) {
      return true;
-@@ -967,8 +932,17 @@ function createServerMcpRuntime(
+@@ -316,8 +281,8 @@ export function createSessionMcpRuntime(
+         tools: catalog.tools.filter((tool) => connectFingerprints.has(tool.serverName)),
+       };
+     },
+-    createExecute(serverName) {
+-      const execute = requesterConnect.createExecute(serverName);
++    createExecute(serverName, onAuthorized) {
++      const execute = requesterConnect.createExecute(serverName, onAuthorized);
+       return (
+         execute &&
+         (async (...args) => {
+@@ -967,8 +932,20 @@ function createServerMcpRuntime(
      }
    };
  
@@ -27015,6 +27345,9 @@ index 4d40c90c2a2b6975d708c82dc547d91a3375006f..fe62dc4b1b89ae7ef61f560b43cf7945
 +    options?: Parameters<SessionMcpRuntime["getCatalog"]>[0],
 +  ): Promise<McpToolCatalog> => {
      failIfDisposed();
++    if (catalog?.diagnostics?.length && options?.retryFailedServerNames?.includes(serverName)) {
++      catalogRetryAfterMs = Date.now();
++    }
 +    const waitForRecovery =
 +      options?.waitForRecovery !== false &&
 +      catalog?.diagnostics?.length &&
@@ -27025,7 +27358,7 @@ index 4d40c90c2a2b6975d708c82dc547d91a3375006f..fe62dc4b1b89ae7ef61f560b43cf7945
      if (catalog && !catalogRetryIsDue()) {
        return catalog;
      }
-@@ -985,11 +959,18 @@ function createServerMcpRuntime(
+@@ -985,11 +962,18 @@ function createServerMcpRuntime(
  
      const staleCatalog = catalog;
      catalogRetryAfterMs = undefined;
@@ -27046,44 +27379,60 @@ index 4d40c90c2a2b6975d708c82dc547d91a3375006f..fe62dc4b1b89ae7ef61f560b43cf7945
    };
    const getActiveSession = async (requestedServer: string) => {
 diff --git a/src/agents/agent-bundle-mcp-types.ts b/src/agents/agent-bundle-mcp-types.ts
-index f068cc9c8d4d73b8409196a7556cc35475f8e801..bb105b1d91670c040057d2d9d54a56e779731c1c 100644
+index f068cc9c8d4d73b8409196a7556cc35475f8e801..f8beb7282273088231a807d2fdc9085a969160aa 100644
 --- a/src/agents/agent-bundle-mcp-types.ts
 +++ b/src/agents/agent-bundle-mcp-types.ts
-@@ -26,6 +26,8 @@ export type BundleMcpToolRuntime = {
+@@ -26,6 +26,12 @@ export type BundleMcpToolRuntime = {
    appTools?: AnyAgentTool[];
    diagnostics?: readonly McpToolCatalogDiagnostic[];
    restrictAppTools?: (tools: readonly AnyAgentTool[]) => void;
 +  /** Exact prepared catalog and runtime ownership are still valid for steering. */
 +  isSteeringCatalogCurrent?: () => boolean;
++  /** Consumes only a successful native bootstrap connect for this materialization. */
++  takeRequesterConnectRefresh?: () => readonly string[] | undefined;
++  /** Runtime generation remains owned while a connect refresh awaits discovery. */
++  isRequesterConnectRefreshCurrent?: () => boolean;
    dispose: () => Promise<void>;
  };
  
-@@ -88,6 +90,8 @@ export type McpToolCatalog = {
+@@ -88,8 +94,13 @@ export type McpToolCatalog = {
  export type RequesterMcpConnect = {
    catalog: McpToolCatalog;
    authorizedServerNames: readonly string[];
 +  /** Rechecks the exact requester identities against canonical local grant classification. */
 +  isCurrent?: () => boolean;
    configFingerprint: string;
-   createExecute: (serverName: string) => AnyAgentTool["execute"] | undefined;
+-  createExecute: (serverName: string) => AnyAgentTool["execute"] | undefined;
++  createExecute: (
++    serverName: string,
++    onAuthorized?: () => void,
++  ) => AnyAgentTool["execute"] | undefined;
  };
-@@ -132,6 +136,8 @@ export type SessionMcpRuntime = {
+ 
+ type PreparedNativeMcpServerPolicy = {
+@@ -132,6 +143,10 @@ export type SessionMcpRuntime = {
    /** Present when this runtime is keyed by requester-scoped connection identity. */
    requesterScope?: SessionMcpRequesterScope;
    requesterConnect?: RequesterMcpConnect;
 +  /** Combined facades project currentness from their admitted partition owners. */
 +  isSteeringCatalogCurrent?: () => boolean;
++  /** Excludes only canonical OAuth classification across manager-owned successors. */
++  isRequesterConnectGenerationCurrent?: () => boolean;
    /**
     * True when the named server's connection is requester-scoped. App views for
     * such servers stay fail-closed: views outlive the requester-authenticated
-@@ -149,8 +155,8 @@ export type SessionMcpRuntime = {
+@@ -149,8 +164,12 @@ export type SessionMcpRuntime = {
    acquireLease?: () => () => void;
    /** Terminal server outcome recorded at retirement, with no callable tools. */
    readonly retiredCatalog?: McpToolCatalog;
 -  /** Lists tools if needed and may connect MCP transports. */
 -  getCatalog: () => Promise<McpToolCatalog>;
 +  /** Lists tools if needed. A combined catalog with healthy peers may keep failure recovery in the background. */
-+  getCatalog: (options?: { waitForRecovery?: boolean }) => Promise<McpToolCatalog>;
++  getCatalog: (options?: {
++    waitForRecovery?: boolean;
++    /** A completed native connect makes only these failed servers due for discovery. */
++    retryFailedServerNames?: readonly string[];
++  }) => Promise<McpToolCatalog>;
    /** Returns the cached catalog only; must not start runtimes, connect transports, or issue tools/list. */
    peekCatalog: () => McpToolCatalog | null;
    /** Returns the configured request timeout for a server from the connected session, without touching the catalog. */
@@ -37582,6 +37931,247 @@ index 579b70b66268c895fc1113aa57dfc731bb0ce915..f95e0780d0afdf4932f9527a7dd82242
            modelId: input.modelId,
          });
        } catch (err) {
+diff --git a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
+index ebeedec41e2c52e372fa449af235862e1317a07d..145becf469da05b9fca3f6fcfbc7d59e78a69744 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
+@@ -1,6 +1,7 @@
+ import { getPluginToolMeta } from "../../../plugins/tool-metadata.js";
+ import { createBundleLspToolRuntime } from "../../agent-bundle-lsp-runtime.js";
+ import { TOOL_NAME_SEPARATOR } from "../../agent-bundle-mcp-names.js";
++import { runWithSessionMcpRequestSignal } from "../../agent-bundle-mcp-request-context.js";
+ import { loadSessionMcpConfig } from "../../agent-bundle-mcp-runtime-config.js";
+ import {
+   acquireSessionMcpRuntime,
+@@ -35,6 +36,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+   setup: EmbeddedAttemptSetup;
+   isRawModelRun: boolean;
+   preparedToolBase: PreparedToolBase;
++  assertCurrent?: () => void;
+ }) {
+   const {
+     cronCreatorToolAllowlist,
+@@ -126,30 +128,33 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+         });
+       },
+     });
+-  const bundleMcpAcquisition = bundleMcpEnabled
+-    ? await acquireSessionMcpRuntime({
+-        ...mcpConfig,
+-        sessionId: params.attempt.sessionId,
+-        sessionKey: params.attempt.sessionKey,
+-        agentDir: params.agentDir,
+-        // senderId is only set from the verified inbound sender (sessionCtx.SenderId
+-        // or the triggering run's sender on follow-ups). Cron/subagent/heartbeat runs
+-        // leave it unset, so requester-scoped MCP stays fail-closed for those paths.
+-        requesterSenderId: params.attempt.senderId,
+-        agentAccountId: params.attempt.agentAccountId,
+-        messageChannel: params.attempt.messageChannel ?? params.attempt.messageProvider,
+-      })
+-    : undefined;
+-  const bundleMcpRuntime = bundleMcpAcquisition
+-    ? await materializeBundleMcpToolsForRun({
+-        ...bundleMcpAcquisition,
+-        agentId: params.setup.sessionAgentId,
+-        reservedToolNames: [
+-          ...tools.map((tool) => tool.name),
+-          ...(clientTools?.map((tool) => tool.function.name) ?? []),
+-        ],
+-      })
+-    : undefined;
++  const acquisitionParams = {
++    ...mcpConfig,
++    sessionId: params.attempt.sessionId,
++    sessionKey: params.attempt.sessionKey,
++    agentDir: params.agentDir,
++    // These fields come from the verified original admission, including on refresh.
++    requesterSenderId: params.attempt.senderId,
++    agentAccountId: params.attempt.agentAccountId,
++    messageChannel: params.attempt.messageChannel ?? params.attempt.messageProvider,
++  };
++  const materializeMcp = async (retryFailedServerNames?: readonly string[]) => {
++    const acquisition = await acquireSessionMcpRuntime(acquisitionParams);
++    if (!acquisition) {
++      return undefined;
++    }
++    return await materializeBundleMcpToolsForRun({
++      ...acquisition,
++      agentId: params.setup.sessionAgentId,
++      reservedToolNames: [
++        ...tools.map((tool) => tool.name),
++        ...(clientTools?.map((tool) => tool.function.name) ?? []),
++      ],
++      retryFailedServerNames,
++      nativeRequesterConnectContinuation: true,
++    });
++  };
++  let bundleMcpRuntime = bundleMcpEnabled ? await materializeMcp() : undefined;
+   let bundleLspRuntime: Awaited<ReturnType<typeof createBundleLspToolRuntime>> | undefined;
+   try {
+     const bundleLspEnabled =
+@@ -172,44 +177,51 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+           ],
+         })
+       : undefined;
+-    const allowedBundleMcpTools = applyEmbeddedAttemptToolsAllow(
+-      bundleMcpRuntime?.tools ?? [],
+-      effectiveToolsAllow,
+-      { toolMeta: (tool) => getPluginToolMeta(tool) },
+-    );
+-    const allowedBundleLspTools = applyEmbeddedAttemptToolsAllow(
+-      bundleLspRuntime?.tools ?? [],
+-      effectiveToolsAllow,
+-      { toolMeta: (tool) => getPluginToolMeta(tool) },
+-    );
+-    const filteredBundledTools = applyFinalEffectiveToolPolicy({
+-      bundledTools: [...allowedBundleMcpTools, ...allowedBundleLspTools],
+-      config: params.attempt.config,
+-      workspaceDir: params.setup.effectiveWorkspace,
+-      metadataSnapshot: bundleMetadataSnapshot,
+-      conversationCapabilityProfile: runtimeCapabilityProfile,
+-      warn: (message) => log.warn(message),
+-    });
+-    if (bundleMcpRuntime?.restrictAppTools) {
+-      const runtimeAllowedAppTools = applyEmbeddedAttemptToolsAllow(
+-        bundleMcpRuntime.appTools ?? bundleMcpRuntime.tools,
++    const prepareBundledTools = () => {
++      const allowedBundleMcpTools = applyEmbeddedAttemptToolsAllow(
++        bundleMcpRuntime?.tools ?? [],
++        effectiveToolsAllow,
++        { toolMeta: (tool) => getPluginToolMeta(tool) },
++      );
++      const allowedBundleLspTools = applyEmbeddedAttemptToolsAllow(
++        bundleLspRuntime?.tools ?? [],
+         effectiveToolsAllow,
+         { toolMeta: (tool) => getPluginToolMeta(tool) },
+       );
+-      const allowedAppTools = applyFinalEffectiveToolPolicy({
+-        bundledTools: runtimeAllowedAppTools,
++      const filteredBundledTools = applyFinalEffectiveToolPolicy({
++        bundledTools: [...allowedBundleMcpTools, ...allowedBundleLspTools],
+         config: params.attempt.config,
+         workspaceDir: params.setup.effectiveWorkspace,
+         metadataSnapshot: bundleMetadataSnapshot,
+         conversationCapabilityProfile: runtimeCapabilityProfile,
+         warn: (message) => log.warn(message),
+       });
+-      // The view outlives this attempt; capture policy against the complete MCP catalog now.
+-      bundleMcpRuntime.restrictAppTools(allowedAppTools);
+-    }
+-    const normalizedBundledTools = (
+-      filteredBundledTools.length > 0 ? normalizeTools(filteredBundledTools) : filteredBundledTools
+-    ).map((tool) => wrapToolWithBeforeToolCallHook(tool, params.preparedToolBase.toolHookContext));
++      if (bundleMcpRuntime?.restrictAppTools) {
++        const runtimeAllowedAppTools = applyEmbeddedAttemptToolsAllow(
++          bundleMcpRuntime.appTools ?? bundleMcpRuntime.tools,
++          effectiveToolsAllow,
++          { toolMeta: (tool) => getPluginToolMeta(tool) },
++        );
++        const allowedAppTools = applyFinalEffectiveToolPolicy({
++          bundledTools: runtimeAllowedAppTools,
++          config: params.attempt.config,
++          workspaceDir: params.setup.effectiveWorkspace,
++          metadataSnapshot: bundleMetadataSnapshot,
++          conversationCapabilityProfile: runtimeCapabilityProfile,
++          warn: (message) => log.warn(message),
++        });
++        // The view outlives this attempt; capture policy against the complete MCP catalog now.
++        bundleMcpRuntime.restrictAppTools(allowedAppTools);
++      }
++      return (
++        filteredBundledTools.length > 0
++          ? normalizeTools(filteredBundledTools)
++          : filteredBundledTools
++      ).map((tool) =>
++        wrapToolWithBeforeToolCallHook(tool, params.preparedToolBase.toolHookContext),
++      );
++    };
++    let normalizedBundledTools = prepareBundledTools();
+     const projectTools = (coreTools: typeof toolsRaw) => {
+       const projectedTools = filterLocalModelLeanTools({
+         tools: [...coreTools, ...normalizedBundledTools].map((tool) =>
+@@ -247,12 +259,80 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+       return schemaProjection.tools;
+     };
+     const uncompactedEffectiveTools = projectTools(tools);
++    let mcpRefresh: Promise<boolean> | undefined;
++    const assertRefreshCurrent = (signal: AbortSignal, generation: AbortSignal) => {
++      signal.throwIfAborted();
++      generation.throwIfAborted();
++      params.assertCurrent?.();
++      if (
++        params.attempt.sessionId !== acquisitionParams.sessionId ||
++        params.attempt.sessionKey !== acquisitionParams.sessionKey ||
++        params.attempt.senderId !== acquisitionParams.requesterSenderId ||
++        params.attempt.agentAccountId !== acquisitionParams.agentAccountId ||
++        (params.attempt.messageChannel ?? params.attempt.messageProvider) !==
++          acquisitionParams.messageChannel ||
++        params.attempt.config !== acquisitionParams.cfg ||
++        params.setup.getCurrentAttemptPluginMetadataSnapshot() !== bundleMetadataSnapshot ||
++        params.attempt.pluginRuntimeRefreshPending?.()
++      ) {
++        throw new Error("MCP requester connect attempt is no longer current");
++      }
++    };
+     return {
+       bundleLspRuntime,
+-      bundleMcpRuntime,
++      get bundleMcpRuntime() {
++        return bundleMcpRuntime;
++      },
+       clientTools,
+       tools,
+       uncompactedEffectiveTools,
++      refreshMcpTools: async (signal: AbortSignal) => {
++        if (mcpRefresh) {
++          return await mcpRefresh;
++        }
++        const previous = bundleMcpRuntime;
++        const connectedServerNames = previous?.takeRequesterConnectRefresh?.();
++        if (!previous || !connectedServerNames) {
++          return false;
++        }
++        const generation = params.preparedToolBase.toolAbortSignal;
++        assertRefreshCurrent(signal, generation);
++        mcpRefresh = (async () => {
++          let next: typeof bundleMcpRuntime;
++          try {
++            next = await runWithSessionMcpRequestSignal(
++              AbortSignal.any([signal, generation]),
++              async () => await materializeMcp(connectedServerNames),
++            );
++            assertRefreshCurrent(signal, generation);
++            if (
++              !next ||
++              previous.isRequesterConnectRefreshCurrent?.() !== true ||
++              next.isSteeringCatalogCurrent?.() !== true
++            ) {
++              throw new Error("MCP requester connect catalog is no longer current");
++            }
++            await previous.dispose();
++            assertRefreshCurrent(signal, generation);
++            if (!next.isSteeringCatalogCurrent?.()) {
++              throw new Error("MCP requester connect catalog is no longer current");
++            }
++            bundleMcpRuntime = next;
++            normalizedBundledTools = prepareBundledTools();
++            const nextTools = projectTools(tools);
++            uncompactedEffectiveTools.splice(0, uncompactedEffectiveTools.length, ...nextTools);
++            return true;
++          } catch (error) {
++            await next?.dispose();
++            throw error;
++          }
++        })();
++        try {
++          return await mcpRefresh;
++        } finally {
++          mcpRefresh = undefined;
++        }
++      },
+       refreshTools: () => {
+         const nextTools = normalizeTools(toolsEnabled ? toolsRaw : []);
+         tools.splice(0, tools.length, ...nextTools);
 diff --git a/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts b/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts
 index b300885c4431e6aac9607e1bc0af39aaf6dc288f..0eea80f496b51c458e5ba278a6f43158f476efd7 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts
@@ -37675,7 +38265,7 @@ index 2a39e8ba79b96d772f2eb461f565a3d52d4b4335..2786a52b6a95b54ff33179c053903a86
      ["stop", 10_000, "event"],
      ["stop", 0, "event"],
 diff --git a/src/agents/embedded-agent-runner/run/attempt-execution-phase.ts b/src/agents/embedded-agent-runner/run/attempt-execution-phase.ts
-index 4d24726f2afc2965236c7ad4eae7032f1f0106e9..a7018412137356794a99585682f62c2c8deb0395 100644
+index 4d24726f2afc2965236c7ad4eae7032f1f0106e9..a349e7e5a9524a0fbef78a689abc6a33cdbfba9d 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-execution-phase.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-execution-phase.ts
 @@ -58,7 +58,7 @@ export async function runEmbeddedAttemptExecutionPhase(
@@ -37687,14 +38277,15 @@ index 4d24726f2afc2965236c7ad4eae7032f1f0106e9..a7018412137356794a99585682f62c2c
      installEmbeddedAttemptStreamGuards(input, {
        onRejectedProviderReplayRepaired: () => {
          repairedRejectedProviderReplay = true;
-@@ -135,6 +135,11 @@ export async function runEmbeddedAttemptExecutionPhase(
+@@ -135,6 +135,12 @@ export async function runEmbeddedAttemptExecutionPhase(
      : undefined;
    const preparedStream = prepareEmbeddedAttemptStream({
      attempt,
 +    getAcceptedAutoAuthProfileId,
-+    isSteeringCatalogCurrent: input.prepared.bundleTools.bundleMcpRuntime
-+      ? (input.prepared.bundleTools.bundleMcpRuntime.isSteeringCatalogCurrent ?? (() => false))
-+      : () => true,
++    isSteeringCatalogCurrent: () => {
++      const runtime = input.prepared.bundleTools.bundleMcpRuntime;
++      return runtime ? runtime.isSteeringCatalogCurrent?.() === true : true;
++    },
 +    withOwnedTranscriptWrite: input.sessionLock.withOwnedTranscriptWrite,
      onModelUsage,
      applyPermissionMode: input.lifecycle.applyPermissionMode,
@@ -39214,10 +39805,40 @@ index 0000000000000000000000000000000000000000..96d8851ff7f22b90d3163951bc322268
 +  });
 +});
 diff --git a/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts b/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
-index 9c54c10763ab9a4a126ca333d188e5fe05067ecc..e27124c7a32522274f1226859cf9422c4e5c1ffa 100644
+index 9c54c10763ab9a4a126ca333d188e5fe05067ecc..4e67f5b0550d671901f3f3ef50b79d2acf992171 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-session-prepare.ts
-@@ -400,7 +400,10 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
+@@ -97,6 +97,7 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
+   transcriptLifecycle: EmbeddedAttemptTranscriptLifecycle;
+   sessionManager: AttemptSessionManager;
+   assertInitialUserTurnReplay?: () => void;
++  prepareNextTurnTools?: (signal: AbortSignal) => Promise<boolean>;
+ }) {
+   const { attempt } = input;
+   const settingsManager = createPreparedEmbeddedAgentSettingsManager({
+@@ -287,13 +288,19 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
+       return { stop: true };
+     }
+     const snapshot = await previousPrepareNextTurn?.call(activeSession.agent, signal);
++    if (snapshot?.stop) {
++      return snapshot;
++    }
++    input.runAbortSignal.throwIfAborted();
++    const toolsRefreshed = await input.prepareNextTurnTools?.(signal ?? input.runAbortSignal);
++    input.runAbortSignal.throwIfAborted();
+     const refreshedPrompt = await refreshPermissionPrompt(snapshot?.context?.systemPrompt, signal);
+-    return snapshot?.context && refreshedPrompt !== undefined
++    return snapshot?.context && (refreshedPrompt !== undefined || toolsRefreshed)
+       ? {
+           ...snapshot,
+           context: {
+             ...snapshot.context,
+-            systemPrompt: refreshedPrompt,
++            systemPrompt: refreshedPrompt ?? snapshot.context.systemPrompt,
+             tools: activeSession.agent.state.tools.slice(),
+           },
+         }
+@@ -400,7 +407,10 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
      : resolveOrphanRepairPlan({
          sessionManager,
          prompt: attempt.prompt,
@@ -39228,6 +39849,26 @@ index 9c54c10763ab9a4a126ca333d188e5fe05067ecc..e27124c7a32522274f1226859cf9422c
            attempt.skipPreparedUserTurnMessage === true ||
            isMainSessionRestartRecoveryInputProvenance(attempt.inputProvenance),
          trigger: attempt.trigger,
+diff --git a/src/agents/embedded-agent-runner/run/attempt-session-runtime-prepare.ts b/src/agents/embedded-agent-runner/run/attempt-session-runtime-prepare.ts
+index ff5159d5e7e37439caed7ba5ce83e9f5690e97c6..c770d3811b95d52fdccc18fe10f35702a7e54f40 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-session-runtime-prepare.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-session-runtime-prepare.ts
+@@ -52,6 +52,7 @@ export async function prepareEmbeddedAttemptSessionRuntime(input: {
+   systemPrompt: Awaited<ReturnType<typeof prepareEmbeddedAttemptSystemPrompt>>;
+   sessionLock: Awaited<ReturnType<typeof prepareEmbeddedAttemptTranscriptLifecycle>>;
+   runAbortSignal: AbortSignal;
++  prepareNextTurnTools?: (signal: AbortSignal) => Promise<boolean>;
+   externalAbortController: Pick<EmbeddedAttemptExternalAbortController, "setActiveSessionAbort">;
+   resources: EmbeddedAttemptSessionResources;
+   onSessionYieldReady: (input: {
+@@ -153,6 +154,7 @@ export async function prepareEmbeddedAttemptSessionRuntime(input: {
+     transcriptLifecycle: sessionLock.transcriptLifecycle,
+     sessionManager,
+     assertInitialUserTurnReplay: preparedSessionManager.assertInitialUserTurnReplay,
++    prepareNextTurnTools: input.prepareNextTurnTools,
+   });
+   const { activeSession, setActiveSessionSystemPrompt, settingsManager } = preparedAgentSession;
+   const recordCurrentTurnImageFailure = (count: number) => {
 diff --git a/src/agents/embedded-agent-runner/run/attempt-settle.ts b/src/agents/embedded-agent-runner/run/attempt-settle.ts
 index 26031dae0c372e3aa64eea6b3e6382b5ddc3aba6..b4ac8cae4a814faa4744c46bf9d4cd533c913cbb 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-settle.ts
@@ -40272,6 +40913,532 @@ index 1c4278da05316bbe70a6f3302581e47312571ce7..5a89c2d3d23c6c664db8accf201442aa
      attempt.yieldDetected === true ||
      run.replyOperation?.turnKind !== "visible" ||
      run.currentInboundEventKind === "room_event" ||
+diff --git a/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts b/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cecce9bba4ca5054a9989167e8e8f9ad4d17885
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts
+@@ -0,0 +1,520 @@
++import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
++import { expectDefined } from "@openclaw/normalization-core";
++import type { Context, Model } from "openclaw/plugin-sdk/llm";
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { withTestTimeout } from "../../../../test/helpers/promise.js";
++import type { OpenClawConfig } from "../../../config/types.openclaw.js";
++import { createDeferredCore } from "../../../shared/deferred.js";
++import { startCatalogRecoveryMcpServer } from "../../agent-bundle-mcp-catalog-recovery.test-support.js";
++import { createSessionMcpRuntimeManager } from "../../agent-bundle-mcp-manager.js";
++import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-materialize.js";
++import { SESSION_MCP_RUNTIME_MANAGER_KEY } from "../../agent-bundle-mcp-runtime-shared.js";
++import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
++import { requesterMcpOAuthIdentity } from "../../mcp-oauth-identity.js";
++import { readMcpOAuthStore, updateMcpOAuthStore } from "../../mcp-oauth-store.js";
++import { withTempHome } from "../../mcp-oauth.test-harness.js";
++import {
++  createAssistant,
++  createAssistantResultStream,
++  streamMocks,
++  testModel,
++} from "../../sessions/agent-session-loop-correctness.test-support.js";
++import { createResourceLoader } from "../../sessions/agent-session-loop-resource-loader.test-support.js";
++import { AuthStorage } from "../../sessions/auth-storage.js";
++import { ModelRegistry } from "../../sessions/model-registry.js";
++import { SessionManager } from "../../sessions/session-manager.js";
++import { SettingsManager } from "../../sessions/settings-manager.js";
++import { resolveToolSearchConfig } from "../../tool-search-config.js";
++import { prepareEmbeddedAttemptBundleTools } from "./attempt-bundle-tools.js";
++import { createPromptBuildToolPolicy } from "./attempt-prompt-support.js";
++import { prepareEmbeddedAttemptAgentSession } from "./attempt-session-prepare.js";
++import { createAttemptSetupFixture } from "./attempt-setup.test-support.js";
++import { prepareEmbeddedAttemptToolCatalog } from "./attempt-tool-catalog.js";
++import type { EmbeddedRunAttemptParams } from "./types.js";
++
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), acquire: vi.fn() }));
++vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
++  auth: mocks.auth,
++  UnauthorizedError: class extends Error {},
++  // The isolated HTTP fixture has no authentication challenge. Native bearer,
++  // OAuth lease/store, requester identity and transport remain production code.
++  extractWWWAuthenticateParams: () => ({}),
++}));
++vi.mock("../../../llm/stream.js", () => ({
++  streamSimple: (...args: unknown[]) => streamMocks.streamSimple(...args),
++}));
++vi.mock("../../../plugins/hook-runner-global.js", () => ({ getGlobalHookRunner: () => undefined }));
++vi.mock("../../agent-bundle-lsp-runtime.js", () => ({
++  createBundleLspToolRuntime: async () => undefined,
++}));
++vi.mock("../../agent-bundle-mcp-tools.js", () => ({
++  acquireSessionMcpRuntime: (...args: unknown[]) => mocks.acquire(...args),
++  materializeBundleMcpToolsForRun: (...args: Parameters<typeof materializeBundleMcpToolsForRun>) =>
++    materializeBundleMcpToolsForRun(...args),
++}));
++vi.mock("../../agent-project-settings.js", () => ({
++  createPreparedEmbeddedAgentSettingsManager: () =>
++    SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
++}));
++vi.mock("../../agent-settings.js", () => ({
++  applyAgentAutoCompactionGuard: () => {},
++  applyAgentCompactionSettingsFromConfig: () => {},
++  isSilentOverflowProneModel: () => false,
++  resolveEffectiveCompactionMode: () => "safeguard",
++}));
++vi.mock("../../runtime-plan/tools.js", () => ({
++  normalizeAgentRuntimeTools: ({ tools }: { tools: unknown[] }) => [...tools],
++  logAgentRuntimeToolDiagnostics: () => {},
++}));
++vi.mock("../extensions.js", () => ({ buildEmbeddedExtensionFactories: () => [] }));
++vi.mock("../resource-loader.js", () => ({
++  createEmbeddedAgentResourceLoader: () => createResourceLoader(),
++}));
++
++beforeEach(() => {
++  mocks.auth.mockReset();
++  mocks.acquire.mockReset();
++  streamMocks.streamSimple.mockReset();
++});
++
++type Boundary =
++  | "ordinary"
++  | "admission-expired"
++  | "requires-authorization"
++  | "tokenless-authorized"
++  | "post-publication"
++  | "prior-context"
++  | "prior-stop"
++  | "pending"
++  | "empty"
++  | "wrong-owner"
++  | "revoked"
++  | "generation"
++  | "generation-same-config"
++  | "abort";
++
++async function withContinuation(
++  boundary: Boundary,
++  run: (fixture: {
++    prompt: Promise<void>;
++    requests: string[][];
++    server: Awaited<ReturnType<typeof startCatalogRecoveryMcpServer>>;
++    rotate: () => Promise<void>;
++    abort: () => void;
++    refreshEntered: Promise<void>;
++    sessionId: string;
++    originalStoreKey: string;
++    nativeError: () => string | undefined;
++  }) => Promise<void>,
++) {
++  await withTempHome(
++    async (home) => {
++      const initiallyUnauthorized =
++        boundary === "requires-authorization" || boundary === "tokenless-authorized";
++      const server = await startCatalogRecoveryMcpServer("recovery", {
++        failFirstList: !initiallyUnauthorized,
++        failRecoveryList: boundary === "empty",
++        holdFirstList: initiallyUnauthorized,
++      });
++      server.allowCalls();
++      const manager = createSessionMcpRuntimeManager({ enableIdleSweepTimer: false });
++      const singleton = globalThis as Record<PropertyKey, unknown>;
++      const previousManager = singleton[SESSION_MCP_RUNTIME_MANAGER_KEY];
++      singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = manager;
++      const runAbort = new AbortController();
++      const generation = new AbortController();
++      const sessionManager = SessionManager.inMemory(home);
++      const sessionId = sessionManager.getSessionId();
++      const scope = {
++        requesterSenderId: "alice",
++        agentAccountId: "bot",
++        messageChannel: "discord",
++      };
++      const identity = requesterMcpOAuthIdentity("recovery", server.url, scope);
++      const cfg: OpenClawConfig = {
++        plugins: { enabled: false },
++        gateway: { publicOrigin: "https://gateway.example" },
++        tools: { profile: "full", toolSearch: { enabled: false } },
++        mcp: {
++          servers: {
++            recovery: {
++              transport: "streamable-http",
++              url: server.url,
++              auth: "oauth",
++              oauth: { identity: "per-requester", scope: "offline_access recovery:read" },
++              requestTimeoutMs: 2_000,
++            },
++          },
++        },
++      };
++      updateMcpOAuthStore(identity.storeKey, () => ({
++        clientInformation: { client_id: "original-client" },
++        ...(boundary === "pending" || boundary === "tokenless-authorized"
++          ? {}
++          : {
++              tokens: {
++                access_token: "fixture-original-access",
++                refresh_token: "fixture-original-refresh",
++                token_type: "Bearer",
++                scope: "offline_access recovery:read",
++              },
++              tokenExpiresAt: Date.now() + (boundary === "admission-expired" ? -60_000 : 120_000),
++              ...(boundary === "requires-authorization"
++                ? { pendingAuthorizationChallenge: { requiresAuthorization: true } }
++                : {}),
++            }),
++      }));
++      const authStorage = AuthStorage.inMemory();
++      authStorage.setRuntimeApiKey(testModel.provider, "fixture-model-key");
++      const modelRegistry = ModelRegistry.inMemory(authStorage);
++      modelRegistry.registerProvider(testModel.provider, {
++        api: testModel.api,
++        streamSimple: streamMocks.streamSimple,
++      });
++      const attempt = {
++        config: cfg,
++        authStorage,
++        modelRegistry,
++        model: testModel,
++        modelId: testModel.id,
++        provider: testModel.provider,
++        runId: "original-run",
++        sessionId,
++        sessionKey: "agent:main:discord:channel:fixture",
++        senderId: scope.requesterSenderId,
++        agentAccountId: scope.agentAccountId,
++        messageChannel: scope.messageChannel,
++        workspaceDir: home,
++        runtimePlan: {},
++        contextTokenBudget: testModel.contextWindow,
++      } as unknown as EmbeddedRunAttemptParams;
++      const setup = createAttemptSetupFixture({ effectiveCwd: home, effectiveWorkspace: home });
++      const toolBase = {
++        toolsRaw: [],
++        toolsEnabled: true,
++        toolAbortSignal: generation.signal,
++        effectiveToolsAllow: undefined,
++        inheritedToolAllowlist: [],
++        cronCreatorToolAllowlist: [],
++        localModelLeanPreserveToolNames: [],
++        runtimeCapabilityProfile: resolveConversationCapabilityProfile({ config: cfg }),
++        toolSearchConfig: resolveToolSearchConfig(cfg),
++        toolSearchRuntimeConfig: cfg,
++        toolSearchControlsEnabledForRun: false,
++        codeModeControlsEnabledForRun: false,
++        codeModeSkills: [],
++        replaySafetyOptions: {},
++      } as unknown as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0]["preparedToolBase"];
++      mocks.acquire.mockImplementation((params: Parameters<typeof manager.acquire>[0]) => {
++        expect(params.requesterSenderId).toBe(scope.requesterSenderId);
++        expect(params.agentAccountId).toBe(scope.agentAccountId);
++        expect(params.messageChannel).toBe(scope.messageChannel);
++        expect(params.sessionId).toBe(sessionId);
++        return manager.acquire(params);
++      });
++      mocks.auth.mockImplementation(async (provider: OAuthClientProvider) => {
++        expect(await provider.clientInformation()).toMatchObject({ client_id: "original-client" });
++        if (boundary === "pending") {
++          await provider.saveCodeVerifier("fixture-code-verifier");
++          await provider.redirectToAuthorization(
++            new URL("https://auth.example/authorize?state=fixture"),
++          );
++          return "REDIRECT";
++        }
++        await provider.saveTokens({
++          access_token: "fixture-renewed-access",
++          refresh_token: "fixture-original-refresh",
++          token_type: "Bearer",
++          expires_in: 900,
++          scope: "offline_access recovery:read",
++        });
++        if (boundary === "wrong-owner") {
++          attempt.senderId = "bob";
++        } else if (boundary === "revoked") {
++          updateMcpOAuthStore(identity.storeKey, (store) => ({
++            ...store,
++            pendingAuthorizationChallenge: { requiresAuthorization: true },
++          }));
++        }
++        return "AUTHORIZED";
++      });
++      let bundle = await prepareEmbeddedAttemptBundleTools({
++        agentDir: home,
++        attempt,
++        setup,
++        isRawModelRun: false,
++        preparedToolBase: toolBase,
++        assertCurrent: () => runAbort.signal.throwIfAborted(),
++      });
++      if (boundary === "post-publication") {
++        await manager.reloadConfig({ cfg });
++        expect(bundle.bundleMcpRuntime?.isRequesterConnectRefreshCurrent?.()).toBe(false);
++        await bundle.bundleMcpRuntime?.dispose();
++        bundle = await prepareEmbeddedAttemptBundleTools({
++          agentDir: home,
++          attempt,
++          setup,
++          isRawModelRun: false,
++          preparedToolBase: toolBase,
++          assertCurrent: () => runAbort.signal.throwIfAborted(),
++        });
++        expect(bundle.bundleMcpRuntime?.isRequesterConnectRefreshCurrent?.()).toBe(true);
++      }
++      expect(bundle.uncompactedEffectiveTools.map((tool) => tool.name)).toEqual([
++        "recovery__connect",
++      ]);
++      const catalog = prepareEmbeddedAttemptToolCatalog({
++        attempt,
++        setup,
++        preparedToolBase: toolBase,
++        bundleTools: bundle,
++        abortSignal: runAbort.signal,
++        executeCodeModeTool: async () => ({ content: [], details: {} }),
++      });
++      let prepared: Awaited<ReturnType<typeof prepareEmbeddedAttemptAgentSession>> | undefined;
++      let policy: ReturnType<typeof createPromptBuildToolPolicy> | undefined;
++      const refreshEntered = createDeferredCore();
++      const requests: string[][] = [];
++      let originalPrompt: Promise<void> | undefined;
++      try {
++        prepared = await prepareEmbeddedAttemptAgentSession({
++          attempt,
++          agentCoreThinkingLevel: "off",
++          agentDir: home,
++          effectiveCwd: home,
++          getCurrentAttemptPluginMetadataSnapshot: () => undefined,
++          initialSystemPrompt:
++            "Complete the original query through the requester's saved connection.",
++          markStage: () => {},
++          onSessionCreated: (session) => {
++            if (boundary === "prior-stop") {
++              // The SDK calls this hook after the first model response/tool batch.
++              session.agent.prepareNextTurn = () => ({ stop: true });
++            } else if (boundary === "prior-context") {
++              session.agent.prepareNextTurn = () => ({
++                context: {
++                  systemPrompt: session.agent.state.systemPrompt,
++                  messages: session.agent.state.messages,
++                  tools: session.agent.state.tools.slice(),
++                },
++              });
++            }
++          },
++          onSystemPromptChanged: () => {},
++          runAbortSignal: runAbort.signal,
++          sessionAgentId: "main",
++          sessionManager,
++          transcriptLifecycle: {
++            withTranscriptWrite: async (write: () => unknown) => await write(),
++          } as never,
++          clientToolPreparation: {
++            catalogToolHookContext: undefined,
++            clientTools: undefined,
++            codeModeControlsEnabledForRun: false,
++            deferredDirectoryToolsCallable: false,
++            effectiveTools: catalog.effectiveTools,
++            replaySafetyOptions: {},
++            sandboxEnabled: false,
++            sessionAgentId: "main",
++            toolSearchRuntimeConfig: cfg,
++            uncompactedEffectiveTools: bundle.uncompactedEffectiveTools,
++            getToolAbortSignal: () => generation.signal,
++          },
++          // This is the production next-turn owner, not an overridden agent hook.
++          // On the old source this input is ignored, so the next real provider
++          // request keeps connect-only tools and the query oracle below fails.
++          prepareNextTurnTools: async (signal) => {
++            if (!(await bundle.refreshMcpTools(signal))) {
++              return false;
++            }
++            refreshEntered.resolve();
++            catalog.refreshTools();
++            expectDefined(prepared, "native session").refreshTools();
++            expectDefined(policy, "prompt policy").refresh();
++            return true;
++          },
++        });
++        policy = createPromptBuildToolPolicy({
++          session: prepared.activeSession,
++          effectiveTools: catalog.effectiveTools,
++          uncompactedEffectiveTools: bundle.uncompactedEffectiveTools,
++          tools: bundle.tools,
++          codeModeControlsEnabled: false,
++        });
++        streamMocks.streamSimple.mockImplementation((model: Model, context: Context) => {
++          requests.push(context.tools?.map((tool) => tool.name) ?? []);
++          const query = requests.length === 2 && requests[1]?.includes("recovery__probe");
++          const toolName =
++            requests.length === 1 ? "recovery__connect" : query ? "recovery__probe" : undefined;
++          return createAssistantResultStream(
++            createAssistant(
++              model,
++              toolName
++                ? [
++                    {
++                      type: "toolCall",
++                      id: `call-${requests.length}`,
++                      name: toolName,
++                      arguments: {},
++                    },
++                  ]
++                : [{ type: "text", text: "Completed the original task." }],
++              toolName ? "toolUse" : "stop",
++            ),
++          );
++        });
++        if (boundary === "ordinary" || boundary === "prior-context") {
++          updateMcpOAuthStore(identity.storeKey, (store) => ({
++            ...store,
++            tokenExpiresAt: Date.now() - 60_000,
++          }));
++        }
++        const prompt = prepared.activeSession.prompt("Run the original query now.");
++        originalPrompt = prompt;
++        // Observe rejection immediately while the caller releases any held HTTP list.
++        void prompt.catch(() => undefined);
++        await run({
++          prompt,
++          requests,
++          server,
++          rotate: async () =>
++            manager.reloadConfig({
++              cfg:
++                boundary === "generation-same-config"
++                  ? cfg
++                  : {
++                      ...cfg,
++                      mcp: {
++                        servers: { recovery: { ...cfg.mcp!.servers!.recovery!, enabled: false } },
++                      },
++                    },
++            }),
++          abort: () => runAbort.abort(),
++          refreshEntered: refreshEntered.promise,
++          sessionId,
++          originalStoreKey: identity.storeKey,
++          nativeError: () => prepared?.activeSession.agent.state.errorMessage,
++        });
++        expect(
++          prepared.activeSession.messages.filter((message) => message.role === "user"),
++        ).toHaveLength(1);
++      } finally {
++        server.releaseLists();
++        await originalPrompt?.catch(() => undefined);
++        prepared?.activeSession.dispose();
++        await bundle.bundleMcpRuntime?.dispose();
++        await manager.disposeAll();
++        if (previousManager === undefined) {
++          delete singleton[SESSION_MCP_RUNTIME_MANAGER_KEY];
++        } else {
++          singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = previousManager;
++        }
++        await server.close();
++      }
++    },
++    {
++      prefix: "openclaw-native-connect-continuation-",
++      skipSessionCleanup: true,
++      env: { OPENCLAW_CONFIG_PATH: undefined, OPENCLAW_STATE_DIR: undefined },
++    },
++  );
++}
++
++describe("native same-attempt requester connect continuation", () => {
++  it.each([
++    "ordinary",
++    "admission-expired",
++    "requires-authorization",
++    "tokenless-authorized",
++    "post-publication",
++    "prior-context",
++  ] as const)(
++    "discovers and calls protected tools after one saved-grant connect without another inbound: %s",
++    async (boundary) => {
++      await withContinuation(boundary, async ({ prompt, requests, server, originalStoreKey }) => {
++        await withTestTimeout(
++          server.recoveryListStarted,
++          2_000,
++          "same-attempt discovery did not start",
++        );
++        expect(requests).toEqual([["recovery__connect"]]);
++        server.releaseLists();
++        await withTestTimeout(prompt, 2_000, "original attempt did not continue");
++        expect(requests).toEqual([["recovery__connect"], ["recovery__probe"], ["recovery__probe"]]);
++        expect(mocks.acquire).toHaveBeenCalledTimes(boundary === "post-publication" ? 3 : 2);
++        expect(mocks.auth).toHaveBeenCalledTimes(boundary === "admission-expired" ? 2 : 1);
++        expect(server.listCount()).toBe(
++          boundary === "requires-authorization" || boundary === "tokenless-authorized" ? 1 : 2,
++        );
++        expect(server.callCount()).toBe(1);
++        expect(readMcpOAuthStore(originalStoreKey).tokens?.refresh_token).toBe(
++          "fixture-original-refresh",
++        );
++        expect(readMcpOAuthStore(originalStoreKey).clientInformation?.client_id).toBe(
++          "original-client",
++        );
++      });
++    },
++  );
++
++  it.each(["pending", "empty", "revoked"] as const)(
++    "keeps %s authorization/discovery connect-only without a fabricated protected query",
++    async (boundary) => {
++      await withContinuation(boundary, async ({ prompt, requests, server }) => {
++        await withTestTimeout(prompt, 2_000, "connect-only attempt did not settle");
++        if (boundary === "revoked") {
++          expect(requests.length).toBeGreaterThanOrEqual(1);
++          expect(
++            requests.every((tools) => tools.length === 1 && tools[0] === "recovery__connect"),
++          ).toBe(true);
++        } else {
++          expect(requests).toEqual([["recovery__connect"], ["recovery__connect"]]);
++        }
++        expect(server.callCount()).toBe(0);
++        expect(mocks.acquire).toHaveBeenCalledTimes(boundary === "empty" ? 2 : 1);
++        expect(server.listCount()).toBe(boundary === "pending" ? 0 : boundary === "empty" ? 2 : 1);
++      });
++    },
++  );
++
++  it("preserves a prior next-turn owner's stop without starting discovery", async () => {
++    await withContinuation("prior-stop", async ({ prompt, requests, server }) => {
++      await withTestTimeout(prompt, 2_000, "prior owner stop did not settle");
++      expect(requests).toEqual([["recovery__connect"]]);
++      expect(mocks.acquire).toHaveBeenCalledOnce();
++      expect(server.listCount()).toBe(1);
++      expect(server.callCount()).toBe(0);
++    });
++  });
++
++  it("rejects a different requester before catalog reacquisition", async () => {
++    await withContinuation("wrong-owner", async ({ prompt, requests, server, nativeError }) => {
++      await withTestTimeout(prompt, 2_000, "wrong-owner terminal outcome did not settle");
++      expect(nativeError()).toContain("MCP requester connect attempt is no longer current");
++      expect(requests).toEqual([["recovery__connect"]]);
++      expect(mocks.acquire).toHaveBeenCalledOnce();
++      expect(server.callCount()).toBe(0);
++    });
++  });
++
++  it.each(["generation", "generation-same-config", "abort"] as const)(
++    "does not publish a protected catalog after %s while discovery awaits",
++    async (boundary) => {
++      await withContinuation(boundary, async ({ prompt, requests, server, rotate, abort }) => {
++        await withTestTimeout(server.recoveryListStarted, 2_000, "discovery did not await");
++        if (boundary === "generation" || boundary === "generation-same-config") {
++          const rotating = rotate();
++          server.releaseLists();
++          await rotating;
++        } else {
++          abort();
++        }
++        server.releaseLists();
++        await prompt.catch(() => undefined);
++        expect(requests).toEqual([["recovery__connect"]]);
++        expect(server.callCount()).toBe(0);
++        expect(mocks.acquire).toHaveBeenCalledTimes(2);
++      });
++    },
++  );
++});
 diff --git a/src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts b/src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..c19dec4ec25b474dbde2040424f468297fb7fb40
@@ -40525,6 +41692,54 @@ index 0000000000000000000000000000000000000000..c19dec4ec25b474dbde2040424f46829
 +    expect(JSON.stringify(requests)).not.toContain("revoked");
 +  });
 +});
+diff --git a/src/agents/embedded-agent-runner/run/attempt.ts b/src/agents/embedded-agent-runner/run/attempt.ts
+index 14d3a2fc825c34efca993a3b47793e4cadf98875..ef8cd96c8b71586ac5b8dfdd16913d29d67bd09e 100644
+--- a/src/agents/embedded-agent-runner/run/attempt.ts
++++ b/src/agents/embedded-agent-runner/run/attempt.ts
+@@ -273,6 +273,10 @@ export async function runEmbeddedAttempt(
+           setup,
+           isRawModelRun,
+           preparedToolBase,
++          assertCurrent: () => {
++            externalAbortController.throwIfFired();
++            assertActiveRun?.();
++          },
+         }),
+       ),
+     );
+@@ -327,6 +331,7 @@ export async function runEmbeddedAttempt(
+         externalAbortController,
+       }),
+     );
++    let prepareNextTurnTools: ((signal: AbortSignal) => Promise<boolean>) | undefined;
+     try {
+       const preparedSessionRuntime = await prepare("attempt.session-runtime", () =>
+         prepareEmbeddedAttemptSessionRuntime({
+@@ -342,6 +347,7 @@ export async function runEmbeddedAttempt(
+           systemPrompt: preparedSystemPrompt,
+           sessionLock,
+           runAbortSignal: runAbortController.signal,
++          prepareNextTurnTools: async (signal) => (await prepareNextTurnTools?.(signal)) ?? false,
+           externalAbortController,
+           resources,
+           onSessionYieldReady: ({ abortActiveSession, activeSession }) => {
+@@ -373,6 +379,16 @@ export async function runEmbeddedAttempt(
+           ...(params.swarmCollector && params.swarmOutputSchema ? ["structured_output"] : []),
+         ],
+       });
++      prepareNextTurnTools = async (signal) => {
++        if (!(await preparedBundleTools.refreshMcpTools(signal))) {
++          return false;
++        }
++        bundleMcpRuntime = preparedBundleTools.bundleMcpRuntime;
++        preparedToolCatalog.refreshTools();
++        preparedSessionRuntime.agentSession.refreshTools();
++        promptToolPolicy.refresh();
++        return true;
++      };
+       const executionResult = await runEmbeddedAttemptExecutionPhase({
+         attempt: params,
+         ...(activeContextEngine ? { activeContextEngine } : {}),
 diff --git a/src/agents/embedded-agent-runner/run/backend.test.ts b/src/agents/embedded-agent-runner/run/backend.test.ts
 index 643fd71e3d3490ba92935d49e86df70692cbd465..21b8244370b50bd3f5e70d201df39be5a96d71f6 100644
 --- a/src/agents/embedded-agent-runner/run/backend.test.ts
@@ -71699,680 +72914,6 @@ index 0000000000000000000000000000000000000000..4f044edcb196b357fab35b7dc3d17c2e
 +    },
 +  );
 +});
-diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.retained-custody.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.retained-custody.test.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..68bd5bee2c728c49e0107d9c3871fdbd54bf64ed
---- /dev/null
-+++ b/src/auto-reply/reply/agent-runner-steer-adoption.retained-custody.test.ts
-@@ -0,0 +1,325 @@
-+import { afterEach, describe, expect, it, vi } from "vitest";
-+import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
-+import { setActiveEmbeddedRun } from "../../agents/embedded-agent-runner/runs.js";
-+import {
-+  createEmbeddedRunHandle,
-+  testing as embeddedTesting,
-+} from "../../agents/embedded-agent-runner/runs.test-support.js";
-+import { QuestionAnswerUnconfirmedError } from "../../agents/harness/gateway-question-dispatch.js";
-+import { retryRetainedFollowupSteers } from "./agent-runner-steer-adoption.js";
-+import {
-+  bindRetainedSource,
-+  createRetainedCodexSteeringQueue,
-+  holdAdoptedSource,
-+} from "./agent-runner-steer-adoption.retained.test-support.js";
-+import { MessageInjectionAuthorityError } from "./message-injection-authority.js";
-+import {
-+  clearSessionQueues,
-+  enqueueFollowupRun,
-+  scheduleFollowupDrain,
-+  type FollowupRun,
-+} from "./queue.js";
-+import { createQueueTestRun } from "./queue.test-helpers.js";
-+import { getExistingFollowupQueue } from "./queue/state.js";
-+import { withQuestionCreator } from "./reply-run-question.test-support.js";
-+import type { ReplyBackendHandle } from "./reply-run-registry.contracts.js";
-+
-+describe("retained steering custody after preparation", () => {
-+  afterEach(() => {
-+    embeddedTesting.resetActiveEmbeddedRuns();
-+    vi.restoreAllMocks();
-+  });
-+
-+  it.each(["media", "custody", "debounce"] as const)(
-+    "retains the source when the catalog changes during Codex %s preparation",
-+    async (stage) => {
-+      const key = `agent:main:retained-catalog-final-${stage}`;
-+      const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+      const a = { ...current, prompt: "original requester input", messageId: "A" };
-+      const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+      await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+        operation.setPhase("running");
-+        const finishCurrent = holdAdoptedSource(key, current, operation, followup);
-+        bindRetainedSource(key, a, operation, fingerprint, followup);
-+        enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+        const entered = createDeferred();
-+        const release = createDeferred();
-+        let catalogCurrent = true;
-+        const wire = vi.fn(async () => ({}));
-+        const queue = createRetainedCodexSteeringQueue({
-+          client: { request: wire },
-+          threadId: "native-thread",
-+          turnId: "native-turn",
-+          requestTimeoutMs: 1_000,
-+          signal: operation.abortSignal,
-+          assertActive: () => {
-+            if (!catalogCurrent) {
-+              throw new Error("codex app-server steering catalog is no longer current");
-+            }
-+          },
-+          prepareMessage: async (text) => {
-+            if (stage === "media") {
-+              entered.resolve();
-+              await release.promise;
-+            }
-+            return {
-+              input: [{ type: "text", text, text_elements: [] }],
-+              context: [],
-+              message: { role: "user", content: [{ type: "text", text }], timestamp: 1 },
-+            };
-+          },
-+          beforeSubmit: async () => {
-+            if (stage === "custody") {
-+              entered.resolve();
-+              await release.promise;
-+            }
-+          },
-+        });
-+        const handle = {
-+          ...createEmbeddedRunHandle({
-+            runId: "accepted-backing-work",
-+            toolAuthorityFingerprint: fingerprint,
-+          }),
-+          kind: "embedded" as const,
-+          cancel: vi.fn(),
-+          isSteeringCatalogCurrent: () => catalogCurrent,
-+          messageInjectionV2: {
-+            version: 2 as const,
-+            isAvailable: () => catalogCurrent,
-+            queueMessage: async (
-+              text: string,
-+              options: Parameters<
-+                NonNullable<ReplyBackendHandle["messageInjectionV2"]>["queueMessage"]
-+              >[1],
-+              assertCurrent: () => void,
-+            ) => {
-+              const queued = queue.queue(
-+                text,
-+                { ...options, debounceMs: stage === "debounce" ? 5 : 0 },
-+                assertCurrent,
-+              );
-+              if (stage === "debounce") {
-+                catalogCurrent = false;
-+              }
-+              await queued;
-+            },
-+          },
-+        };
-+        operation.attachBackend(handle);
-+        setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+        const retry = retryRetainedFollowupSteers(operation);
-+        try {
-+          if (stage !== "debounce") {
-+            await withTestTimeout(entered.promise, 1_000, "steer preparation was not entered");
-+            catalogCurrent = false;
-+            release.resolve();
-+          }
-+          await retry;
-+          expect(wire).not.toHaveBeenCalled();
-+          expect(getExistingFollowupQueue(key)?.items).toEqual([current, a]);
-+          expect(a.steerPending).toBeUndefined();
-+          operation.complete();
-+          finishCurrent();
-+          scheduleFollowupDrain(key, followup);
-+          await vi.waitFor(() => expect(followup).toHaveBeenCalledOnce());
-+          expect(followup).toHaveBeenCalledWith(a);
-+        } finally {
-+          release.resolve();
-+          await retry;
-+          queue.cancel();
-+          clearSessionQueues([key]);
-+        }
-+      });
-+    },
-+  );
-+
-+  it("retires a terminal refused source instead of replaying it after clear", async () => {
-+    const key = "agent:main:retained-terminal-authority";
-+    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+    const adopted = vi.fn();
-+    const abandoned = vi.fn();
-+    const settled = vi.fn();
-+    const a = {
-+      ...current,
-+      prompt: "refused requester input",
-+      messageId: "A",
-+      turnAdoptionLifecycle: { onAdopted: adopted, onAbandoned: abandoned, onSettled: settled },
-+    };
-+    const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+    await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+      operation.setPhase("running");
-+      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
-+      bindRetainedSource(key, a, operation, fingerprint, followup);
-+      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      const handle = {
-+        ...createEmbeddedRunHandle({
-+          runId: "accepted-backing-work",
-+          toolAuthorityFingerprint: fingerprint,
-+        }),
-+        kind: "embedded" as const,
-+        cancel: vi.fn(),
-+        isSteeringCatalogCurrent: () => true,
-+        messageInjectionV2: {
-+          version: 2 as const,
-+          isAvailable: () => true,
-+          queueMessage: async () => {
-+            throw new MessageInjectionAuthorityError();
-+          },
-+        },
-+      };
-+      operation.attachBackend(handle);
-+      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+      await expect(retryRetainedFollowupSteers(operation)).rejects.toBeInstanceOf(
-+        MessageInjectionAuthorityError,
-+      );
-+      expect(adopted).not.toHaveBeenCalled();
-+      expect(abandoned).toHaveBeenCalledOnce();
-+      expect(settled).toHaveBeenCalledOnce();
-+      expect(getExistingFollowupQueue(key)?.items).toEqual([current]);
-+      operation.complete();
-+      finishCurrent();
-+      scheduleFollowupDrain(key, followup);
-+      await Promise.resolve();
-+      expect(followup).not.toHaveBeenCalled();
-+      expect(handle.cancel).not.toHaveBeenCalled();
-+      clearSessionQueues([key]);
-+    });
-+  });
-+
-+  it("keeps accepted-unconfirmed custody and delivers through the original source once", async () => {
-+    const key = "agent:main:retained-indeterminate";
-+    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+    const adopted = vi.fn(async () => {
-+      throw new Error("adoption receipt unavailable");
-+    });
-+    const abandoned = vi.fn();
-+    const a = {
-+      ...current,
-+      prompt: "possibly committed requester input",
-+      messageId: "A",
-+      turnAdoptionLifecycle: { onAdopted: adopted, onAbandoned: abandoned },
-+    };
-+    const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+    await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+      operation.setPhase("running");
-+      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
-+      bindRetainedSource(key, a, operation, fingerprint, followup);
-+      const disposition = a.queuedFollowupReplyDisposition;
-+      if (disposition?.kind !== "deliver") {
-+        throw new Error("original delivery owner missing");
-+      }
-+      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      const queueMessage = vi.fn(async () => {
-+        throw new QuestionAnswerUnconfirmedError(new Error("confirmation unavailable"));
-+      });
-+      const handle = {
-+        ...createEmbeddedRunHandle({
-+          runId: "accepted-backing-work",
-+          toolAuthorityFingerprint: fingerprint,
-+        }),
-+        kind: "embedded" as const,
-+        cancel: vi.fn(),
-+        isSteeringCatalogCurrent: () => true,
-+        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
-+      };
-+      operation.attachBackend(handle);
-+      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+      await retryRetainedFollowupSteers(operation);
-+      await retryRetainedFollowupSteers(operation);
-+      expect(queueMessage).toHaveBeenCalledOnce();
-+      expect(adopted).toHaveBeenCalledOnce();
-+      expect(abandoned).not.toHaveBeenCalled();
-+      expect(disposition.deliver).toHaveBeenCalledOnce();
-+      expect(disposition.deliver).toHaveBeenCalledWith(
-+        expect.objectContaining({
-+          kind: "queued-followup",
-+          runId: "A",
-+          completion: expect.objectContaining({ kind: "failed" }),
-+          payloads: [expect.objectContaining({ isError: true })],
-+        }),
-+      );
-+      expect(getExistingFollowupQueue(key)?.items).toEqual([current]);
-+      operation.complete();
-+      finishCurrent();
-+      scheduleFollowupDrain(key, followup);
-+      await Promise.resolve();
-+      expect(followup).not.toHaveBeenCalled();
-+      expect(handle.cancel).not.toHaveBeenCalled();
-+      clearSessionQueues([key]);
-+    });
-+  });
-+
-+  it("preserves existing unaccepted automatic-account rotation fallback", async () => {
-+    const key = "agent:main:retained-auto-account-rotation";
-+    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+    current.run.authProfileId = "openai:admitted";
-+    current.run.authProfileIdSource = "auto";
-+    const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+    await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+      operation.setPhase("running");
-+      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
-+      const a: FollowupRun = {
-+        ...current,
-+        prompt: "account-bound requester input",
-+        messageId: "A",
-+        run: { ...current.run, authProfileId: "openai:accepted" },
-+      };
-+      bindRetainedSource(key, a, operation, fingerprint, followup);
-+      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      let acceptedProfileId = "openai:accepted";
-+      const dispatch = vi.fn();
-+      const entered = createDeferred();
-+      const release = createDeferred();
-+      const handle = {
-+        ...createEmbeddedRunHandle({
-+          runId: "accepted-backing-work",
-+          toolAuthorityFingerprint: fingerprint,
-+        }),
-+        kind: "embedded" as const,
-+        cancel: vi.fn(),
-+        get acceptedAutoAuthProfileId() {
-+          return acceptedProfileId;
-+        },
-+        isSteeringCatalogCurrent: () => true,
-+        messageInjectionV2: {
-+          version: 2 as const,
-+          isAvailable: () => true,
-+          queueMessage: async (
-+            _text: string,
-+            _options: Parameters<
-+              NonNullable<ReplyBackendHandle["messageInjectionV2"]>["queueMessage"]
-+            >[1],
-+            assertCurrent: () => void,
-+          ) => {
-+            assertCurrent();
-+            entered.resolve();
-+            await release.promise;
-+            assertCurrent();
-+            dispatch();
-+          },
-+        },
-+      };
-+      operation.attachBackend(handle);
-+      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+      const retry = retryRetainedFollowupSteers(operation);
-+      try {
-+        await withTestTimeout(entered.promise, 1_000, "account-bound steer was not entered");
-+        acceptedProfileId = "openai:next";
-+        release.resolve();
-+        await retry;
-+        expect(dispatch).not.toHaveBeenCalled();
-+        expect(getExistingFollowupQueue(key)?.items).toEqual([current, a]);
-+        operation.complete();
-+        finishCurrent();
-+        scheduleFollowupDrain(key, followup);
-+        await vi.waitFor(() => expect(followup).toHaveBeenCalledOnce());
-+        expect(followup).toHaveBeenCalledWith(a);
-+        expect(handle.cancel).not.toHaveBeenCalled();
-+      } finally {
-+        release.resolve();
-+        await retry;
-+        clearSessionQueues([key]);
-+      }
-+    });
-+  });
-+});
-diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.retained-publication.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.retained-publication.test.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..bcd116804008851e16ff31e6e87095e0145b0b99
---- /dev/null
-+++ b/src/auto-reply/reply/agent-runner-steer-adoption.retained-publication.test.ts
-@@ -0,0 +1,258 @@
-+import { expectDefined } from "@openclaw/normalization-core";
-+import { afterEach, describe, expect, it, vi } from "vitest";
-+import { setActiveEmbeddedRun } from "../../agents/embedded-agent-runner/runs.js";
-+import {
-+  createEmbeddedRunHandle,
-+  testing as embeddedTesting,
-+} from "../../agents/embedded-agent-runner/runs.test-support.js";
-+import { retryRetainedFollowupSteersAfterPublication } from "./agent-runner-steer-adoption.js";
-+import {
-+  bindRetainedSource,
-+  createRetainedCodexSteeringQueue,
-+} from "./agent-runner-steer-adoption.retained.test-support.js";
-+import {
-+  clearSessionQueues,
-+  enqueueFollowupRun,
-+  scheduleFollowupDrain,
-+  type FollowupRun,
-+} from "./queue.js";
-+import { createQueueTestRun } from "./queue.test-helpers.js";
-+import { getExistingFollowupQueue } from "./queue/state.js";
-+import { withQuestionCreator } from "./reply-run-question.test-support.js";
-+import type { ReplyBackendHandle } from "./reply-run-registry.contracts.js";
-+import { adoptedFollowupSourceByOperation } from "./reply-run-registry.state.js";
-+
-+describe("retained steer-mode FIFO at native publication", () => {
-+  afterEach(() => {
-+    embeddedTesting.resetActiveEmbeddedRuns();
-+    vi.restoreAllMocks();
-+  });
-+
-+  it.each([
-+    { backendKind: "embedded", adoptedSource: true },
-+    { backendKind: "codex", adoptedSource: true },
-+    { backendKind: "embedded", adoptedSource: false },
-+    { backendKind: "codex", adoptedSource: false },
-+  ] as const)(
-+    "adopts old A/B from $backendKind publication alone (adopted source: $adoptedSource)",
-+    async ({ backendKind, adoptedSource }) => {
-+      const key = `agent:main:retained-publication-${backendKind}-${adoptedSource}`;
-+      const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+      const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+      await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+        operation.setPhase("running");
-+        if (adoptedSource) {
-+          enqueueFollowupRun(
-+            key,
-+            current,
-+            { mode: "steer", debounceMs: 0 },
-+            "message-id",
-+            followup,
-+            false,
-+          );
-+          const queue = expectDefined(getExistingFollowupQueue(key), "active queue");
-+          queue.draining = true;
-+          queue.inFlight.add(current);
-+          adoptedFollowupSourceByOperation.set(operation, current);
-+        }
-+        const adoptedA = vi.fn();
-+        const adoptedB = vi.fn();
-+        const deferredA = vi.fn();
-+        const deferredB = vi.fn();
-+        const a = {
-+          ...current,
-+          prompt: "old A",
-+          messageId: "A",
-+          currentInboundContext: { text: "A context" },
-+          turnAdoptionLifecycle: { onDeferred: deferredA, onAdopted: adoptedA },
-+        };
-+        const b = {
-+          ...current,
-+          prompt: "old B",
-+          messageId: "B",
-+          currentInboundContext: { text: "B context" },
-+          turnAdoptionLifecycle: { onDeferred: deferredB, onAdopted: adoptedB },
-+        };
-+        const startA = bindRetainedSource(key, a, operation, fingerprint, followup);
-+        bindRetainedSource(key, b, operation, fingerprint, followup);
-+        if (adoptedSource) {
-+          // A falls back before publication, leaving a resolved false tail.
-+          expect(await startA()).toBe("handled");
-+        } else {
-+          enqueueFollowupRun(
-+            key,
-+            a,
-+            { mode: "steer", debounceMs: 0 },
-+            "message-id",
-+            followup,
-+            false,
-+          );
-+          retryRetainedFollowupSteersAfterPublication(operation);
-+        }
-+        enqueueFollowupRun(key, b, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+        const queue = expectDefined(getExistingFollowupQueue(key), "retained queue");
-+        expect(queue.items).toEqual(adoptedSource ? [current, a, b] : [a, b]);
-+        expect(deferredA).toHaveBeenCalledTimes(1);
-+        expect(deferredB).toHaveBeenCalledTimes(1);
-+        const received: Array<{ text: string; id?: string; context?: string }> = [];
-+        let codexQueue: ReturnType<typeof createRetainedCodexSteeringQueue> | undefined;
-+        const wire = vi.fn(async (method: string, args: Record<string, unknown>) => {
-+          expect(method).toBe("turn/steer");
-+          queueMicrotask(() =>
-+            expectDefined(codexQueue, "Codex queue").confirmConsumed(
-+              String(args.clientUserMessageId),
-+            ),
-+          );
-+          return {};
-+        });
-+        if (backendKind === "codex") {
-+          codexQueue = createRetainedCodexSteeringQueue({
-+            client: { request: wire },
-+            threadId: "native-thread",
-+            turnId: "native-turn",
-+            requestTimeoutMs: 1_000,
-+            signal: operation.abortSignal,
-+            assertActive: () => operation.abortSignal.throwIfAborted(),
-+            prepareMessage: async (text) => {
-+              return {
-+                input: [{ type: "text", text, text_elements: [] }],
-+                context: [],
-+                message: { role: "user", content: [{ type: "text", text }], timestamp: 1 },
-+              };
-+            },
-+          });
-+        }
-+        const queueMessage: NonNullable<
-+          ReplyBackendHandle["messageInjectionV2"]
-+        >["queueMessage"] = async (text, options, assertCurrent) => {
-+          assertCurrent();
-+          received.push({
-+            text,
-+            id: options?.queueIdentity,
-+            context: options?.currentInboundContext?.text,
-+          });
-+          if (codexQueue) {
-+            await codexQueue.queue(text, options, assertCurrent);
-+          } else {
-+            options?.onQueueAccepted?.(true);
-+          }
-+        };
-+        const handle = {
-+          ...createEmbeddedRunHandle({
-+            runId: "accepted-backing-work",
-+            toolAuthorityFingerprint: fingerprint,
-+            supportsTranscriptCommitWait: true,
-+          }),
-+          kind: "embedded" as const,
-+          cancel: vi.fn(),
-+          supportsQueueMessageContext: true,
-+          isSteeringCatalogCurrent: () => true,
-+          messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
-+        };
-+        operation.attachBackend(handle);
-+        setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+        await vi.waitFor(() => expect(adoptedB).toHaveBeenCalledTimes(1));
-+        expect(received).toEqual([
-+          { text: "old A", id: "A", context: "A context" },
-+          { text: "old B", id: "B", context: "B context" },
-+        ]);
-+        expect(adoptedA).toHaveBeenCalledTimes(1);
-+        expect(adoptedB).toHaveBeenCalledTimes(1);
-+        expect(deferredA).toHaveBeenCalledTimes(1);
-+        expect(deferredB).toHaveBeenCalledTimes(1);
-+        expect(getExistingFollowupQueue(key)?.items ?? []).toEqual(adoptedSource ? [current] : []);
-+        if (backendKind === "codex") {
-+          expect(wire.mock.calls.map(([, args]) => args.input)).toEqual([
-+            [{ type: "text", text: "old A", text_elements: [] }],
-+            [{ type: "text", text: "old B", text_elements: [] }],
-+          ]);
-+        }
-+        expect(followup).not.toHaveBeenCalled();
-+        codexQueue?.cancel();
-+        clearSessionQueues([key]);
-+      });
-+    },
-+  );
-+
-+  it("keeps an incompatible catalog head and its suffix for normal after-clear admission", async () => {
-+    const key = "agent:main:retained-catalog-refusal";
-+    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+    const a = { ...current, prompt: "needs refreshed catalog", messageId: "A" };
-+    const b = { ...current, prompt: "later B", messageId: "B" };
-+    const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+    await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+      operation.setPhase("running");
-+      bindRetainedSource(key, a, operation, fingerprint, followup);
-+      bindRetainedSource(key, b, operation, fingerprint, followup);
-+      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      enqueueFollowupRun(key, b, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      retryRetainedFollowupSteersAfterPublication(operation);
-+      const queueMessage = vi.fn(async () => undefined);
-+      const handle = {
-+        ...createEmbeddedRunHandle({
-+          runId: "accepted-backing-work",
-+          toolAuthorityFingerprint: fingerprint,
-+        }),
-+        kind: "embedded" as const,
-+        cancel: vi.fn(),
-+        isSteeringCatalogCurrent: () => false,
-+        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
-+      };
-+      operation.attachBackend(handle);
-+      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+      await Promise.resolve();
-+      await Promise.resolve();
-+      expect(getExistingFollowupQueue(key)?.items).toEqual([a, b]);
-+      expect(queueMessage).not.toHaveBeenCalled();
-+      expect(followup).not.toHaveBeenCalled();
-+      operation.complete();
-+      // Existing after-clear scheduling owns the normal-turn drain.
-+      scheduleFollowupDrain(key, followup);
-+      await vi.waitFor(() => expect(followup).toHaveBeenCalledTimes(2));
-+      expect(followup.mock.calls.map(([run]) => run.messageId)).toEqual(["A", "B"]);
-+      clearSessionQueues([key]);
-+    });
-+  });
-+
-+  it("does not redirect a publication wake to a backend attached before its continuation", async () => {
-+    const key = "agent:main:retained-publication-replacement";
-+    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
-+    const a = { ...current, prompt: "original requester input", messageId: "A" };
-+    const followup = vi.fn(async (_run: FollowupRun) => undefined);
-+    await withQuestionCreator(key, current, async (operation, fingerprint) => {
-+      operation.setPhase("running");
-+      bindRetainedSource(key, a, operation, fingerprint, followup);
-+      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+      retryRetainedFollowupSteersAfterPublication(operation);
-+      const queueMessage = vi.fn(async () => undefined);
-+      const handle = {
-+        ...createEmbeddedRunHandle({
-+          runId: "accepted-backing-work",
-+          toolAuthorityFingerprint: fingerprint,
-+        }),
-+        kind: "embedded" as const,
-+        cancel: vi.fn(),
-+        isSteeringCatalogCurrent: () => true,
-+        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
-+      };
-+      operation.attachBackend(handle);
-+      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
-+      const successorQueueMessage = vi.fn(async () => undefined);
-+      operation.attachBackend({
-+        ...handle,
-+        messageInjectionV2: {
-+          version: 2,
-+          isAvailable: () => true,
-+          queueMessage: successorQueueMessage,
-+        },
-+      });
-+      await Promise.resolve();
-+      await Promise.resolve();
-+      expect(queueMessage).not.toHaveBeenCalled();
-+      expect(successorQueueMessage).not.toHaveBeenCalled();
-+      expect(getExistingFollowupQueue(key)?.items).toEqual([a]);
-+      expect(followup).not.toHaveBeenCalled();
-+      clearSessionQueues([key]);
-+    });
-+  });
-+});
-diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.retained.test-support.ts b/src/auto-reply/reply/agent-runner-steer-adoption.retained.test-support.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..ebcb34a96e6ed661f16517aa9fb5d67e0f4b4c36
---- /dev/null
-+++ b/src/auto-reply/reply/agent-runner-steer-adoption.retained.test-support.ts
-@@ -0,0 +1,73 @@
-+import { expectDefined } from "@openclaw/normalization-core";
-+import { vi } from "vitest";
-+import { createCodexSteeringQueue } from "../../../extensions/codex/api.js";
-+import { runActiveReplySteer } from "./agent-runner-steer-adoption.js";
-+import { bindRetainedReplySteerSource } from "./agent-runner-steer-source.js";
-+import { enqueueFollowupRun, type FollowupRun } from "./queue.js";
-+import { getExistingFollowupQueue } from "./queue/state.js";
-+import type { ReplyOperation } from "./reply-run-registry.contracts.js";
-+import { adoptedFollowupSourceByOperation } from "./reply-run-registry.state.js";
-+import { createMockTypingController } from "./test-helpers.js";
-+import { createTypingSignaler } from "./typing-mode.js";
-+
-+type QueueParams = Parameters<typeof createCodexSteeringQueue>[0];
-+
-+export function createRetainedCodexSteeringQueue(
-+  params: Omit<QueueParams, "client"> & {
-+    client: QueueParams["client"] | { request: ReturnType<typeof vi.fn> };
-+  },
-+) {
-+  return createCodexSteeringQueue({
-+    ...params,
-+    client: params.client as QueueParams["client"],
-+  });
-+}
-+
-+/** Keeps source fixtures distinct while exercising the real adoption boundary. */
-+export function bindRetainedSource(
-+  key: string,
-+  run: FollowupRun,
-+  operation: ReplyOperation,
-+  fingerprint: string,
-+  followup: (run: FollowupRun) => Promise<void>,
-+) {
-+  const typing = createMockTypingController();
-+  run.queuedFollowupReplyDisposition = { kind: "deliver", deliver: vi.fn(async () => undefined) };
-+  const params: Parameters<typeof runActiveReplySteer>[0] = {
-+    followupRun: run,
-+    opts: undefined,
-+    providedReplyOperation: operation,
-+    queueKey: key,
-+    releaseAdmissionTicket: () => undefined,
-+    replyOperationRunState: undefined,
-+    resolvedQueue: { mode: "steer", debounceMs: 0 },
-+    restartRecoverySourceTurnId: run.messageId,
-+    runFollowup: followup,
-+    sessionCtx: { SenderId: run.run.senderId },
-+    sessionKey: key,
-+    touchActiveSessionEntry: async () => undefined,
-+    typing,
-+    typingSignals: createTypingSignaler({ typing, mode: "never", isHeartbeat: false }),
-+    toolAuthorityFingerprint: fingerprint,
-+  };
-+  bindRetainedReplySteerSource(params);
-+  return () => runActiveReplySteer(params);
-+}
-+
-+export function holdAdoptedSource(
-+  key: string,
-+  source: FollowupRun,
-+  operation: ReplyOperation,
-+  followup: (run: FollowupRun) => Promise<void>,
-+) {
-+  enqueueFollowupRun(key, source, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
-+  const queue = expectDefined(getExistingFollowupQueue(key), "adopted queue");
-+  queue.draining = true;
-+  queue.inFlight.add(source);
-+  adoptedFollowupSourceByOperation.set(operation, source);
-+  return () => {
-+    queue.items.splice(queue.items.indexOf(source), 1);
-+    queue.inFlight.delete(source);
-+    queue.draining = false;
-+  };
-+}
 diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
 index bc6203e130c9d8163b6af838dd6e445ed768a323..2e00ed047df314289fc37522cc38fbce0b420329 100644
 --- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
@@ -114852,24 +115393,23 @@ index 0000000000000000000000000000000000000000..c20f90dd34030a50ad42cd56f00d9b51
 +});
 diff --git a/test/discord-voice-runtime-owner.integration.test.ts b/test/discord-voice-runtime-owner.integration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..39f559b701780041f62c58c7f80c5db5c627f109
+index 0000000000000000000000000000000000000000..8ce1f50b2bf44d25f0f43a0f097d61fb5bad2725
 --- /dev/null
 +++ b/test/discord-voice-runtime-owner.integration.test.ts
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,128 @@
 +import { describe, expect, it, vi } from "vitest";
 +import {
 +  discordVoiceTranscriptsSourceProvider,
 +  getDiscordVoiceManager,
-+} from "../extensions/discord/src/voice/transcripts-source.js";
-+import {
-+  captureTarget,
-+  capturedText,
-+  createDiscordGatewayCaptureFixture,
-+} from "../extensions/discord/src/voice/voice-gateway-capture.test-support.js";
++  loadDiscordGatewayCaptureFixture,
++} from "../extensions/discord/test-api.js";
 +import type { OpenClawConfig } from "../src/config/types.openclaw.js";
 +import { createPluginRuntimeStore, type PluginRuntime } from "../src/plugin-sdk/runtime-store.js";
 +import { PluginInstance } from "../src/plugins/plugin-instance.js";
 +import { createPluginRuntime } from "../src/plugins/runtime/index.js";
++
++const { captureTarget, capturedText, createDiscordGatewayCaptureFixture } =
++  await loadDiscordGatewayCaptureFixture();
 +
 +describe("Discord voice manager runtime ownership", () => {
 +  it.each(["empty", "different"] as const)(
@@ -115650,6 +116190,682 @@ index 0000000000000000000000000000000000000000..3065c46b3cefee66afbb75afad0b0e30
 +    },
 +  );
 +});
+diff --git a/test/plugins/codex-retained-steering-custody.test.ts b/test/plugins/codex-retained-steering-custody.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..222bda4438b10b7e89f82c208db7cedf3237682c
+--- /dev/null
++++ b/test/plugins/codex-retained-steering-custody.test.ts
+@@ -0,0 +1,326 @@
++import "../setup-openclaw-runtime.js";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { setActiveEmbeddedRun } from "../../src/agents/embedded-agent-runner/runs.js";
++import {
++  createEmbeddedRunHandle,
++  testing as embeddedTesting,
++} from "../../src/agents/embedded-agent-runner/runs.test-support.js";
++import { QuestionAnswerUnconfirmedError } from "../../src/agents/harness/gateway-question-dispatch.js";
++import { retryRetainedFollowupSteers } from "../../src/auto-reply/reply/agent-runner-steer-adoption.js";
++import { MessageInjectionAuthorityError } from "../../src/auto-reply/reply/message-injection-authority.js";
++import {
++  clearSessionQueues,
++  enqueueFollowupRun,
++  scheduleFollowupDrain,
++  type FollowupRun,
++} from "../../src/auto-reply/reply/queue.js";
++import { createQueueTestRun } from "../../src/auto-reply/reply/queue.test-helpers.js";
++import { getExistingFollowupQueue } from "../../src/auto-reply/reply/queue/state.js";
++import { withQuestionCreator } from "../../src/auto-reply/reply/reply-run-question.test-support.js";
++import type { ReplyBackendHandle } from "../../src/auto-reply/reply/reply-run-registry.contracts.js";
++import { createDeferred, withTestTimeout } from "../helpers/promise.js";
++import {
++  bindRetainedSource,
++  createRetainedCodexSteeringQueue,
++  holdAdoptedSource,
++} from "./codex-retained-steering.test-support.js";
++
++describe("retained steering custody after preparation", () => {
++  afterEach(() => {
++    embeddedTesting.resetActiveEmbeddedRuns();
++    vi.restoreAllMocks();
++  });
++
++  it.each(["media", "custody", "debounce"] as const)(
++    "retains the source when the catalog changes during Codex %s preparation",
++    async (stage) => {
++      const key = `agent:main:retained-catalog-final-${stage}`;
++      const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++      const a = { ...current, prompt: "original requester input", messageId: "A" };
++      const followup = vi.fn(async (_run: FollowupRun) => undefined);
++      await withQuestionCreator(key, current, async (operation, fingerprint) => {
++        operation.setPhase("running");
++        const finishCurrent = holdAdoptedSource(key, current, operation, followup);
++        bindRetainedSource(key, a, operation, fingerprint, followup);
++        enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++        const entered = createDeferred();
++        const release = createDeferred();
++        let catalogCurrent = true;
++        const wire = vi.fn(async () => ({}));
++        const queue = createRetainedCodexSteeringQueue({
++          client: { request: wire },
++          threadId: "native-thread",
++          turnId: "native-turn",
++          requestTimeoutMs: 1_000,
++          signal: operation.abortSignal,
++          assertActive: () => {
++            if (!catalogCurrent) {
++              throw new Error("codex app-server steering catalog is no longer current");
++            }
++          },
++          prepareMessage: async (text) => {
++            if (stage === "media") {
++              entered.resolve();
++              await release.promise;
++            }
++            return {
++              input: [{ type: "text", text, text_elements: [] }],
++              context: [],
++              message: { role: "user", content: [{ type: "text", text }], timestamp: 1 },
++            };
++          },
++          beforeSubmit: async () => {
++            if (stage === "custody") {
++              entered.resolve();
++              await release.promise;
++            }
++          },
++        });
++        const handle = {
++          ...createEmbeddedRunHandle({
++            runId: "accepted-backing-work",
++            toolAuthorityFingerprint: fingerprint,
++          }),
++          kind: "embedded" as const,
++          cancel: vi.fn(),
++          isSteeringCatalogCurrent: () => catalogCurrent,
++          messageInjectionV2: {
++            version: 2 as const,
++            isAvailable: () => catalogCurrent,
++            queueMessage: async (
++              text: string,
++              options: Parameters<
++                NonNullable<ReplyBackendHandle["messageInjectionV2"]>["queueMessage"]
++              >[1],
++              assertCurrent: () => void,
++            ) => {
++              const queued = queue.queue(
++                text,
++                { ...options, debounceMs: stage === "debounce" ? 5 : 0 },
++                assertCurrent,
++              );
++              if (stage === "debounce") {
++                catalogCurrent = false;
++              }
++              await queued;
++            },
++          },
++        };
++        operation.attachBackend(handle);
++        setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++        const retry = retryRetainedFollowupSteers(operation);
++        try {
++          if (stage !== "debounce") {
++            await withTestTimeout(entered.promise, 1_000, "steer preparation was not entered");
++            catalogCurrent = false;
++            release.resolve();
++          }
++          await retry;
++          expect(wire).not.toHaveBeenCalled();
++          expect(getExistingFollowupQueue(key)?.items).toEqual([current, a]);
++          expect(a.steerPending).toBeUndefined();
++          operation.complete();
++          finishCurrent();
++          scheduleFollowupDrain(key, followup);
++          await vi.waitFor(() => expect(followup).toHaveBeenCalledOnce());
++          expect(followup).toHaveBeenCalledWith(a);
++        } finally {
++          release.resolve();
++          await retry;
++          queue.cancel();
++          clearSessionQueues([key]);
++        }
++      });
++    },
++  );
++
++  it("retires a terminal refused source instead of replaying it after clear", async () => {
++    const key = "agent:main:retained-terminal-authority";
++    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++    const adopted = vi.fn();
++    const abandoned = vi.fn();
++    const settled = vi.fn();
++    const a = {
++      ...current,
++      prompt: "refused requester input",
++      messageId: "A",
++      turnAdoptionLifecycle: { onAdopted: adopted, onAbandoned: abandoned, onSettled: settled },
++    };
++    const followup = vi.fn(async (_run: FollowupRun) => undefined);
++    await withQuestionCreator(key, current, async (operation, fingerprint) => {
++      operation.setPhase("running");
++      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
++      bindRetainedSource(key, a, operation, fingerprint, followup);
++      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      const handle = {
++        ...createEmbeddedRunHandle({
++          runId: "accepted-backing-work",
++          toolAuthorityFingerprint: fingerprint,
++        }),
++        kind: "embedded" as const,
++        cancel: vi.fn(),
++        isSteeringCatalogCurrent: () => true,
++        messageInjectionV2: {
++          version: 2 as const,
++          isAvailable: () => true,
++          queueMessage: async () => {
++            throw new MessageInjectionAuthorityError();
++          },
++        },
++      };
++      operation.attachBackend(handle);
++      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++      await expect(retryRetainedFollowupSteers(operation)).rejects.toBeInstanceOf(
++        MessageInjectionAuthorityError,
++      );
++      expect(adopted).not.toHaveBeenCalled();
++      expect(abandoned).toHaveBeenCalledOnce();
++      expect(settled).toHaveBeenCalledOnce();
++      expect(getExistingFollowupQueue(key)?.items).toEqual([current]);
++      operation.complete();
++      finishCurrent();
++      scheduleFollowupDrain(key, followup);
++      await Promise.resolve();
++      expect(followup).not.toHaveBeenCalled();
++      expect(handle.cancel).not.toHaveBeenCalled();
++      clearSessionQueues([key]);
++    });
++  });
++
++  it("keeps accepted-unconfirmed custody and delivers through the original source once", async () => {
++    const key = "agent:main:retained-indeterminate";
++    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++    const adopted = vi.fn(async () => {
++      throw new Error("adoption receipt unavailable");
++    });
++    const abandoned = vi.fn();
++    const a = {
++      ...current,
++      prompt: "possibly committed requester input",
++      messageId: "A",
++      turnAdoptionLifecycle: { onAdopted: adopted, onAbandoned: abandoned },
++    };
++    const followup = vi.fn(async (_run: FollowupRun) => undefined);
++    await withQuestionCreator(key, current, async (operation, fingerprint) => {
++      operation.setPhase("running");
++      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
++      bindRetainedSource(key, a, operation, fingerprint, followup);
++      const disposition = a.queuedFollowupReplyDisposition;
++      if (disposition?.kind !== "deliver") {
++        throw new Error("original delivery owner missing");
++      }
++      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      const queueMessage = vi.fn(async () => {
++        throw new QuestionAnswerUnconfirmedError(new Error("confirmation unavailable"));
++      });
++      const handle = {
++        ...createEmbeddedRunHandle({
++          runId: "accepted-backing-work",
++          toolAuthorityFingerprint: fingerprint,
++        }),
++        kind: "embedded" as const,
++        cancel: vi.fn(),
++        isSteeringCatalogCurrent: () => true,
++        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
++      };
++      operation.attachBackend(handle);
++      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++      await retryRetainedFollowupSteers(operation);
++      await retryRetainedFollowupSteers(operation);
++      expect(queueMessage).toHaveBeenCalledOnce();
++      expect(adopted).toHaveBeenCalledOnce();
++      expect(abandoned).not.toHaveBeenCalled();
++      expect(disposition.deliver).toHaveBeenCalledOnce();
++      expect(disposition.deliver).toHaveBeenCalledWith(
++        expect.objectContaining({
++          kind: "queued-followup",
++          runId: "A",
++          completion: expect.objectContaining({ kind: "failed" }),
++          payloads: [expect.objectContaining({ isError: true })],
++        }),
++      );
++      expect(getExistingFollowupQueue(key)?.items).toEqual([current]);
++      operation.complete();
++      finishCurrent();
++      scheduleFollowupDrain(key, followup);
++      await Promise.resolve();
++      expect(followup).not.toHaveBeenCalled();
++      expect(handle.cancel).not.toHaveBeenCalled();
++      clearSessionQueues([key]);
++    });
++  });
++
++  it("preserves existing unaccepted automatic-account rotation fallback", async () => {
++    const key = "agent:main:retained-auto-account-rotation";
++    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++    current.run.authProfileId = "openai:admitted";
++    current.run.authProfileIdSource = "auto";
++    const followup = vi.fn(async (_run: FollowupRun) => undefined);
++    await withQuestionCreator(key, current, async (operation, fingerprint) => {
++      operation.setPhase("running");
++      const finishCurrent = holdAdoptedSource(key, current, operation, followup);
++      const a: FollowupRun = {
++        ...current,
++        prompt: "account-bound requester input",
++        messageId: "A",
++        run: { ...current.run, authProfileId: "openai:accepted" },
++      };
++      bindRetainedSource(key, a, operation, fingerprint, followup);
++      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      let acceptedProfileId = "openai:accepted";
++      const dispatch = vi.fn();
++      const entered = createDeferred();
++      const release = createDeferred();
++      const handle = {
++        ...createEmbeddedRunHandle({
++          runId: "accepted-backing-work",
++          toolAuthorityFingerprint: fingerprint,
++        }),
++        kind: "embedded" as const,
++        cancel: vi.fn(),
++        get acceptedAutoAuthProfileId() {
++          return acceptedProfileId;
++        },
++        isSteeringCatalogCurrent: () => true,
++        messageInjectionV2: {
++          version: 2 as const,
++          isAvailable: () => true,
++          queueMessage: async (
++            _text: string,
++            _options: Parameters<
++              NonNullable<ReplyBackendHandle["messageInjectionV2"]>["queueMessage"]
++            >[1],
++            assertCurrent: () => void,
++          ) => {
++            assertCurrent();
++            entered.resolve();
++            await release.promise;
++            assertCurrent();
++            dispatch();
++          },
++        },
++      };
++      operation.attachBackend(handle);
++      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++      const retry = retryRetainedFollowupSteers(operation);
++      try {
++        await withTestTimeout(entered.promise, 1_000, "account-bound steer was not entered");
++        acceptedProfileId = "openai:next";
++        release.resolve();
++        await retry;
++        expect(dispatch).not.toHaveBeenCalled();
++        expect(getExistingFollowupQueue(key)?.items).toEqual([current, a]);
++        operation.complete();
++        finishCurrent();
++        scheduleFollowupDrain(key, followup);
++        await vi.waitFor(() => expect(followup).toHaveBeenCalledOnce());
++        expect(followup).toHaveBeenCalledWith(a);
++        expect(handle.cancel).not.toHaveBeenCalled();
++      } finally {
++        release.resolve();
++        await retry;
++        clearSessionQueues([key]);
++      }
++    });
++  });
++});
+diff --git a/test/plugins/codex-retained-steering-publication.test.ts b/test/plugins/codex-retained-steering-publication.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..07078ee237efd63f7f12a2dcb5238539d453c761
+--- /dev/null
++++ b/test/plugins/codex-retained-steering-publication.test.ts
+@@ -0,0 +1,259 @@
++import "../setup-openclaw-runtime.js";
++import { expectDefined } from "@openclaw/normalization-core";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { setActiveEmbeddedRun } from "../../src/agents/embedded-agent-runner/runs.js";
++import {
++  createEmbeddedRunHandle,
++  testing as embeddedTesting,
++} from "../../src/agents/embedded-agent-runner/runs.test-support.js";
++import { retryRetainedFollowupSteersAfterPublication } from "../../src/auto-reply/reply/agent-runner-steer-adoption.js";
++import {
++  clearSessionQueues,
++  enqueueFollowupRun,
++  scheduleFollowupDrain,
++  type FollowupRun,
++} from "../../src/auto-reply/reply/queue.js";
++import { createQueueTestRun } from "../../src/auto-reply/reply/queue.test-helpers.js";
++import { getExistingFollowupQueue } from "../../src/auto-reply/reply/queue/state.js";
++import { withQuestionCreator } from "../../src/auto-reply/reply/reply-run-question.test-support.js";
++import type { ReplyBackendHandle } from "../../src/auto-reply/reply/reply-run-registry.contracts.js";
++import { adoptedFollowupSourceByOperation } from "../../src/auto-reply/reply/reply-run-registry.state.js";
++import {
++  bindRetainedSource,
++  createRetainedCodexSteeringQueue,
++} from "./codex-retained-steering.test-support.js";
++
++describe("retained steer-mode FIFO at native publication", () => {
++  afterEach(() => {
++    embeddedTesting.resetActiveEmbeddedRuns();
++    vi.restoreAllMocks();
++  });
++
++  it.each([
++    { backendKind: "embedded", adoptedSource: true },
++    { backendKind: "codex", adoptedSource: true },
++    { backendKind: "embedded", adoptedSource: false },
++    { backendKind: "codex", adoptedSource: false },
++  ] as const)(
++    "adopts old A/B from $backendKind publication alone (adopted source: $adoptedSource)",
++    async ({ backendKind, adoptedSource }) => {
++      const key = `agent:main:retained-publication-${backendKind}-${adoptedSource}`;
++      const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++      const followup = vi.fn(async (_run: FollowupRun) => undefined);
++      await withQuestionCreator(key, current, async (operation, fingerprint) => {
++        operation.setPhase("running");
++        if (adoptedSource) {
++          enqueueFollowupRun(
++            key,
++            current,
++            { mode: "steer", debounceMs: 0 },
++            "message-id",
++            followup,
++            false,
++          );
++          const queue = expectDefined(getExistingFollowupQueue(key), "active queue");
++          queue.draining = true;
++          queue.inFlight.add(current);
++          adoptedFollowupSourceByOperation.set(operation, current);
++        }
++        const adoptedA = vi.fn();
++        const adoptedB = vi.fn();
++        const deferredA = vi.fn();
++        const deferredB = vi.fn();
++        const a = {
++          ...current,
++          prompt: "old A",
++          messageId: "A",
++          currentInboundContext: { text: "A context" },
++          turnAdoptionLifecycle: { onDeferred: deferredA, onAdopted: adoptedA },
++        };
++        const b = {
++          ...current,
++          prompt: "old B",
++          messageId: "B",
++          currentInboundContext: { text: "B context" },
++          turnAdoptionLifecycle: { onDeferred: deferredB, onAdopted: adoptedB },
++        };
++        const startA = bindRetainedSource(key, a, operation, fingerprint, followup);
++        bindRetainedSource(key, b, operation, fingerprint, followup);
++        if (adoptedSource) {
++          // A falls back before publication, leaving a resolved false tail.
++          expect(await startA()).toBe("handled");
++        } else {
++          enqueueFollowupRun(
++            key,
++            a,
++            { mode: "steer", debounceMs: 0 },
++            "message-id",
++            followup,
++            false,
++          );
++          retryRetainedFollowupSteersAfterPublication(operation);
++        }
++        enqueueFollowupRun(key, b, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++        const queue = expectDefined(getExistingFollowupQueue(key), "retained queue");
++        expect(queue.items).toEqual(adoptedSource ? [current, a, b] : [a, b]);
++        expect(deferredA).toHaveBeenCalledTimes(1);
++        expect(deferredB).toHaveBeenCalledTimes(1);
++        const received: Array<{ text: string; id?: string; context?: string }> = [];
++        let codexQueue: ReturnType<typeof createRetainedCodexSteeringQueue> | undefined;
++        const wire = vi.fn(async (method: string, args: Record<string, unknown>) => {
++          expect(method).toBe("turn/steer");
++          queueMicrotask(() =>
++            expectDefined(codexQueue, "Codex queue").confirmConsumed(
++              String(args.clientUserMessageId),
++            ),
++          );
++          return {};
++        });
++        if (backendKind === "codex") {
++          codexQueue = createRetainedCodexSteeringQueue({
++            client: { request: wire },
++            threadId: "native-thread",
++            turnId: "native-turn",
++            requestTimeoutMs: 1_000,
++            signal: operation.abortSignal,
++            assertActive: () => operation.abortSignal.throwIfAborted(),
++            prepareMessage: async (text) => {
++              return {
++                input: [{ type: "text", text, text_elements: [] }],
++                context: [],
++                message: { role: "user", content: [{ type: "text", text }], timestamp: 1 },
++              };
++            },
++          });
++        }
++        const queueMessage: NonNullable<
++          ReplyBackendHandle["messageInjectionV2"]
++        >["queueMessage"] = async (text, options, assertCurrent) => {
++          assertCurrent();
++          received.push({
++            text,
++            id: options?.queueIdentity,
++            context: options?.currentInboundContext?.text,
++          });
++          if (codexQueue) {
++            await codexQueue.queue(text, options, assertCurrent);
++          } else {
++            options?.onQueueAccepted?.(true);
++          }
++        };
++        const handle = {
++          ...createEmbeddedRunHandle({
++            runId: "accepted-backing-work",
++            toolAuthorityFingerprint: fingerprint,
++            supportsTranscriptCommitWait: true,
++          }),
++          kind: "embedded" as const,
++          cancel: vi.fn(),
++          supportsQueueMessageContext: true,
++          isSteeringCatalogCurrent: () => true,
++          messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
++        };
++        operation.attachBackend(handle);
++        setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++        await vi.waitFor(() => expect(adoptedB).toHaveBeenCalledTimes(1));
++        expect(received).toEqual([
++          { text: "old A", id: "A", context: "A context" },
++          { text: "old B", id: "B", context: "B context" },
++        ]);
++        expect(adoptedA).toHaveBeenCalledTimes(1);
++        expect(adoptedB).toHaveBeenCalledTimes(1);
++        expect(deferredA).toHaveBeenCalledTimes(1);
++        expect(deferredB).toHaveBeenCalledTimes(1);
++        expect(getExistingFollowupQueue(key)?.items ?? []).toEqual(adoptedSource ? [current] : []);
++        if (backendKind === "codex") {
++          expect(wire.mock.calls.map(([, args]) => args.input)).toEqual([
++            [{ type: "text", text: "old A", text_elements: [] }],
++            [{ type: "text", text: "old B", text_elements: [] }],
++          ]);
++        }
++        expect(followup).not.toHaveBeenCalled();
++        codexQueue?.cancel();
++        clearSessionQueues([key]);
++      });
++    },
++  );
++
++  it("keeps an incompatible catalog head and its suffix for normal after-clear admission", async () => {
++    const key = "agent:main:retained-catalog-refusal";
++    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++    const a = { ...current, prompt: "needs refreshed catalog", messageId: "A" };
++    const b = { ...current, prompt: "later B", messageId: "B" };
++    const followup = vi.fn(async (_run: FollowupRun) => undefined);
++    await withQuestionCreator(key, current, async (operation, fingerprint) => {
++      operation.setPhase("running");
++      bindRetainedSource(key, a, operation, fingerprint, followup);
++      bindRetainedSource(key, b, operation, fingerprint, followup);
++      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      enqueueFollowupRun(key, b, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      retryRetainedFollowupSteersAfterPublication(operation);
++      const queueMessage = vi.fn(async () => undefined);
++      const handle = {
++        ...createEmbeddedRunHandle({
++          runId: "accepted-backing-work",
++          toolAuthorityFingerprint: fingerprint,
++        }),
++        kind: "embedded" as const,
++        cancel: vi.fn(),
++        isSteeringCatalogCurrent: () => false,
++        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
++      };
++      operation.attachBackend(handle);
++      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++      await Promise.resolve();
++      await Promise.resolve();
++      expect(getExistingFollowupQueue(key)?.items).toEqual([a, b]);
++      expect(queueMessage).not.toHaveBeenCalled();
++      expect(followup).not.toHaveBeenCalled();
++      operation.complete();
++      // Existing after-clear scheduling owns the normal-turn drain.
++      scheduleFollowupDrain(key, followup);
++      await vi.waitFor(() => expect(followup).toHaveBeenCalledTimes(2));
++      expect(followup.mock.calls.map(([run]) => run.messageId)).toEqual(["A", "B"]);
++      clearSessionQueues([key]);
++    });
++  });
++
++  it("does not redirect a publication wake to a backend attached before its continuation", async () => {
++    const key = "agent:main:retained-publication-replacement";
++    const current = createQueueTestRun({ prompt: "existing work", messageId: "current" });
++    const a = { ...current, prompt: "original requester input", messageId: "A" };
++    const followup = vi.fn(async (_run: FollowupRun) => undefined);
++    await withQuestionCreator(key, current, async (operation, fingerprint) => {
++      operation.setPhase("running");
++      bindRetainedSource(key, a, operation, fingerprint, followup);
++      enqueueFollowupRun(key, a, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++      retryRetainedFollowupSteersAfterPublication(operation);
++      const queueMessage = vi.fn(async () => undefined);
++      const handle = {
++        ...createEmbeddedRunHandle({
++          runId: "accepted-backing-work",
++          toolAuthorityFingerprint: fingerprint,
++        }),
++        kind: "embedded" as const,
++        cancel: vi.fn(),
++        isSteeringCatalogCurrent: () => true,
++        messageInjectionV2: { version: 2 as const, isAvailable: () => true, queueMessage },
++      };
++      operation.attachBackend(handle);
++      setActiveEmbeddedRun(operation.sessionId, handle, key, current.run.sessionFile, "main");
++      const successorQueueMessage = vi.fn(async () => undefined);
++      operation.attachBackend({
++        ...handle,
++        messageInjectionV2: {
++          version: 2,
++          isAvailable: () => true,
++          queueMessage: successorQueueMessage,
++        },
++      });
++      await Promise.resolve();
++      await Promise.resolve();
++      expect(queueMessage).not.toHaveBeenCalled();
++      expect(successorQueueMessage).not.toHaveBeenCalled();
++      expect(getExistingFollowupQueue(key)?.items).toEqual([a]);
++      expect(followup).not.toHaveBeenCalled();
++      clearSessionQueues([key]);
++    });
++  });
++});
+diff --git a/test/plugins/codex-retained-steering.test-support.ts b/test/plugins/codex-retained-steering.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5f6eab6c4fbc8c29cdb103a12b85290e3668f784
+--- /dev/null
++++ b/test/plugins/codex-retained-steering.test-support.ts
+@@ -0,0 +1,73 @@
++import { expectDefined } from "@openclaw/normalization-core";
++import { vi } from "vitest";
++import { createCodexSteeringQueue } from "../../extensions/codex/api.js";
++import { runActiveReplySteer } from "../../src/auto-reply/reply/agent-runner-steer-adoption.js";
++import { bindRetainedReplySteerSource } from "../../src/auto-reply/reply/agent-runner-steer-source.js";
++import { enqueueFollowupRun, type FollowupRun } from "../../src/auto-reply/reply/queue.js";
++import { getExistingFollowupQueue } from "../../src/auto-reply/reply/queue/state.js";
++import type { ReplyOperation } from "../../src/auto-reply/reply/reply-run-registry.contracts.js";
++import { adoptedFollowupSourceByOperation } from "../../src/auto-reply/reply/reply-run-registry.state.js";
++import { createMockTypingController } from "../../src/auto-reply/reply/test-helpers.js";
++import { createTypingSignaler } from "../../src/auto-reply/reply/typing-mode.js";
++
++type QueueParams = Parameters<typeof createCodexSteeringQueue>[0];
++
++export function createRetainedCodexSteeringQueue(
++  params: Omit<QueueParams, "client"> & {
++    client: QueueParams["client"] | { request: ReturnType<typeof vi.fn> };
++  },
++) {
++  return createCodexSteeringQueue({
++    ...params,
++    client: params.client as QueueParams["client"],
++  });
++}
++
++/** Keeps source fixtures distinct while exercising the real adoption boundary. */
++export function bindRetainedSource(
++  key: string,
++  run: FollowupRun,
++  operation: ReplyOperation,
++  fingerprint: string,
++  followup: (run: FollowupRun) => Promise<void>,
++) {
++  const typing = createMockTypingController();
++  run.queuedFollowupReplyDisposition = { kind: "deliver", deliver: vi.fn(async () => undefined) };
++  const params: Parameters<typeof runActiveReplySteer>[0] = {
++    followupRun: run,
++    opts: undefined,
++    providedReplyOperation: operation,
++    queueKey: key,
++    releaseAdmissionTicket: () => undefined,
++    replyOperationRunState: undefined,
++    resolvedQueue: { mode: "steer", debounceMs: 0 },
++    restartRecoverySourceTurnId: run.messageId,
++    runFollowup: followup,
++    sessionCtx: { SenderId: run.run.senderId },
++    sessionKey: key,
++    touchActiveSessionEntry: async () => undefined,
++    typing,
++    typingSignals: createTypingSignaler({ typing, mode: "never", isHeartbeat: false }),
++    toolAuthorityFingerprint: fingerprint,
++  };
++  bindRetainedReplySteerSource(params);
++  return () => runActiveReplySteer(params);
++}
++
++export function holdAdoptedSource(
++  key: string,
++  source: FollowupRun,
++  operation: ReplyOperation,
++  followup: (run: FollowupRun) => Promise<void>,
++) {
++  enqueueFollowupRun(key, source, { mode: "steer", debounceMs: 0 }, "message-id", followup, false);
++  const queue = expectDefined(getExistingFollowupQueue(key), "adopted queue");
++  queue.draining = true;
++  queue.inFlight.add(source);
++  adoptedFollowupSourceByOperation.set(operation, source);
++  return () => {
++    queue.items.splice(queue.items.indexOf(source), 1);
++    queue.inFlight.delete(source);
++    queue.draining = false;
++  };
++}
 diff --git a/test/plugins/lane-contract-loader.integration.test.ts b/test/plugins/lane-contract-loader.integration.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..d923fd65ab49f0dad0451d8d47fb58b34c0625cb
@@ -115765,12 +116981,12 @@ index 0000000000000000000000000000000000000000..d923fd65ab49f0dad0451d8d47fb58b3
 +});
 diff --git a/test/project-memory-bootstrap.integration.test.ts b/test/project-memory-bootstrap.integration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..13e94c6a4a5a8bf95c904a468c382b43d3ef4b22
+index 0000000000000000000000000000000000000000..aeffbd592c1713268ed5ce405a78e19fc51d5705
 --- /dev/null
 +++ b/test/project-memory-bootstrap.integration.test.ts
 @@ -0,0 +1,123 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-+import { MemoryManagerRegistry } from "../extensions/memory-core/src/memory/manager-registry.js";
++import { MemoryManagerRegistry } from "../extensions/memory-core/test-api.js";
 +import { prepareProjectMemoryBootstrap } from "../src/agents/project-memory-bootstrap.js";
 +import type { MemorySearchResult } from "../src/memory-host-sdk/host/types.js";
 +import { createDeferredCore } from "../src/shared/deferred.js";

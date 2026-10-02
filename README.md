@@ -14,18 +14,20 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The October 1 reference source is `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
-Its 52 reviewed paths since `3063571d0390f2e0fe48226035fe6581149cebae` retain
-requester reconnect, useful recovery progress and intentional cancellation, and
-repair timeout ownership, retained FIFO steering, MCP catalog recovery and startup
-publication. The exact-source aggregate build, including UI, completed in 253.509
-seconds and physically joined. Staging, offline validation and sealing passed.
-Native activation completed at 21:59:12 UTC on October 1; Gateway and Node loaded
-the exact sealed source and passed health/readiness checks. Current-process capture
-and preservation of original inputs, goals, job definitions and authority bindings
-were verified separately. Fresh ordinary-use Finance reconnect and continuation
-on this final source remain pending, along with matching-revision hosted checks.
-Earlier requester OAuth refresh/query acceptance belongs to the recorded C15 source.
+The October 2 reference source is `de4c172287e9707895d96a5a33aac18d59b96199`.
+When an MCP service requests sign-in in the native OpenClaw flow, successful
+sign-in can make its permitted tools available to the current request without
+resending the question. Requester identity and active-attempt ownership stay
+bound; revoked or stale tools are not published.
+
+This 25-path successor extends `abcf0e16c9ed22923f397ab4fad4708d93f22098`.
+Affected-owner tests, shared host/plugin integrations, type checks, typed lint,
+formatting, dependency guards and source-size ratchets passed. The native
+aggregate build, staging, offline validation and seal passed. One native
+activation selected this source at 01:18:32 UTC on October 2; both loaded services,
+health/readiness, current-process capture and custody preservation passed.
+Exact-source export verification, ordinary-use Finance completion and all five
+hosted jobs remain separate acceptance gates.
 Dated qualifications and other acceptance limits retain their original scope.
 
 ## How it works

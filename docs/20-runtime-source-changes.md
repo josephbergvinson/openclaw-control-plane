@@ -13,6 +13,49 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 2 requester sign-in continuation and test boundaries
+
+Reference `de4c172287e9707895d96a5a33aac18d59b96199`, source tree
+`9984c90999b4e05fdc6d063a7bc592143ed65b3e`, contains 25 reviewed paths since
+`abcf0e16c9ed22923f397ab4fad4708d93f22098` and 44,994 committed entries. Three removed
+core test/helper paths are the old locations of the retained Codex integration
+suites. Their replacements live in `test/plugins`; the continuation owner test
+and Memory Core test-api account for the two additional entries. The existing
+exporter must reconstruct every committed blob and mode, allowing only the two
+established Company Alpha label substitutions.
+
+After successful requester `mcp_connect`, the native attempt can discover and
+prepare permitted protected tools before its next model request. The existing
+next-turn owner publishes the catalog to the same session and hook context.
+The user can continue the current question without another incoming message.
+This continuation keeps the admitted requester, client and refresh-grant
+ownership. Revocation, a changed runtime generation, abort or a prior next-turn
+stop prevents stale publication. Consent and discovery failures remain explicit.
+Other harnesses retain their existing reconnect guidance.
+
+The two shared host/plugin integration suites remain in their root test owner.
+They import the existing Discord test-api and a two-line Memory Core test-api;
+their assertion and cleanup bodies are unchanged. Both dependency guards passed
+without exclusions. Retained Codex custody/publication suites and their helper
+moved together from core auto-reply to `test/plugins`.
+
+Root qualification recorded 347 affected-owner tests, three additional shared
+host integration tests and 60 passing tests after the equivalent lint correction.
+These counts describe their separately recorded scopes and are not additive.
+The affected type graphs, scoped typed lint, formatting, import guards and both
+source-size ratchets also passed. Qualification binds this exact committed tree.
+
+The bounded native aggregate build, including UI, physically joined with exit
+zero. Readonly staging, network-denied offline validation and candidate sealing
+passed. One native activation selected this exact source at 01:18:32 UTC on
+October 2. Both loaded services, health/readiness, current-process capture and
+original custody preservation passed. These receipts do not establish a completed
+Finance analysis or delivery. Exact-source export parity and all five existing
+hosted jobs must qualify the same successor public revision before merge; the
+933cfcfc boundary failure and its aggregate remain dated history.
+Existing wallet, meeting, Journal, companion and account receipts keep their
+original scopes.
+
 ## October 1 timeout, retained steering and requester recovery
 
 Reference `abcf0e16c9ed22923f397ab4fad4708d93f22098`, source tree
