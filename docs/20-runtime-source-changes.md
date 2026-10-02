@@ -50,8 +50,9 @@ failed history.
 The native aggregate build, self-contained staging, offline validation and seal
 passed for the exact commit. The native activation selected it at 07:59:12 UTC on
 October 2 and verified both loaded services and readiness. Fresh capture and custody
-checks preserved all six original conversations, their goals and their received
-inputs. The isolated export reconstructed all 45,006 entries with exact blob/mode
+checks preserved every original conversation present in the baseline, including
+its goals and received inputs. Six scopes were compared: five conversations were
+present; the Robotics scope was absent both before and after. The isolated export reconstructed all 45,006 entries with exact blob/mode
 parity except the established two Company Alpha label substitutions. Its normalized
 tree is `fa2e24688651b325b97918ac44fa47f598eeebd2`.
 
