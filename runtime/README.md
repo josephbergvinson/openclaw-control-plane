@@ -34,7 +34,11 @@ One ordinary startup, app-owned worker readiness, one native metadata command an
 the normal signed boolean local-auth probe passed. Opaque credential entry unlocked
 the normal Apple Passwords landing without screenshots, item contents or secrets
 being requested. This does not qualify vault-item retrieval or Bitwarden per-item
-reuse. MacBook build 599 retains its dated observation; it was not rolled forward.
+reuse. At October 3, 18:18 UTC, MacBook build 600 and its matching private worker
+were accepted from the same source. File/mode parity, the strict signature, one
+ordinary startup, connection in the existing remote mode and one native metadata
+command passed. Its remote configuration was preserved. MacBook signed local-auth
+and credential acceptance were not performed.
 
 The Gateway remains installed from `219dead`; its seven deployment fields and
 complete history are preserved. The previous public revision passed all five

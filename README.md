@@ -23,7 +23,9 @@ signed-parent, private-pipe and whole-config checks remain.
 Mini companion build 600 and its matching worker passed normal packaging,
 installation/readiness and signed local-auth acceptance. Opaque entry unlocked the
 normal Apple Passwords landing; vault-item retrieval and Bitwarden reuse are not
-claimed. MacBook rollout remains separate. The [runtime qualification](runtime/README.md#october-3-mac-companion-authentication-bootstrap)
+claimed. An October 3, 18:18 UTC readback accepted MacBook build 600 in its
+existing remote mode and one native metadata command; credential acceptance remains
+separate. The [runtime qualification](runtime/README.md#october-3-mac-companion-authentication-bootstrap)
 records the scoped source and host evidence. The Gateway remains on the source below.
 
 The installed October 3 Gateway successor is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`,
