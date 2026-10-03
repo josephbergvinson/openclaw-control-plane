@@ -11,7 +11,13 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
-The October 3 reference source is `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`.
+The October 3 reference source is `3e7d6ada7440d2094891e1b3964241e64f585c09`.
+It adds two explicit expected browser actions to one regression fixture after
+hosted follow-up checks exposed a stale action list. The native index owner passed
+21 cases; extension test types, changed-file formatting/lint and normal hooks passed.
+Every production blob and mode matches installed source
+`c066ce9ce642ae830eec9a2de74b59cf19c66d7e`; no runtime rebuild or reinstall occurred.
+The exported reference spans 123 paths since `ab9bbc63194b02f4e523f39855f70522882678b0`.
 It keeps protected browser credentials inside the native consumer, carries the
 authenticated UI requester's MCP scope through admitted work, preserves large tool
 results for native reads, and returns completed child work to the same logical
@@ -20,13 +26,14 @@ prevent a late synthetic input from interrupting final persistence. Voice output
 filters standalone nonspeech markers; summaries order valid timestamped copies
 without rewriting raw history.
 
-This 122-path successor extends `ab9bbc63194b02f4e523f39855f70522882678b0`.
+Installed production is the 122-path successor extending `ab9bbc63194b02f4e523f39855f70522882678b0`.
 All 43 native gates are covered by 39 fresh checks and four successful compiler
 checks retained after exact input exclusion and custody verification. Scoped
 behavior contains 238 cases across nine owners: 20 fresh voice cases and 218
 unchanged cases from the preceding invocation.
 
-The exact source passed the native build, staging, offline validation and seal.
+Installed source `c066ce9ce642ae830eec9a2de74b59cf19c66d7e` passed the native build,
+staging, offline validation and seal.
 One activation selected it on October 3 at 03:13:40 UTC, without rollback.
 Loaded services, health/readiness, current-process capture and original task custody
 passed. Export reconstruction matched all 45,030 committed entries, allowing only
@@ -36,11 +43,13 @@ A controlled installed operator check completed one hidden child, returned its
 private result through native announcement, resumed the original parent and read
 back one actual Discord result. GPT-6.1 Sol at Max and no fallback were preserved;
 no polling rescue or substitute turn was used. This is bounded completion evidence,
-not fresh human-origin Discord acceptance. The separate saved-alias browser action
-completed, but the website rejected authentication; authenticated UI, report, reload
-and indexed refresh remain unverified. Exact-head hosted qualification remains
-separate. Portable model/compaction preferences and dated companion evidence
-retain their previous scope.
+not fresh human-origin Discord acceptance. An initial saved-alias website
+authentication attempt was rejected and remains failed history. After the supported
+verifier repair, native saved-review login, a September UTC report, protected reload
+and one indexed refresh passed; owned tabs were closed. Token-boundary uncertainty
+and unavailable historical prices remain; no accounting-close or MCP/Control UI
+acceptance is claimed. Exact-head hosted qualification stays separate. Portable
+model/compaction preferences and dated companion evidence retain their previous scope.
 
 
 ## October 3 managed credentials and reliable completion
@@ -96,11 +105,15 @@ The controlled installed operator completion check passed: one hidden child,
 private handoff, native parent continuation and one actual Discord readback,
 with Max reasoning, no fallback, polling rescue or replacement turn. Its receipt
 SHA-256 is `3531aefc7bfdcd48d6a7d61fef77e6d478bccbf589b6f5bad6b977ab42e0c922`.
-Fresh human-origin Discord acceptance is not claimed. The separate native
-managed-browser saved-alias action completed, but protected navigation returned
-`ERR_INVALID_AUTH_CREDENTIALS`. Authenticated UI, report, reload and indexed refresh
-remain unverified; the owned target was closed. This does not qualify account
-login or diminish the separate completion result.
+Fresh human-origin Discord acceptance is not claimed. The initial native
+managed-browser saved-alias attempt returned `ERR_INVALID_AUTH_CREDENTIALS`;
+receipt `5ced7c2f4a5e9f0a61cd19094c535148b1324442a7c61e983e3c0236fdeca197`
+preserves that failure. The later supported verifier repair passed saved-review
+website login, a September UTC report, protected reload and one indexed refresh.
+Its receipt is `631f6e66faa8846c2afb3a6db1c73a7078cc9c28b61873da2cd7bd7d9a99de18`;
+owned tabs were closed. Token-boundary uncertainty and unavailable historical
+prices remain. This proves the bounded native browser flow; accounting-close,
+individual MCP and Control UI acceptance are not claimed.
 
 All five existing hosted jobs must qualify the exact final public revision.
 Portable GPT-6.1 Sol/Max, no-fallback and compaction settings remain unchanged.

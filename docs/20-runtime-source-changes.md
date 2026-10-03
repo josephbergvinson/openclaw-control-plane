@@ -13,6 +13,23 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 3 test-only browser fixture correction
+
+Reference `3e7d6ada7440d2094891e1b3964241e64f585c09`, tree
+`4a764dc6af919fc7ae9cc2470432c169fd9d893f`, adds only the two existing opaque
+credential actions to the explicit expected action list. Exact equality,
+evaluation exclusion, schema freezing and dispatch assertions remain.
+The native index owner passed 21 cases, and native extension test types,
+changed-file format/lint and normal hooks passed.
+
+All production blobs and modes match installed `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`.
+Its qualification, build and activation below retain their scope; this test-only
+reference did not rebuild or reinstall runtime. The full reference contains
+123 paths since `ab9bbc63194b02f4e523f39855f70522882678b0`.
+The reconstructed 45,030-entry normalized tree is
+`726d0573cdd0dbd578ccd58139a001868460cb7e`, with only the two established
+Company Alpha fixture substitutions. Exact-final-head hosted checks remain required.
+
 ## October 3 managed credentials and reliable completion
 
 Reference `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`, source tree
@@ -66,11 +83,15 @@ The controlled installed operator completion check passed: one hidden child,
 private handoff, native parent continuation and one actual Discord readback,
 with Max reasoning, no fallback, polling rescue or replacement turn. Its receipt
 SHA-256 is `3531aefc7bfdcd48d6a7d61fef77e6d478bccbf589b6f5bad6b977ab42e0c922`.
-Fresh human-origin Discord acceptance is not claimed. The separate native
-managed-browser saved-alias action completed, but protected navigation returned
-`ERR_INVALID_AUTH_CREDENTIALS`. Authenticated UI, report, reload and indexed refresh
-remain unverified; the owned target was closed. This does not qualify account
-login or diminish the separate completion result.
+Fresh human-origin Discord acceptance is not claimed. The initial native
+managed-browser saved-alias attempt returned `ERR_INVALID_AUTH_CREDENTIALS`;
+receipt `5ced7c2f4a5e9f0a61cd19094c535148b1324442a7c61e983e3c0236fdeca197`
+preserves that failure. The later supported verifier repair passed saved-review
+website login, a September UTC report, protected reload and one indexed refresh.
+Its receipt is `631f6e66faa8846c2afb3a6db1c73a7078cc9c28b61873da2cd7bd7d9a99de18`;
+owned tabs were closed. Token-boundary uncertainty and unavailable historical
+prices remain. This proves the bounded native browser flow; accounting-close,
+individual MCP and Control UI acceptance are not claimed.
 
 All five existing hosted jobs must qualify the exact final public revision.
 Portable GPT-6.1 Sol/Max, no-fallback and compaction settings remain unchanged.
