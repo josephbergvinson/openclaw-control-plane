@@ -13,6 +13,304 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 3 test-only browser fixture correction
+
+Reference `3e7d6ada7440d2094891e1b3964241e64f585c09`, tree
+`4a764dc6af919fc7ae9cc2470432c169fd9d893f`, adds only the two existing opaque
+credential actions to the explicit expected action list. Exact equality,
+evaluation exclusion, schema freezing and dispatch assertions remain.
+The native index owner passed 21 cases, and native extension test types,
+changed-file format/lint and normal hooks passed.
+
+All production blobs and modes match installed `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`.
+Its qualification, build and activation below retain their scope; this test-only
+reference did not rebuild or reinstall runtime. The full reference contains
+123 paths since `ab9bbc63194b02f4e523f39855f70522882678b0`.
+The reconstructed 45,030-entry normalized tree is
+`726d0573cdd0dbd578ccd58139a001868460cb7e`, with only the two established
+Company Alpha fixture substitutions. Exact-final-head hosted checks remain required.
+
+## October 3 managed credentials and reliable completion
+
+Reference `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`, source tree
+`951b50a85376a26056d0bcd7d9bbf69054f268d3`, adds 122 paths since prior public
+source `ab9bbc63194b02f4e523f39855f70522882678b0`. The final committed private delta
+contains 62 paths since `abe908c8f118b1c33c3b7d1abd9f70ea47b731dd`.
+Export reconstructs all 45,030 entries. The normalized tree is
+`bd4f419ac7d635bb6ac947db270fb2517ca65931`; only two established labels in one
+unchanged test fixture differ from the qualified source.
+
+Managed HTTP Basic credentials use a configured opaque alias and exact owned tab.
+The browser tool discovers bindings and installs an alias through the existing
+credentials route without exposing plaintext to the model. Exact HTTPS origin,
+requester, binding, abort and owned native process checks remain. A unique
+configured origin permits a first challenge on an error or blank tab. Credential
+installation and tracing reserve context state before asynchronous work. A native
+context that held opaque credentials refuses tracing for its lifetime, including
+after explicit removal and a CDP reconnect. Actual native stop and a new process
+establish a fresh context.
+
+Authenticated Control UI work carries the verified private participant's MCP
+requester scope through queued and admitted execution. An ordinary transport
+disconnect does not revoke admitted work; abort, owner replacement and actual
+identity invalidation do. Sender attribution and tool permissions remain separate.
+Large MCP output is preserved in the existing private artifact and persisted
+native-read contract, with existing credential redaction.
+
+Child delivery checks persisted logical requester identity instead of treating
+a new physical execution ID as a new conversation. Negative ownership checks
+remain. Automatic checkpoint input waits at the completed-response boundary so
+recording, final assistant messages and provider submission finish in order.
+Voice output removes standalone uppercase nonspeech marker lines and preserves
+inline and quoted content. Summary ordering uses sanitized copies only when all
+timestamps are finite; ties stay stable and raw history remains untouched.
+
+All 43 canonical native gates are covered: 39 fresh checks plus four successful
+compiler outcomes retained after complete current input, missing-resolution,
+link, tool and cache verification. The actual complete ALL20 core-test command
+passed in that retained scope. Scoped behavior contains 238 cases across nine
+owners: 20 fresh voice cases and 218 unchanged cases from the preceding invocation.
+Failed predecessors remain failures; these counts do not imply all owners reran.
+
+The exact source passed the bounded native build, readonly staging, offline
+validation and seal. One activation finished at 03:13:40 UTC on October 3 without
+rollback. Loaded Gateway and Node services, health/readiness, current-process
+capture and postactivation custody passed. Five original conversations were
+present and preserved; Robotics was absent both before and after. Original
+scheduled work was observed without replay or schedule edits.
+
+The controlled installed operator completion check passed: one hidden child,
+private handoff, native parent continuation and one actual Discord readback,
+with Max reasoning, no fallback, polling rescue or replacement turn. Its receipt
+SHA-256 is `3531aefc7bfdcd48d6a7d61fef77e6d478bccbf589b6f5bad6b977ab42e0c922`.
+Fresh human-origin Discord acceptance is not claimed. The initial native
+managed-browser saved-alias attempt returned `ERR_INVALID_AUTH_CREDENTIALS`;
+receipt `5ced7c2f4a5e9f0a61cd19094c535148b1324442a7c61e983e3c0236fdeca197`
+preserves that failure. The later supported verifier repair passed saved-review
+website login, a September UTC report, protected reload and one indexed refresh.
+Its receipt is `631f6e66faa8846c2afb3a6db1c73a7078cc9c28b61873da2cd7bd7d9a99de18`;
+owned tabs were closed. Token-boundary uncertainty and unavailable historical
+prices remain. This proves the bounded native browser flow; accounting-close,
+individual MCP and Control UI acceptance are not claimed.
+
+All five existing hosted jobs must qualify the exact final public revision.
+Portable GPT-6.1 Sol/Max, no-fallback and compaction settings remain unchanged.
+Historical source, recovery, companion and live acceptance records retain their
+dated scope; no broader account, wallet, meeting or device completion is implied.
+
+## October 2 authenticated task credential continuity
+
+Reference `ab9bbc63194b02f4e523f39855f70522882678b0`, source tree
+`c1ff2d0394d9a00ea7d97ebaf1008ff5f7f43fa6`, retains the complete predecessor
+`de4c172287e9707895d96a5a33aac18d59b96199` and adds credential continuity through task
+delegation, queued launch admission, exact private result return and scheduled work.
+The complete committed predecessor delta contains 87 paths; 78 paths belong to the
+authenticated continuity qualification against `458f77254db7c3e3bf5525c1bdea352bcee5fb6f`.
+
+A delegated child can use the original requesting account's MCP connection while
+retaining its own sender and inherited tool limits. Admission validates and captures
+that credential scope before acknowledging acceptance. Execution then follows the
+child's own lifetime, so retiring the accepted source callback does not erase the
+connection. Private announce and settle return transfer only their exact single-use
+request tuple. Old anonymous rows, stale incarnations, mismatched destinations and
+model-supplied identity do not gain access.
+
+Scheduled turns obtain credentials from the existing private job creator provenance
+and current occurrence. Message permission remains independent. Public schedules
+and receipts expose neither private creator metadata nor executable callbacks.
+MCP acquisition, refresh and retained tool/resource operations recheck currentness;
+revoked scope cannot silently become a different account.
+
+Source qualification is a composed result. The original full invocation passed the
+native graph and four type suites before failing the unused-export check. An exact
+internal-test annotation resolved that ownership declaration. The final 31 native
+non-type commands passed, including format, both lint owners and all three actual
+Knip scans at zero. Twenty equivalent branch-bracing changes retained their runtime
+AST; the newly typed Cron fixture received a fresh native selected graph/type check.
+The affected five test owners passed 113 cases. Other recorded common, Cron and
+native component qualifications retain their separate scopes and are not added to
+a single test total. The original whole-run failure and later lint failure remain
+failed history.
+
+The native aggregate build, self-contained staging, offline validation and seal
+passed for the exact commit. The native activation selected it at 07:59:12 UTC on
+October 2 and verified both loaded services and readiness. Fresh capture and custody
+checks preserved every original conversation present in the baseline, including
+its goals and received inputs. Six scopes were compared: five conversations were
+present; the Robotics scope was absent both before and after. The isolated export reconstructed all 45,006 entries with exact blob/mode
+parity except the established two Company Alpha label substitutions. Its normalized
+tree is `fa2e24688651b325b97918ac44fa47f598eeebd2`.
+
+After the owners settled, the live installation received a normal configuration
+patch enabling `agents.defaults.compaction.midTurnPrecheck.enabled` and setting
+`agents.defaults.compaction.thinkingLevel` to `inherit`. The portable preferences
+include the same two settings. Existing context thresholds and GPT-6.1 Sol/Max,
+no-fallback and manual Ultra behavior remain unchanged. No restart was used, and
+reduced latency or provider token usage is not yet established.
+
+Fresh ordinary Finance child execution and exact private announce/settle protected
+tool return remain pending. Hosted reconstruction and all five existing jobs must
+pass at the final public revision. No completed Finance analysis, wallet, meeting,
+natural Journal or companion upgrade is implied by source or activation checks.
+
+## October 2 requester sign-in continuation and test boundaries
+
+Reference `de4c172287e9707895d96a5a33aac18d59b96199`, source tree
+`9984c90999b4e05fdc6d063a7bc592143ed65b3e`, contains 25 reviewed paths since
+`abcf0e16c9ed22923f397ab4fad4708d93f22098` and 44,994 committed entries. Three removed
+core test/helper paths are the old locations of the retained Codex integration
+suites. Their replacements live in `test/plugins`; the continuation owner test
+and Memory Core test-api account for the two additional entries. The existing
+exporter must reconstruct every committed blob and mode, allowing only the two
+established Company Alpha label substitutions.
+
+After successful requester `mcp_connect`, the native attempt can discover and
+prepare permitted protected tools before its next model request. The existing
+next-turn owner publishes the catalog to the same session and hook context.
+The user can continue the current question without another incoming message.
+This continuation keeps the admitted requester, client and refresh-grant
+ownership. Revocation, a changed runtime generation, abort or a prior next-turn
+stop prevents stale publication. Consent and discovery failures remain explicit.
+Other harnesses retain their existing reconnect guidance.
+
+The two shared host/plugin integration suites remain in their root test owner.
+They import the existing Discord test-api and a two-line Memory Core test-api;
+their assertion and cleanup bodies are unchanged. Both dependency guards passed
+without exclusions. Retained Codex custody/publication suites and their helper
+moved together from core auto-reply to `test/plugins`.
+
+Root qualification recorded 347 affected-owner tests, three additional shared
+host integration tests and 60 passing tests after the equivalent lint correction.
+These counts describe their separately recorded scopes and are not additive.
+The affected type graphs, scoped typed lint, formatting, import guards and both
+source-size ratchets also passed. Qualification binds this exact committed tree.
+
+The bounded native aggregate build, including UI, physically joined with exit
+zero. Readonly staging, network-denied offline validation and candidate sealing
+passed. One native activation selected this exact source at 01:18:32 UTC on
+October 2. Both loaded services, health/readiness, current-process capture and
+original custody preservation passed. These receipts do not establish a completed
+Finance analysis or delivery. Exact-source export parity and all five existing
+hosted jobs must qualify the same successor public revision before merge; the
+933cfcfc boundary failure and its aggregate remain dated history.
+Existing wallet, meeting, Journal, companion and account receipts keep their
+original scopes.
+
+## October 1 timeout, retained steering and requester recovery
+
+Reference `abcf0e16c9ed22923f397ab4fad4708d93f22098`, source tree
+`67123000d1c8008a18ce7e9e4aa9f40c5d273aeb`, covers 52 reviewed paths since
+`3063571d0390f2e0fe48226035fe6581149cebae`. The full patch still reconstructs
+the pinned official release through this exact source, with only the two existing
+test-label normalizations.
+
+The source retains the C15 recovery-notice visibility, current-request authority,
+intentional cancellation and requester reconnect changes. A current timeout stays
+the authoritative terminal cause after progress has been delivered. The default
+visible failure uses ordinary language while exact diagnostics remain internal;
+explicit owner action guidance and completed final-message delivery keep their
+existing semantics.
+
+Retained admitted input can retry against the exact published native or Codex
+backend in FIFO order, without another incoming message or duplicate source
+adoption. Incompatible prepared MCP catalogs retain their normal next-turn path.
+The existing injection guards recheck runtime ownership, executable catalog and
+canonical authorization class after asynchronous preparation. Compatible token
+refresh remains usable; source authority and accepted or indeterminate input
+keep their existing custody rules.
+
+An all-failed empty MCP catalog joins the existing bounded discovery recovery
+when due. Usable catalogs keep their current fast path. HTTP diagnostics preserve
+a valid numeric status while redacting response bodies and URL queries. Startup
+publication initializes the typed registration before synchronous target projection
+and captures the exact registration afterward, preserving currentness and
+accepted-profile checks. The real native preparation regression reproduced the
+observed ReferenceError before the correction.
+
+The preceding 35-path source qualification passed 760 cases in 37 whole owner
+files. The startup correction then passed 60 cases in three whole owner files;
+these are separate recorded runs. Required affected production and test types,
+typed lint, formatting and unchanged official size/environment guards passed.
+The failed pre-fix regression and resolved lint failure remain recorded. Exact
+source review and final qualification bind the committed bytes; no full native
+repository type/lint aggregate is inferred from the affected-owner checks.
+
+The exact aggregate build, including UI, completed in 253.509 seconds and
+physically joined. Staging, offline validation and sealing passed. One native
+activation completed at 21:59:12 UTC on October 1 with Gateway and Node loaded
+from this exact source, and health/readiness accepted. Current-process Journal
+capture and custody comparison preserved original inputs, goals, configuration,
+all 28 job definitions, auth ordering, approval bindings and companion generations.
+An absent scoped session remained absent. This does not prove a natural Journal
+cycle or upgrade the separately recorded companion source.
+
+The original requester completed an authenticated status query through automatic
+OAuth refresh after token expiry on the earlier C15 source. That result remains
+C15 evidence. Fresh ordinary-use Finance reconnect and continuation on this final
+source remain pending. All five existing hosted jobs must qualify the exact new
+public revision; the C12 hosted failure and earlier green results retain their
+original identities. Wallet, spoken meeting minutes and natural Journal sync
+retain their separate acceptance gates. Older dated sections below are unchanged.
+
+## October 1 requester authority, helper admission and MCP discovery
+
+Reference `3063571d0390f2e0fe48226035fe6581149cebae`, source tree
+`5a72ac3b5e98d2a6d951ad72109ce1a9ae53df41`, covers twelve reviewed paths relative
+to `1ce74af1fa354698f71eebfb96a033aeeda83b80`. Ten paths retain the qualified
+`8ba000f21065c3eaf04bab1ffa92e427d9ed5634` authority/helper bytes. OpenClaw carries
+the authenticated requester's owner status into the current request, including
+fresh input and plain or hydrated chat steering. This fact comes from admitted
+command authority; names, quoted messages and earlier turns cannot supply it.
+A later non-owner turn receives its own current authority. Existing tool and
+permission checks still apply.
+
+Setup and conversational helpers select their runtime independently of the turn
+that invoked them. They leave the parent's prepared-model and plugin-generation
+scopes while retaining the authenticated Gateway caller. Autonomous embedded
+execution remains separately owned.
+
+The MCP OAuth provider declines incomplete or conflicting cached first-use
+discovery before a registered client or token exists. This lets the maintained SDK
+discover the recovered protected resource's advertised authorization issuer, such
+as `/agent-auth`, after a failed login cached the legacy root fallback. Established
+credentials retain their issuer and refresh checks; requester identity, other
+requesters' stores and lease ownership remain intact. The change uses the existing
+provider entrypoint and SDK discovery path, without a direct production store repair.
+
+The retained authority/helper qualification passed 34 steering/reply-context cases,
+307 auto-reply cases, 29 helper/generation cases and six isolated authenticated
+Gateway cases. These counts describe their recorded runs, including sibling guards.
+Full core types, Gateway-other and messaging test types, typed lint on the ten
+changed authority/helper paths, formatting and whitespace checks passed.
+
+The final MCP qualification passed all 34 cases in both whole existing OAuth owner
+suites, full production types and maintained agents-root test types, native targeted
+lint, formatting and whitespace checks. Actual SDK regressions failed before the
+repair and passed afterward; independent review of the moved issuer fixture found
+no blocking issue. The final root source review binds the twelve committed file
+hashes. Earlier fixture, selector and watchdog outcomes retain their original scope;
+a complete repository type/lint aggregate and a live provider login are not claimed.
+
+The first 8ba build stopped under its competing-process guard. Its later aggregate
+build completed in 275.41 seconds; staging, offline validation and sealing passed.
+That candidate was never activated. C10 remains the actual Gateway predecessor.
+The final C12 aggregate build, including UI, completed once in 260.277 seconds
+and physically joined with no surviving owned processes. Physical staging, offline
+validation and sealing passed for this exact source. One native activation
+completed successfully with no rollback attempt; Gateway and Node loaded the exact
+sealed C12 release and native health/readiness checks passed. Fresh process
+readback confirmed their exact release and process identities. The explicit
+scheduler-route Journal capture was renewed for the current Gateway process
+without changing its protected code identity or recorded permission; the temporary
+job and owned Journal window were cleaned up. Custody comparison preserved config,
+auth ordering, job definitions, approval bindings, companion generations, scoped
+session goals and original inputs. An absent scoped session remains explicitly
+unchanged. Matching-head hosted checks and fresh ordinary-use Finance,
+OAuth and wallet acceptance remain pending. The existing five hosted jobs will check
+the complete native plan and build, with the changed Gateway, auto-reply and MCP
+owner suites in the existing runtime-build job. Source qualification does not
+establish a live account workflow, spoken meeting minutes or a natural Journal cycle.
+
 ## October 1 requester and goal usage ownership
 
 Reference `1ce74af1fa354698f71eebfb96a033aeeda83b80` adds four reviewed paths to
