@@ -13,6 +13,70 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 3 managed credentials and reliable completion
+
+Reference `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`, source tree
+`951b50a85376a26056d0bcd7d9bbf69054f268d3`, adds 122 paths since prior public
+source `ab9bbc63194b02f4e523f39855f70522882678b0`. The final committed private delta
+contains 62 paths since `abe908c8f118b1c33c3b7d1abd9f70ea47b731dd`.
+Export reconstructs all 45,030 entries. The normalized tree is
+`bd4f419ac7d635bb6ac947db270fb2517ca65931`; only two established labels in one
+unchanged test fixture differ from the qualified source.
+
+Managed HTTP Basic credentials use a configured opaque alias and exact owned tab.
+The browser tool discovers bindings and installs an alias through the existing
+credentials route without exposing plaintext to the model. Exact HTTPS origin,
+requester, binding, abort and owned native process checks remain. A unique
+configured origin permits a first challenge on an error or blank tab. Credential
+installation and tracing reserve context state before asynchronous work. A native
+context that held opaque credentials refuses tracing for its lifetime, including
+after explicit removal and a CDP reconnect. Actual native stop and a new process
+establish a fresh context.
+
+Authenticated Control UI work carries the verified private participant's MCP
+requester scope through queued and admitted execution. An ordinary transport
+disconnect does not revoke admitted work; abort, owner replacement and actual
+identity invalidation do. Sender attribution and tool permissions remain separate.
+Large MCP output is preserved in the existing private artifact and persisted
+native-read contract, with existing credential redaction.
+
+Child delivery checks persisted logical requester identity instead of treating
+a new physical execution ID as a new conversation. Negative ownership checks
+remain. Automatic checkpoint input waits at the completed-response boundary so
+recording, final assistant messages and provider submission finish in order.
+Voice output removes standalone uppercase nonspeech marker lines and preserves
+inline and quoted content. Summary ordering uses sanitized copies only when all
+timestamps are finite; ties stay stable and raw history remains untouched.
+
+All 43 canonical native gates are covered: 39 fresh checks plus four successful
+compiler outcomes retained after complete current input, missing-resolution,
+link, tool and cache verification. The actual complete ALL20 core-test command
+passed in that retained scope. Scoped behavior contains 238 cases across nine
+owners: 20 fresh voice cases and 218 unchanged cases from the preceding invocation.
+Failed predecessors remain failures; these counts do not imply all owners reran.
+
+The exact source passed the bounded native build, readonly staging, offline
+validation and seal. One activation finished at 03:13:40 UTC on October 3 without
+rollback. Loaded Gateway and Node services, health/readiness, current-process
+capture and postactivation custody passed. Five original conversations were
+present and preserved; Robotics was absent both before and after. Original
+scheduled work was observed without replay or schedule edits.
+
+The controlled installed operator completion check passed: one hidden child,
+private handoff, native parent continuation and one actual Discord readback,
+with Max reasoning, no fallback, polling rescue or replacement turn. Its receipt
+SHA-256 is `3531aefc7bfdcd48d6a7d61fef77e6d478bccbf589b6f5bad6b977ab42e0c922`.
+Fresh human-origin Discord acceptance is not claimed. The separate native
+managed-browser saved-alias action completed, but protected navigation returned
+`ERR_INVALID_AUTH_CREDENTIALS`. Authenticated UI, report, reload and indexed refresh
+remain unverified; the owned target was closed. This does not qualify account
+login or diminish the separate completion result.
+
+All five existing hosted jobs must qualify the exact final public revision.
+Portable GPT-6.1 Sol/Max, no-fallback and compaction settings remain unchanged.
+Historical source, recovery, companion and live acceptance records retain their
+dated scope; no broader account, wallet, meeting or device completion is implied.
+
 ## October 2 authenticated task credential continuity
 
 Reference `ab9bbc63194b02f4e523f39855f70522882678b0`, source tree

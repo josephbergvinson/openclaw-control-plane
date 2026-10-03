@@ -135,17 +135,27 @@ jobs:
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
           set -o pipefail
-          pnpm test:serial \
+          OPENCLAW_BROWSER_HTTP_AUTH_E2E=1 pnpm test:serial \
             src/agents/tools/sessions.test.ts \
             src/agents/tools/sessions-send-tool.recovery.test.ts \
             src/agents/subagents/registry/subagent-registry-restart-recovery.test.ts \
             src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts \
             src/tasks/task-registry-private-cancellation.test.ts \
             src/gateway/server.private-completion.test.ts \
+            src/agents/sessions/session-manager.user-idempotency.test.ts \
             src/gateway/server.private-recovery-completion.test.ts \
             src/gateway/session-subagent-private-completion.test.ts \
             src/gateway/session-subagent-resume.test.ts \
             src/agents/embedded-agent-runner/compact.auth-fallback.test.ts \
+            src/agents/command/browser-cleanup.test.ts \
+            src/auto-reply/reply/agent-runner-browser-cleanup.test.ts \
+            src/auto-reply/reply/agent-runner-result-complete.retained-child.test.ts \
+            src/auto-reply/reply/followup-runner.test.ts \
+            src/browser-task-completion-cleanup.test.ts \
+            src/plugin-sdk/browser-maintenance.completion.test.ts \
+            extensions/browser/src/browser-node-proxy.completion.test.ts \
+            extensions/browser/src/browser/client-fetch.completion.test.ts \
+            extensions/browser/src/browser/session-tab-registry.completion.test.ts \
             src/agents/compaction.summarize-fallback.test.ts \
             src/auto-reply/reply/agent-runner-execution-compaction.test.ts \
             src/auto-reply/reply/agent-runner-failure-reply.test.ts \
@@ -160,6 +170,20 @@ jobs:
             src/gateway/config-reload.browser.test.ts \
             extensions/browser/index.test.ts \
             extensions/browser/src/browser-tool.credentials.test.ts \
+            extensions/browser/src/browser/pw-tools-core.state.test.ts \
+            extensions/browser/src/browser/routes/agent.storage.device.test.ts \
+            extensions/browser/src/cli/browser-cli-state.option-collisions.test.ts \
+            extensions/browser/src/browser/request-policy.test.ts \
+            extensions/browser/src/gateway/browser-request.profile-from-body.test.ts \
+            extensions/browser/src/node-host/invoke-browser.type-secret.test.ts \
+            extensions/browser/src/node-host/invoke-browser.test.ts \
+            extensions/browser/src/browser/pw-tools-core.trace.test.ts \
+            extensions/browser/src/browser/server-context.stop-running-browser.test.ts \
+            extensions/browser/src/browser/pw-tools-core.state.credentials.chromium.test.ts \
+            extensions/browser/src/browser-tool.schema.test.ts \
+            extensions/browser/src/browser-tool-binding.test.ts \
+            extensions/browser/src/browser-tool.test.ts \
+            extensions/browser/src/browser/client-actions-core.hooks.test.ts \
             src/agents/tools/sessions-yield-tool.test.ts \
             src/tasks/task-registry-progress.test.ts \
             src/plugin-sdk/channel-outbound.streaming.test.ts \
@@ -196,10 +220,16 @@ jobs:
           pnpm test:serial \
             src/gateway/server-methods/chat-send-message-injection.test.ts \
             src/gateway/server-methods/chat-send-message-injection.isolated-gateway.test.ts \
+            src/gateway/server-methods/gateway-client-identity.test.ts \
             src/gateway/server-methods/system-agent-nested-inference.integration.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-qa-authority-gateway.log"
           pnpm test:serial \
             src/auto-reply/reply/inbound-meta.test.ts \
+            src/auto-reply/reply/reply-mcp-requester-scope.test.ts \
+            src/auto-reply/reply/queue.mcp-requester-scope.test.ts \
+            src/auto-reply/reply/agent-runner-utils.test.ts \
+            src/auto-reply/reply/agent-runner-execution-cli-admission.test.ts \
+            src/auto-reply/reply/agent-runner-execution-runtime.test.ts \
             test/plugins/codex-retained-steering-publication.test.ts \
             test/plugins/codex-retained-steering-custody.test.ts \
             src/auto-reply/reply/agent-runner-steer-adoption.auth-rotation.test.ts \
@@ -225,6 +255,10 @@ jobs:
             src/agents/mcp-http-transport.test.ts \
             src/agents/agent-bundle-mcp-runtime.test.ts \
             src/agents/agent-bundle-mcp-tools.materialize.test.ts \
+            src/agents/agent-bundle-mcp-output-preservation.test.ts \
+            src/agents/session-tool-result-guard.persistence-order.test.ts \
+            src/agents/session-tool-result-guard.tool-result-persist-hook.test.ts \
+            src/agents/sessions/tools/read.test.ts \
             src/agents/agent-bundle-mcp-tools.request-boundary.test.ts \
             src/agents/agent-bundle-mcp-runtime-shared.test.ts \
             src/agents/agent-bundle-mcp-acquisition.test.ts \
@@ -244,6 +278,16 @@ jobs:
           pnpm test:serial \
             extensions/codex/src/app-server/run-attempt.requester-continuity.test.ts \
             src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts \
+            src/agents/tools/sessions-send-tool.a2a-requester-scope.test.ts \
+            src/agents/tools/in-process-gateway.completion-handoff.test.ts \
+            src/agents/requester-tool-policy.a2a.test.ts \
+            src/agents/command/attempt-execution.cli.test.ts \
+            src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts \
+            src/agents/tools/sessions-send-tool.a2a.test.ts \
+            src/agents/tools/agent-step.test.ts \
+            src/agents/subagents/announce/subagent-announce-handoff.test.ts \
+            src/agents/requester-tool-policy.test.ts \
+            src/agents/tools/in-process-gateway.test.ts \
             src/agents/embedded-agent-runner/run/run-attempt-dispatch.owner.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-mcp-continuity.test.ts \
             src/agents/subagents/registry/subagent-registry-run-launch.requester-scope.test.ts \
@@ -263,6 +307,23 @@ jobs:
             src/plugins/compat/registry.test.ts \
             test/scripts/plugin-boundary-report.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-credential-continuity.log"
+      - name: Verify original-conversation completion and checkpoint admission
+        id: completion-checkpoint
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          pnpm test:serial \
+            src/agents/subagents/announce/subagent-announce-delivery.test.ts \
+            src/agents/subagents/announce/subagent-announce-delivery.runtime.test.ts \
+            src/agents/subagents/announce/subagent-announce-requester-incarnation.test.ts \
+            src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts \
+            src/agents/embedded-agent-runner/run/attempt.checkpoint-admission.test.ts \
+            src/agents/sessions/agent-session-checkpoint-admission.test.ts \
+            src/plugins/runtime/runtime-tasks.test.ts \
+            extensions/lane-contract/src/detached-lane-checkpoint.test.ts \
+            extensions/discord/src/voice/segment.test.ts \
+            src/transcripts/summary.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-completion-checkpoint.log"
       - name: Verify account transport and quota recovery
         id: quota
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -307,6 +368,18 @@ jobs:
             src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts \
             src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts \
             src/agents/embedded-agent-runner/run/attempt-stream-prepare.test.ts \
+            src/agents/embedded-agent-runner/provider-prompt-state.fixed-cost.test.ts \
+            src/agents/embedded-agent-runner/run/preemptive-compaction.fixed-cost.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-prompt-submit.measured-fixed-cost.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-prompt-submit.midturn-projection.test.ts \
+            src/agents/embedded-agent-runner/run.overflow-context-recovery.test.ts \
+            src/agents/embedded-agent-runner/run.shared-integration.test.ts \
+            src/agents/embedded-agent-runner/run.overflow-compaction.loop.test.ts \
+            src/agents/embedded-agent-runner/run.overflow-compaction.test.ts \
+            src/agents/embedded-agent-subscribe.subscribe-embedded-agent-session.compaction-and-tool-summaries.test.ts \
+            src/agents/embedded-agent-subscribe.subscribe-embedded-agent-session.subscribeembeddedagentsession.test.ts \
+            packages/ai/src/transports/openai-responses-prompt-observer.test.ts \
+            packages/llm-core/src/utils/event-stream.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
       - name: Verify resumed requester progress ownership
         id: cadence
@@ -380,6 +453,7 @@ jobs:
             ${{ runner.temp }}/reference-qa-authority-auto-reply.log
             ${{ runner.temp }}/reference-mcp-discovery.log
             ${{ runner.temp }}/reference-credential-continuity.log
+            ${{ runner.temp }}/reference-completion-checkpoint.log
             ${{ runner.temp }}/reference-followup-terminal.log
             ${{ runner.temp }}/reference-followup-receipts.log
             ${{ runner.temp }}/reference-followup-continuation.log

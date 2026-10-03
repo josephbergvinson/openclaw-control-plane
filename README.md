@@ -14,27 +14,36 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The October 2 reference source is `ab9bbc63194b02f4e523f39855f70522882678b0`.
-Permitted MCP connections now follow authenticated task delegation and private
-result return, so a child can finish protected work and the original conversation
-can continue using its connection. The actual sender and existing tool permissions
-remain unchanged. Scheduled work uses its existing private creator identity for
-its current occurrence; stale or mismatched ownership cannot reuse it.
+The October 3 reference source is `c066ce9ce642ae830eec9a2de74b59cf19c66d7e`.
+It keeps protected browser credentials inside the native consumer, carries the
+authenticated UI requester's MCP scope through admitted work, preserves large tool
+results for native reads, and returns completed child work to the same logical
+conversation after its physical execution changes. Completed response checkpoints
+prevent a late synthetic input from interrupting final persistence. Voice output
+filters standalone nonspeech markers; summaries order valid timestamped copies
+without rewriting raw history.
 
-This 87-path successor extends `de4c172287e9707895d96a5a33aac18d59b96199`.
-The recorded source checks, native build, staging, offline validation and seal
-passed. One native activation selected the exact source at 07:59:12 UTC on October
-2; loaded services, health/readiness, current-process capture and original task
-custody passed. Isolated export reconstruction matched all 45,006 committed entries,
-with only the two established Company Alpha fixture labels normalized.
+This 122-path successor extends `ab9bbc63194b02f4e523f39855f70522882678b0`.
+All 43 native gates are covered by 39 fresh checks and four successful compiler
+checks retained after exact input exclusion and custody verification. Scoped
+behavior contains 238 cases across nine owners: 20 fresh voice cases and 218
+unchanged cases from the preceding invocation.
 
-The portable preferences enable a context precheck during a turn and inherit the
-turn's reasoning setting for compaction. The live installation received those two
-settings through its normal configuration patch without a restart. GPT-6.1 Sol,
-Max reasoning, no fallback and the manual Ultra option remain unchanged. Reduced
-latency and token usage still require live evidence. Ordinary Finance completion
-and all five hosted jobs remain separate acceptance gates. Dated predecessor and
-companion evidence retains its original scope.
+The exact source passed the native build, staging, offline validation and seal.
+One activation selected it on October 3 at 03:13:40 UTC, without rollback.
+Loaded services, health/readiness, current-process capture and original task custody
+passed. Export reconstruction matched all 45,030 committed entries, allowing only
+the two established Company Alpha fixture substitutions.
+
+A controlled installed operator check completed one hidden child, returned its
+private result through native announcement, resumed the original parent and read
+back one actual Discord result. GPT-6.1 Sol at Max and no fallback were preserved;
+no polling rescue or substitute turn was used. This is bounded completion evidence,
+not fresh human-origin Discord acceptance. The separate saved-alias browser action
+completed, but the website rejected authentication; authenticated UI, report, reload
+and indexed refresh remain unverified. Exact-head hosted qualification remains
+separate. Portable model/compaction preferences and dated companion evidence
+retain their previous scope.
 
 
 ## How it works
