@@ -13,6 +13,62 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 3 voice following and useful completion messages
+
+The installed source is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`, tree
+`b76fabfb1a1e5abffa3fa2fa61394c5f2bdcec9c`. The committed delta contains
+45 paths since reference `3e7d6ada7440d2094891e1b3964241e64f585c09`.
+
+With a minutes destination configured for one followed user, Discord's existing
+join, move and leave lifecycle starts and stops the native transcript capture.
+The existing summary and delivery owners post meeting notes and action items.
+Already-received audio drains before finalization, including packets waiting for
+decode or transcription. Concurrent departure and explicit leave share one finish,
+so they do not produce duplicate notes. Explicit leave pauses the current visit;
+reconciliation and stale REST responses cannot rejoin it or disconnect a newer
+manual session. A genuine departure or move releases that visit's pause.
+
+Yielded company conversations now keep the logical requester identity required
+for their completed worker's result to return. Existing replacement and revocation
+checks remain. Visible task creation uses natural progress instead of a mandatory
+internal URL and owner header. A session link remains available when the user asks
+to open or steer it. Discord automation messages omit the Inspect section;
+other channels, action controls and internal inspection metadata are preserved.
+On constrained local hosts, build admission prevents overlapping tsdown compiler work.
+
+The initial voice feature passed 153 cases across six owners. The later
+explicit-leave correction passed 113 cases across six affected owners. These
+suites overlap and are not added together; the earlier result describes its
+initial source. Alert coverage is a composed 374 cases across six owners:
+164 fresh cases in one owner plus 210 unchanged cases in five owners, rather
+than a second complete run. The requester-completion component passed 60 cases
+across five owners. Their recorded scoped types, lint and contract guards passed.
+These component results do not claim a complete integrated local native plan or
+all 20 core-test graphs for the new source.
+
+The final integrated native build included the UI and passed. The isolated Discord
+entrypoint profile passed with 297.6 MiB peak RSS, a 45.5 MiB baseline and a
+252.1 MiB delta; it does not measure loaded Gateway or combined-plugin memory.
+Readonly staging, the offline import and seal passed against the exact source.
+One activation installed this exact source on October 3 at 15:24:40 UTC without
+rollback. Loaded Gateway and Node services, health/readiness and protected-state
+readback passed. Voice following and its minutes destination were configured
+through one valid patch; Discord remained connected and the same Gateway instance
+was retained. Current-process screen capture and the final context readback passed; this does
+not prove a natural source-day export. Custody comparison against the dated
+03:02 baseline preserved five original conversation identities and goals. All
+29 retained inputs remain interrupted and accounted for; resumption and delivery
+are not claimed, and no fresh pre-stop baseline is implied.
+
+One naturally scheduled Discord announcement matched its recorded summary exactly
+and contained no appended Inspect section. It was not manually triggered or
+replayed. That live check covers the scheduled announcement route; failure-alert
+and background-task routes retain their source-test scope. Fresh spoken-audio,
+recording and minutes delivery remain pending. Earlier website, MCP and
+conversation acceptance records below retain their dated scope; they were not
+repeated for this activation. The final public head still requires all five
+existing hosted checks.
+
 ## October 3 test-only browser fixture correction
 
 Reference `3e7d6ada7440d2094891e1b3964241e64f585c09`, tree
