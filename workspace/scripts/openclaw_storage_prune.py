@@ -37,10 +37,11 @@ from pathlib import Path
 from typing import Callable
 
 try:
-    from . import external_volume_guard, node_compile_cache
+    from . import external_volume_guard, node_compile_cache, developer_cache_formats
 except ImportError:
     import external_volume_guard
     import node_compile_cache
+    import developer_cache_formats
 
 OWC = Path((str(OPERATOR.require_path('paths.data_root'))))
 WORKSPACE = Path(os.environ.get('WORKSPACE', str(OPERATOR.require_path('paths.workspace'))))
@@ -50,6 +51,7 @@ XCODE_OUTPUTS = ('Build/Intermediates.noindex', 'ModuleCache.noindex', 'Index.no
                  'SDKStatCaches.noindex', 'CompilationCache.noindex')
 QUARANTINE_PREFIX = '.openclaw-prune-'
 SCRATCH_RETENTION_DAYS = 7
+DEVELOPER_CACHE_RETENTION_DAYS = 2
 NPM_LOG_KIND = 'npm-debug-log'
 NPM_LOG_NAME = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{3}Z-debug-\d+\.log')
 
@@ -187,6 +189,8 @@ def bounded_candidates() -> list[tuple[Path, str, Path, int]]:
             for p in root.iterdir():
                 if p.is_dir() and not p.is_symlink():
                     result.append((p, 'package-download-cache', p, 14))
+    result += [(p, kind, p, DEVELOPER_CACHE_RETENTION_DAYS)
+               for p, kind in developer_cache_formats.candidates(USER_HOME)]
     logs = USER_HOME / '.npm/_logs'
     if logs.is_dir() and logs.resolve() == logs:
         result.extend((p, NPM_LOG_KIND, p, 14) for p in logs.iterdir()
@@ -208,6 +212,7 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
             # Every ancestor must still resolve to the path we classified.
             if p.resolve() != p or activity.resolve() != activity:
                 raise ValueError('symlink ancestor')
+            cache_signature = None
             if kind == NPM_LOG_KIND:
                 s = npm_log_stat(p, now - days * 86400)
                 allocated, newest = s.st_blocks * 512, s.st_mtime
@@ -240,12 +245,31 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
                         anchor.verify()
                     finally:
                         os.close(fd)
+            elif kind in developer_cache_formats.KINDS:
+                cutoff = now - days * 86400
+                developer_cache_formats.classify(p, kind, USER_HOME, cutoff)
+                reason = developer_cache_formats.producer_reason(kind, process_arguments())
+                if reason:
+                    raise ValueError(reason)
+                s = p.lstat()
+                with anchored_parent(p) as anchor:
+                    fd = os.open(p.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=anchor.fd)
+                    try:
+                        if (file_identity(os.fstat(fd)) != file_identity(s)
+                                or s.st_dev != os.fstat(anchor.fd).st_dev
+                                or os.fstat(anchor.fd).st_uid != os.getuid()):
+                            raise ValueError('developer cache root owner, identity or filesystem changed')
+                        facts = developer_cache_formats.tree_facts(fd, kind, cutoff, deadline, entry_fingerprint)
+                        allocated, newest, cache_signature = facts.allocated, facts.newest, (facts.signature,)
+                        anchor.verify()
+                    finally:
+                        os.close(fd)
             else:
                 allocated, newest = tree_facts(p, now - days * 86400, deadline)
                 s = p.lstat()
             candidates.append(Candidate(str(p), kind, str(activity), days,
                                         s.st_dev, s.st_ino, newest, allocated,
-                                        entry_fingerprint(s) if kind == NPM_LOG_KIND else None))
+                                        entry_fingerprint(s) if kind == NPM_LOG_KIND else cache_signature))
         except (OSError, ValueError) as error:
             skipped.append({'path': str(p), 'reason': str(error), 'error': isinstance(error, OSError)})
     return candidates, skipped
@@ -743,6 +767,7 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
             if is_recovery_path(p):
                 raise ValueError('preserved recovery quarantine')
             is_node = candidate.kind == node_compile_cache.KIND
+            is_developer_cache = candidate.kind in developer_cache_formats.KINDS
             is_npm_log = candidate.kind == NPM_LOG_KIND
             is_scratch = candidate.kind in ('test-scratch', 'pytest-scratch')
             if is_scratch:
@@ -764,7 +789,16 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                     raise ValueError('unclassified Node cache retention policy')
                 if version in node_compile_cache.active_versions(deadline):
                     raise ValueError('active Node version ' + version)
-            reason = activity_reason(activity, process_arguments(), directory=not is_npm_log)
+            commands = process_arguments()
+            if is_developer_cache:
+                if candidate.min_age_days != DEVELOPER_CACHE_RETENTION_DAYS or activity != p or candidate.leaf_fingerprint is None:
+                    raise ValueError('unclassified developer cache retention policy')
+                developer_cache_formats.classify(p, candidate.kind, USER_HOME,
+                                                 time.time() - DEVELOPER_CACHE_RETENTION_DAYS * 86400)
+                reason = developer_cache_formats.producer_reason(candidate.kind, commands)
+                if reason:
+                    raise ValueError(reason)
+            reason = activity_reason(activity, commands, directory=not is_npm_log)
             if reason:
                 raise ValueError(reason)
             if p.resolve() != p or activity.resolve() != activity:
@@ -784,6 +818,12 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                             or os.fstat(captured.anchor.fd).st_uid != os.getuid()):
                         raise ValueError('Node cache root owner or filesystem changed')
                     allocated, newest, leaves = node_compile_cache.tree_facts(captured.fd, cutoff, deadline)
+                elif is_developer_cache:
+                    facts = developer_cache_formats.tree_facts(captured.fd, candidate.kind, cutoff,
+                                                               deadline, entry_fingerprint)
+                    if (facts.signature,) != candidate.leaf_fingerprint:
+                        raise ValueError('developer cache contents changed after discovery')
+                    allocated, newest = facts.allocated, facts.newest
                 else:
                     allocated, newest = descriptor_tree_facts(captured.fd, cutoff, deadline)
                 if newest != candidate.newest_mtime:
@@ -791,6 +831,10 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                 if is_node and version in node_compile_cache.active_versions(deadline):
                     raise ValueError('active Node version ' + version)
                 commands = process_arguments()
+                if is_developer_cache:
+                    reason = developer_cache_formats.producer_reason(candidate.kind, commands)
+                    if reason:
+                        raise ValueError(reason)
                 if activity == p:
                     # Capture moved this pathname; inspect open handles on its
                     # captured location while retaining original argv aliases.
@@ -806,6 +850,16 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                     remove_captured_leaf(captured, captured_log, cutoff, candidate.device, deadline)
                 elif is_node:
                     remove_node_cache(captured, leaves, cutoff, deadline)
+                elif is_developer_cache:
+                    def validate_cache_entry(relative, value, after_capture):
+                        expected = facts.entries.get(relative)
+                        if (expected is None or entry_fingerprint(value, after_rename=after_capture)
+                                != entry_fingerprint(expected, after_rename=after_capture)):
+                            raise ValueError('developer cache entry changed after format admission')
+                    remove_captured_tree(captured, cutoff, deadline, entry_validator=validate_cache_entry,
+                                         captured_leaf_validator=lambda leaf, relative:
+                                         developer_cache_formats.validate_leaf(leaf.fd, candidate.kind,
+                                                                              relative, deadline))
                 else:
                     remove_captured_tree(captured, cutoff, deadline, writable_scratch=is_scratch)
             # A new object at the original path belongs to another worker and
