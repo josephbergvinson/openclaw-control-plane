@@ -13,7 +13,43 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
-## October 3 Mac companion authentication bootstrap
+## October 3 foreground shortcuts and browser bootstrap migration
+
+Reference `04adc9cec81f56cfe6fc8b418178b719099f1a1c`, tree
+`18f6cc162cab880dbe2f07ccb2220f7937fa5251`, has fourteen net changed paths
+since `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`. CUA 0.30.4 fixes
+foreground shortcut modifier flags while preserving input guards and native result
+envelopes. The browser installer recognizes verified private legacy registrations
+and handles an older owned destination with a different generated origin.
+
+CUA qualification composes 309 cases across 17 owners: 193 fresh CUA cases,
+16 fresh core contract cases and 100 unchanged earlier cases. The latest browser
+correction passed 180 cases across seven owners after reproducing the installed
+collision. Selected types, lint, format, pin and boundary guards passed. These
+component scopes overlap and are not a single combined run. The corrected Gateway
+build, UI, staging, offline import, native seal and exact-source activation passed.
+The normal installed migration and status passed: four current owned launchers,
+all four old registered copies retired, no manual setup required and no issues.
+
+The current Gateway loads `04adc9cec81f56cfe6fc8b418178b719099f1a1c`.
+Its one native activation, health and protected settings passed. Current-process
+Journal manual capture passed separately; natural source-day and downstream
+completeness remain open. The previous 2cc migration failure is preserved. Final
+context and fresh pre-stop custody comparison retain all six compared scopes and
+29 historical inputs, including unchanged absence; no replay, resumption or new
+delivery is claimed. Native registration readiness does not prove website login.
+
+Both companions use signed build 601 from `e36cc1228aa3317389a90313fea7cea91182683e`,
+tree `931eff6614217ed3e97fdaa4a2478b177695b88c`. Whole-bundle parity and
+current worker metadata passed on both hosts. Mini foreground select-all, exact
+replacement and owned-window closure passed; saved-alias entry also unlocked the
+normal Apple Passwords landing. MacBook shortcut and credential acceptance, vault
+item retrieval, Bitwarden/MFA reuse, browser transport/login and genuine spoken
+audio/minutes remain open. Normal browser-provider installation/reinstall left its
+official native host missing. This export performs no installation. Prior source,
+qualification and deployment records below retain their original dates and limits.
+
+## October 3 Mac companion authentication bootstrap (dated build 600)
 
 Reference `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`, tree
 `6c7f113dda8684378c7a7810add963178a6674f2`, adds two auth-bootstrap paths
