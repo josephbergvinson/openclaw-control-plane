@@ -5018,6 +5018,25 @@ index f37cda5f8f74ad244d18ee973e462f18b92a95c2..9857a0fcb05d4383534253f31e42d27f
  ### Screenshot vision (text-only model support)
  
  When the main model is text-only (no vision/multimodal support), browser
+diff --git a/docs/tools/chrome-extension.md b/docs/tools/chrome-extension.md
+index e8b764af43de25f6fea8576f2b9de9754a55684a..ac7cbcbf3ab292eb4df7c1d6ba625469c5bd9165 100644
+--- a/docs/tools/chrome-extension.md
++++ b/docs/tools/chrome-extension.md
+@@ -300,6 +300,14 @@ either target, rerun `openclaw browser extension install` to repair the owned
+ registration. Ownership checks still refuse foreign or malformed manifests and
+ launchers.
+ 
++Previous macOS installations can register a launcher under Application Support
++instead of the current OpenClaw state directory. Install migrates that exact managed
++location only after validating its private files, full launcher grammar, current
++state and configuration, and allowed origins. It verifies the replacement before
++removing an unchanged predecessor. A changed predecessor is retained with a cleanup
++issue; the working replacement is not rolled back. Uninstall also recognizes the
++validated previous registration. Neither command adopts arbitrary same-name hosts.
++
+ Remove only OpenClaw's macOS Chrome Store installation request:
+ 
+ ```bash
 diff --git a/docs/tools/goal.md b/docs/tools/goal.md
 index 6e014fa7498b27806a245e3d958f57e09ed9f1ee..a24c1faba1f114b230c9a0551c8ade3e05ff58f0 100644
 --- a/docs/tools/goal.md
@@ -7768,6 +7787,927 @@ index 0000000000000000000000000000000000000000..e6be87cdc5b5b5f47e254154b35b86bd
 +    throw new Error("Browser credential target origin changed before fill.");
 +  }
 +}
+diff --git a/extensions/browser/src/browser/extension-install-layout.ts b/extensions/browser/src/browser/extension-install-layout.ts
+index 1fa296b5482ede813600d0616d464ff86635c049..bccefeeb2323eb38addf08db44e7c57be4cbcd0a 100644
+--- a/extensions/browser/src/browser/extension-install-layout.ts
++++ b/extensions/browser/src/browser/extension-install-layout.ts
+@@ -72,6 +72,19 @@ function homeDirectory(deps: ExtensionInstallDeps): string {
+   return path.resolve(value);
+ }
+ 
++/** Previous macOS installations registered launchers here; installation migrates them. */
++export function legacyNativeMessagingLauncherRoot(deps: ExtensionInstallDeps): string | undefined {
++  return (deps.platform ?? process.platform) === "darwin"
++    ? path.join(
++        homeDirectory(deps),
++        "Library",
++        "Application Support",
++        "OpenClaw",
++        "native-messaging",
++      )
++    : undefined;
++}
++
+ /** Chromium-derived default user-data and user native-host roots. */
+ export function chromeProductRoots(deps: ExtensionInstallDeps = {}): ChromeProductRoot[] {
+   const platform = deps.platform ?? process.platform;
+diff --git a/extensions/browser/src/browser/extension-install-migration.test.ts b/extensions/browser/src/browser/extension-install-migration.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d379f6c7591c19ac9f2565a470a949081ca0236
+--- /dev/null
++++ b/extensions/browser/src/browser/extension-install-migration.test.ts
+@@ -0,0 +1,376 @@
++import { existsSync } from "node:fs";
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  chromeProductRoots,
++  generateChromeExtensionIdForPath,
++  installStableChromeExtension,
++} from "./extension-install-layout.js";
++import {
++  browserExtensionStatus,
++  installChromeExtensionBootstrap,
++  uninstallChromeExtensionNativeHosts,
++} from "./extension-install.js";
++import {
++  FOUNDATION_STORE_ID,
++  predictedId,
++  useExtensionInstallFixture,
++  writeChromePreferences,
++} from "./extension-install.test-support.js";
++
++const fixture = useExtensionInstallFixture();
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++describe("previous macOS launcher migration", () => {
++  async function legacyFixture() {
++    const value = await fixture("darwin");
++    const deps = { ...value.deps, stateDir: path.join(value.homeDir, "state's directory") };
++    const installed = await installStableChromeExtension(value.bundledDir, deps);
++    const chrome = chromeProductRoots(deps).find((root) => root.product === "chrome");
++    if (!chrome) {
++      throw new Error("missing Chrome fixture root");
++    }
++    await writeChromePreferences({
++      userDataDir: chrome.userDataDir,
++      profile: "Default",
++      entries: { [await predictedId(installed, "darwin")]: { location: 4, path: installed } },
++    });
++    const params = {
++      bundledDir: value.bundledDir,
++      pluginRoot: value.pluginRoot,
++      requestStoreInstall: false,
++      waitMs: 1_000,
++      deps,
++    };
++    const initial = await installChromeExtensionBootstrap(params);
++    expect(initial.manualSetupRequired, initial.issues.join("\n")).toBe(false);
++    const manifestPath = path.join(chrome.nativeManifestDir, "ai.openclaw.browser_bootstrap.json");
++    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
++      path: string;
++      allowed_origins: string[];
++    };
++    const canonicalPath = manifest.path;
++    // Reproduce the previous deployed macOS producer, including its self-bound --launcher word.
++    const legacyPath = path.join(
++      value.homeDir,
++      "Library",
++      "Application Support",
++      "OpenClaw",
++      "native-messaging",
++      path.basename(canonicalPath),
++    );
++    await fs.mkdir(path.dirname(legacyPath), { recursive: true, mode: 0o700 });
++    const quote = (word: string) => `'${word.replaceAll("'", `'"'"'`)}'`;
++    const launcher = (await fs.readFile(canonicalPath, "utf8")).replace(
++      quote(canonicalPath),
++      quote(legacyPath),
++    );
++    await fs.writeFile(legacyPath, launcher, { mode: 0o700 });
++    await fs.unlink(canonicalPath);
++    await fs.writeFile(manifestPath, `${JSON.stringify({ ...manifest, path: legacyPath })}\n`, {
++      mode: 0o600,
++    });
++    return { ...value, params, manifestPath, canonicalPath, legacyPath, launcher };
++  }
++
++  async function canonicalCollisionFixture() {
++    const value = await legacyFixture();
++    const quote = (word: string) => `'${word.replaceAll("'", `'"'"'`)}'`;
++    const currentOrigin = `chrome-extension://${await predictedId(value.bundledDir, "darwin")}/`;
++    const previousOrigin = `chrome-extension://${generateChromeExtensionIdForPath(
++      path.join(value.root, "previous-package", "chrome-extension"),
++      "darwin",
++    )}/`;
++    const previousOrigins = [
++      `chrome-extension://${FOUNDATION_STORE_ID}/`,
++      `chrome-extension://${await predictedId(
++        path.join(value.params.deps.stateDir, "browser", "chrome-extension"),
++        "darwin",
++      )}/`,
++      previousOrigin,
++    ].toSorted();
++    const originWords = previousOrigins
++      .map((origin) => ` '--expected-origin' '${origin}'`)
++      .join("");
++    const previousCanonical = value.launcher
++      .replace(quote(value.legacyPath), quote(value.canonicalPath))
++      .replace(
++        /(?: '--expected-origin' 'chrome-extension:\/\/[a-p]{32}\/')+ "\$@"/u,
++        `${originWords} "$@"`,
++      )
++      .replace(quote(value.deps.nodePath), quote(`${value.deps.nodePath}-removed`))
++      .replace(quote(value.nativeHostPath), quote(`${value.nativeHostPath}-removed`));
++    expect(previousCanonical).not.toContain(currentOrigin);
++    await fs.writeFile(value.canonicalPath, previousCanonical, { mode: 0o700 });
++    return { ...value, previousCanonical, previousOrigin, previousOrigins, quote };
++  }
++
++  it("reports a managed predecessor as non-ready and migrates its removed runtime without executing it", async () => {
++    const value = await legacyFixture();
++    const replacementNode = `${value.deps.nodePath}-current`;
++    await fs.rename(value.deps.nodePath, replacementNode);
++    const params = { ...value.params, deps: { ...value.params.deps, nodePath: replacementNode } };
++    const before = await browserExtensionStatus(params);
++    expect(before.manualSetupRequired).toBe(true);
++    expect(before.registrations.find((entry) => entry.product === "chrome")).toMatchObject({
++      state: "owned",
++      launcherPath: value.legacyPath,
++      issue: expect.stringContaining("runtime or entry is unavailable"),
++    });
++    const after = await installChromeExtensionBootstrap(params);
++    expect(after.manualSetupRequired, after.issues.join("\n")).toBe(false);
++    expect(after.issues).toEqual([]);
++    expect(after.registrations.find((entry) => entry.product === "chrome")).toMatchObject({
++      state: "owned",
++      launcherPath: value.canonicalPath,
++    });
++    expect(JSON.parse(await fs.readFile(value.manifestPath, "utf8")).path).toBe(
++      value.canonicalPath,
++    );
++    await expect(fs.readFile(value.canonicalPath, "utf8")).resolves.toContain(replacementNode);
++    expect(existsSync(value.legacyPath)).toBe(false);
++    const idempotent = await installChromeExtensionBootstrap(params);
++    expect(idempotent).toEqual(after);
++  });
++
++  it("migrates over a managed canonical loader from an earlier package origin", async () => {
++    const value = await canonicalCollisionFixture();
++    const after = await installChromeExtensionBootstrap(value.params);
++    expect(after.manualSetupRequired, after.issues.join("\n")).toBe(false);
++    expect(after.issues).toEqual([]);
++    expect(JSON.parse(await fs.readFile(value.manifestPath, "utf8")).path).toBe(
++      value.canonicalPath,
++    );
++    await expect(fs.readFile(value.canonicalPath, "utf8")).resolves.not.toContain(
++      value.previousOrigin,
++    );
++    expect(existsSync(value.legacyPath)).toBe(false);
++    await expect(installChromeExtensionBootstrap(value.params)).resolves.toEqual(after);
++  });
++
++  it.each([
++    "extra-origin",
++    "duplicate-origin",
++    "unsorted-origins",
++    "missing-store",
++    "no-stable-overlap",
++    "grammar",
++    "self-binding",
++    "manifest-binding",
++    "state",
++    "config",
++    "mode",
++    "symlink",
++  ] as const)(
++    "retains both registered and canonical files when collision ownership fails: %s",
++    async (failure) => {
++      const value = await canonicalCollisionFixture();
++      let content = value.previousCanonical;
++      if (
++        [
++          "extra-origin",
++          "duplicate-origin",
++          "unsorted-origins",
++          "missing-store",
++          "no-stable-overlap",
++        ].includes(failure)
++      ) {
++        let origins = [...value.previousOrigins];
++        if (failure === "extra-origin") {
++          origins = [...origins, `chrome-extension://${"a".repeat(32)}/`].toSorted();
++        }
++        if (failure === "duplicate-origin") {
++          origins = [...origins, origins[0] ?? ""].toSorted();
++        }
++        if (failure === "unsorted-origins") {
++          origins.reverse();
++        }
++        if (failure === "missing-store") {
++          origins = origins.filter((origin) => !origin.includes(FOUNDATION_STORE_ID));
++        }
++        if (failure === "no-stable-overlap") {
++          origins = [
++            `chrome-extension://${FOUNDATION_STORE_ID}/`,
++            `chrome-extension://${"a".repeat(32)}/`,
++            `chrome-extension://${"b".repeat(32)}/`,
++          ].toSorted();
++        }
++        content = content.replace(
++          /(?: '--expected-origin' 'chrome-extension:\/\/[a-p]{32}\/')+ "\$@"/u,
++          `${origins.map((origin) => ` '--expected-origin' '${origin}'`).join("")} "$@"`,
++        );
++      } else if (failure === "grammar") {
++        content += "echo unexpected\n";
++      } else if (failure === "self-binding") {
++        content = content.replace(
++          value.quote(value.canonicalPath),
++          value.quote(`${value.canonicalPath}-other`),
++        );
++      } else if (failure === "manifest-binding") {
++        content = content.replace(
++          value.quote(value.manifestPath),
++          value.quote(`${value.manifestPath}-other`),
++        );
++      } else if (failure === "state") {
++        content = content.replace("export OPENCLAW_STATE_DIR=", "export OTHER_STATE_DIR=");
++      } else if (failure === "config") {
++        content = content.replace(
++          "\nexec ",
++          "\nexport OPENCLAW_CONFIG_PATH='/other-config'\nexec ",
++        );
++      }
++      await fs.writeFile(value.canonicalPath, content);
++      if (failure === "mode") {
++        await fs.chmod(value.canonicalPath, 0o744);
++      }
++      if (failure === "symlink") {
++        await fs.rename(value.canonicalPath, `${value.canonicalPath}.original`);
++        await fs.symlink(`${value.canonicalPath}.original`, value.canonicalPath);
++      }
++      const manifestBefore = await fs.readFile(value.manifestPath, "utf8");
++      const after = await installChromeExtensionBootstrap(value.params);
++      expect(after.manualSetupRequired).toBe(true);
++      expect(after.issues.join("\n")).toContain("refused");
++      await expect(fs.readFile(value.manifestPath, "utf8")).resolves.toBe(manifestBefore);
++      await expect(fs.readFile(value.legacyPath, "utf8")).resolves.toBe(value.launcher);
++      await expect(fs.readFile(value.canonicalPath, "utf8")).resolves.toBe(content);
++    },
++  );
++
++  it("removes the exact registered predecessor when its old executable is missing", async () => {
++    const value = await legacyFixture();
++    await fs.unlink(value.deps.nodePath);
++    expect((await browserExtensionStatus(value.params)).manualSetupRequired).toBe(true);
++    await expect(uninstallChromeExtensionNativeHosts({ deps: value.params.deps })).resolves.toEqual(
++      {
++        removed: [value.manifestPath, value.legacyPath],
++        refused: [],
++        manualRequired: false,
++      },
++    );
++    expect(existsSync(value.manifestPath)).toBe(false);
++    expect(existsSync(value.legacyPath)).toBe(false);
++  });
++
++  it.each(["default", "matching-explicit", "different-explicit"] as const)(
++    "keeps the selected configuration context for %s",
++    async (configuration) => {
++      const value = await legacyFixture();
++      const config = path.join(
++        value.params.deps.stateDir,
++        configuration === "default" ? "openclaw.json" : "separate-config.json",
++      );
++      const params = {
++        ...value.params,
++        deps: {
++          ...value.params.deps,
++          env: { ...value.params.deps.env, OPENCLAW_CONFIG_PATH: config },
++        },
++      };
++      if (configuration === "matching-explicit") {
++        const quoted = `'${config.replaceAll("'", `'"'"'`)}'`;
++        await fs.writeFile(
++          value.legacyPath,
++          value.launcher.replace("\nexec ", `\nexport OPENCLAW_CONFIG_PATH=${quoted}\nexec `),
++        );
++      }
++      const before = await browserExtensionStatus(params);
++      const registration = before.registrations.find((entry) => entry.product === "chrome");
++      expect(registration?.state).toBe(
++        configuration === "different-explicit" ? "invalid" : "owned",
++      );
++      const after = await installChromeExtensionBootstrap(params);
++      if (configuration === "different-explicit") {
++        expect(after.issues.join("\n")).toContain("Refusing to overwrite invalid");
++        expect(existsSync(value.legacyPath)).toBe(true);
++        expect(existsSync(value.canonicalPath)).toBe(false);
++      } else {
++        expect(after.manualSetupRequired, after.issues.join("\n")).toBe(false);
++        expect(existsSync(value.legacyPath)).toBe(false);
++      }
++    },
++  );
++
++  it.each(["state", "config", "grammar", "symlink", "mode", "home"] as const)(
++    "preserves a predecessor with mismatched %s instead of adopting it",
++    async (failure) => {
++      const value = await legacyFixture();
++      let params = value.params;
++      if (failure === "state") {
++        await fs.writeFile(
++          value.legacyPath,
++          value.launcher.replace(
++            /export OPENCLAW_STATE_DIR=[^\n]+/u,
++            "export OPENCLAW_STATE_DIR='/another-installation'",
++          ),
++        );
++      } else if (failure === "config") {
++        await fs.writeFile(
++          value.legacyPath,
++          value.launcher.replace(
++            "\nexec ",
++            "\nexport OPENCLAW_CONFIG_PATH='/another-config'\nexec ",
++          ),
++        );
++      } else if (failure === "grammar") {
++        await fs.writeFile(value.legacyPath, `${value.launcher}echo unexpected\n`);
++      } else if (failure === "symlink") {
++        await fs.rename(value.legacyPath, `${value.legacyPath}.original`);
++        await fs.symlink(`${value.legacyPath}.original`, value.legacyPath);
++      } else if (failure === "mode") {
++        await fs.chmod(value.legacyPath, 0o744);
++      } else {
++        params = {
++          ...params,
++          deps: { ...params.deps, homeDir: path.join(value.homeDir, "other") },
++        };
++        // Use the same native-manifest root with a distinct home account contract.
++        const root = chromeProductRoots(params.deps).find((entry) => entry.product === "chrome");
++        if (!root) {
++          throw new Error("missing alternate Chrome fixture root");
++        }
++        await fs.mkdir(root.nativeManifestDir, { recursive: true, mode: 0o700 });
++        await fs.copyFile(
++          value.manifestPath,
++          path.join(root.nativeManifestDir, "ai.openclaw.browser_bootstrap.json"),
++        );
++      }
++      const bytes = await fs.readFile(value.manifestPath, "utf8");
++      const before = await browserExtensionStatus(params);
++      expect(before.registrations.find((entry) => entry.product === "chrome")?.state).not.toBe(
++        "owned",
++      );
++      const after = await installChromeExtensionBootstrap(params);
++      expect(after.issues.join("\n")).toContain("Refusing to overwrite");
++      const removal = await uninstallChromeExtensionNativeHosts({ deps: params.deps });
++      expect(removal.refused).toHaveLength(1);
++      expect(await fs.readFile(value.manifestPath, "utf8")).toBe(bytes);
++      expect(existsSync(value.legacyPath)).toBe(true);
++    },
++  );
++
++  it("retains a changed predecessor and reports cleanup failure after canonical publication", async () => {
++    const value = await legacyFixture();
++    const rename = fs.rename.bind(fs);
++    vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
++      await rename(from, to);
++      if (to === value.manifestPath) {
++        await fs.writeFile(value.legacyPath, `${value.launcher}echo changed\n`);
++      }
++    });
++    const after = await installChromeExtensionBootstrap(value.params);
++    expect(after.registrations.find((entry) => entry.product === "chrome")).toMatchObject({
++      state: "owned",
++      launcherPath: value.canonicalPath,
++    });
++    expect(after.issues.join("\n")).toContain("retired launcher cleanup was refused");
++    await expect(fs.readFile(value.legacyPath, "utf8")).resolves.toContain("echo changed");
++    expect(JSON.parse(await fs.readFile(value.manifestPath, "utf8")).path).toBe(
++      value.canonicalPath,
++    );
++  });
++});
+diff --git a/extensions/browser/src/browser/extension-install-owned-launcher.ts b/extensions/browser/src/browser/extension-install-owned-launcher.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3475debd281b571dcebe5d264c5dab5d85dca373
+--- /dev/null
++++ b/extensions/browser/src/browser/extension-install-owned-launcher.ts
+@@ -0,0 +1,148 @@
++import type { Stats } from "node:fs";
++import fs from "node:fs/promises";
++import path from "node:path";
++import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
++import { assertOwnedPath, type ExtensionInstallDeps } from "./extension-install-layout.js";
++
++export const OWNED_LAUNCHER_MARKER = "# OpenClaw native messaging bootstrap v1";
++
++export function resolveInstallStateDir(deps: ExtensionInstallDeps): string {
++  return path.resolve(deps.stateDir ?? resolveStateDir(deps.env));
++}
++
++export function resolveInstallConfigPath(deps: ExtensionInstallDeps): string | undefined {
++  const env = deps.env ?? process.env;
++  const explicit = env.OPENCLAW_CONFIG_PATH?.trim();
++  return explicit ? resolveStateDir({ ...env, OPENCLAW_STATE_DIR: explicit }) : undefined;
++}
++
++export function shellQuote(value: string): string {
++  return `'${value.replaceAll("'", `'"'"'`)}'`;
++}
++
++export function matchesLegacyInstallContext(content: string, deps: ExtensionInstallDeps): boolean {
++  const prefix = `#!/bin/sh\n${OWNED_LAUNCHER_MARKER}\nexport OPENCLAW_STATE_DIR=${shellQuote(resolveInstallStateDir(deps))}\n`;
++  if (!content.startsWith(prefix)) {
++    return false;
++  }
++  const remaining = content.slice(prefix.length);
++  const defaultConfig = path.join(resolveInstallStateDir(deps), "openclaw.json");
++  const config = resolveInstallConfigPath(deps) ?? defaultConfig;
++  if (!remaining.startsWith("export OPENCLAW_CONFIG_PATH=")) {
++    return config === defaultConfig;
++  }
++  return remaining.startsWith(`export OPENCLAW_CONFIG_PATH=${shellQuote(config)}\n`);
++}
++
++function escapeRegExp(value: string): string {
++  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
++}
++
++export function parseOwnedLauncherTargets(params: {
++  content: string;
++  manifestPath: string;
++  launcherPath: string;
++  origins: string[];
++}): string[] | undefined {
++  const quotedValue = String.raw`'(?:[^'\r\n]|'"'"')*'`;
++  const command = [
++    `(${quotedValue})`,
++    `(${quotedValue})`,
++    escapeRegExp(shellQuote("--manifest")),
++    escapeRegExp(shellQuote(params.manifestPath)),
++    escapeRegExp(shellQuote("--launcher")),
++    escapeRegExp(shellQuote(params.launcherPath)),
++    ...params.origins.flatMap((origin) => [
++      escapeRegExp(shellQuote("--expected-origin")),
++      escapeRegExp(shellQuote(origin)),
++    ]),
++  ].join(" ");
++  const pattern = new RegExp(
++    `^#!/bin/sh\\n${escapeRegExp(OWNED_LAUNCHER_MARKER)}\\nexport OPENCLAW_STATE_DIR=${quotedValue}\\n(?:export OPENCLAW_CONFIG_PATH=${quotedValue}\\n)?exec ${command} "\\$@"\\n$`,
++    "u",
++  );
++  // Decode only shellQuote's two target words after the entire ownership grammar matches.
++  return pattern
++    .exec(params.content)
++    ?.slice(1)
++    .map((value) => value.slice(1, -1).replaceAll(`'"'"'`, "'"));
++}
++
++export function parseOwnedLauncherOrigins(params: {
++  content: string;
++  manifestPath: string;
++  launcherPath: string;
++}): string[] | undefined {
++  const origins = [
++    ...params.content.matchAll(/'--expected-origin' '(chrome-extension:\/\/[a-p]{32}\/)'/gu),
++  ].flatMap((match) => (match[1] ? [match[1]] : []));
++  if (
++    origins.length === 0 ||
++    new Set(origins).size !== origins.length ||
++    JSON.stringify(origins) !== JSON.stringify(origins.toSorted())
++  ) {
++    return undefined;
++  }
++  // The inferred words confer ownership only when the entire self-bound grammar matches.
++  return parseOwnedLauncherTargets({ ...params, origins }) ? origins : undefined;
++}
++
++export async function assertPrivateNativeHostFile(
++  target: string,
++  executable: boolean,
++  platform: NodeJS.Platform,
++): Promise<void> {
++  await assertOwnedPath(target, "file");
++  if (platform === "win32") {
++    return;
++  }
++  const mode = (await fs.lstat(target)).mode & 0o777;
++  if ((mode & 0o077) !== 0 || (executable && (mode & 0o100) === 0)) {
++    throw new Error("native host file has unsafe mode");
++  }
++}
++
++export type NativeLauncherSnapshot = {
++  path: string;
++  info: Pick<Stats, "dev" | "ino" | "mode">;
++  content: string;
++};
++
++export async function captureOwnedLauncher(
++  registration: { manifestPath: string; launcherPath: string; extensionIds: string[] },
++  deps: ExtensionInstallDeps,
++  legacyLauncherPath: string | undefined,
++): Promise<NativeLauncherSnapshot> {
++  const launcherPath = registration.launcherPath;
++  await assertPrivateNativeHostFile(launcherPath, true, deps.platform ?? process.platform);
++  const info = await fs.lstat(launcherPath);
++  const content = await fs.readFile(launcherPath, "utf8");
++  if (
++    !parseOwnedLauncherTargets({
++      content,
++      manifestPath: registration.manifestPath,
++      launcherPath,
++      origins: registration.extensionIds.map((id) => `chrome-extension://${id}/`),
++    }) ||
++    (launcherPath === legacyLauncherPath && !matchesLegacyInstallContext(content, deps))
++  ) {
++    throw new Error("registered launcher ownership changed");
++  }
++  return { path: launcherPath, info, content };
++}
++
++export async function assertLauncherUnchanged(
++  snapshot: NativeLauncherSnapshot,
++  deps: ExtensionInstallDeps,
++): Promise<void> {
++  await assertPrivateNativeHostFile(snapshot.path, true, deps.platform ?? process.platform);
++  const info = await fs.lstat(snapshot.path);
++  if (
++    info.dev !== snapshot.info.dev ||
++    info.ino !== snapshot.info.ino ||
++    info.mode !== snapshot.info.mode ||
++    (await fs.readFile(snapshot.path, "utf8")) !== snapshot.content
++  ) {
++    throw new Error("registered launcher changed during cleanup");
++  }
++}
+diff --git a/extensions/browser/src/browser/extension-install.ts b/extensions/browser/src/browser/extension-install.ts
+index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..b1bedfbc5fba7837cb3c6bc7ee8c4a3f15fa9dd5 100644
+--- a/extensions/browser/src/browser/extension-install.ts
++++ b/extensions/browser/src/browser/extension-install.ts
+@@ -2,7 +2,6 @@ import crypto from "node:crypto";
+ import fs from "node:fs/promises";
+ import path from "node:path";
+ import { replaceFileAtomic } from "openclaw/plugin-sdk/security-runtime";
+-import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
+ import {
+   chromeStoreInstallRequests,
+   type ChromeStoreInstallRequest,
+@@ -23,12 +22,25 @@ import {
+   generateChromeExtensionIdForPath,
+   inspectInstalledCopy,
+   installStableChromeExtension,
++  legacyNativeMessagingLauncherRoot,
+   pathInfo,
+   stableChromeExtensionDir,
+ } from "./extension-install-layout.js";
++import {
++  assertLauncherUnchanged,
++  assertPrivateNativeHostFile,
++  captureOwnedLauncher,
++  parseOwnedLauncherOrigins,
++  matchesLegacyInstallContext,
++  type NativeLauncherSnapshot,
++  OWNED_LAUNCHER_MARKER,
++  parseOwnedLauncherTargets,
++  resolveInstallConfigPath,
++  resolveInstallStateDir,
++  shellQuote,
++} from "./extension-install-owned-launcher.js";
+ import { BROWSER_NATIVE_HOST_NAME } from "./extension-native-host.js";
+ 
+-const OWNED_LAUNCHER_MARKER = "# OpenClaw native messaging bootstrap v1";
+ const BROWSER_EXTENSION_INSTALL_WAIT_DEFAULT_MS = 30_000;
+ const BROWSER_EXTENSION_INSTALL_WAIT_MIN_MS = 1_000;
+ const BROWSER_EXTENSION_INSTALL_WAIT_MAX_MS = 120_000;
+@@ -43,9 +55,8 @@ type NativeHostRegistrationStatus = {
+   browser: string;
+   manifestPath: string;
+   extensionIds: string[];
+-  state: "missing" | "owned" | "foreign" | "invalid";
+   issue?: string;
+-};
++} & ({ state: "owned"; launcherPath: string } | { state: "missing" | "foreign" | "invalid" });
+ 
+ type BrowserExtensionStatus = {
+   platform: NodeJS.Platform;
+@@ -65,20 +76,6 @@ function nativeMessagingRoot(deps: ExtensionInstallDeps = {}): string {
+   return path.join(resolveInstallStateDir(deps), "browser", "native-messaging");
+ }
+ 
+-function resolveInstallStateDir(deps: ExtensionInstallDeps): string {
+-  return path.resolve(deps.stateDir ?? resolveStateDir(deps.env));
+-}
+-
+-function resolveInstallConfigPath(deps: ExtensionInstallDeps): string | undefined {
+-  const env = deps.env ?? process.env;
+-  const explicit = env.OPENCLAW_CONFIG_PATH?.trim();
+-  return explicit ? resolveStateDir({ ...env, OPENCLAW_STATE_DIR: explicit }) : undefined;
+-}
+-
+-function shellQuote(value: string): string {
+-  return `'${value.replaceAll("'", `'"'"'`)}'`;
+-}
+-
+ async function resolveNativeHostPath(pluginRoot: string, explicit?: string): Promise<string> {
+   if (explicit) {
+     return await fs.realpath(explicit);
+@@ -107,6 +104,13 @@ function launcherPathForManifest(manifestPath: string, deps: ExtensionInstallDep
+   return path.join(nativeMessagingRoot(deps), `${BROWSER_NATIVE_HOST_NAME}.${suffix}.sh`);
+ }
+ 
++function legacyLauncherPathForManifest(manifestPath: string, deps: ExtensionInstallDeps) {
++  const root = legacyNativeMessagingLauncherRoot(deps);
++  return root
++    ? path.join(root, path.basename(launcherPathForManifest(manifestPath, deps)))
++    : undefined;
++}
++
+ function expectedExtensionIds(extensionIds: string[]): string[] {
+   // The Store ID also authorizes trusted unpacked builds that preserve it;
+   // it never proves that an arbitrary extension path is OpenClaw-owned.
+@@ -142,55 +146,6 @@ function isSafeOriginMigration(existingIds: string[], desiredPathIds: string[]):
+   );
+ }
+ 
+-function escapeRegExp(value: string): string {
+-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+-}
+-
+-function parseOwnedLauncherTargets(params: {
+-  content: string;
+-  manifestPath: string;
+-  launcherPath: string;
+-  origins: string[];
+-}): string[] | undefined {
+-  const quotedValue = String.raw`'(?:[^'\r\n]|'"'"')*'`;
+-  const command = [
+-    `(${quotedValue})`,
+-    `(${quotedValue})`,
+-    escapeRegExp(shellQuote("--manifest")),
+-    escapeRegExp(shellQuote(params.manifestPath)),
+-    escapeRegExp(shellQuote("--launcher")),
+-    escapeRegExp(shellQuote(params.launcherPath)),
+-    ...params.origins.flatMap((origin) => [
+-      escapeRegExp(shellQuote("--expected-origin")),
+-      escapeRegExp(shellQuote(origin)),
+-    ]),
+-  ].join(" ");
+-  const pattern = new RegExp(
+-    `^#!/bin/sh\\n${escapeRegExp(OWNED_LAUNCHER_MARKER)}\\nexport OPENCLAW_STATE_DIR=${quotedValue}\\n(?:export OPENCLAW_CONFIG_PATH=${quotedValue}\\n)?exec ${command} "\\$@"\\n$`,
+-    "u",
+-  );
+-  // Decode only shellQuote's two target words after the entire ownership grammar matches.
+-  return pattern
+-    .exec(params.content)
+-    ?.slice(1)
+-    .map((value) => value.slice(1, -1).replaceAll(`'"'"'`, "'"));
+-}
+-
+-async function assertPrivateNativeHostFile(
+-  target: string,
+-  executable: boolean,
+-  platform: NodeJS.Platform,
+-): Promise<void> {
+-  await assertOwnedPath(target, "file");
+-  if (platform === "win32") {
+-    return;
+-  }
+-  const mode = (await fs.lstat(target)).mode & 0o777;
+-  if ((mode & 0o077) !== 0 || (executable && (mode & 0o100) === 0)) {
+-    throw new Error("native host file has unsafe mode");
+-  }
+-}
+-
+ async function assertNativeHostTarget(target: string, accessMode: number): Promise<void> {
+   // Registered targets must not depend on Chrome's working directory.
+   if (!path.isAbsolute(target)) {
+@@ -260,12 +215,17 @@ async function inspectRegistration(
+     }
+     const manifest = parsed as { name?: unknown; path?: unknown; allowed_origins?: unknown };
+     const expectedLauncher = launcherPathForManifest(manifestPath, deps);
++    const legacyLauncher = legacyLauncherPathForManifest(manifestPath, deps);
+     const origins = Array.isArray(manifest.allowed_origins) ? manifest.allowed_origins : [];
+     const ids = origins.flatMap((origin) => {
+       const match = /^chrome-extension:\/\/([a-p]{32})\/$/.exec(String(origin));
+       return match?.[1] ? [match[1]] : [];
+     });
+-    if (manifest.name !== BROWSER_NATIVE_HOST_NAME || manifest.path !== expectedLauncher) {
++    if (
++      manifest.name !== BROWSER_NATIVE_HOST_NAME ||
++      typeof manifest.path !== "string" ||
++      (manifest.path !== expectedLauncher && manifest.path !== legacyLauncher)
++    ) {
+       return {
+         product: root.product,
+         browser: root.label,
+@@ -297,18 +257,29 @@ async function inspectRegistration(
+     ) {
+       throw new Error("native host manifest does not contain exact allowed origins");
+     }
+-    await assertPrivateNativeHostFile(expectedLauncher, true, deps.platform ?? process.platform);
++    const registeredLauncher = manifest.path;
++    await assertPrivateNativeHostFile(registeredLauncher, true, deps.platform ?? process.platform);
++    const launcherContent = await fs.readFile(registeredLauncher, "utf8");
+     const launcherTargets = parseOwnedLauncherTargets({
+-      content: await fs.readFile(expectedLauncher, "utf8"),
++      content: launcherContent,
+       manifestPath,
+-      launcherPath: expectedLauncher,
++      launcherPath: registeredLauncher,
+       origins: stringOrigins,
+     });
+     if (!launcherTargets) {
+       throw new Error("native host launcher and manifest origins do not match");
+     }
++    if (
++      registeredLauncher === legacyLauncher &&
++      !matchesLegacyInstallContext(launcherContent, deps)
++    ) {
++      throw new Error("legacy native host belongs to a different OpenClaw installation");
++    }
+     // Removed package versions break readiness, not ownership or managed repair/removal.
+-    let issue: string | undefined;
++    let issue: string | undefined =
++      registeredLauncher !== expectedLauncher
++        ? "registered native host needs migration; run openclaw browser extension install"
++        : undefined;
+     try {
+       for (const [index, target] of launcherTargets.entries()) {
+         await assertNativeHostTarget(target, index === 0 ? fs.constants.X_OK : fs.constants.R_OK);
+@@ -323,6 +294,7 @@ async function inspectRegistration(
+       manifestPath,
+       extensionIds: ids.toSorted(),
+       state: "owned",
++      launcherPath: registeredLauncher,
+       issue,
+     };
+   } catch (error) {
+@@ -358,6 +330,18 @@ async function installRegistration(params: {
+   ) {
+     throw new Error(`Refusing to overwrite owned native host with unexpected allowed origins`);
+   }
++  const retiredLauncher =
++    existing.state === "owned" &&
++    existing.launcherPath !== launcherPathForManifest(manifestPath, deps)
++      ? {
++          ...(await captureOwnedLauncher(
++            existing,
++            deps,
++            legacyLauncherPathForManifest(existing.manifestPath, deps),
++          )),
++          manifestContent: await fs.readFile(manifestPath, "utf8"),
++        }
++      : undefined;
+   await ensurePrivateDirectory(nativeMessagingRoot(deps));
+   await ensurePrivateDirectory(root.nativeManifestDir);
+   const launcher = await resolveLauncherInstall({
+@@ -369,8 +353,29 @@ async function installRegistration(params: {
+   const launcherPath = launcher.path;
+   if (await pathInfo(launcherPath)) {
+     await assertOwnedPath(launcherPath, "file");
++    if (retiredLauncher) {
++      await assertPrivateNativeHostFile(launcherPath, true, deps.platform ?? process.platform);
++    }
+     const existingLauncher = await fs.readFile(launcherPath, "utf8");
+-    if (!existingLauncher.includes(OWNED_LAUNCHER_MARKER)) {
++    const destinationOrigins = retiredLauncher
++      ? parseOwnedLauncherOrigins({
++          content: existingLauncher,
++          manifestPath,
++          launcherPath,
++        })
++      : undefined;
++    const migrationDestinationIsOwned =
++      !retiredLauncher ||
++      existingLauncher === launcher.content ||
++      (matchesLegacyInstallContext(existingLauncher, deps) &&
++        destinationOrigins?.includes(
++          `chrome-extension://${FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID}/`,
++        ) &&
++        isSafeOriginMigration(
++          destinationOrigins.map((origin) => origin.slice("chrome-extension://".length, -1)),
++          extensionIds,
++        ));
++    if (!existingLauncher.includes(OWNED_LAUNCHER_MARKER) || !migrationDestinationIsOwned) {
+       throw new Error(`Refusing to overwrite foreign native host launcher: ${launcherPath}`);
+     }
+     if (existingLauncher !== launcher.content) {
+@@ -389,12 +394,48 @@ async function installRegistration(params: {
+     type: "stdio",
+     allowed_origins: expectedOriginsForExtensionIds(extensionIds),
+   };
++  if (retiredLauncher) {
++    const refreshed = await inspectRegistration(root, deps);
++    if (
++      refreshed.state !== "owned" ||
++      refreshed.launcherPath !== retiredLauncher.path ||
++      JSON.stringify(refreshed.extensionIds) !== JSON.stringify(existing.extensionIds) ||
++      (await fs.readFile(manifestPath, "utf8")) !== retiredLauncher.manifestContent
++    ) {
++      throw new Error("Native host registration changed during migration; left it untouched");
++    }
++    await assertLauncherUnchanged(retiredLauncher, deps);
++  }
++  const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
+   await replaceFileAtomic({
+     filePath: manifestPath,
+-    content: `${JSON.stringify(manifest, null, 2)}\n`,
++    content: manifestContent,
+     mode: 0o600,
+   });
+-  return await inspectRegistration(root, deps, extensionIds);
++  const status = await inspectRegistration(root, deps, extensionIds);
++  if (retiredLauncher) {
++    try {
++      if (
++        status.state !== "owned" ||
++        status.launcherPath !== launcherPath ||
++        status.issue ||
++        (await fs.readFile(manifestPath, "utf8")) !== manifestContent ||
++        (await fs.readFile(launcherPath, "utf8")) !== launcher.content
++      ) {
++        throw new Error("retired launcher or replacement changed");
++      }
++      // The final check belongs immediately before removal; publication is single-file atomic.
++      await assertLauncherUnchanged(retiredLauncher, deps);
++      await fs.unlink(retiredLauncher.path);
++    } catch {
++      return {
++        ...status,
++        issue:
++          "native host migrated; retired launcher cleanup was refused because its files changed",
++      };
++    }
++  }
++  return status;
+ }
+ 
+ async function approvedInstallRealpaths(installed: string, bundled: string): Promise<string[]> {
+@@ -454,12 +495,15 @@ export async function installChromeExtensionBootstrap(params: {
+     }
+     try {
+       await assertOwnedPath(root.userDataDir, "directory");
+-      await installRegistration({
++      const registration = await installRegistration({
+         root,
+         extensionIds: predictedIds,
+         pluginRoot: params.pluginRoot,
+         deps,
+       });
++      if (registration.issue) {
++        preRegistrationIssues.push(`${root.label}: ${registration.issue}`);
++      }
+       preRegisteredRoots += 1;
+       params.onProgress?.(`Pre-registered the native host for ${root.label}.`);
+     } catch (error) {
+@@ -619,20 +663,30 @@ export async function uninstallChromeExtensionNativeHosts(
+       refused.push(status.manifestPath);
+       continue;
+     }
+-    const launcherPath = launcherPathForManifest(status.manifestPath, deps);
+-    const launcher = await pathInfo(launcherPath);
+-    if (launcher) {
+-      await assertOwnedPath(launcherPath, "file");
+-      if (!(await fs.readFile(launcherPath, "utf8")).includes(OWNED_LAUNCHER_MARKER)) {
+-        refused.push(launcherPath);
+-        continue;
++    let launcher: NativeLauncherSnapshot;
++    try {
++      launcher = await captureOwnedLauncher(
++        status,
++        deps,
++        legacyLauncherPathForManifest(status.manifestPath, deps),
++      );
++      const refreshed = await inspectRegistration(root, deps);
++      if (refreshed.state !== "owned" || refreshed.launcherPath !== launcher.path) {
++        throw new Error("registration changed during removal");
+       }
++      await assertLauncherUnchanged(launcher, deps);
++    } catch {
++      refused.push(status.manifestPath);
++      continue;
+     }
+     await fs.unlink(status.manifestPath);
+     removed.push(status.manifestPath);
+-    if (launcher) {
+-      await fs.unlink(launcherPath);
+-      removed.push(launcherPath);
++    try {
++      await assertLauncherUnchanged(launcher, deps);
++      await fs.unlink(launcher.path);
++      removed.push(launcher.path);
++    } catch {
++      refused.push(launcher.path);
+     }
+   }
+   return { removed, refused, manualRequired: false };
 diff --git a/extensions/browser/src/browser/pw-session-connection.ts b/extensions/browser/src/browser/pw-session-connection.ts
 index 7d1441e738148af1a04e3ddef69a717383e4d7b0..eb0f4ed9066c42658496762dc24892c02ca17b9f 100644
 --- a/extensions/browser/src/browser/pw-session-connection.ts
@@ -13664,6 +14604,161 @@ index 6b1cb57db7a9473b4d58fb835ef0617c809db256..0e8e7179c811b2b92613b2eb389555eb
  // initialize request. Its package integration test guards this internal contract.
  const CODEX_EXEC_SERVER_READY_LINE =
    "codex_exec_server::server::transport: codex-exec-server listening on stdio";
+diff --git a/extensions/cua-computer/package.json b/extensions/cua-computer/package.json
+index cf4b08bec63016e69f151df0dd37ab28e5c31220..8b1ad5e6123ec306338969415eeed553b84164f4 100644
+--- a/extensions/cua-computer/package.json
++++ b/extensions/cua-computer/package.json
+@@ -4,7 +4,7 @@
+   "description": "Experimental CUA Driver computer control for macOS, Windows, and Linux node hosts",
+   "type": "module",
+   "dependencies": {
+-    "@trycua/cua-driver": "0.24.0",
++    "@trycua/cua-driver": "0.30.4",
+     "rastermill": "0.3.3",
+     "zod": "4.5.4"
+   },
+@@ -13,30 +13,30 @@
+   },
+   "cuaDriverArtifacts": {
+     "darwin-universal-binary": {
+-      "archiveSha256": "31790cb49baa206f6455fbc259f8f83ae27e86be908f5c8cac5ec2f8521f8382"
++      "archiveSha256": "a93d21bab914b2d854776f46f71a53bddd4e483ef762aeb74137d3ac306cbf65"
+     },
+     "linux-arm64-gnu": {
+       "files": {
+-        "cua_driver_node_runtime.node": "d1f997df97fdda027175e6f824d060ab281e9579e5ebc3040fe2151e3f36f9a6",
+-        "libcua_driver_sdk.so": "3666bfdc98198b7e4e5216c991b758b5f046d44555793433f7c334a4b895096a"
++        "cua_driver_node_runtime.node": "518ecdb132d061b64dbf228781b88b5e0fd5c65dd76bce3e07fe5b9c93340fb1",
++        "libcua_driver_sdk.so": "d8349367e7b91b7bd17333af54e03d222d53907b97f5f0d20f9497aae9c10555"
+       }
+     },
+     "linux-x64-gnu": {
+       "files": {
+-        "cua_driver_node_runtime.node": "1f805d6052ee6c4f5ed3828ecbdf6e0db1f40f4e2fedcd292226e131a307c547",
+-        "libcua_driver_sdk.so": "6a63c34d9551c74eb15c6e304c5558d9b96c93bd59facaa5cd1a3c8c0eeedddd"
++        "cua_driver_node_runtime.node": "fd59af4111705a74fc1e60d6471b50750cb4742e2ef76ac08c4d79b245aec289",
++        "libcua_driver_sdk.so": "e4b258f5400ecd1174c144d5ccb0e7d3d4a250710d74bf99d677be11f07e1699"
+       }
+     },
+     "win32-arm64-msvc": {
+       "files": {
+-        "cua_driver_sdk.dll": "72e677d69e8c457a944ae63dbf3fe3780bd60ea51563bf99cca357ebd6c625a9",
+-        "cua_driver_node_runtime.node": "13c35176c94e2ebf9e168851b9e9bfbbeaedcb77657f2dcf24665b1777b004e7"
++        "cua_driver_sdk.dll": "818391dce62493723ddd5179e7f85b4d69fc842ed46b4fe8153c8c3a722149cf",
++        "cua_driver_node_runtime.node": "3cdd4a70aab45a6f1abc3d9ef816658de695fb22b66bee8dc5d32cebc13c4142"
+       }
+     },
+     "win32-x64-msvc": {
+       "files": {
+-        "cua_driver_sdk.dll": "e5ce91e13b781e650eb6f54be61d1af7138bdee4d510b54010d9bf05fd24276e",
+-        "cua_driver_node_runtime.node": "11de7f51a8f5a5b3b418afa317b64ba8f035b4ea3fa2b3afcd7893d5b364e3f4"
++        "cua_driver_sdk.dll": "a205af94cd05260d6864a7ee2b001bff4266eb0ca8a3194773a433b883775307",
++        "cua_driver_node_runtime.node": "7e2e0b22bcd49b29317cefc5b3edf5e23782d3d288de4ea68d813af379857393"
+       }
+     }
+   },
+diff --git a/extensions/cua-computer/src/driver-artifacts-resolution.test.ts b/extensions/cua-computer/src/driver-artifacts-resolution.test.ts
+index f524ef1519ee18ac4f1f3aef4ab2161f1f07bee8..46cd6da0a293a37d7402785e53eb0457cd9ebf94 100644
+--- a/extensions/cua-computer/src/driver-artifacts-resolution.test.ts
++++ b/extensions/cua-computer/src/driver-artifacts-resolution.test.ts
+@@ -17,14 +17,14 @@ it("supplies the accepted artifact record without depending on the bundled modul
+   expect(mocks.inspect).toHaveBeenCalledWith(
+     expect.objectContaining({
+       pluginManifest: expect.objectContaining({
+-        dependencies: expect.objectContaining({ "@trycua/cua-driver": "0.24.0" }),
++        dependencies: expect.objectContaining({ "@trycua/cua-driver": "0.30.4" }),
+         cuaDriverArtifacts: expect.objectContaining({
+           "win32-arm64-msvc": {
+             files: {
+               "cua_driver_node_runtime.node":
+-                "13c35176c94e2ebf9e168851b9e9bfbbeaedcb77657f2dcf24665b1777b004e7",
++                "3cdd4a70aab45a6f1abc3d9ef816658de695fb22b66bee8dc5d32cebc13c4142",
+               "cua_driver_sdk.dll":
+-                "72e677d69e8c457a944ae63dbf3fe3780bd60ea51563bf99cca357ebd6c625a9",
++                "818391dce62493723ddd5179e7f85b4d69fc842ed46b4fe8153c8c3a722149cf",
+             },
+           },
+         }),
+diff --git a/extensions/cua-computer/src/driver-client.test.ts b/extensions/cua-computer/src/driver-client.test.ts
+index 5d30018c00b80ed45a1ad9bb9a92379b755dd8a2..70df161ec8c9871a45f22639584f89533443a8ce 100644
+--- a/extensions/cua-computer/src/driver-client.test.ts
++++ b/extensions/cua-computer/src/driver-client.test.ts
+@@ -203,10 +203,20 @@ describe("CUA Driver direct session", () => {
+     const target = { tag: "Desktop", inner: { displayId: "primary" } };
+     expect(mocks.createDesktopTarget).toHaveBeenCalledOnce();
+     expect(mocks.createDesktopTarget).toHaveBeenCalledWith({ displayId: "primary" });
+-    expect(mocks.click).toHaveBeenCalledWith(
+-      { x: 20, y: 30, button: ClickButton.Left, count: 1, target },
++    expect(mocks.callTool).toHaveBeenCalledWith(
++      "click",
++      JSON.stringify({
++        x: 20,
++        y: 30,
++        target: { kind: "desktop", display_id: "primary" },
++        delivery_mode: "foreground",
++        button: "left",
++        count: 1,
++        session: sessionOptions.publicSession,
++      }),
+       undefined,
+     );
++    expect(mocks.click).not.toHaveBeenCalled();
+     expect(mocks.drag).toHaveBeenCalledWith(
+       { fromX: 1, fromY: 2, toX: 3, toY: 4, durationMs: 5n, target },
+       undefined,
+@@ -241,6 +251,26 @@ describe("CUA Driver direct session", () => {
+     await driver.dispose();
+   });
+ 
++  it.each([false, true])(
++    "preserves the complete native click envelope (isError=%s)",
++    async (isError) => {
++      const signal = new AbortController().signal;
++      const native = cuaToolResult(
++        { effect: isError ? "refused" : "confirmed", detail: "native click evidence" },
++        { isError, ...(isError ? { errorCode: "permission_denied" } : {}), image: true },
++      );
++      mocks.callTool.mockResolvedValueOnce(native);
++      const driver = createCuaDriver({ loadSdk: () => sdk as never });
++
++      expect(await driver.click({ x: 20, y: 30, button: ClickButton.Left, count: 1 }, signal)).toBe(
++        native,
++      );
++      expect(mocks.callTool).toHaveBeenCalledWith("click", expect.any(String), { signal });
++      expect(mocks.click).not.toHaveBeenCalled();
++      await driver.dispose();
++    },
++  );
++
+   it("keeps a missing native desktop library behind command availability", async () => {
+     const loadSdk = vi.fn(() => {
+       throw new Error("libX11.so.6: cannot open shared object file");
+diff --git a/extensions/cua-computer/src/driver-client.ts b/extensions/cua-computer/src/driver-client.ts
+index dc3c1b416ba3b2c8d49cc151bb0598265a8f7c45..ce3518b413899eaf25b2f4afda1ad6b085a40999 100644
+--- a/extensions/cua-computer/src/driver-client.ts
++++ b/extensions/cua-computer/src/driver-client.ts
+@@ -189,8 +189,19 @@ class DirectCuaDriverSession {
+     input: { x: number; y: number; button: ClickButton; count: number },
+     signal?: AbortSignal,
+   ) {
+-    return await this.invoke(signal, () =>
+-      this.session.click({ ...input, target: this.desktopTarget }, asyncOptions(signal)),
++    // The SDK's typed click returns only ActionResult. Keep the native tool
++    // envelope, including refusal codes and transport evidence, intact.
++    return await this.callTool(
++      "click",
++      {
++        x: input.x,
++        y: input.y,
++        target: { kind: "desktop", display_id: "primary" },
++        delivery_mode: "foreground",
++        button: ["left", "right", "middle"][input.button],
++        count: input.count,
++      },
++      signal,
+     );
+   }
+   async drag(
 diff --git a/extensions/discord/src/actions/handle-action.ts b/extensions/discord/src/actions/handle-action.ts
 index eecbdae0f20286fc60b00c9b904485f6e20d95e2..ef50feed432f287fa1cc7bc33e9665596ec25a92 100644
 --- a/extensions/discord/src/actions/handle-action.ts
@@ -28384,6 +29479,19 @@ index 07d6ecc5a8c01eeb1ae155a4c349f0e56dc9e58b..61dabfb566c1f28b3b1aaa8310d8970c
      ]
    }
  }
+diff --git a/package.json b/package.json
+index 09bbdbc63035aafa355b57c1f16529c09bb17ff4..b0b3396ac1687c736b6ce150c8ae4511b8289bbc 100644
+--- a/package.json
++++ b/package.json
+@@ -2196,7 +2196,7 @@
+     "@openclaw/fs-safe": "0.13.1",
+     "@openclaw/proxyline": "0.3.12",
+     "@silvia-odwyer/photon-node": "0.3.4",
+-    "@trycua/cua-driver": "0.24.0",
++    "@trycua/cua-driver": "0.30.4",
+     "acorn": "8.18.0",
+     "chalk": "6.0.0",
+     "chokidar": "5.0.0",
 diff --git a/packages/ai/src/providers/openai-chatgpt-responses-headers.ts b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..de3b532acf2a7041b69bd108b354d15810ee027f
@@ -30252,9 +31360,31 @@ index cbb61f20a9888901f6c0e1e353c116af7bbc4f4a..60400ca9c4d01c1e3c2b16b193716a27
    const cancelled =
      restartCancelled || (input.status !== "ok" && isCancellationStopReason(stopReason));
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
-index ae5499ff3ad4980de1eed979619aaad847153020..a6c84e76aa7d2b9533af269adb13cebb3461be92 100644
+index ae5499ff3ad4980de1eed979619aaad847153020..d560560b70cdf692a6db2caba6f9fe80c68764d9 100644
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
+@@ -269,8 +269,8 @@ importers:
+         specifier: 0.3.4
+         version: 0.3.4
+       '@trycua/cua-driver':
+-        specifier: 0.24.0
+-        version: 0.24.0
++        specifier: 0.30.4
++        version: 0.30.4
+       acorn:
+         specifier: 8.18.0
+         version: 8.18.0
+@@ -947,8 +947,8 @@ importers:
+   extensions/cua-computer:
+     dependencies:
+       '@trycua/cua-driver':
+-        specifier: 0.24.0
+-        version: 0.24.0
++        specifier: 0.30.4
++        version: 0.30.4
+       rastermill:
+         specifier: 0.3.3
+         version: 0.3.3
 @@ -1364,6 +1364,16 @@ importers:
          specifier: workspace:*
          version: link:../../packages/plugin-sdk
@@ -30272,6 +31402,129 @@ index ae5499ff3ad4980de1eed979619aaad847153020..a6c84e76aa7d2b9533af269adb13cebb
    extensions/line:
      dependencies:
        '@line/bot-sdk':
+@@ -5381,40 +5391,40 @@ packages:
+   '@tokenizer/token@0.3.0':
+     resolution: {integrity: sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==}
+ 
+-  '@trycua/cua-driver-darwin-arm64@0.24.0':
+-    resolution: {integrity: sha512-V6C580ZFIYmB6fxjqM3eEoXahvzGjWc34I1SoVSBjDRjQSn2fXLldlNsCBxEUHs4TH/JopTyP1hTChbNtCC06w==}
++  '@trycua/cua-driver-darwin-arm64@0.30.4':
++    resolution: {integrity: sha512-ceIRKOYtsL5mRTivFjctvDEjCuZSddzv6wsaN8fO3/U6bLLOEEXVEBxwmbF5hJLu0Eb33lybVeqZpc0hr9tdtg==}
+     cpu: [arm64]
+     os: [darwin]
+ 
+-  '@trycua/cua-driver-darwin-x64@0.24.0':
+-    resolution: {integrity: sha512-4KmFTUsGegTXmt+Crr/M+Zf/92zI+tGmJWFfM3CkCNGaCBw+wqJFmAYp9mVaR2F+zmdpaWyptB/movaHC88Lcg==}
++  '@trycua/cua-driver-darwin-x64@0.30.4':
++    resolution: {integrity: sha512-sy7Fj4y+fuWQcjYILWtLNTdPOQE1HZUwHg8Q2E97RaGRMKw1EA413g/HPru4FtVjaMgOJZFSGUdkQPNMIFdn0Q==}
+     cpu: [x64]
+     os: [darwin]
+ 
+-  '@trycua/cua-driver-linux-arm64-gnu@0.24.0':
+-    resolution: {integrity: sha512-SWiyMz8z6Oax/Q+Fp2zN4WjxcXE1pSQH9SsET63W2+C6t2CZdhLzypB1h4xNStcX8eCQZ/dl0ayiV2h0U2c/Zw==}
++  '@trycua/cua-driver-linux-arm64-gnu@0.30.4':
++    resolution: {integrity: sha512-SycwQiI909YzOys7HpsW4AUBX/pSWftZ97lPqrI7ttYElWySLRu+f5rsUJ01Vit2i73oTw9jt/uUNXBtXCobmA==}
+     cpu: [arm64]
+     os: [linux]
+     libc: [glibc]
+ 
+-  '@trycua/cua-driver-linux-x64-gnu@0.24.0':
+-    resolution: {integrity: sha512-7FDtyemjyaZwNIOahfYPr6NcJOr86i3WXGcaJ9Q+a5wG13srkr3vhA0K7mPQcGd/tZTyZAulXA0fnjYv7oZiXg==}
++  '@trycua/cua-driver-linux-x64-gnu@0.30.4':
++    resolution: {integrity: sha512-DLkgZkI1rNHXtSGZUUHZ9uhq0J1CsGQZew+QNu4ZuXC1RLu4hwa83jfKPCHg5Rs95ki6a5yX6XIP8fSjYzErkw==}
+     cpu: [x64]
+     os: [linux]
+     libc: [glibc]
+ 
+-  '@trycua/cua-driver-win32-arm64-msvc@0.24.0':
+-    resolution: {integrity: sha512-NktveoX98qafCjgBePzqTsHqjlFHdz6ositvEtwVTS3xA7hNEgCsr9w55sRQYuUSGfz5xjxpFioSn6Mh/f5brw==}
++  '@trycua/cua-driver-win32-arm64-msvc@0.30.4':
++    resolution: {integrity: sha512-L1AFSgZF61IuB9EM4/RE9N1BjlSqSK542LzHQW/lYPKtHdzgADOVbFO9nzMs6ZM9jU18UYoXagsiJcwFWkIiHQ==}
+     cpu: [arm64]
+     os: [win32]
+ 
+-  '@trycua/cua-driver-win32-x64-msvc@0.24.0':
+-    resolution: {integrity: sha512-8tudsgdnfgCgeavIyhIOVCAAkfKezTkhTaZvPqZnikYN+5xKrO4o+vPhyyuEurYZLBLKluAxRwGr9DP/7syZjw==}
++  '@trycua/cua-driver-win32-x64-msvc@0.30.4':
++    resolution: {integrity: sha512-ZrCOUCHwKNwPT8cx96pfOLQ12Dz2WJqfbx9RZ41WkhKTXYf0HrRKrMQ2u2xvic78WC4AB4qaWwI+TvDNgb/C9Q==}
+     cpu: [x64]
+     os: [win32]
+ 
+-  '@trycua/cua-driver@0.24.0':
+-    resolution: {integrity: sha512-OVYuBBvo7HNxGmqZDaWlfQ5tdr7FruA0YfytJ0p+aTZ9QF/1T8G5nQNsLVJht7JBAybktxO6JW+lxBNn9QHp8A==}
++  '@trycua/cua-driver@0.30.4':
++    resolution: {integrity: sha512-0v1IhX151BvULRiHzuKoV4D39O6A1CY1UteSZRR3NHPimaj7zd5p8rqgl9N27eldY+cPGloVykAlzPds8KMNSA==}
+ 
+   '@tufjs/canonical-json@2.0.0':
+     resolution: {integrity: sha512-yVtV8zsdo8qFHe+/3kw81dSLyF7D576A5cCFCi4X7B39tWT7SekaEFUnvnWJHz+9qO7qJTah1JbrDjWKqFtdWA==}
+@@ -12747,35 +12757,35 @@ snapshots:
+ 
+   '@tokenizer/token@0.3.0': {}
+ 
+-  '@trycua/cua-driver-darwin-arm64@0.24.0':
++  '@trycua/cua-driver-darwin-arm64@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver-darwin-x64@0.24.0':
++  '@trycua/cua-driver-darwin-x64@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver-linux-arm64-gnu@0.24.0':
++  '@trycua/cua-driver-linux-arm64-gnu@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver-linux-x64-gnu@0.24.0':
++  '@trycua/cua-driver-linux-x64-gnu@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver-win32-arm64-msvc@0.24.0':
++  '@trycua/cua-driver-win32-arm64-msvc@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver-win32-x64-msvc@0.24.0':
++  '@trycua/cua-driver-win32-x64-msvc@0.30.4':
+     optional: true
+ 
+-  '@trycua/cua-driver@0.24.0':
++  '@trycua/cua-driver@0.30.4':
+     dependencies:
+       '@ubjs/core': 0.31.0-3
+       '@ubjs/node': 0.31.0-3
+     optionalDependencies:
+-      '@trycua/cua-driver-darwin-arm64': 0.24.0
+-      '@trycua/cua-driver-darwin-x64': 0.24.0
+-      '@trycua/cua-driver-linux-arm64-gnu': 0.24.0
+-      '@trycua/cua-driver-linux-x64-gnu': 0.24.0
+-      '@trycua/cua-driver-win32-arm64-msvc': 0.24.0
+-      '@trycua/cua-driver-win32-x64-msvc': 0.24.0
++      '@trycua/cua-driver-darwin-arm64': 0.30.4
++      '@trycua/cua-driver-darwin-x64': 0.30.4
++      '@trycua/cua-driver-linux-arm64-gnu': 0.30.4
++      '@trycua/cua-driver-linux-x64-gnu': 0.30.4
++      '@trycua/cua-driver-win32-arm64-msvc': 0.30.4
++      '@trycua/cua-driver-win32-x64-msvc': 0.30.4
+ 
+   '@tufjs/canonical-json@2.0.0': {}
+ 
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index a7127b45c9bd97eadd30a964f11727edd4ac6654..7bc265e80d381e91617871723c6e281411341fad 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -10,6 +10,14 @@ minimumReleaseAgeStrict: true
+ 
+ # Trusted Codex runtimes are outside the dependency cooldown.
+ minimumReleaseAgeExclude:
++  # Reviewed macOS foreground modifier fix (trycua/cua#3855); remove after 2026-10-05T21:44Z.
++  - "@trycua/cua-driver@0.30.4"
++  - "@trycua/cua-driver-darwin-arm64@0.30.4"
++  - "@trycua/cua-driver-darwin-x64@0.30.4"
++  - "@trycua/cua-driver-linux-arm64-gnu@0.30.4"
++  - "@trycua/cua-driver-linux-x64-gnu@0.30.4"
++  - "@trycua/cua-driver-win32-arm64-msvc@0.30.4"
++  - "@trycua/cua-driver-win32-x64-msvc@0.30.4"
+   # Reviewed ACPX runtime release; remove after 2026-09-23T13:34:53Z.
+   - acpx@0.16.0
+   # Published ACPX runtime dependency; remove after 2026-09-20T08:36Z.
 diff --git a/scripts/build-all.mts b/scripts/build-all.mts
 index c02e5ebc4910053738ded795e2716230e1572178..6ad845abc39d76944a991d7149eb88f8737e7a1d 100644
 --- a/scripts/build-all.mts
@@ -129385,6 +130638,19 @@ index 0000000000000000000000000000000000000000..fba13df1a39735e2dd464ecd04470e1b
 +    });
 +  });
 +});
+diff --git a/src/plugins/computer-use-contract.test.ts b/src/plugins/computer-use-contract.test.ts
+index e5e85f2d6cd83055cb711d27f9aab464cbdceff3..74a91d188a5df659a2a7ac0801a54bcf8bfa8a68 100644
+--- a/src/plugins/computer-use-contract.test.ts
++++ b/src/plugins/computer-use-contract.test.ts
+@@ -111,6 +111,8 @@ describe("Computer Use wire contract", () => {
+       "stop_recording",
+       "replay_trajectory",
+       "invoke_menu",
++      "credential_prompts",
++      "type_secret",
+     ]);
+   });
+ 
 diff --git a/src/plugins/computer-use-contract.ts b/src/plugins/computer-use-contract.ts
 index 0dd2b4c3cb65e5c1cf1f314276c7c2d279c60e25..cd674047746b7be329290b66739dc5db054b926f 100644
 --- a/src/plugins/computer-use-contract.ts
@@ -136890,7 +138156,7 @@ index 0000000000000000000000000000000000000000..96c7a4c2ef9f2d38acd783ce6dc7bbbe
 +  );
 +}
 diff --git a/test/scripts/package-mac-app.test.ts b/test/scripts/package-mac-app.test.ts
-index 55f198686a6b64bfaaad4773650747f0673b3a65..5604413a3fd18595387cd3e202c9a7f0cbe089c3 100644
+index 55f198686a6b64bfaaad4773650747f0673b3a65..93baeab0737863c871da9123bfd8acb9ad32354a 100644
 --- a/test/scripts/package-mac-app.test.ts
 +++ b/test/scripts/package-mac-app.test.ts
 @@ -20,6 +20,7 @@ import * as tar from "tar";
@@ -136942,6 +138208,18 @@ index 55f198686a6b64bfaaad4773650747f0673b3a65..5604413a3fd18595387cd3e202c9a7f0
      );
      const mismatched = runRealCompiledPeekabooHarness("none", "e".repeat(40));
      expect(mismatched.status).toBe(1);
+@@ -2454,9 +2443,9 @@ ${mounts === "failed" ? "exit 1" : mounts === "mounted" ? `printf '/dev/disk9 on
+     );
+     expect(stageScript).toContain('manifest.dependencies["@trycua/cua-driver"]');
+     expect(stageScript).toContain('manifest.cuaDriverArtifacts["darwin-universal-binary"]');
+-    expect(cuaManifest.dependencies["@trycua/cua-driver"]).toBe("0.24.0");
++    expect(cuaManifest.dependencies["@trycua/cua-driver"]).toBe("0.30.4");
+     expect(cuaManifest.cuaDriverArtifacts["darwin-universal-binary"]?.archiveSha256).toBe(
+-      "31790cb49baa206f6455fbc259f8f83ae27e86be908f5c8cac5ec2f8521f8382",
++      "a93d21bab914b2d854776f46f71a53bddd4e483ef762aeb74137d3ac306cbf65",
+     );
+     expect(packageScript).toContain(
+       '"$ROOT_DIR/scripts/stage-cua-driver-macos.sh" "$APP_ROOT/Contents/Resources/cua-driver"',
 diff --git a/test/scripts/plugin-boundary-report.test.ts b/test/scripts/plugin-boundary-report.test.ts
 index da216d6da768158b5902eab2f2a6f6f321dd7707..95ef8793d8838ea5961ce5d875a96bd6c9ba8072 100644
 --- a/test/scripts/plugin-boundary-report.test.ts
