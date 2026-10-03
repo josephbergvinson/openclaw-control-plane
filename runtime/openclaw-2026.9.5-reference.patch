@@ -127258,23 +127258,36 @@ index 9a860c2e97042cc08103208f8822877da46eaefc..d3b3f14c8e8546f940afe4bf32ab136e
    verboseLogging: boolean;
 diff --git a/src/node-host/local-gateway-auth.test.ts b/src/node-host/local-gateway-auth.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e10fe29cd793b738538f1ffe73a6560e442ab2c1
+index 0000000000000000000000000000000000000000..c8fe7a19ffbc410f473ca00b46b666e215d74695
 --- /dev/null
 +++ b/src/node-host/local-gateway-auth.test.ts
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,312 @@
++import fsSync from "node:fs";
 +import fs from "node:fs/promises";
 +import os from "node:os";
 +import path from "node:path";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { requestExitAfterOneShotOutput } from "../cli/one-shot-exit.js";
 +import { readConfigFileSnapshot } from "../config/config.js";
++import { runExec } from "../process/exec.js";
 +import { writeSecretStoreEntry } from "../secrets/store/secret-store.js";
 +import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
-+import { resolveLocalGatewayAuth } from "./local-gateway-auth.js";
++import { mockProcessPlatform } from "../test-utils/vitest-spies.js";
++import { resolveLocalGatewayAuth, runLocalGatewayAuth } from "./local-gateway-auth.js";
++
++vi.mock("../process/exec.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../process/exec.js")>()),
++  runExec: vi.fn(),
++}));
++vi.mock("../cli/one-shot-exit.js", () => ({ requestExitAfterOneShotOutput: vi.fn() }));
 +
 +let root: string;
++let previousExitCode: typeof process.exitCode;
 +const ref = { source: "store", provider: "default", id: "NATIVE_GATEWAY_TOKEN" };
 +
 +beforeEach(async () => {
++  previousExitCode = process.exitCode;
++  process.exitCode = undefined;
 +  root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-native-auth-"));
 +  vi.stubEnv("OPENCLAW_STATE_DIR", root);
 +  vi.stubEnv("OPENCLAW_CONFIG_PATH", path.join(root, "openclaw.json"));
@@ -127283,9 +127296,184 @@ index 0000000000000000000000000000000000000000..e10fe29cd793b738538f1ffe73a6560e
 +});
 +
 +afterEach(async () => {
++  vi.restoreAllMocks();
++  vi.mocked(runExec).mockReset();
++  vi.mocked(requestExitAfterOneShotOutput).mockClear();
++  process.exitCode = previousExitCode;
 +  closeOpenClawStateDatabaseForTest();
 +  vi.unstubAllEnvs();
 +  await fs.rm(root, { recursive: true, force: true });
++});
++
++describe("private native local Gateway auth producer", () => {
++  const parentIdentity = `1:2:3:${"a".repeat(40)}`;
++  const auth = { mode: "token", token: ref };
++  const futureVoice = { futureRecorderPolicy: true };
++
++  async function writeConfig(gateway: object, voice = futureVoice, extra: object = {}) {
++    await fs.writeFile(
++      path.join(root, "openclaw.json"),
++      JSON.stringify({ gateway, channels: { discord: { voice } }, ...extra }),
++    );
++  }
++
++  async function nativePipes(request: unknown = { version: 1, auth }) {
++    mockProcessPlatform("darwin");
++    const realpath = fsSync.realpathSync.native;
++    vi.spyOn(fsSync.realpathSync, "native").mockImplementation((target, options) =>
++      target === process.execPath
++        ? path.join(root, "Signed.app/Contents/Frameworks/node")
++        : realpath(target, options),
++    );
++    const stats = await fs.stat(root);
++    const isFIFO = vi.spyOn(stats, "isFIFO").mockReturnValue(true);
++    const fstat = fsSync.fstatSync;
++    vi.spyOn(fsSync, "fstatSync").mockImplementation((fd, options) =>
++      fd === 0 || fd === 1 ? stats : fstat(fd, options),
++    );
++    vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () {
++      yield Buffer.from(JSON.stringify(request));
++      return undefined;
++    });
++    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
++    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
++    vi.mocked(runExec).mockResolvedValue({ stdout: parentIdentity, stderr: "" });
++    return { stdout, stderr, isFIFO };
++  }
++
++  it("boots through future Discord plugin metadata while the full config reader rejects it", async () => {
++    await writeConfig({ mode: "local", auth });
++    store("synthetic-bootstrap-token");
++    const full = await readConfigFileSnapshot({ observe: false });
++    expect(full.valid).toBe(false);
++    expect(full.issues.some((issue) => issue.path === "channels.discord.voice")).toBe(true);
++    const pipes = await nativePipes();
++
++    await runLocalGatewayAuth();
++
++    expect(pipes.stdout).toHaveBeenCalledExactlyOnceWith(
++      `${JSON.stringify({ version: 1, token: "synthetic-bootstrap-token" })}\n`,
++    );
++    expect(pipes.stderr).not.toHaveBeenCalled();
++    expect(process.exitCode).toBeUndefined();
++    expect(runExec).toHaveBeenCalledTimes(2);
++    expect(requestExitAfterOneShotOutput).toHaveBeenCalledOnce();
++  });
++
++  it.each([
++    ["invalid core Gateway", { mode: "local", port: "invalid", auth }],
++    ["changed selected auth", { mode: "local", auth: { mode: "token", token: "changed" } }],
++    ["remote Gateway", { mode: "remote", auth }],
++  ])("refuses %s without returning a credential", async (_label, gateway) => {
++    await writeConfig(gateway);
++    store("synthetic-bootstrap-token");
++    const pipes = await nativePipes();
++
++    await runLocalGatewayAuth();
++
++    expect(pipes.stdout).not.toHaveBeenCalled();
++    expect(process.exitCode).toBe(1);
++  });
++
++  it("refuses a missing selected SecretRef instead of falling back to ambient auth", async () => {
++    await writeConfig({ mode: "local", auth });
++    vi.stubEnv("OPENCLAW_GATEWAY_TOKEN", "unrelated-ambient-token");
++    const pipes = await nativePipes();
++
++    await runLocalGatewayAuth();
++
++    expect(pipes.stdout).not.toHaveBeenCalled();
++    expect(pipes.stderr).not.toHaveBeenCalled();
++    expect(process.exitCode).toBe(1);
++  });
++
++  it("rechecks the native parent after resolution before emitting auth", async () => {
++    await writeConfig({ mode: "local", auth });
++    store("synthetic-bootstrap-token");
++    const pipes = await nativePipes();
++    vi.mocked(runExec)
++      .mockResolvedValueOnce({ stdout: parentIdentity, stderr: "" })
++      .mockResolvedValueOnce({ stdout: `4:5:6:${"b".repeat(40)}`, stderr: "" });
++
++    await runLocalGatewayAuth();
++
++    expect(pipes.stdout).not.toHaveBeenCalled();
++    expect(pipes.stderr).not.toHaveBeenCalled();
++    expect(process.exitCode).toBe(1);
++  });
++
++  it.each(["non-pipe", "invalid-parent"])("refuses %s native authority", async (kind) => {
++    await writeConfig({ mode: "local", auth });
++    store("synthetic-bootstrap-token");
++    const pipes = await nativePipes();
++    if (kind === "non-pipe") {
++      pipes.isFIFO.mockReturnValue(false);
++    } else {
++      vi.mocked(runExec).mockResolvedValue({ stdout: "invalid", stderr: "" });
++    }
++
++    await runLocalGatewayAuth();
++
++    expect(pipes.stdout).not.toHaveBeenCalled();
++    expect(pipes.stderr).not.toHaveBeenCalled();
++    expect(process.exitCode).toBe(1);
++  });
++
++  it.skipIf(process.platform === "win32")(
++    "rejects a full source config edit while the real credential provider is suspended",
++    async () => {
++      const marker = path.join(root, "provider-started");
++      const gate = path.join(root, "provider-release");
++      const command = path.join(root, "delayed-provider.sh");
++      await fs.writeFile(
++        command,
++        [
++          "#!/bin/sh",
++          "cat >/dev/null",
++          ': > "$1"',
++          'while [ ! -f "$2" ]; do sleep 0.01; done',
++          'printf \'%s\' \'{"protocolVersion":1,"values":{"token":"synthetic-delayed-token"}}\'',
++        ].join("\n"),
++        { mode: 0o700 },
++      );
++      const delayedAuth = {
++        mode: "token",
++        token: { source: "exec", provider: "delayed", id: "token" },
++      };
++      const extra = {
++        secrets: {
++          providers: {
++            delayed: {
++              source: "exec",
++              command,
++              args: [marker, gate],
++              jsonOnly: true,
++              timeoutMs: 5000,
++            },
++          },
++        },
++      };
++      await writeConfig({ mode: "local", auth: delayedAuth }, futureVoice, extra);
++      const pipes = await nativePipes({ version: 1, auth: delayedAuth });
++      const running = runLocalGatewayAuth();
++      try {
++        await vi.waitFor(() => expect(fsSync.existsSync(marker)).toBe(true));
++        await writeConfig(
++          { mode: "local", auth: delayedAuth },
++          { futureRecorderPolicy: false },
++          extra,
++        );
++      } finally {
++        await fs.writeFile(gate, "release");
++        await running;
++      }
++
++      expect(pipes.stdout).not.toHaveBeenCalled();
++      expect(pipes.stderr).not.toHaveBeenCalled();
++      expect(process.exitCode).toBe(1);
++      expect(runExec).toHaveBeenCalledOnce();
++    },
++  );
 +});
 +
 +async function snapshot(auth: object, mode = "local") {
@@ -127388,10 +127576,10 @@ index 0000000000000000000000000000000000000000..e10fe29cd793b738538f1ffe73a6560e
 +});
 diff --git a/src/node-host/local-gateway-auth.ts b/src/node-host/local-gateway-auth.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4113d9d4e875b88195ec973efd0dc0947fea7b73
+index 0000000000000000000000000000000000000000..0f560889db8047977d83a8c7bf19fdb4bdb3a4c0
 --- /dev/null
 +++ b/src/node-host/local-gateway-auth.ts
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,112 @@
 +/** Private, pipe-only bootstrap auth for the signed Mac app's local connection. */
 +import fs from "node:fs";
 +import path from "node:path";
@@ -127480,10 +127668,13 @@ index 0000000000000000000000000000000000000000..4113d9d4e875b88195ec973efd0dc094
 +      chunks.push(bytes);
 +    }
 +    const request: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-+    const snapshot = await readConfigFileSnapshot();
++    const snapshot = await readConfigFileSnapshot({
++      pluginValidation: "core-only",
++      observe: false,
++    });
 +    const auth = await resolveLocalGatewayAuth(request, snapshot, process.env);
 +    // A provider may suspend. Do not return credentials against an edited config.
-+    const current = await readConfigFileSnapshot();
++    const current = await readConfigFileSnapshot({ pluginValidation: "core-only", observe: false });
 +    if (!current.valid || !isDeepStrictEqual(current.sourceConfig, snapshot.sourceConfig)) {
 +      throw new Error(UNAVAILABLE);
 +    }
