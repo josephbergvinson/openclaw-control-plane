@@ -14,7 +14,19 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed October 3 successor is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`,
+The current source reference is `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`,
+source tree `6c7f113dda8684378c7a7810add963178a6674f2`. Its two auth-bootstrap
+changes let the local Mac credential reader validate core Gateway settings without
+being blocked by unrelated newer channel metadata. The existing credential,
+signed-parent, private-pipe and whole-config checks remain.
+
+Mini companion build 600 and its matching worker passed normal packaging,
+installation/readiness and signed local-auth acceptance. Opaque entry unlocked the
+normal Apple Passwords landing; vault-item retrieval and Bitwarden reuse are not
+claimed. MacBook rollout remains separate. The [runtime qualification](runtime/README.md#october-3-mac-companion-authentication-bootstrap)
+records the scoped source and host evidence. The Gateway remains on the source below.
+
+The installed October 3 Gateway successor is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`,
 source tree `b76fabfb1a1e5abffa3fa2fa61394c5f2bdcec9c`. It changes 45 paths
 since the earlier published reference `3e7d6ada7440d2094891e1b3964241e64f585c09`.
 

@@ -13,6 +13,37 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 3 Mac companion authentication bootstrap
+
+Reference `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`, tree
+`6c7f113dda8684378c7a7810add963178a6674f2`, adds two auth-bootstrap paths
+since `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`. The private local
+Gateway reader uses existing core-only validation without config observation.
+Unrelated newer channel metadata cannot block bootstrap. Core Gateway and
+SecretRef validation, selected-auth matching, signed native ancestry, bounded
+private pipes and the whole authored-config recheck remain enforced.
+
+The real producer fixture passed 15 cases in one owner, including nine producer
+cases and six existing helper cases. The old producer rejected the future-channel
+fixture. Core production and owning test types, focused typed lint, formatting,
+line caps and diff checks passed. This is scoped source evidence, not a complete
+local native plan or all 20 core test graphs.
+
+The normal whole Mac package passed runtime/UI, Swift and helper builds, strict
+signature checks and both isolated worker modes. Mini build 600 and its matching
+private worker were installed from this source with the standard signing identity.
+One ordinary startup, app-owned worker readiness, one native metadata command and
+the normal signed boolean local-auth probe passed. Opaque credential entry unlocked
+the normal Apple Passwords landing without screenshots, item contents or secrets
+being requested. This does not qualify vault-item retrieval or Bitwarden per-item
+reuse. MacBook build 599 retains its dated observation; it was not rolled forward.
+
+The Gateway remains installed from `219dead`; its seven deployment fields and
+complete history are preserved. The previous public revision passed all five
+hosted checks. This new public head requires its own hosted qualification. Earlier
+voice, delivery, website and provider results retain their source and scope;
+fresh spoken-audio and minutes-delivery acceptance remains pending.
+
 ## October 3 voice following and useful completion messages
 
 The installed source is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`, tree
