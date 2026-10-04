@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Copy one completed clean build into a new read-only runtime candidate.
 
-This stages files and a private receipt only. It does not select, seal or execute
-the candidate, install dependencies, or change configuration or services.
+This stages files and a private receipt. An explicitly supplied pinned Node can
+verify the fixed offline AI SDK import before hardening. It does not select,
+seal or start the runtime, install dependencies, or change configuration/services.
 """
 from __future__ import annotations
 
@@ -20,6 +21,10 @@ import sys
 import tempfile
 
 EXCLUDED_NAMES = {'.git', '.artifacts', '.cache', '.pytest_cache', '__pycache__'}
+SWIFT_BUILD_CACHE_ROOTS = ('apps/macos/.build', 'apps/macos-mlx-tts/.build')
+AI_IMPORT_EXPRESSION = 'await import("@openclaw/ai/internal/openai-responses-payload-policy")'
+AI_IMPORT_NODE_VERSION = 'v24.16.0'
+AI_IMPORT_TIMEOUT_SECONDS = 30
 REQUIRED_FILES = (
     'openclaw.mjs', 'package.json', 'dist/build-info.json',
     'dist/control-ui/index.html',
@@ -81,6 +86,9 @@ def git_identity(source: Path, commit: str, exclude_roots: tuple[str, ...] = ())
     for name in exclude_roots:
         if read('ls-files', '-z', '--', name):
             raise StagingError(f'cannot exclude a root containing tracked source: {name}')
+    for name in SWIFT_BUILD_CACHE_ROOTS:
+        if read('ls-files', '-z', '--', name):
+            raise StagingError(f'cannot exclude tracked Swift .build source: {name}')
     try:
         build = json.loads((source / 'dist/build-info.json').read_text())
     except (OSError, ValueError) as exc:
@@ -91,17 +99,27 @@ def git_identity(source: Path, commit: str, exclude_roots: tuple[str, ...] = ())
             'buildInfoSha256': sha256((source / 'dist/build-info.json').read_bytes())}
 
 
-def snapshot(root: Path, exclude_roots: tuple[str, ...] = ()) -> list[dict]:
-    """Read the included tree without following symlink directories."""
+def excluded_names(root: Path, directory: Path, exclude_roots: tuple[str, ...] = ()) -> set[str]:
+    excluded = EXCLUDED_NAMES | (set(exclude_roots) if directory == root else set())
+    for relative in SWIFT_BUILD_CACHE_ROOTS:
+        cache = root / relative
+        if directory == cache.parent:
+            excluded.add(cache.name)
+    return excluded
+
+
+def snapshot(root: Path, exclude_roots: tuple[str, ...] = (),
+             *, source_exclusions: bool = True) -> list[dict]:
+    """Read source inputs or the complete candidate without following links."""
     rows = []
     def inaccessible(error: OSError) -> None:
         raise StagingError('included source or candidate subtree could not be enumerated') from error
 
     for directory, directories, files in os.walk(root, followlinks=False, onerror=inaccessible):
-        excluded = EXCLUDED_NAMES | (set(exclude_roots) if Path(directory) == root else set())
+        excluded = excluded_names(root, Path(directory), exclude_roots) if source_exclusions else set()
         directories[:] = sorted(name for name in directories if name not in excluded)
         for name in sorted(directories + files):
-            if name in excluded or name.endswith('.tsbuildinfo'):
+            if name in excluded or source_exclusions and name.endswith('.tsbuildinfo'):
                 continue
             path = Path(directory) / name
             info = path.lstat()
@@ -164,8 +182,68 @@ def write_receipt(path: Path, value: dict) -> None:
         os.unlink(temporary)
 
 
+def pinned_import_node(node: Path) -> dict:
+    if not isinstance(node, Path) or not node.is_absolute() or '..' in node.parts:
+        raise StagingError('offline SDK import Node path must be absolute and physical')
+    info = node.lstat()
+    if (node.resolve(strict=True) != node or not stat.S_ISREG(info.st_mode)
+            or not info.st_mode & 0o111):
+        raise StagingError('offline SDK import Node path must be a physical executable')
+    try:
+        observed = subprocess.run([str(node), '--version'], capture_output=True, check=False,
+                                  timeout=5, env={'PATH': os.defpath})
+    except subprocess.TimeoutExpired as exc:
+        raise StagingError('offline SDK import Node version query exceeded its bound') from exc
+    if observed.returncode or observed.stdout.decode(errors='replace').strip() != AI_IMPORT_NODE_VERSION:
+        raise StagingError(f'offline SDK import requires pinned Node {AI_IMPORT_NODE_VERSION}')
+    digest = hashlib.sha256()
+    with node.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    after = node.lstat()
+    fields = ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+    if any(getattr(info, field) != getattr(after, field) for field in fields):
+        raise StagingError('offline SDK import Node changed during verification')
+    return {'path': str(node), 'nodeVersion': AI_IMPORT_NODE_VERSION, 'sha256': digest.hexdigest(),
+            'identity': {field: getattr(info, field) for field in fields}}
+
+
+def verify_fixed_ai_import(candidate: Path, node: dict) -> dict:
+    started = now()
+    argv = [node['path'], '--input-type=module', '--eval', AI_IMPORT_EXPRESSION]
+    # Fixed offline module evaluation receives no provider credentials or custom
+    # Node loaders. Stream output to private temporary files rather than RAM.
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as error:
+        try:
+            result = subprocess.run(argv, cwd=candidate, stdin=subprocess.DEVNULL,
+                                    stdout=output, stderr=error, check=False,
+                                    timeout=AI_IMPORT_TIMEOUT_SECONDS,
+                                    env={'PATH': os.defpath, 'HOME': str(candidate)})
+        except subprocess.TimeoutExpired as exc:
+            raise StagingError('fixed offline SDK import exceeded its 30-second bound') from exc
+        if result.returncode:
+            error.seek(0)
+            detail = error.read(512).decode(errors='replace').strip()
+            raise StagingError(f'fixed offline SDK import failed (exit {result.returncode}): {detail}')
+        output_hashes = {}
+        for name, stream in (('stdoutSha256', output), ('stderrSha256', error)):
+            stream.seek(0)
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+            output_hashes[name] = digest.hexdigest()
+    info = Path(node['path']).lstat()
+    if any(getattr(info, field) != expected for field, expected in node['identity'].items()):
+        raise StagingError('offline SDK import Node identity changed')
+    return {'status': 'passed', 'nodePath': node['path'], 'nodeVersion': node['nodeVersion'],
+            'nodeSha256': node['sha256'], 'argv': argv, 'cwd': str(candidate),
+            'startedAt': started, 'completedAt': now(), 'exitCode': result.returncode,
+            'physicalJoin': True, 'timeoutSeconds': AI_IMPORT_TIMEOUT_SECONDS,
+            'beforeReadOnly': True, **output_hashes}
+
+
 def stage(source: Path, candidate: Path, commit: str, receipt: Path,
-          *, exclude_roots: tuple[str, ...] = ()) -> dict:
+          *, exclude_roots: tuple[str, ...] = (), verify_ai_import_node: Path | None = None) -> dict:
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise StagingError('expected source commit must be 40 lowercase hexadecimal characters')
     if any(not isinstance(name, str) for name in exclude_roots):
@@ -186,6 +264,7 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
     identity = git_identity(source, commit, exclude_roots)
     require_artifacts(source)
     before = snapshot(source, exclude_roots)
+    import_node = pinned_import_node(verify_ai_import_node) if verify_ai_import_node is not None else None
     candidate.mkdir(mode=0o700)
     relocated = []
     try:
@@ -193,7 +272,7 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
         default_ignore = shutil.ignore_patterns(*sorted(EXCLUDED_NAMES), '*.tsbuildinfo')
 
         def ignored(directory, names):
-            return default_ignore(directory, names) | (set(exclude_roots) if Path(directory) == source else set())
+            return default_ignore(directory, names) | excluded_names(source, Path(directory), exclude_roots)
 
         shutil.copytree(source, candidate, symlinks=True, dirs_exist_ok=True, ignore=ignored)
         for row in before:
@@ -215,7 +294,9 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
             target.chmod(row['mode'])
             relocated.append({'path': row['path'], 'beforeSha256': sha256(data), 'afterSha256': sha256(changed)})
         require_artifacts(candidate)
-        copied = snapshot(candidate)
+        # Exclusions select source inputs only. Every actual candidate member
+        # must participate in parity, import-mutation and read-only checks.
+        copied = snapshot(candidate, source_exclusions=False)
         indexed = {row['path']: row for row in before}
         changed_hashes = {row['path']: row['afterSha256'] for row in relocated}
         if {row['path'] for row in copied} != set(indexed):
@@ -233,11 +314,17 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
                 raise StagingError(f'copied symlink changed: {row["path"]}')
         if snapshot(source, exclude_roots) != before or git_identity(source, commit, exclude_roots) != identity:
             raise StagingError('source changed during staging')
+        offline_import = verify_fixed_ai_import(candidate, import_node) if import_node is not None else None
+        if offline_import is not None:
+            if snapshot(candidate, source_exclusions=False) != copied:
+                raise StagingError('candidate changed during fixed offline SDK import')
+            if snapshot(source, exclude_roots) != before or git_identity(source, commit, exclude_roots) != identity:
+                raise StagingError('source changed during fixed offline SDK import')
         for row in reversed(copied):
             if row['type'] != 'symlink':
                 (candidate / row['path']).chmod(row['mode'] & ~0o222)
         candidate.chmod(0o555)
-        final = snapshot(candidate)
+        final = snapshot(candidate, source_exclusions=False)
         copied_index = {row['path']: row for row in copied}
         if {row['path'] for row in final} != set(copied_index):
             raise StagingError('candidate membership changed while making it read-only')
@@ -258,11 +345,14 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
                  'commit': commit, 'sourceIdentity': identity,
                  'exclusions': sorted(EXCLUDED_NAMES) + ['*.tsbuildinfo'],
                  'excludedTopLevelRoots': list(exclude_roots),
+                 'excludedSwiftBuildCaches': list(SWIFT_BUILD_CACHE_ROOTS),
                  'sourceInventorySha256': sha256(json.dumps(before, sort_keys=True).encode()),
                  'requiredArtifacts': list(REQUIRED_FILES), 'relocatedShims': relocated,
                  'regularFileCount': sum(row['type'] == 'file' for row in final), 'files': final,
                  'sourceUnchanged': True, 'sourceHardlinksReused': False,
-                 'candidateExecuted': False, 'candidateSealed': False, 'liveStateChanged': False}
+                 'candidateExecuted': offline_import is not None, 'candidateSealed': False, 'liveStateChanged': False}
+        if offline_import is not None:
+            value['offlineAiImport'] = offline_import
         write_receipt(receipt, value)
         return value
     except Exception as exc:
@@ -279,10 +369,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--receipt', required=True, type=Path)
     parser.add_argument('--exclude-root', action='append', default=[], metavar='NAME',
                         help='Exclude one explicitly identified regenerable top-level cache; repeat as needed')
+    parser.add_argument('--verify-ai-import-node', type=Path,
+                        help='Explicit pinned Node 24.16.0 for the fixed offline AI import before hardening')
     args = parser.parse_args(argv)
     try:
         value = stage(args.source, args.candidate, args.source_commit, args.receipt,
-                      exclude_roots=tuple(args.exclude_root))
+                      exclude_roots=tuple(args.exclude_root), verify_ai_import_node=args.verify_ai_import_node)
         print(json.dumps({key: value[key] for key in ('status', 'candidate', 'regularFileCount', 'candidateSealed')}))
         return 0
     except (OSError, ValueError) as exc:
