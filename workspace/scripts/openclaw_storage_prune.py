@@ -56,6 +56,12 @@ NPM_LOG_KIND = 'npm-debug-log'
 NPM_LOG_NAME = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{3}Z-debug-\d+\.log')
 
 
+def is_execution_budget(error: BaseException) -> bool:
+    """Only our explicit wall-budget exception permits fresh-pass continuation."""
+    return (isinstance(error, TimeoutError) and error.errno is None
+            and error.args == ('execution budget exhausted',))
+
+
 def is_recovery_path(path: Path) -> bool:
     return any(part.startswith(QUARANTINE_PREFIX) for part in path.parts)
 
@@ -202,9 +208,11 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
     now = time.time() if now is None else now
     candidates, skipped = [], []
     node_versions, node_error = None, None
-    for p, kind, activity, days in bounded_candidates():
+    planned = bounded_candidates()
+    for index, (p, kind, activity, days) in enumerate(planned):
         if deadline is not None and time.monotonic() >= deadline:
-            skipped.append({'path': str(p), 'reason': 'execution budget exhausted', 'error': True})
+            skipped.extend(budget_deferral(str(path), 'host_discovery', kind=kind)
+                           for path, kind, _, _ in planned[index:])
             break
         try:
             if is_recovery_path(p):
@@ -271,6 +279,10 @@ def discover(now: float | None = None, deadline: float | None = None) -> tuple[l
                                         s.st_dev, s.st_ino, newest, allocated,
                                         entry_fingerprint(s) if kind == NPM_LOG_KIND else cache_signature))
         except (OSError, ValueError) as error:
+            if is_execution_budget(error):
+                skipped.extend(budget_deferral(str(path), 'host_discovery', kind=kind)
+                               for path, kind, _, _ in planned[index:])
+                break
             skipped.append({'path': str(p), 'reason': str(error), 'error': isinstance(error, OSError)})
     return candidates, skipped
 
@@ -395,6 +407,8 @@ class CapturedEntry:
     original_path: Path | None = None
     deleted_entries: int = 0
     removed: bool = False
+    restoring_fingerprint: tuple | None = None
+    restored: bool = False
 
 
 def verify_capture_container(anchor: ParentAnchor, name: str, fd: int) -> None:
@@ -481,6 +495,11 @@ def capture_entry(path: Path, expected: tuple[int, int], *, directory: bool,
                         rename_exclusive(qfd, 'payload', anchor.fd, path.name)
                         os.fsync(qfd)
                         os.fsync(anchor.fd)
+                        if entry is not None:
+                            restored = os.stat(path.name, dir_fd=anchor.fd, follow_symlinks=False)
+                            if file_identity(restored) == expected:
+                                entry.restoring_fingerprint = entry_fingerprint(restored)
+                                entry.restored = True
                     except OSError as error:
                         preserved = error
                 if preserved is None:
@@ -754,11 +773,53 @@ def remove_node_cache(captured: CapturedEntry, leaves: list[tuple[str, tuple[int
     os.fsync(captured.container_fd)
 
 
+def budget_deferral(path: str | None, stage: str, *, kind: str | None = None,
+                    captured: CapturedEntry | None = None) -> dict:
+    """A budget limit is resumable only before effects or after proven restoration."""
+    deleted = captured.deleted_entries if captured is not None else 0
+    restored = captured is not None and captured.restored and deleted == 0
+    state = 'restored' if restored else 'not_started' if captured is None else 'uncertain'
+    row = {'reason': 'execution budget exhausted', 'cause': 'execution_budget',
+           'stage': stage, 'state': state, 'deferred': True,
+           'not_started': state == 'not_started', 'error': True,
+           'effects': 'restored_zero' if restored else 'none' if captured is None
+                      else 'partial' if deleted else 'unknown',
+           'partially_removed': deleted != 0, 'removed_entries': deleted,
+           'target_count': 1 if path is not None else 0}
+    if path is not None:
+        row['path'] = path
+    if kind is not None:
+        row['kind'] = kind
+    if restored:
+        value = Path(path).lstat()
+        if captured.restoring_fingerprint is None or file_identity(value) != captured.restoring_fingerprint[:2]:
+            raise ValueError('budget restoration identity changed')
+        row['restored_identity'] = {'device': value.st_dev, 'inode': value.st_ino}
+    return row
+
+
+def cleanup_summary(payload: dict) -> dict:
+    rows = [row for row in payload.get('skipped', []) + payload.get('deferred', [])
+            if isinstance(row, dict) and (row.get('deferred') is True or row.get('not_started') is True)]
+    budgets = [row for row in rows if row.get('cause') == 'execution_budget']
+    removed = payload.get('removed', [])
+    return {'removed_items': len(removed),
+            'removed_cache_files': 0,
+            'deferred_targets': sum(row.get('target_count', 1 if row.get('path') else 0) for row in rows),
+            'deferred_stages': len({row.get('stage', 'unknown') for row in rows}),
+            'budget_deferred_targets': sum(row['target_count'] for row in budgets),
+            'budget_deferred_stages': len({row['stage'] for row in budgets}),
+            'unclassified_deferred_stages': len({row['stage'] for row in budgets if row['target_count'] == 0}),
+            'uncertain_effects': sum(row.get('effects') in ('partial', 'unknown')
+                                     or row.get('partially_removed') is True for row in rows),
+            'reclaimed_allocated_bytes': sum(row['allocated_bytes'] for row in removed)}
+
+
 def apply_candidates(candidates: list[Candidate], deadline: float | None = None) -> tuple[list[dict], list[dict]]:
     removed, skipped = [], []
     for index, candidate in enumerate(candidates):
         if deadline is not None and time.monotonic() >= deadline:
-            skipped.extend({'path': c.path, 'reason': 'execution budget exhausted', 'error': True}
+            skipped.extend(budget_deferral(c.path, 'host_candidates', kind=c.kind)
                            for c in candidates[index:])
             break
         p, activity = Path(candidate.path), Path(candidate.activity_root)
@@ -869,6 +930,11 @@ def apply_candidates(candidates: list[Candidate], deadline: float | None = None)
                             'device': candidate.device, 'inode': candidate.inode,
                             'captured_inode_removed': True, 'replacement_present': os.path.lexists(p)})
         except (OSError, ValueError, subprocess.SubprocessError) as error:
+            if is_execution_budget(error):
+                skipped.append(budget_deferral(str(p), 'host_candidates', kind=candidate.kind, captured=captured))
+                skipped.extend(budget_deferral(c.path, 'host_candidates', kind=c.kind)
+                               for c in candidates[index + 1:])
+                break
             skipped.append({'path': str(p), 'reason': str(error),
                             'partially_removed': bool(captured and captured.deleted_entries),
                             'removed_entries': captured.deleted_entries if captured else 0,
@@ -916,16 +982,18 @@ def disposable_simulators(deadline: float) -> tuple[list[dict], list[dict]]:
                                   'device': st.st_dev, 'inode': st.st_ino,
                                   'newest_mtime': newest, 'allocated_bytes': size, 'min_age_days': days})
         except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
-            errors.append({'path': str(root), 'reason': 'simulator inventory failed: ' + str(error), 'error': True})
+            errors.append(budget_deferral(None, 'simulator_discovery') if is_execution_budget(error)
+                          else {'path': str(root), 'reason': 'simulator inventory failed: ' + str(error), 'error': True})
     return plans, errors
 
 
 def delete_simulators(plans: list[dict], deadline: float) -> tuple[list[dict], list[dict]]:
     removed, deferred = [], []
-    for plan in plans:
+    for index, plan in enumerate(plans):
+        if time.monotonic() >= deadline:
+            deferred.extend(budget_deferral(row['path'], 'simulators') for row in plans[index:])
+            break
         try:
-            if time.monotonic() >= deadline:
-                raise TimeoutError('execution budget exhausted')
             commands = process_arguments()
             if re.search(r'(?:^|[ /])(?:xcodebuild|xctest|XCTRunner)(?:[ ]|$)', commands, re.M):
                 raise ValueError('active Xcode test run')
@@ -972,8 +1040,13 @@ def oversized_logs() -> list[dict]:
 def rotate_logs(plans: list[dict], deadline: float) -> tuple[list[dict], list[dict]]:
     archived, deferred = [], []
     archive = OWC / 'OpenClaw/.state/OpenClaw/logs/launchd-archive'
-    for plan in plans:
+    for index, plan in enumerate(plans):
         p = Path(plan['path'])
+        if time.monotonic() >= deadline:
+            deferred.extend(budget_deferral(row['path'], 'log_rotation') for row in plans[index:])
+            break
+        captured = None
+        archive_started = False
         try:
             check_deadline(deadline)
             if not OWC.is_mount() or archive.resolve() != archive:
@@ -994,6 +1067,7 @@ def rotate_logs(plans: list[dict], deadline: float) -> tuple[list[dict], list[di
                 with anchored_parent(target) as destination:
                     if os.fstat(destination.fd).st_dev != OWC.stat().st_dev:
                         raise OSError('log archive filesystem changed')
+                    archive_started = True
                     output_fd = os.open(target.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                         0o600, dir_fd=destination.fd)
                     with os.fdopen(output_fd, 'w+b') as output:
@@ -1043,7 +1117,12 @@ def rotate_logs(plans: list[dict], deadline: float) -> tuple[list[dict], list[di
                                  'sha256': digest.hexdigest(), 'captured_inode_removed': True,
                                  'replacement_present': os.path.lexists(p)})
         except (OSError, ValueError, subprocess.SubprocessError) as error:
-            deferred.append({'path': str(p), 'reason': str(error), 'error': True})
+            if is_execution_budget(error) and not archive_started:
+                deferred.append(budget_deferral(str(p), 'log_rotation', captured=captured))
+                deferred.extend(budget_deferral(row['path'], 'log_rotation') for row in plans[index + 1:])
+                break
+            deferred.append({'path': str(p), 'reason': str(error), 'error': True,
+                             'effects': 'unknown' if archive_started else 'none'})
     return archived, deferred
 
 
@@ -1122,7 +1201,8 @@ def run(*, apply: bool = False, budget_seconds: int = 480) -> dict:
         if payload['after_free_bytes']['owc'] is None:
             payload['skipped'].append({'reason': 'OWC drive disappeared during cleanup', 'error': True})
         payload['errors'] = [entry for entry in payload['skipped'] + payload.get('deferred', []) if entry.get('error')]
-        payload['status'] = 'partial' if payload['errors'] else 'ok'
+        payload['summary'] = cleanup_summary(payload)
+        payload['status'] = 'partial' if payload['errors'] or (apply and payload['summary']['deferred_targets']) else 'ok'
         payload['terminal'] = True
         payload['reclaimed_allocated_bytes'] = sum(r['allocated_bytes'] for r in payload['removed'])
         write_receipt(receipt, payload)

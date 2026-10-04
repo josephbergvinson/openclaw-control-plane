@@ -726,5 +726,220 @@ class OpenClawRetentionAlertContractTests(unittest.TestCase):
         self.assertIn('requested metric missing from alert output: reclaimable', problems)
 
 
+class HostBudgetContinuationTests(unittest.TestCase):
+    def setUp(self):
+        from scripts import openclaw_storage_prune as storage
+        self.storage = storage
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+
+    def payload(self, *, remaining=1, removed=1):
+        rows = [self.budget_row(str(self.root / f'pending-{i}'), 'host_candidates')
+                for i in range(remaining)]
+        report = {'schema': 'openclaw.storage_prune.v1', 'mode': 'apply', 'terminal': True,
+                  'status': 'partial' if rows else 'ok', 'skipped': [], 'deferred': rows,
+                  'errors': list(rows), 'removed': [{'path': str(self.root / f'removed-{i}'),
+                    'original_path': str(self.root / f'removed-{i}'), 'kind': 'fixture-backup',
+                    'device':1, 'inode':i+1, 'captured_inode_removed':True, 'allocated_bytes':4096} for i in range(removed)],
+                  'candidates':[{'path':str(self.root / f'removed-{i}'), 'kind':'fixture-backup',
+                      'device':1, 'inode':i+1} for i in range(removed)]}
+        report['summary'] = {'removed_items':removed, 'removed_cache_files':0,
+            'deferred_targets':remaining, 'deferred_stages':1 if remaining else 0,
+            'budget_deferred_targets':remaining, 'budget_deferred_stages':1 if remaining else 0,
+            'uncertain_effects':0, 'unclassified_deferred_stages':0, 'reclaimed_allocated_bytes':4096 * removed}
+        return report
+
+    @staticmethod
+    def budget_row(path, stage):
+        return {'path':path, 'stage':stage, 'cause':'execution_budget',
+            'reason':'execution budget exhausted', 'state':'not_started', 'effects':'none',
+            'deferred':True, 'not_started':True, 'error':True, 'target_count':1,
+            'partially_removed':False, 'removed_entries':0}
+
+    @staticmethod
+    def child(report, **kwargs):
+        return cron.ChildResult('host_storage', 1 if report['status'] != 'ok' else 0,
+                                json.dumps(report), **kwargs)
+
+    def run_host(self, children, *, times=None):
+        with mock.patch.object(cron, 'run_child', side_effect=children) as child, \
+             mock.patch.object(cron, 'host_continuation_controls', return_value=('same',)), \
+             mock.patch.object(cron.time, 'monotonic', side_effect=times) if times else mock.patch.object(cron.time, 'monotonic', return_value=100):
+            result = cron.run_host_stage(apply=True)
+        return result, child.call_args_list
+
+    def test_fresh_second_pass_preserves_first_receipt_and_final_completion(self):
+        first = self.child(self.payload())
+        second = self.child(self.payload(remaining=0))
+        result, calls = self.run_host([first, second])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, second.stdout)
+        self.assertEqual([item['stdout'] for item in result.attempts], [first.stdout, second.stdout])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].args, calls[1].args)
+        self.assertNotIn('--manifest', calls[1].args[2])
+
+    def test_second_budget_partial_remains_nonzero_without_third_pass(self):
+        result, calls = self.run_host([self.child(self.payload()), self.child(self.payload())])
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.continuation_stop, 'host_pass_limit')
+        self.assertEqual(len(calls), 2)
+
+    def test_remaining_wall_budget_clips_timeout_and_normal_work_budget(self):
+        result, calls = self.run_host([self.child(self.payload()), self.child(self.payload(remaining=0))],
+                                      times=[100, 100, 1040])
+        self.assertEqual(calls[0].kwargs['timeout_seconds'], 600)
+        self.assertEqual(calls[1].kwargs['timeout_seconds'], 140)
+        self.assertEqual(calls[1].args[2][-1], '140')
+        self.assertEqual(result.returncode, 0)
+
+    def test_timeout_malformed_unknown_partial_and_no_progress_stop(self):
+        for variant in ('timeout', 'malformed', 'unknown', 'partial', 'no_progress', 'false_count'):
+            with self.subTest(variant=variant):
+                report = self.payload(removed=0 if variant == 'no_progress' else 1)
+                if variant in ('unknown', 'partial'):
+                    report['deferred'][0]['effects'] = variant
+                if variant == 'false_count':
+                    report['summary']['deferred_targets'] = 0
+                child = self.child(report, timed_out=variant == 'timeout')
+                if variant == 'malformed':
+                    child = cron.ChildResult('host_storage', 1, '{bad')
+                result, calls = self.run_host([child])
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(result.returncode, 1)
+
+    def test_control_change_stops_before_second_discovery(self):
+        first = self.child(self.payload())
+        with mock.patch.object(cron, 'run_child', return_value=first) as child, \
+             mock.patch.object(cron, 'host_continuation_controls', side_effect=[('before',), ('after',)]):
+            result = cron.run_host_stage(apply=True)
+        self.assertEqual(child.call_count, 1)
+        self.assertEqual(result.continuation_stop, 'controls_changed_or_unavailable')
+
+    def test_completed_effect_must_be_independently_absent(self):
+        report = self.payload()
+        Path(report['removed'][0]['path']).mkdir()
+        self.assertFalse(cron.host_budget_continuable(self.child(report)))
+
+    def test_restored_zero_requires_matching_current_identity(self):
+        path = self.root / 'restored'
+        path.mkdir()
+        value = path.stat()
+        report = self.payload()
+        report['deferred'][0].update(path=str(path), state='restored', effects='restored_zero',
+            not_started=False, restored_identity={'device':value.st_dev, 'inode':value.st_ino})
+        self.assertTrue(cron.host_budget_continuable(self.child(report)))
+        report['deferred'][0]['restored_identity']['inode'] += 1
+        self.assertFalse(cron.host_budget_continuable(self.child(report)))
+
+    def test_predecessor_budget_does_not_mask_later_failed_effect(self):
+        first = self.child(self.payload())
+        final = self.child(self.payload(remaining=0))
+        result, _ = self.run_host([first, final])
+        Path(json.loads(first.stdout)['removed'][0]['path']).mkdir()
+        with mock.patch.object(cron, 'final_free_space'):
+            with self.assertRaisesRegex(ValueError, 'effects changed'):
+                cron.human_success_summary([result], apply=True)
+
+    def test_final_backlog_counts_26_host_and_two_simulator_targets(self):
+        report = self.payload(remaining=26)
+        report['deferred'].extend(self.budget_row(str(self.root / f'simulator-{i}'), 'simulators')
+                                  for i in range(2))
+        report['errors'] = list(report['deferred'])
+        report['summary'].update(deferred_targets=28, budget_deferred_targets=28,
+                                 deferred_stages=2, budget_deferred_stages=2)
+        self.assertEqual(report['summary']['deferred_targets'], 28)
+        self.assertEqual(report['summary']['deferred_stages'], 2)
+        checks = cron.validate_host_report(report, apply=True)
+        unfinished = next(item for item in checks if item['name'] == 'host_storage_unfinished_eligible_records')
+        self.assertEqual(unfinished['observed_value'], 28)
+        self.assertFalse(unfinished['satisfied'])
+
+    def test_run_steps_continues_only_host_stage_with_fresh_invocations(self):
+        hosts = iter([self.child(self.payload()), self.child(self.payload(remaining=0))])
+        calls = []
+        def child(name, script, *args, **kwargs):
+            calls.append((name, script, args, kwargs))
+            return next(hosts) if name == 'host_storage' else cron.ChildResult(name, 0, 'NO_REPLY')
+        with mock.patch.object(cron, 'run_child', side_effect=child), \
+             mock.patch.object(cron, 'retire_completed_activation', return_value=None), \
+             mock.patch.object(cron, 'host_continuation_controls', return_value=('same',)):
+            results = cron.run_steps(apply=True)
+        self.assertEqual([call[0] for call in calls],
+            ['host_storage', 'host_storage', 'runtime_releases', 'runtime_promotions', 'approval_a'])
+        self.assertEqual(results[0].returncode, 0)
+
+    def test_unbound_completed_path_cannot_authorize_continuation(self):
+        report = self.payload()
+        report['removed'][0]['original_path'] = str(self.root / 'outside-plan')
+        self.assertFalse(cron.host_budget_continuable(self.child(report)))
+
+    def test_broken_symlink_is_not_a_completed_removal(self):
+        report = self.payload()
+        Path(report['removed'][0]['path']).symlink_to(self.root / 'missing-target')
+        self.assertFalse(cron.host_budget_continuable(self.child(report)))
+
+    def test_unreadable_completed_path_is_not_absence(self):
+        report = self.payload()
+        with mock.patch.object(cron.Path, 'lstat', side_effect=PermissionError('unreadable')):
+            self.assertFalse(cron.host_budget_continuable(self.child(report)))
+
+    def test_unavailable_controls_permit_first_guarded_pass_but_prevent_continuation(self):
+        from scripts.operator_contract import ContractError
+        for phase in ('initial', 'readback'):
+            for error_type in (ValueError, ContractError):
+                with self.subTest(phase=phase, error_type=error_type.__name__):
+                    first = self.child(self.payload())
+                    error = error_type('fixture control is unavailable')
+                    controls = [error] if phase == 'initial' else [('same',), error]
+                    with mock.patch.object(cron, 'run_child', return_value=first) as child, \
+                         mock.patch.object(cron, 'host_continuation_controls', side_effect=controls), \
+                         mock.patch.object(cron.time, 'monotonic', return_value=100):
+                        result = cron.run_host_stage(apply=True)
+                    self.assertEqual(child.call_count, 1)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout, first.stdout)
+                    self.assertEqual(len(result.attempts), 1)
+                    self.assertEqual(result.continuation_stop, 'controls_changed_or_unavailable')
+
+    def test_portable_controls_bind_separate_activation_result_fence_and_config_source(self):
+        current = self.root / 'selectors/current'
+        current.parent.mkdir()
+        current.symlink_to(self.root / 'releases/selected')
+        result = self.root / 'activation-controls/activation-result.json'
+        result.parent.mkdir()
+        result.write_text('{}')
+        consumed = result.with_name('activation-start-consumed.json')
+        consumed.write_text('{}')
+        config = self.root / 'configuration/operator.json'
+        config.parent.mkdir()
+        guard = self.root / 'guards/volume.json'
+        guard.parent.mkdir()
+        guard.write_text('{}')
+        script = self.root / 'source/storage-prune.py'
+        script.parent.mkdir()
+        script.write_text('# fixture producer')
+        config.write_text(json.dumps({'paths': {
+            'runtime_current_link': str(current), 'activation_result': str(result),
+            'volume_guard_contract': str(guard)}}))
+        from scripts.operator_contract import load_operator_contract
+        operator = load_operator_contract(config)
+        with mock.patch.object(cron, 'OPERATOR', operator), \
+             mock.patch.object(cron, 'HOST_STORAGE_SCRIPT', script), \
+             mock.patch.dict(os.environ, {'OPENCLAW_OPERATOR_CONFIG': str(config)}):
+            before = cron.host_continuation_controls()
+            paths = {row[0] for row in before}
+            self.assertTrue({str(current), str(result), str(consumed), str(config),
+                             str(guard), str(script)}.issubset(paths))
+            self.assertNotIn(str(current.parent / 'activation-result.json'), paths)
+            self.assertNotIn(str(current.parent / 'activation-start-consumed.json'), paths)
+            result.write_text('{"changed":true}')
+            after_result = cron.host_continuation_controls()
+            self.assertNotEqual(before, after_result)
+            config.write_text(config.read_text() + '\n')
+            self.assertNotEqual(after_result, cron.host_continuation_controls())
+
+
 if __name__ == '__main__':
     unittest.main()
