@@ -14,7 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current source reference is `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`,
+The current source reference is `04adc9cec81f56cfe6fc8b418178b719099f1a1c`,
+source tree `18f6cc162cab880dbe2f07ccb2220f7937fa5251`. It includes the
+foreground shortcut repair and the qualified browser registration collision fix.
+Both Mac companions run signed build 601; Mini shortcut replacement and saved-alias
+Apple Passwords unlock passed. The Gateway now runs this corrected source with
+health and protected settings verified. Normal native-browser registration passed;
+browser login, Bitwarden reuse and genuine spoken-audio/minutes remain pending.
+The [runtime qualification](runtime/README.md#october-3-foreground-shortcuts-and-browser-bootstrap-migration)
+keeps those source, installation and ordinary-use scopes separate.
+
+The dated build 600 source reference is `dfcb9c9410f4bde9a6bab69437050aa76d4d6b4e`,
 source tree `6c7f113dda8684378c7a7810add963178a6674f2`. Its two auth-bootstrap
 changes let the local Mac credential reader validate core Gateway settings without
 being blocked by unrelated newer channel metadata. The existing credential,
@@ -26,9 +36,10 @@ normal Apple Passwords landing; vault-item retrieval and Bitwarden reuse are not
 claimed. An October 3, 18:18 UTC readback accepted MacBook build 600 in its
 existing remote mode and one native metadata command; credential acceptance remains
 separate. The [runtime qualification](runtime/README.md#october-3-mac-companion-authentication-bootstrap)
-records the scoped source and host evidence. The Gateway remains on the source below.
+records the scoped source and host evidence. That dated acceptance retained the Gateway source below.
 
-The installed October 3 Gateway successor is `219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`,
+At the dated build 600 checkpoint, the Gateway successor was
+`219dead0bc0ebbe8ab2c255677c8d65d1a6b8b59`,
 source tree `b76fabfb1a1e5abffa3fa2fa61394c5f2bdcec9c`. It changes 45 paths
 since the earlier published reference `3e7d6ada7440d2094891e1b3964241e64f585c09`.
 
