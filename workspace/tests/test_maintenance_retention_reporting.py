@@ -17,7 +17,9 @@ class MaintenanceReportingTests(unittest.TestCase):
 
     def emit(self, children, predicates=(), apply=True):
         with tempfile.TemporaryDirectory() as raw:
-            with mock.patch.object(cron, 'WORKSPACE', Path(raw)):
+            with mock.patch.object(cron, 'WORKSPACE', Path(raw)), \
+                 mock.patch.object(cron, 'final_free_space', return_value={
+                     'internal': 40 * 1024**3, 'owc': 1500 * 1024**3}):
                 out = io.StringIO()
                 with redirect_stdout(out):
                     code = cron.emit_human_result(children, list(predicates), apply=apply)
@@ -31,7 +33,8 @@ class MaintenanceReportingTests(unittest.TestCase):
         children = [cron.ChildResult('host_storage', 0, json.dumps(self.host_payload()))]
         code, output, receipt = self.emit(children)
         self.assertEqual(code, 0)
-        self.assertEqual(output, 'Daily cleanup completed. Free space: Mac 40.0 GiB; OWC 1500 GiB.\n')
+        self.assertEqual(output, 'Daily cleanup completed: no eligible items needed removal. '
+                                'Mac: 40.0 GiB free; OWC: 1,500 GiB free.\n')
         self.assertEqual(receipt['status'], 'ok')
 
     def test_partial_success_cannot_hide_failed_child(self):
@@ -40,7 +43,7 @@ class MaintenanceReportingTests(unittest.TestCase):
             cron.ChildResult('runtime_releases', 124, stderr='private diagnostic', timed_out=True),
         ])
         self.assertEqual(code, 1)
-        self.assertIn('runtime cleanup did not finish successfully', output)
+        self.assertIn('Daily cleanup incomplete: runtime cleanup did not finish.', output)
         self.assertNotIn('private diagnostic', output)
         self.assertEqual(receipt['children'][1]['stderr'], 'private diagnostic')
 
@@ -81,8 +84,78 @@ class MaintenanceReportingTests(unittest.TestCase):
             self.assertNotIn('private child output', output)
             self.assertIn('private child output', receipt['children'][0]['stdout'])
 
+    def test_budget_partial_summary_reports_verified_removals_and_28_pending_targets(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            payload = self.host_payload()
+            payload['removed'] = [{'path': str(root / f'archive-{i}.tar'), 'original_path':str(root / f'archive-{i}.tar'),
+                                   'kind': 'unused-owc-backup-file',
+                                   'allocated_bytes': 1024} for i in range(17)]
+            def pending(path, stage):
+                return {'path':str(path), 'stage':stage, 'cause':'execution_budget',
+                        'state':'not_started', 'effects':'none', 'deferred':True,
+                        'not_started':True, 'error':True, 'target_count':1, 'partially_removed':False}
+            payload['deferred'] = [pending(root / f'pending-{i}', 'host_candidates') for i in range(26)]
+            payload['deferred'].extend(pending(root / f'simulator-{i}', 'simulators') for i in range(2))
+            payload['errors'] = list(payload['deferred'])
+            payload['summary'] = {'removed_items':17, 'removed_cache_files':0,
+                'deferred_targets':28, 'deferred_stages':2, 'budget_deferred_targets':28,
+                'budget_deferred_stages':2, 'uncertain_effects':0, 'unclassified_deferred_stages':0, 'reclaimed_allocated_bytes':17 * 1024}
+            payload['status'] = 'partial'
+            code, output, receipt = self.emit([cron.ChildResult('host_storage', 1, json.dumps(payload))])
+        self.assertEqual(code, 1)
+        self.assertIn('removed 17 backup archives', output)
+        self.assertIn('28 targets remain deferred across 2 stages', output)
+        self.assertIn('Verified host removals reclaimed 17.0 KiB', output)
+        self.assertIn('Mac: 40.0 GiB free; OWC: 1,500 GiB free.', output)
+        self.assertNotIn('Inspect', output)
+        self.assertNotIn(str(root), output)
+        self.assertEqual(receipt['outcome_summary'], output.strip())
+
+    def test_partial_summary_never_counts_unverified_or_partial_effect(self):
+        with tempfile.TemporaryDirectory() as raw:
+            present = Path(raw).resolve() / 'still-present'
+            present.mkdir()
+            payload = self.host_payload()
+            payload.update(status='partial', errors=['custody failed'], removed=[{'path':str(present)}])
+            code, output, _ = self.emit([cron.ChildResult('host_storage', 1, json.dumps(payload))])
+        self.assertEqual(code, 1)
+        self.assertNotIn('removed 1', output)
+
+    def test_malformed_host_missing_allocated_bytes_becomes_typed_partial(self):
+        with tempfile.TemporaryDirectory() as raw:
+            payload = self.host_payload()
+            payload.update(removed=[{'path':str(Path(raw).resolve() / 'missing')}], summary={})
+            child = cron.ChildResult('host_storage', 0, json.dumps(payload))
+            checks = cron.load_retention_effects([child], apply=True)
+            self.assertFalse(all(item['satisfied'] for item in checks))
+            self.assertTrue(any(item['name'] == 'host_storage_report' for item in checks))
+            code, output, receipt = self.emit([child], checks)
+        self.assertEqual(code, 1)
+        self.assertIn('incomplete', output)
+        self.assertEqual(receipt['status'], 'failed')
+
+    def test_partial_host_summary_includes_independently_verified_runtime_progress(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            runtime = {'schema':cron.REPORT_SCHEMAS['runtime_releases'], 'mode':'apply', 'terminal':True,
+                'errors':[], 'summary':{'error_count':0, 'removed_count':7},
+                'removed':[f'runtime-{i}' for i in range(7)],
+                'receipts':[{'state':'removed', 'path':str(root / f'runtime-{i}'), 'after_exists':False} for i in range(7)]}
+            path = root / 'runtime-report.json'
+            path.write_text(json.dumps(runtime))
+            host = self.host_payload()
+            host.update(status='partial', errors=['execution budget exhausted'])
+            code, output, _ = self.emit([cron.ChildResult('host_storage', 1, json.dumps(host)),
+                cron.ChildResult('runtime_releases', 0, 'STATUS | report: ' + str(path))])
+        self.assertEqual(code, 1)
+        self.assertIn('removed 7 runtimes', output)
+        self.assertNotIn(str(path), output)
+
     def test_receipt_write_failure_has_honest_human_outcome(self):
-        with mock.patch.object(cron.os, 'open', side_effect=OSError('disk full')):
+        with mock.patch.object(cron.os, 'open', side_effect=OSError('disk full')), \
+             mock.patch.object(cron, 'final_free_space', return_value={
+                 'internal': 40 * 1024**3, 'owc': 1500 * 1024**3}):
             with mock.patch.object(cron.Path, 'mkdir'):
                 output = io.StringIO()
                 with redirect_stdout(output):
