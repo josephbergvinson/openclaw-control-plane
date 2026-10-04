@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import stat
 import subprocess
+import sys
 
 import pytest
 from scripts import stage_runtime_release as staging
@@ -216,3 +218,149 @@ def test_unreadable_subtree_is_never_silently_omitted(built_source, tmp_path: Pa
     with pytest.raises(staging.StagingError, match='could not be enumerated'):
         run_stage(source, commit, tmp_path)
     assert not (tmp_path / 'candidate release').exists()
+
+
+def test_swift_cache_exclusion_preserves_required_runtime_artifacts(built_source, tmp_path: Path) -> None:
+    source, commit = built_source
+    (source / '.git/info/exclude').write_text('.build/\n')
+    for name in ('apps/macos/.build/arm64/compiler-cache',
+                 'apps/macos-mlx-tts/.build/arm64/metal-cache'):
+        target = source / name
+        target.parent.mkdir(parents=True)
+        target.write_text('regenerable Swift build cache')
+    unrelated = source / 'packages/ai/dist/.build/runtime-asset'
+    unrelated.parent.mkdir()
+    unrelated.write_text('this same-name runtime asset is not a Swift cache')
+    result = run_stage(source, commit, tmp_path)
+    candidate = Path(result['candidate'])
+    assert not (candidate / 'apps/macos/.build').exists()
+    assert not (candidate / 'apps/macos-mlx-tts/.build').exists()
+    assert (candidate / 'packages/ai/dist/.build/runtime-asset').read_bytes() == unrelated.read_bytes()
+    for name in staging.REQUIRED_FILES:
+        assert (candidate / name).is_file()
+    for name in staging.REQUIRED_DIRECTORIES:
+        assert (candidate / name).is_dir()
+
+
+def test_tracked_swift_cache_member_cannot_be_silently_excluded(built_source, tmp_path: Path) -> None:
+    source, _ = built_source
+    tracked = source / 'apps/macos/.build/tracked.swift'
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text('tracked source is not a disposable cache')
+    git(source, 'add', 'apps/macos/.build/tracked.swift')
+    git(source, 'commit', '-m', 'fixture tracked Swift source')
+    commit = git(source, 'rev-parse', 'HEAD')
+    (source / 'dist/build-info.json').write_text(json.dumps({'commit': commit}))
+    with pytest.raises(staging.StagingError, match='tracked.*build|build.*tracked'):
+        run_stage(source, commit, tmp_path)
+    assert not (tmp_path / 'candidate release').exists()
+
+
+def fixed_import_node(tmp_path: Path, *, outcome: str = 'pass', version: str = 'v24.16.0') -> Path:
+    """Fixture executable observes the fixed Node argv; it never imports live SDKs."""
+    node = tmp_path / 'fixture pinned node'
+    node.write_text(f'''#!/bin/sh
+exec {shlex.quote(sys.executable)} -B - "$@" <<'FIXTURE_PINNED_NODE'
+import json, pathlib, stat, sys
+if sys.argv[1:] == ['--version']:
+    print({version!r})
+    raise SystemExit(0)
+assert sys.argv[1:] == ['--input-type=module', '--eval',
+                       'await import("@openclaw/ai/internal/openai-responses-payload-policy")']
+candidate = pathlib.Path.cwd()
+assert stat.S_IMODE(candidate.stat().st_mode) & 0o200
+assert stat.S_IMODE((candidate / 'dist/build-info.json').stat().st_mode) & 0o200
+pathlib.Path({str(tmp_path / 'import observation.json')!r}).write_text(json.dumps(
+    {{'candidate':str(candidate),'writableBeforeImport':True}}))
+if {outcome!r} == 'fail':
+    print('fixture SDK import failure', file=sys.stderr)
+    raise SystemExit(7)
+if {outcome!r} == 'mutate':
+    (candidate / 'dist/build-info.json').write_text('changed during SDK import')
+added = {{'swift-cache':'apps/macos/.build/import-side-effect',
+          'generic-cache':'.cache/import-side-effect',
+          'tsbuildinfo':'import-side-effect.tsbuildinfo'}}.get({outcome!r})
+if added:
+    side_effect = candidate / added
+    side_effect.parent.mkdir(parents=True, exist_ok=True)
+    side_effect.write_text('unexpected candidate-only import side effect')
+print('fixture offline SDK import passed')
+FIXTURE_PINNED_NODE
+''')
+    node.chmod(0o700)
+    return node
+
+
+def test_preharden_fixed_ai_import_runs_before_readonly_and_is_recorded(built_source, tmp_path: Path) -> None:
+    source, commit = built_source
+    node = fixed_import_node(tmp_path)
+    result = staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
+                           verify_ai_import_node=node)
+    observed = json.loads((tmp_path / 'import observation.json').read_text())
+    assert observed['writableBeforeImport'] is True
+    assert observed['candidate'] == result['candidate']
+    assert result['offlineAiImport']['status'] == 'passed'
+    assert result['offlineAiImport']['nodeVersion'] == 'v24.16.0'
+    assert result['offlineAiImport']['exitCode'] == 0
+    assert result['offlineAiImport']['beforeReadOnly'] is True
+    assert result['candidateExecuted'] is True
+    assert not Path(result['candidate']).stat().st_mode & 0o222
+    assert json.loads((tmp_path / 'staging.json').read_text()) == result
+
+
+@pytest.mark.parametrize('outcome', ['fail', 'mutate'])
+def test_preharden_import_failure_or_mutation_cannot_publish_readonly_success(
+    built_source, tmp_path: Path, outcome: str,
+) -> None:
+    source, commit = built_source
+    node = fixed_import_node(tmp_path, outcome=outcome)
+    with pytest.raises(staging.StagingError, match='SDK import|candidate changed'):
+        staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
+                      verify_ai_import_node=node)
+    assert (tmp_path / 'candidate release').stat().st_mode & 0o200
+    assert not (tmp_path / 'staging.json').exists()
+
+
+@pytest.mark.parametrize('outcome', ['swift-cache', 'generic-cache', 'tsbuildinfo'])
+def test_preharden_import_cannot_hide_candidate_members_in_source_exclusions(
+    built_source, tmp_path: Path, outcome: str,
+) -> None:
+    source, commit = built_source
+    # Include the normal macOS parent so creation of a hidden .build member
+    # cannot be detected merely as creation of a new visible parent directory.
+    (source / 'apps/macos').mkdir(parents=True)
+    node = fixed_import_node(tmp_path, outcome=outcome)
+    with pytest.raises(staging.StagingError, match='candidate changed'):
+        staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
+                      verify_ai_import_node=node)
+    assert (tmp_path / 'candidate release').stat().st_mode & 0o200
+    assert not (tmp_path / 'staging.json').exists()
+
+
+def test_preharden_import_rejects_a_different_node_version_before_copy(built_source, tmp_path: Path) -> None:
+    source, commit = built_source
+    node = fixed_import_node(tmp_path, version='v24.15.0')
+    with pytest.raises(staging.StagingError, match='Node.*24.16.0'):
+        staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
+                      verify_ai_import_node=node)
+    assert not (tmp_path / 'candidate release').exists()
+    assert not (tmp_path / 'staging.json').exists()
+
+
+def test_preharden_import_timeout_cannot_harden_or_publish(built_source, tmp_path: Path, monkeypatch) -> None:
+    source, commit = built_source
+    node = fixed_import_node(tmp_path)
+    real_run = staging.subprocess.run
+
+    def timed_import(argv, **kwargs):
+        if argv == [str(node), '--input-type=module', '--eval', staging.AI_IMPORT_EXPRESSION]:
+            assert kwargs['timeout'] == 30
+            raise subprocess.TimeoutExpired(argv, 30)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(staging.subprocess, 'run', timed_import)
+    with pytest.raises(staging.StagingError, match='SDK import.*30-second'):
+        staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
+                      verify_ai_import_node=node)
+    assert (tmp_path / 'candidate release').stat().st_mode & 0o200
+    assert not (tmp_path / 'staging.json').exists()
