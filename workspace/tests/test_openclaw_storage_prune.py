@@ -1,5 +1,7 @@
 from __future__ import annotations
+import errno
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -312,6 +314,93 @@ class StoragePruneTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'not mounted'):
                 prune.run(apply=True)
             discover.assert_not_called()
+
+    def test_budget_deferral_certifies_every_unstarted_generated_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            candidates = []
+            for index in range(26):
+                path = root / f'output-{index}'
+                path.mkdir()
+                candidates.append(self.candidate(path))
+            removed, deferred = prune.apply_candidates(candidates, deadline=0)
+            self.assertEqual(removed, [])
+            self.assertEqual(len(deferred), 26)
+            self.assertEqual({row['path'] for row in deferred}, {candidate.path for candidate in candidates})
+            self.assertTrue(all(row['state'] == 'not_started' and row['effects'] == 'none'
+                                and row['target_count'] == 1 for row in deferred))
+            self.assertTrue(all(Path(candidate.path).exists() for candidate in candidates))
+
+    def test_budget_after_capture_without_deletion_has_positive_restoration_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp).resolve() / 'cache'
+            path.mkdir()
+            (path / 'keep').write_text('intact')
+            candidate = self.candidate(path)
+            with mock.patch.object(prune, 'activity_reason', return_value=None), \
+                 mock.patch.object(prune, 'process_arguments', return_value=''), \
+                 mock.patch.object(prune, 'remove_captured_tree', side_effect=TimeoutError('execution budget exhausted')):
+                removed, deferred = prune.apply_candidates([candidate])
+            self.assertEqual(removed, [])
+            self.assertEqual(deferred[0]['state'], 'restored')
+            self.assertEqual(deferred[0]['effects'], 'restored_zero')
+            self.assertEqual(deferred[0]['restored_identity'], {'device':candidate.device, 'inode':candidate.inode})
+            self.assertEqual((path / 'keep').read_text(), 'intact')
+            self.assertFalse(list(path.parent.glob(prune.QUARANTINE_PREFIX + '*')))
+
+    def test_preinventory_simulator_deadline_is_readonly_unknown_count_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            (home / 'Library/Developer/CoreSimulator/Devices').mkdir(parents=True)
+            with mock.patch.object(prune, 'USER_HOME', home), \
+                 mock.patch.object(prune, 'OWC', home / 'unmounted'), \
+                 mock.patch.object(prune.subprocess, 'run', side_effect=AssertionError('no native inventory')):
+                plans, errors = prune.disposable_simulators(0)
+        self.assertEqual(plans, [])
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]['cause'], 'execution_budget')
+        self.assertEqual(errors[0]['stage'], 'simulator_discovery')
+        self.assertEqual(errors[0]['target_count'], 0)
+        self.assertEqual(errors[0]['effects'], 'none')
+
+    def test_nonbudget_timeouts_after_capture_are_blocking_not_deferrals(self):
+        errors = (TimeoutError(errno.ETIMEDOUT, 'guarded read timed out'),
+                  TimeoutError(errno.ETIMEDOUT, 'execution budget exhausted'),
+                  TimeoutError('provider read timed out'),
+                  subprocess.TimeoutExpired('fixture inventory', 1))
+        for error in errors:
+            with self.subTest(error=repr(error)), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp).resolve() / 'cache'
+                path.mkdir()
+                (path / 'keep').write_text('intact')
+                candidate = self.candidate(path)
+                with mock.patch.object(prune, 'activity_reason', return_value=None), \
+                     mock.patch.object(prune, 'process_arguments', return_value=''), \
+                     mock.patch.object(prune, 'remove_captured_tree', side_effect=error):
+                    removed, deferred = prune.apply_candidates([candidate])
+                self.assertEqual(removed, [])
+                self.assertEqual(len(deferred), 1)
+                self.assertTrue(deferred[0]['error'])
+                self.assertNotEqual(deferred[0].get('cause'), 'execution_budget')
+                self.assertNotIn('state', deferred[0])
+                self.assertEqual((path / 'keep').read_text(), 'intact')
+                self.assertFalse(list(path.parent.glob(prune.QUARANTINE_PREFIX + '*')))
+
+    def test_nonbudget_simulator_inventory_timeouts_remain_errors(self):
+        for error in (TimeoutError(errno.ETIMEDOUT, 'native inventory timed out'),
+                      subprocess.TimeoutExpired('fixture inventory', 1)):
+            with self.subTest(error=repr(error)), tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp).resolve()
+                (home / 'Library/Developer/CoreSimulator/Devices').mkdir(parents=True)
+                with mock.patch.object(prune, 'USER_HOME', home), \
+                     mock.patch.object(prune, 'OWC', home / 'unmounted'), \
+                     mock.patch.object(prune.subprocess, 'run', side_effect=error):
+                    plans, errors = prune.disposable_simulators(time.monotonic() + 60)
+                self.assertEqual(plans, [])
+                self.assertEqual(len(errors), 1)
+                self.assertTrue(errors[0]['error'])
+                self.assertNotEqual(errors[0].get('cause'), 'execution_budget')
+                self.assertIn('simulator inventory failed', errors[0]['reason'])
 
     def test_budget_defers_remaining_work(self):
         with tempfile.TemporaryDirectory() as tmp:
