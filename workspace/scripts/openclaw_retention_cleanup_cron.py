@@ -19,6 +19,8 @@ import json
 import os
 import re
 import subprocess
+import stat
+import time
 import sys
 import uuid
 from dataclasses import dataclass
@@ -67,6 +69,9 @@ RETENTION_ALERT_CONTRACT = {
     ),
 }
 INLINE_CHILD_FRAGMENT_LIMIT = 512
+HOST_STAGE_WALL_SECONDS = 1080
+HOST_MAX_PASSES = 2
+HOST_PASS_BUDGET_SECONDS = 480
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,8 @@ class ChildResult:
     stdout: str = ''
     stderr: str = ''
     timed_out: bool = False
+    attempts: tuple[dict, ...] = ()
+    continuation_stop: str | None = None
 
 
 def squash(text: str) -> str:
@@ -280,6 +287,147 @@ def retire_completed_activation(*, apply: bool) -> str | None:
     return str(archive / activation.RETIREMENT_RECEIPT_NAME)
 
 
+def host_continuation_controls() -> tuple:
+    """Pin bounded source/selector controls; each pass still acquires native locks."""
+    current = OPERATOR.require_path('paths.runtime_current_link')
+    result = OPERATOR.require_path('paths.activation_result')
+    operator_source = Path(os.environ.get('OPENCLAW_OPERATOR_CONFIG',
+        str(Path(__file__).resolve().parents[1] / 'operator.json')))
+    paths = [HOST_STORAGE_SCRIPT, Path(__file__).absolute(), operator_source,
+             OPERATOR.require_path('paths.volume_guard_contract'),
+             HOST_STORAGE_SCRIPT.resolve().parents[1] / 'registry/external_volume_guard.json', current,
+             result, result.with_name('activation-start-consumed.json')]
+    controls = []
+    for path in paths:
+        try:
+            value = path.lstat()
+        except FileNotFoundError:
+            controls.append((str(path), None))
+            continue
+        controls.append((str(path), value.st_dev, value.st_ino, value.st_mode,
+                         value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+                         os.readlink(path) if stat.S_ISLNK(value.st_mode) else None))
+    return tuple(controls)
+
+
+def host_effect_plan_bindings(report: dict) -> bool:
+    """Do not admit a successor from effects outside the producer's guarded plans."""
+    plans = {}
+    for field in ('candidates',):
+        rows = report.get(field)
+        if not isinstance(rows, list):
+            return False
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get('path'), str) or row['path'] in plans:
+                return False
+            plans[row['path']] = row
+    for row in report.get('removed', []):
+        if not isinstance(row, dict):
+            return False
+        original = row.get('original_path')
+        planned = plans.get(original)
+        if not planned or row.get('kind') != planned.get('kind'):
+            return False
+        expected = (planned.get('device'), planned.get('inode'))
+        if (any(type(value) is not int for value in expected)
+                or (row.get('device'), row.get('inode')) != expected
+                or row.get('captured_inode_removed') is not True):
+            return False
+    for field, plan_field in (('removed_simulators', 'simulator_plan'), ('archived_logs', 'log_rotation_plan')):
+        plans_for_stage = {row['path']: row for row in report.get(plan_field, [])}
+        for row in report.get(field, []):
+            planned = plans_for_stage.get(row['path'])
+            if not planned:
+                return False
+            if field == 'removed_simulators' and any(row.get(key) != planned.get(key) for key in ('device', 'inode', 'id')):
+                return False
+    return True
+
+
+def host_budget_continuable(child: ChildResult) -> bool:
+    if child.returncode != 1 or child.timed_out:
+        return False
+    try:
+        report = host_report(child)
+        if (report.get('schema') != 'openclaw.storage_prune.v1' or report.get('mode') != 'apply'
+                or report.get('terminal') is not True or report.get('status') != 'partial'):
+            return False
+        errors = report.get('errors')
+        rows = report.get('skipped', []) + report.get('deferred', [])
+        if not isinstance(errors, list) or not errors or errors != [row for row in rows if row.get('error')]:
+            return False
+        unfinished = [row for row in rows if row.get('error') or row.get('deferred') or row.get('not_started')]
+        for row in unfinished:
+            if (row.get('cause') != 'execution_budget' or row.get('deferred') is not True
+                    or row.get('partially_removed') is not False
+                    or row.get('effects') not in ('none', 'restored_zero')
+                    or row.get('state') not in ('not_started', 'restored')
+                    or type(row.get('target_count')) is not int or row['target_count'] not in (0, 1)
+                    or not isinstance(row.get('stage'), str)
+                    or (row['target_count'] == 1 and (not isinstance(row.get('path'), str) or not Path(row['path']).is_absolute()))
+                    or row.get('removed_entries', row.get('removed_files', 0)) != 0):
+                return False
+            if row['state'] == 'restored':
+                value = Path(row['path']).lstat()
+                if row.get('effects') != 'restored_zero' or row.get('restored_identity') != {'device':value.st_dev, 'inode':value.st_ino}:
+                    return False
+            elif row.get('effects') != 'none' or row.get('not_started') is not True:
+                return False
+        try:
+            from . import openclaw_storage_prune as storage
+        except ImportError:
+            import openclaw_storage_prune as storage
+        if (not isinstance(report.get('summary'), dict)
+                or any(type(value) is not int or value < 0 for value in report['summary'].values())
+                or report['summary'] != storage.cleanup_summary(report)):
+            return False
+        if not host_effect_plan_bindings(report) or any(not predicate['satisfied'] for predicate in validate_host_effects(report)):
+            return False
+        # A new pass is useful only after actual, independently verified progress.
+        counts, logs, _ = verified_cleanup_counts([child])
+        return sum(count for _, count in counts) + logs > 0
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def run_host_stage(*, apply: bool) -> ChildResult:
+    deadline = time.monotonic() + HOST_STAGE_WALL_SECONDS
+    try:
+        controls = host_continuation_controls()
+    except (OSError, ValueError):
+        controls = None
+    attempts = []
+    stop = None
+    child = ChildResult('host_storage', 1, stderr='host stage wall budget exhausted before admission')
+    for index in range(HOST_MAX_PASSES):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            stop = 'host_stage_wall_budget'
+            break
+        budget = min(HOST_PASS_BUDGET_SECONDS, max(1, int(remaining)))
+        child = run_child('host_storage', HOST_STORAGE_SCRIPT,
+                          [*(['--apply'] if apply else []), '--json', '--budget-seconds', str(budget)],
+                          timeout_seconds=min(600, remaining))
+        attempts.append(vars(child))
+        if not apply or not host_budget_continuable(child):
+            stop = 'terminal' if child.returncode == 0 and not child.timed_out else 'not_safe_to_continue'
+            break
+        if index + 1 == HOST_MAX_PASSES:
+            stop = 'host_pass_limit'
+            break
+        try:
+            if controls is None or host_continuation_controls() != controls:
+                stop = 'controls_changed_or_unavailable'
+                break
+        except (OSError, ValueError):
+            stop = 'controls_changed_or_unavailable'
+            break
+    # Each pass is a fresh subprocess with ordinary discovery, admission and
+    # custody. No earlier manifest or deletion instruction is ever replayed.
+    return ChildResult(child.name, child.returncode, child.stdout, child.stderr,
+                       child.timed_out, tuple(attempts), stop)
+
+
 def run_steps(*, apply: bool = False) -> list[ChildResult]:
     try:
         activation_receipt = retire_completed_activation(apply=apply)
@@ -288,11 +436,7 @@ def run_steps(*, apply: bool = False) -> list[ChildResult]:
                 for name in ('host_storage', 'runtime_releases', 'runtime_promotions', 'approval_a')]
     child_args = ['--apply'] if apply else []
     results = [
-        run_child(
-            'host_storage', HOST_STORAGE_SCRIPT,
-            [*child_args, '--json', '--budget-seconds', '480'],
-            timeout_seconds=600,
-        ),
+        run_host_stage(apply=apply),
         run_child(
             'runtime_releases',
             RUNTIME_RELEASE_RETENTION_SCRIPT,
@@ -356,12 +500,68 @@ def validate_host_report(report: dict, *, apply: bool) -> list[dict]:
         effect.readback_matches('host_storage_status', expected='ok', actual=report.get('status')),
         effect.readback_matches('host_storage_errors', expected=[], actual=report.get('errors')),
     ]
+    if apply:
+        unfinished = [row for row in report.get('skipped', []) + report.get('deferred', []) if isinstance(row, dict)
+                      and (row.get('not_started') is True or row.get('deferred') is True)]
+        results.append(effect.readback_matches(
+            'host_storage_unfinished_eligible_records', expected=0, actual=len(unfinished),
+        ))
+    summary = report.get('summary')
+    if summary is not None:
+        try:
+            from . import openclaw_storage_prune as storage
+        except ImportError:
+            import openclaw_storage_prune as storage
+        results.append(effect.readback_matches('host_storage_count_types', expected=True,
+            actual=isinstance(summary, dict) and all(type(value) is int and value >= 0 for value in summary.values())))
+        results.append(effect.readback_matches('host_storage_counts', expected=storage.cleanup_summary(report), actual=summary))
+    results.extend(validate_host_effects(report))
+    return results
+
+
+def host_path_present(value: str) -> bool:
+    # lexists returns False for some unreadable paths. Only ENOENT establishes
+    # absence here; a broken symlink is present and other errors stay unknown.
+    try:
+        Path(value).lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def validate_host_effects(report: dict) -> list[dict]:
+    """Read completed effects independently, without treating backlog as completion."""
+    results = []
+    seen = set()
     for index, row in enumerate(report.get('removed', [])):
         value = row.get('path') if isinstance(row, dict) else row
         if not isinstance(value, str) or not Path(value).is_absolute():
             results.append(effect.unreadable(f'host_storage_removed:{index}', 'missing absolute removed path'))
             continue
-        results.append(effect.readback_matches(f'host_storage_removed:{index}', expected=False, actual=os.path.lexists(value)))
+        if value in seen:
+            results.append(effect.unreadable(f'host_storage_removed:{index}', 'duplicate removed target'))
+            continue
+        seen.add(value)
+        results.append(effect.readback_matches(f'host_storage_removed:{index}', expected=False, actual=host_path_present(value)))
+    for index, row in enumerate(report.get('removed_simulators', [])):
+        value = row.get('path') if isinstance(row, dict) else None
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            results.append(effect.unreadable(f'host_simulator_removed:{index}', 'missing absolute removed path'))
+            continue
+        results.append(effect.readback_matches(f'host_simulator_removed:{index}',
+            expected=False, actual=host_path_present(value)))
+    for index, row in enumerate(report.get('archived_logs', [])):
+        try:
+            path = Path(row['archive'])
+            current = path.lstat()
+            valid = (path.is_absolute() and stat.S_ISREG(current.st_mode)
+                     and type(row['bytes']) is int and current.st_size == row['bytes']
+                     and row.get('captured_inode_removed') is True
+                     and isinstance(row.get('sha256'), str)
+                     and re.fullmatch(r'[0-9a-f]{64}', row['sha256']) is not None)
+            results.append(effect.readback_matches(f'host_log_archived:{index}', expected=True, actual=valid))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            results.append(effect.unreadable(f'host_log_archived:{index}', str(exc)))
     return results
 
 
@@ -469,7 +669,9 @@ def load_retention_effects(results: list[ChildResult], *, apply: bool) -> list[d
         if child.name == 'host_storage':
             try:
                 predicates.extend(validate_host_report(host_report(child), apply=apply))
-            except (ValueError, TypeError) as exc:
+                for attempt in child.attempts[:-1]:
+                    predicates.extend(validate_host_effects(json.loads(attempt['stdout'])))
+            except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
                 predicates.append(effect.unreadable('host_storage_report', str(exc)))
             continue
         report_value = status_fields(child.stdout).get('report')
@@ -620,10 +822,160 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def final_free_space() -> dict[str, int]:
+    try:
+        from . import openclaw_storage_prune as storage
+    except ImportError:
+        import openclaw_storage_prune as storage
+    storage.require_owc_identity()
+    space = storage.free_space()
+    storage.require_owc_identity()
+    if any(type(space.get(key)) is not int or space[key] < 0 for key in ('internal', 'owc')):
+        raise ValueError('final both-drive free space is unavailable')
+    return space
+
+
+def verified_cleanup_counts(results: list[ChildResult]) -> tuple[list[tuple[str, int]], int, int]:
+    """Count only independently confirmed effects, including earlier partial passes."""
+    counts = {'backup archive': 0, 'other item': 0, 'disposable simulator': 0,
+              'runtime': 0, 'promotion folder': 0, 'retired execution folder': 0}
+    rotated_logs = reclaimed_bytes = 0
+    seen = set()
+    for child in results:
+        if child.name == 'host_storage':
+            attempts = child.attempts or (vars(child),)
+            for attempt in attempts:
+                try:
+                    report = json.loads(attempt['stdout'])
+                    if not isinstance(report, dict):
+                        continue
+                    for field in ('removed', 'removed_simulators', 'archived_logs'):
+                        for row in report.get(field, []):
+                            value = row if isinstance(row, dict) else {'path': row}
+                            key = (field, value.get('kind'), value.get('path'), value.get('device'), value.get('inode'))
+                            if key in seen or any(not p['satisfied'] for p in validate_host_effects({field: [row]})):
+                                continue
+                            seen.add(key)
+                            allocated = value.get('allocated_bytes')
+                            if type(allocated) is int and allocated > 0:
+                                reclaimed_bytes += allocated
+                            if field == 'archived_logs':
+                                rotated_logs += 1
+                            elif field == 'removed_simulators':
+                                counts['disposable simulator'] += 1
+                            elif (value.get('kind') == 'unused-owc-backup-file'
+                                  and Path(value.get('original_path', value['path'])).suffix in ('.tar', '.tgz', '.gz', '.zip')):
+                                counts['backup archive'] += 1
+                            else:
+                                counts['other item'] += 1
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    continue
+        elif child.name in REPORT_SCHEMAS:
+            try:
+                path = Path(status_fields(child.stdout)['report'])
+                report = json.loads((path if path.is_absolute() else WORKSPACE / path).read_text())
+                if any(not p['satisfied'] for p in validate_child_retention_report(child.name, report, apply=True)):
+                    continue
+                count = report['summary']['removed_count']
+                if type(count) is not int or count < 0:
+                    continue
+                counts[{'runtime_releases': 'runtime', 'runtime_promotions': 'promotion folder',
+                        'approval_a': 'retired execution folder'}[child.name]] += count
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                continue
+    return list(counts.items()), rotated_logs, reclaimed_bytes
+
+
+def removal_detail(results: list[ChildResult]) -> tuple[str, int, int]:
+    counts, logs, reclaimed = verified_cleanup_counts(results)
+    return ', '.join(f'{count:,} {label}{"s" if count != 1 else ""}'
+                     for label, count in counts if count), logs, reclaimed
+
+
+def human_partial_summary(results: list[ChildResult], unsatisfied: list[dict]) -> str:
+    labels = {'host_storage': 'Mac and OWC cleanup', 'runtime_releases': 'runtime cleanup',
+              'runtime_promotions': 'promotion cleanup', 'approval_a': 'retired execution cleanup'}
+    failed = {child.name for child in results if child.returncode != 0 or child.timed_out}
+    affected_names = failed | {name for name in labels
+        if any(str(item.get('name', '')).startswith(name + '_') for item in unsatisfied)}
+    affected = ', '.join(labels.get(name, name) for name in sorted(affected_names)) or 'cleanup verification'
+    detail, logs, reclaimed = removal_detail(results)
+    progress = ' Verified completed cleanup: removed ' + detail + '.' if detail else ''
+    if reclaimed:
+        amount = f'{reclaimed / 1024**3:,.2f} GiB' if reclaimed >= 1024**3 else f'{reclaimed / 1024:,.1f} KiB'
+        progress += f' Verified host removals reclaimed {amount}.'
+    if logs:
+        progress += f' Rotated {logs} log{"s" if logs != 1 else ""}.'
+    pending = ''
+    try:
+        host = next(child for child in results if child.name == 'host_storage')
+        report = host_report(host)
+        summary = report.get('summary')
+        try:
+            from . import openclaw_storage_prune as storage
+        except ImportError:
+            import openclaw_storage_prune as storage
+        if summary == storage.cleanup_summary(report) and summary['deferred_stages']:
+            if summary['deferred_targets']:
+                pending = f" {summary['deferred_targets']:,} targets remain deferred across {summary['deferred_stages']} stages."
+            else:
+                pending = f" Cleanup remains deferred in {summary['deferred_stages']} stages; the remaining target count is unverified."
+            if summary['unclassified_deferred_stages']:
+                pending += f" {summary['unclassified_deferred_stages']} stages still need target discovery."
+    except (OSError, ValueError, TypeError, KeyError, StopIteration, AttributeError):
+        pass
+    try:
+        space = final_free_space()
+        free = f' Mac: {space["internal"] / 1024**3:.1f} GiB free; OWC: {space["owc"] / 1024**3:,.0f} GiB free.'
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, ImportError, subprocess.SubprocessError):
+        free = ' Current free space could not be verified.'
+    return f'Daily cleanup incomplete: {affected} did not finish.' + progress + pending + ' Remaining cleanup is unfinished.' + free
+
+
+def human_success_summary(results: list[ChildResult], *, apply: bool) -> str:
+    if apply:
+        for child in results:
+            if child.name == 'host_storage':
+                if any(not row['satisfied'] for row in validate_host_report(host_report(child), apply=True)):
+                    raise ValueError('host effects changed before summary')
+                for attempt in child.attempts[:-1]:
+                    if any(not row['satisfied'] for row in validate_host_effects(json.loads(attempt['stdout']))):
+                        raise ValueError('earlier host effects changed before summary')
+            elif child.name in REPORT_SCHEMAS:
+                value = status_fields(child.stdout).get('report')
+                if not value:
+                    raise ValueError('runtime effect report missing before summary')
+                path = Path(value)
+                report = json.loads((path if path.is_absolute() else WORKSPACE / path).read_text())
+                if any(not row['satisfied'] for row in validate_child_retention_report(child.name, report, apply=True)):
+                    raise ValueError('runtime effects changed before summary')
+    detail, rotated_logs, _ = removal_detail(results) if apply else ('', 0, 0)
+    space = final_free_space()
+    if apply:
+        actions = ['removed ' + detail] if detail else []
+        if rotated_logs:
+            actions.append(f'rotated {rotated_logs} log{"s" if rotated_logs != 1 else ""}')
+        action = '; '.join(actions) if actions else 'no eligible items needed removal'
+        text = 'Daily cleanup completed: ' + action + '.'
+    else:
+        text = 'Daily cleanup preview completed; no files were removed.'
+    return text + f' Mac: {space["internal"] / 1024**3:.1f} GiB free; OWC: {space["owc"] / 1024**3:,.0f} GiB free.'
+
+
 def emit_human_result(results: list[ChildResult], predicates: list[dict], *, apply: bool) -> int:
     """Persist the complete outcome before publishing any success sentence."""
     failed_names = {child.name for child in results if child.returncode != 0 or child.timed_out}
     unsatisfied = [item for item in predicates if not item.get('satisfied')]
+    summary = None
+    if not failed_names and not unsatisfied:
+        try:
+            summary = human_success_summary(results, apply=apply)
+        except (OSError, ValueError, TypeError, KeyError, StopIteration, RuntimeError, ImportError, subprocess.SubprocessError) as exc:
+            unreadable = effect.unreadable('daily_outcome_summary', str(exc))
+            predicates = [*predicates, unreadable]
+            unsatisfied = [unreadable]
+    if failed_names or unsatisfied:
+        summary = human_partial_summary(results, unsatisfied)
     receipt_root = WORKSPACE / 'artifacts' / 'maintenance_retention'
     receipt_path = receipt_root / f'{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex}.json'
     payload = {
@@ -632,6 +984,7 @@ def emit_human_result(results: list[ChildResult], predicates: list[dict], *, app
         'mode': 'apply' if apply else 'preview', 'terminal': True,
         'status': 'failed' if failed_names or unsatisfied else 'ok',
         'children': [vars(child) for child in results], 'predicates': predicates,
+        'outcome_summary': summary,
     }
     pending = receipt_path.with_suffix('.pending')
     try:
@@ -646,26 +999,10 @@ def emit_human_result(results: list[ChildResult], predicates: list[dict], *, app
     except (OSError, TypeError, ValueError):
         print('Daily cleanup needs attention: its completion record could not be saved. Cleanup may be partial; completion is unverified.')
         return 1
-    labels = {'host_storage': 'Mac and OWC cleanup', 'runtime_releases': 'runtime cleanup',
-              'runtime_promotions': 'promotion cleanup', 'approval_a': 'retired execution cleanup'}
     if failed_names or unsatisfied:
-        affected = ', '.join(labels.get(name, name) for name in sorted(failed_names))
-        if not affected:
-            affected = 'cleanup verification'
-        print(f'Daily cleanup needs attention: {affected} did not finish successfully. Completed cleanup is recorded; the next daily run will retry.')
+        print(summary)
         return 1
-    host = next((child for child in results if child.name == 'host_storage'), None)
-    freed = ''
-    if host:
-        try:
-            report = host_report(host)
-            space = report.get('after_free_bytes', {})
-            internal, owc = space.get('internal'), space.get('owc')
-            if isinstance(internal, (float, int)) and isinstance(owc, (float, int)):
-                freed = f' Free space: Mac {internal / 1024**3:.1f} GiB; OWC {owc / 1024**3:.0f} GiB.'
-        except (ValueError, TypeError):
-            pass  # The receipt validator, not presentation, determines success.
-    print(('Daily cleanup completed.' if apply else 'Daily cleanup preview completed; no files were removed.') + freed)
+    print(summary)
     return 0
 
 

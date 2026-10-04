@@ -11,6 +11,39 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 4 retained work, browser feedback and compaction budgets
+
+Reference `ea5e7c28aa6499a7b043974b4f058695621e4946`, tree
+`5c79281d4a0ff39fc0cfe8e19800066ab9bf67c0`, adds 47 net runtime paths
+since the dated `04adc` reference. Ended computer-use sessions recover through the
+existing session owner without replaying stale input. Successful same-document
+browser clicks can return bounded page state, reducing a separate inspection round.
+Ordinary Discord retained replies keep their originating callbacks and defer a
+fallback drain while the live turn can adopt them in order.
+
+Managed build entry points share host admission. Constrained local Swift builds use
+two jobs, and Darwin retirement preserves exact process births and session custody.
+The signed worker verifier loads its native dependency from the signed runtime
+bundle. Default compaction uses the effective context budget; first-generation
+summaries receive a size allocation in the prompt. This is guidance and final-fit
+validation, not a hard ChatGPT backend output or reasoning cap.
+
+The full Gateway build, staging, offline import, seal and one native activation
+passed. Current-process capture passed separately. The Mini runs signed companion
+602 from `d10d30170e856563c64e569f31ce3c8b70d209f9`; the MacBook retains
+601, with 602 and its rollback staged. The companion and Gateway identities are
+separate. Isolated native active-input and accepted-duration repairs remain outside
+this exported source and are not installed. Browser/Bitwarden routine access,
+ordinary Discord delivery, voice/minutes and natural Journal downstream freshness
+remain open. Narrow CUI observations do not establish general latency improvement.
+
+The portable maintenance scripts retain strict internal-budget provenance, useful
+partial-effect counts and reports, and at most two fresh guarded continuation
+passes. Their 118 isolated fixtures passed. Operator paths, external-volume and
+custody checks remain. The deployment-specific copied-cache branch and its private
+manifest/helper inputs are excluded; this is a five-path portable projection.
+This source export does not activate, install or run maintenance.
+
 ## October 3 foreground shortcuts and browser bootstrap migration
 
 Reference `04adc9cec81f56cfe6fc8b418178b719099f1a1c`, tree
@@ -29,7 +62,7 @@ build, UI, staging, offline import, native seal and exact-source activation pass
 The normal installed migration and status passed: four current owned launchers,
 all four old registered copies retired, no manual setup required and no issues.
 
-The current Gateway loads `04adc9cec81f56cfe6fc8b418178b719099f1a1c`.
+At that dated checkpoint the Gateway loaded `04adc9cec81f56cfe6fc8b418178b719099f1a1c`.
 Its one native activation, health and protected settings passed. Current-process
 Journal manual capture passed separately; natural source-day and downstream
 completeness remain open. The previous 2cc migration failure is preserved. Final

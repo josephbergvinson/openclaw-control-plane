@@ -14,11 +14,20 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current source reference is `04adc9cec81f56cfe6fc8b418178b719099f1a1c`,
+The current source reference is `ea5e7c28aa6499a7b043974b4f058695621e4946`,
+source tree `5c79281d4a0ff39fc0cfe8e19800066ab9bf67c0`. Its 47-path
+successor adds retained Discord steering, bounded browser feedback, managed build
+retirement and compaction budget repairs. The Gateway is activated from this source;
+the Mini separately runs signed companion 602/d10d. MacBook installation, routine
+Chrome/Bitwarden access, voice/minutes and broader unattended outcomes remain open.
+The [runtime qualification](runtime/README.md#october-4-retained-work-browser-feedback-and-compaction-budgets)
+keeps source, activation, companion and ordinary-use evidence separate.
+
+The dated October 3 source reference is `04adc9cec81f56cfe6fc8b418178b719099f1a1c`,
 source tree `18f6cc162cab880dbe2f07ccb2220f7937fa5251`. It includes the
 foreground shortcut repair and the qualified browser registration collision fix.
-Both Mac companions run signed build 601; Mini shortcut replacement and saved-alias
-Apple Passwords unlock passed. The Gateway now runs this corrected source with
+At that checkpoint both Mac companions ran signed build 601; Mini shortcut replacement and saved-alias
+Apple Passwords unlock passed. The Gateway then ran this corrected source with
 health and protected settings verified. Normal native-browser registration passed;
 browser login, Bitwarden reuse and genuine spoken-audio/minutes remain pending.
 The [runtime qualification](runtime/README.md#october-3-foreground-shortcuts-and-browser-bootstrap-migration)
