@@ -4746,6 +4746,41 @@ index 8fadee4b5cf5e340bc76e1355b2396c1e2b265df..d1650960d4d58af0d9f6a92d237a150b
  Direct Gateway event sources can use `cron.run` with `mode: "if-enabled"` to run immediately without overriding an operator-disabled or auto-disabled job. Explicit operator run-now commands continue to use `force`.
  
  Re-enabling an auto-disabled job or an exhausted stream resets its failure counters. API clients reconciling a `declarationKey` can do the same with explicit `enabled: true`; routine declarations that omit enablement preserve stopped jobs, and routine reconciliation preserves existing failure streaks.
+diff --git a/docs/automation/cron-jobs/payloads.md b/docs/automation/cron-jobs/payloads.md
+index 472ac34ed5fe2c14407e336619c6cb3991d3d364..660fe14809335c27237fc7f9b507c51645425f8c 100644
+--- a/docs/automation/cron-jobs/payloads.md
++++ b/docs/automation/cron-jobs/payloads.md
+@@ -166,7 +166,7 @@ Before an isolated run starts, OpenClaw checks reachable local endpoints for con
+ 
+ ### Command payloads
+ 
+-Command payloads run deterministic scripts inside the Gateway scheduler without starting a model-backed turn. They execute on the Gateway host, capture stdout/stderr, record the run in the job's run history, and reuse the same `announce`, `webhook`, and `none` delivery modes as agent-turn jobs.
++Command payloads run deterministic scripts inside the Gateway scheduler. By default they do not start a model-backed turn. They execute on the Gateway host, capture stdout/stderr, record the run in the job's run history, and reuse the same `announce`, `webhook`, and `none` delivery modes as agent-turn jobs.
+ 
+ <Note>
+ When an agent-turn automation's exec needs approval, the card is delivered to connected approval surfaces and the run waits for the decision; answering **Always allow** mints a scoped standing grant so later occurrences run without prompting. See [Standing grants for automations](/tools/exec-approvals#standing-grants-for-automations) for lifetime, listing, and revocation.
+@@ -190,6 +190,21 @@ Delivered text is derived from process output: non-empty stdout wins; if stdout
+ 
+ When the run deadline stops a command, run history retains its captured output and command timeout reason after bounded process cleanup. Completion delivery does not start after that deadline.
+ 
++Operator-authored command payloads can opt into one repair turn through the native
++`cron.add` or `cron.update` API. Set `repair.onExitCodes` to the nonzero exits that
++mean repair is needed, `repair.agentTurn` to the authorized repair task and its
++normal model options, and `repair.verify` to a fresh command that checks the
++actual result. Healthy commands and unselected exits do not start a repair turn.
++Signals and timeouts never start one.
++
++The repair uses the original job's agent, tool cap, requester authority, and
++cancellation signal within its existing deadline. It does not deliver a separate
++completion message. Only the fresh verification command can mark the job
++successful; a skipped or failed repair, cancellation, or failed verification
++leaves the job failed. Verification cannot contain another repair. Set
++`repair: null` in a command payload patch to remove this opt-in. Command repairs
++require a bounded original timeout; they do not accept `timeoutSeconds: 0`.
++
+ ### Script payloads
+ 
+ Script payloads run headlessly in the same code-mode executor as trigger scripts, without starting a conversational agent turn. They are available by default; setting `cron.triggers.enabled: false` disables creation and execution of script payloads together with condition-trigger scripts and stream schedules. Script jobs support only `main` and `isolated` session targets.
 diff --git a/docs/channels/discord/messaging.md b/docs/channels/discord/messaging.md
 index 117f134ab60b19ce3a402ebf9c932e7775a0c2cf..6706fc7afd9271d5f2317f442973c9d025e4684a 100644
 --- a/docs/channels/discord/messaging.md
@@ -36351,11 +36386,94 @@ index 0bd51ffd8b319906727215ebe48f3c43df119482..5c05b331c66ca3e8b63f63b60140d97d
    TasksRecoveryParamsSchema,
    TasksRecoveryResultSchema,
    ConfigGetParamsSchema,
+diff --git a/packages/gateway-protocol/src/schema/cron-shared.ts b/packages/gateway-protocol/src/schema/cron-shared.ts
+index 41cc1a229ed43254ba7916439dec4d8941b4fb46..4a7600f4b7404d35564b961c7fb89abdc38c45db 100644
+--- a/packages/gateway-protocol/src/schema/cron-shared.ts
++++ b/packages/gateway-protocol/src/schema/cron-shared.ts
+@@ -42,12 +42,12 @@ export function cronAgentTurnPayloadSchema<
+ }
+ 
+ /** Builds command payload variants while preserving create/patch argv optionality. */
+-export function cronCommandPayloadSchema<
++function cronCommandExecutionFields<
+   TArgv extends TSchema,
+   TToolsAllow extends TSchema,
+   TTimeout extends TSchema,
+ >(params: { argv: TArgv; toolsAllow: TToolsAllow; timeoutSeconds: TTimeout }) {
+-  return closedObject({
++  return {
+     kind: Type.Literal("command"),
+     argv: params.argv,
+     cwd: Type.Optional(Type.String({ minLength: 1 })),
+@@ -58,6 +58,55 @@ export function cronCommandPayloadSchema<
+     outputMaxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+     toolsAllow: Type.Optional(params.toolsAllow),
+     toolsAllowIsDefault: Type.Optional(Type.Boolean()),
++  };
++}
++
++/** Command repair is an explicit original-job substep, never a recursive payload. */
++export function cronCommandPayloadSchema<
++  TArgv extends TSchema,
++  TToolsAllow extends TSchema,
++  TTimeout extends TSchema,
++>(params: {
++  argv: TArgv;
++  toolsAllow: TToolsAllow;
++  timeoutSeconds: TTimeout;
++  repairNullable?: boolean;
++}) {
++  const toolsAllow = Type.Array(Type.String());
++  const timeoutSeconds = Type.Number({ minimum: 0 });
++  const repair = closedObject({
++    onExitCodes: Type.Array(Type.Integer({ minimum: 1, maximum: 255 }), {
++      minItems: 1,
++      maxItems: 255,
++      uniqueItems: true,
++    }),
++    agentTurn: Type.Omit(
++      cronAgentTurnPayloadSchema({
++        message: Type.String({ minLength: 1 }),
++        model: Type.String(),
++        fallbacks: Type.Array(Type.String()),
++        toolsAllow,
++        thinking: Type.String(),
++        timeoutSeconds,
++      }),
++      ["toolsAllow", "toolsAllowIsDefault"],
++      { additionalProperties: false },
++    ),
++    verify: Type.Omit(
++      closedObject(
++        cronCommandExecutionFields({
++          argv: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
++          toolsAllow,
++          timeoutSeconds,
++        }),
++      ),
++      ["toolsAllow", "toolsAllowIsDefault"],
++      { additionalProperties: false },
++    ),
++  });
++  return closedObject({
++    ...cronCommandExecutionFields(params),
++    repair: Type.Optional(params.repairNullable ? Type.Union([repair, Type.Null()]) : repair),
+   });
+ }
+ 
 diff --git a/packages/gateway-protocol/src/schema/cron.ts b/packages/gateway-protocol/src/schema/cron.ts
-index d9f1ef1e3b083ada89926ed188b2993eb6fac1a0..24ded5ed82bfdcc01a52c67af8b247c04de6ad37 100644
+index d9f1ef1e3b083ada89926ed188b2993eb6fac1a0..e68b09cb8cae1b2a78e57e0502ebb7b55f967d10 100644
 --- a/packages/gateway-protocol/src/schema/cron.ts
 +++ b/packages/gateway-protocol/src/schema/cron.ts
-@@ -705,6 +705,7 @@ export const CronRunsParamsSchema = closedObject({
+@@ -283,6 +283,7 @@ const CronPayloadPatchSchema = Type.Union([
+     argv: Type.Optional(Type.Array(NonEmptyString, { minItems: 1 })),
+     timeoutSeconds: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+     toolsAllow: Type.Union([Type.Array(Type.String()), Type.Null()]),
++    repairNullable: true,
+   }),
+   cronScriptPayloadSchema({
+     script: Type.Optional(Type.String({ minLength: 1, maxLength: 65_536 })),
+@@ -705,6 +706,7 @@ export const CronRunsParamsSchema = closedObject({
  export const CronRunLogEntrySchema = closedObject({
    ts: Type.Integer({ minimum: 0 }),
    jobId: NonEmptyString,
@@ -123630,6 +123748,55 @@ index dedb684e7038f5d0b6140d8cfe78f6557e29bcbf..e7ef46f7e0fca7145da2f4f34c2c97e4
  export async function deleteCronSessionViaGateway(params: {
    agentSessionKey: string;
    sessionId: string;
+diff --git a/src/cron/normalize.test.ts b/src/cron/normalize.test.ts
+index f88461312456aea6cdc64d9d3c7d6d72d36d2890..1c7e0370cee251bf3c65e79f1ee5243eac0735ec 100644
+--- a/src/cron/normalize.test.ts
++++ b/src/cron/normalize.test.ts
+@@ -448,6 +448,44 @@ describe("normalizeCronJobCreate", () => {
+     });
+     expect(validateCronAddParams(normalized)).toBe(true);
+   });
++  it("preserves explicit command repair through native create and update validation", () => {
++    const repair = {
++      onExitCodes: [1],
++      agentTurn: {
++        kind: "agentTurn",
++        message: "Restore capacity.",
++        model: "example/model",
++        thinking: "max",
++        fallbacks: [],
++      },
++      verify: { kind: "command", argv: ["capacity-check"] },
++    };
++    const normalized = createDefaulted({
++      kind: "command",
++      argv: ["prune"],
++      timeoutSeconds: 420,
++      repair,
++    });
++    expect(child(normalized, "payload").repair).toEqual(repair);
++    expect(validateCronAddParams(normalized)).toBe(true);
++    const patch = normalizePatch({ payload: { kind: "command", repair: null } });
++    expect(child(patch, "payload").repair).toBeNull();
++    expect(validateCronUpdateParams({ id: "job", patch })).toBe(true);
++    for (const invalid of [
++      { ...repair, onExitCodes: [0] },
++      { ...repair, onExitCodes: [1, 1] },
++      { ...repair, agentTurn: { ...repair.agentTurn, toolsAllow: ["*"] } },
++      { ...repair, verify: { ...repair.verify, repair } },
++      { ...repair, verify: { ...repair.verify, toolsAllow: ["*"] } },
++    ]) {
++      expect(
++        validateCronAddParams(
++          createDefaulted({ kind: "command", argv: ["prune"], repair: invalid }),
++        ),
++        JSON.stringify(invalid),
++      ).toBe(false);
++    }
++  });
+   it("preserves timeoutSeconds=0 for no-timeout agentTurn payloads", () => {
+     expect(
+       child(createDefaulted({ ...AGENT_TURN, timeoutSeconds: 0 }), "payload").timeoutSeconds,
 diff --git a/src/cron/service.one-shot-schedule-ownership.test.ts b/src/cron/service.one-shot-schedule-ownership.test.ts
 index 92fd5c6d3a9f5d7844ac6056b3fd69bcf11e049a..d86b0b1b554f84e5628c8eadf90b47e26ddf4ea8 100644
 --- a/src/cron/service.one-shot-schedule-ownership.test.ts
@@ -123766,6 +123933,394 @@ index 63e5ec55fc2b39b89be63b9ddc3624a7c133992b..95e4cf8c692174fd497b157f8965ec96
      ...cronFailureDetailLines(errorReason),
      `Fix the underlying cause, then run \`openclaw automations enable ${job.id}\` to re-enable it.`,
    ].join("\n");
+diff --git a/src/cron/service/command-repair.test.ts b/src/cron/service/command-repair.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7e9d5356848b83f384619a5c6ead4522456fb740
+--- /dev/null
++++ b/src/cron/service/command-repair.test.ts
+@@ -0,0 +1,277 @@
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { createDeferred } from "../../../test/helpers/promise.js";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import { runCronCommandJob } from "../command-runner.js";
++import { makeCronJob } from "../delivery.test-helpers.js";
++import { createNoopLogger } from "../service.test-harness.js";
++import { applyDefaultCronToolsAllow } from "../tools-allow.js";
++import { assertSupportedJobSpec } from "./jobs-validation.js";
++import { createCronServiceState, type CronServiceDeps } from "./state.js";
++import { executeJobCore } from "./timer-execution.js";
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++
++function fixture(runIsolatedAgentJob: CronServiceDeps["runIsolatedAgentJob"]) {
++  const root = tempDirs.make("cron-command-repair-");
++  const marker = path.join(root, "capacity-restored");
++  const argv = [
++    process.execPath,
++    "-e",
++    "const fs = require('node:fs'); const ok = fs.existsSync(process.argv[1]); console.log(ok ? 'capacity restored' : 'capacity still low'); process.exit(ok ? 0 : 1);",
++    marker,
++  ];
++  const job = makeCronJob({
++    id: "original-repair-job",
++    agentId: "main",
++    sessionKey: "agent:main:discord:channel:synthetic",
++    delivery: { mode: "announce", channel: "discord", to: "synthetic" },
++    payload: {
++      kind: "command",
++      argv,
++      timeoutSeconds: 30,
++      toolsAllow: ["read", "exec", "process"],
++      repair: {
++        onExitCodes: [1],
++        agentTurn: {
++          kind: "agentTurn",
++          message: "Restore the synthetic capacity marker using the authorized owner.",
++          model: "openai/gpt-6.1-sol",
++          fallbacks: [],
++          thinking: "max",
++        },
++        verify: { kind: "command", argv },
++      },
++    },
++  });
++  const runCommandJob = vi.fn(runCronCommandJob);
++  const state = createCronServiceState({
++    storePath: path.join(root, "jobs.json"),
++    cronEnabled: true,
++    log: createNoopLogger(),
++    enqueueSystemEvent: vi.fn(),
++    requestHeartbeat: vi.fn(),
++    runCommandJob,
++    runIsolatedAgentJob,
++  });
++  return { job, state, marker, runCommandJob };
++}
++
++describe("original command job repair", () => {
++  it("runs one admitted repair and a real fresh effect check under the original identity", async () => {
++    const runAgent = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>();
++    const { job, state, marker, runCommandJob } = fixture(runAgent);
++    const controller = new AbortController();
++    const invoker = {
++      state: "present",
++      kind: "person",
++      rawPrincipalRef: "synthetic-owner",
++    } as const;
++    const assertRunCurrent = vi.fn();
++    runAgent.mockImplementation(async (params) => {
++      expect(params.job.id).toBe(job.id);
++      expect(params.job.sessionKey).toBe(job.sessionKey);
++      expect(params.job.agentId).toBe(job.agentId);
++      expect(params.job.payload).toMatchObject({
++        kind: "agentTurn",
++        model: "openai/gpt-6.1-sol",
++        fallbacks: [],
++        thinking: "max",
++        toolsAllow: ["read", "exec", "process"],
++      });
++      expect(params.job.delivery).toEqual({ mode: "none" });
++      expect(params.abortSignal).toBe(controller.signal);
++      expect(params.executionIdentity?.invoker).toBe(invoker);
++      await fs.writeFile(marker, "restored");
++      return { status: "ok", summary: "model said it completed", model: "gpt-6.1-sol" };
++    });
++
++    const result = await executeJobCore(state, job, controller.signal, {
++      assertRunCurrent,
++      executionIdentity: {
++        ingress: { kind: "schedule", boundary: "cron", state: "present" },
++        invoker,
++      },
++    });
++
++    expect(result).toMatchObject({ status: "ok", summary: "capacity restored" });
++    expect(runAgent).toHaveBeenCalledOnce();
++    expect(runCommandJob).toHaveBeenCalledTimes(2);
++    expect(assertRunCurrent.mock.calls.length).toBeGreaterThanOrEqual(4);
++  });
++
++  it("cannot turn an unverified model success into a successful job", async () => {
++    const runAgent = vi.fn(async () => ({ status: "ok" as const, summary: "All fixed." }));
++    const { job, state, runCommandJob } = fixture(runAgent);
++    const result = await executeJobCore(state, job);
++    expect(runAgent).toHaveBeenCalledOnce();
++    expect(runCommandJob).toHaveBeenCalledTimes(2);
++    expect(result).toMatchObject({
++      status: "error",
++      summary: "capacity still low",
++      failureNotificationDetail: { kind: "command-exit", exitCode: 1 },
++    });
++  });
++
++  it("keeps a skipped repair failed and never verifies or retries it", async () => {
++    const runAgent = vi.fn(async () => ({ status: "skipped" as const, summary: "not executed" }));
++    const { job, state, runCommandJob } = fixture(runAgent);
++    expect(await executeJobCore(state, job)).toMatchObject({
++      status: "error",
++      summary: "capacity still low",
++      failureNotificationDetail: { kind: "command-exit", exitCode: 1 },
++    });
++    expect(runAgent).toHaveBeenCalledOnce();
++    expect(runCommandJob).toHaveBeenCalledOnce();
++  });
++
++  it("spends the original command deadline instead of restarting it for repair or verification", async () => {
++    let now = 0;
++    const runAgent = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(async (params) => {
++      expect(params.job.payload).toMatchObject({ timeoutSeconds: 18 });
++      now = 20_000;
++      return { status: "ok" };
++    });
++    const { job, state } = fixture(runAgent);
++    state.deps.nowMs = () => now;
++    const commands = vi.fn<NonNullable<CronServiceDeps["runCommandJob"]>>(
++      async ({ job: executing }) => {
++        if (commands.mock.calls.length === 1) {
++          now = 12_000;
++          return {
++            status: "error",
++            failureNotificationDetail: { kind: "command-exit", exitCode: 1 },
++          };
++        }
++        expect(executing.payload).toMatchObject({ timeoutSeconds: 10 });
++        return { status: "ok" };
++      },
++    );
++    state.deps.runCommandJob = commands;
++    expect(await executeJobCore(state, job)).toMatchObject({ status: "ok" });
++    expect(commands).toHaveBeenCalledTimes(2);
++    now = 0;
++    state.deps.runCommandJob = vi.fn<NonNullable<CronServiceDeps["runCommandJob"]>>(async () => {
++      now = 30_000;
++      return { status: "error", failureNotificationDetail: { kind: "command-exit", exitCode: 1 } };
++    });
++    await expect(executeJobCore(state, job)).rejects.toThrow("original job deadline");
++    expect(runAgent).toHaveBeenCalledOnce();
++    if (job.payload.kind !== "command") {
++      throw new Error("expected command fixture");
++    }
++    job.payload.timeoutSeconds = 0;
++    expect(() => assertSupportedJobSpec(job)).toThrow("bounded original job timeout");
++  });
++
++  it("uses the ordinary cron tool cap only for opted-in commands", () => {
++    const { job } = fixture(vi.fn(async () => ({ status: "ok" as const })));
++    applyDefaultCronToolsAllow(job);
++    expect(job.payload.toolsAllow).toEqual(["read", "exec", "process"]);
++    delete job.payload.toolsAllow;
++    applyDefaultCronToolsAllow(job);
++    expect(job.payload.toolsAllow).toEqual(["*"]);
++    if (job.payload.kind !== "command") {
++      throw new Error("expected command fixture");
++    }
++    delete job.payload.repair;
++    delete job.payload.toolsAllow;
++    applyDefaultCronToolsAllow(job);
++    expect(job.payload.toolsAllow).toBeUndefined();
++  });
++
++  it("keeps adequate capacity fast and leaves reporting commands without repair unchanged", async () => {
++    const runAgent = vi.fn(async () => ({ status: "ok" as const }));
++    const { job, state, marker, runCommandJob } = fixture(runAgent);
++    await fs.writeFile(marker, "already adequate");
++    expect(await executeJobCore(state, job)).toMatchObject({ status: "ok" });
++    expect(runAgent).not.toHaveBeenCalled();
++    expect(runCommandJob).toHaveBeenCalledOnce();
++    await fs.unlink(marker);
++    if (job.payload.kind !== "command") {
++      throw new Error("expected command fixture");
++    }
++    delete job.payload.repair;
++    expect(await executeJobCore(state, job)).toMatchObject({ status: "error" });
++    expect(runAgent).not.toHaveBeenCalled();
++  });
++
++  it.each(["failed", "cancelled"] as const)(
++    "joins the %s repair before returning and never starts verification",
++    async (mode) => {
++      const entered = createDeferred();
++      const release = createDeferred();
++      let settled = false;
++      const runAgent = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(async (params) => {
++        entered.resolve();
++        await release.promise;
++        settled = true;
++        return {
++          status: "error",
++          error: params.abortSignal?.aborted ? "cancelled" : "provider failed",
++        };
++      });
++      const { job, state, runCommandJob } = fixture(runAgent);
++      const controller = new AbortController();
++      let returned = false;
++      const executing = executeJobCore(state, job, controller.signal).then((result) => {
++        returned = true;
++        return result;
++      });
++      try {
++        await Promise.race([
++          entered.promise,
++          executing.then(() => {
++            throw new Error("repair never entered");
++          }),
++        ]);
++        if (mode === "cancelled") {
++          controller.abort(new Error("cancelled"));
++        }
++        expect(returned).toBe(false);
++      } finally {
++        release.resolve();
++      }
++      expect(await executing).toMatchObject({ status: "error" });
++      expect(settled).toBe(true);
++      expect(runCommandJob).toHaveBeenCalledOnce();
++    },
++  );
++
++  it("refuses verification after the original source authority changes", async () => {
++    let current = true;
++    const runAgent = vi.fn(async () => {
++      current = false;
++      return { status: "ok" as const };
++    });
++    const { job, state, runCommandJob } = fixture(runAgent);
++    await expect(
++      executeJobCore(state, job, undefined, {
++        assertRunCurrent: () => {
++          if (!current) {
++            throw new Error("original job replaced");
++          }
++        },
++      }),
++    ).rejects.toThrow("original job replaced");
++    expect(runAgent).toHaveBeenCalledOnce();
++    expect(runCommandJob).toHaveBeenCalledOnce();
++  });
++
++  it("does not repair unselected exits or native timeout failures", async () => {
++    const runAgent = vi.fn(async () => ({ status: "ok" as const }));
++    const { job, state } = fixture(runAgent);
++    state.deps.runCommandJob = vi.fn(async () => ({
++      status: "error" as const,
++      failureNotificationDetail: { kind: "command-timeout" as const, mode: "wall-clock" as const },
++    }));
++    expect(await executeJobCore(state, job)).toMatchObject({ status: "error" });
++    state.deps.runCommandJob = vi.fn(async () => ({
++      status: "error" as const,
++      failureNotificationDetail: { kind: "command-exit" as const, exitCode: 2 },
++    }));
++    expect(await executeJobCore(state, job)).toMatchObject({ status: "error" });
++    expect(runAgent).not.toHaveBeenCalled();
++  });
++});
+diff --git a/src/cron/service/command-repair.ts b/src/cron/service/command-repair.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b894824ecf5df01d490cf3e5df79699ba23876cf
+--- /dev/null
++++ b/src/cron/service/command-repair.ts
+@@ -0,0 +1,99 @@
++import { isCronActiveJobMarkerCurrent } from "../active-jobs.js";
++import type { CronJob, CronRunTelemetry } from "../types.js";
++import { abortErrorMessage } from "./execution-errors.js";
++import type { CronServiceState } from "./state.js";
++import { resolveCronJobTimeoutMs } from "./timeout-policy.js";
++import type { ExecuteJobCoreOptions } from "./timer-execution-timeout.js";
++
++type CronCommandRunResult = Awaited<
++  ReturnType<NonNullable<CronServiceState["deps"]["runCommandJob"]>>
++>;
++
++/** One opt-in repair turn stays inside the original command job and its deadline. */
++export async function repairCronCommand(params: {
++  state: CronServiceState;
++  job: CronJob;
++  initial: CronCommandRunResult;
++  startedAt: number;
++  abortSignal?: AbortSignal;
++  options?: ExecuteJobCoreOptions;
++}): Promise<CronCommandRunResult & CronRunTelemetry> {
++  const { state, job, initial, abortSignal, options } = params;
++  if (job.payload.kind !== "command" || !job.payload.repair || !state.deps.runCommandJob) {
++    return initial;
++  }
++  const repair = job.payload.repair;
++  const detail = initial.failureNotificationDetail;
++  if (
++    initial.status !== "error" ||
++    detail?.kind !== "command-exit" ||
++    !repair.onExitCodes.includes(detail.exitCode)
++  ) {
++    return initial;
++  }
++  const assertCurrent = () => {
++    abortSignal?.throwIfAborted();
++    if (!isCronActiveJobMarkerCurrent(options?.activeJobMarker)) {
++      throw new Error("Gateway restarting.");
++    }
++    options?.assertRunCurrent?.();
++  };
++  const timeoutMs = resolveCronJobTimeoutMs(job);
++  if (timeoutMs === undefined) {
++    return { ...initial, error: "command repair requires a bounded original job timeout" };
++  }
++  const remainingSeconds = () =>
++    Math.floor((params.startedAt + timeoutMs - state.deps.nowMs()) / 1000);
++  const boundTimeout = (requested: number | undefined) => {
++    const remaining = remainingSeconds();
++    if (remaining < 1) {
++      throw new Error("command repair exhausted the original job deadline");
++    }
++    return requested && requested > 0 ? Math.min(requested, remaining) : remaining;
++  };
++  assertCurrent();
++  const repairJob: CronJob = {
++    ...job,
++    delivery: { mode: "none" },
++    payload: {
++      ...repair.agentTurn,
++      timeoutSeconds: boundTimeout(repair.agentTurn.timeoutSeconds),
++      toolsAllow: job.payload.toolsAllow,
++      toolsAllowIsDefault: job.payload.toolsAllowIsDefault,
++    },
++  };
++  const repaired = await state.deps.runIsolatedAgentJob({
++    job: repairJob,
++    message: repair.agentTurn.message,
++    abortSignal,
++    onExecutionStarted: options?.onExecutionStarted,
++    onExecutionPhase: options?.onExecutionPhase,
++    onLaneWait: options?.onLaneWait,
++    executionIdentity: options?.executionIdentity,
++  });
++  if (abortSignal?.aborted) {
++    return { status: "error", error: abortErrorMessage(abortSignal) };
++  }
++  assertCurrent();
++  if (repaired.status !== "ok") {
++    return { ...initial, ...repaired, status: "error", summary: initial.summary };
++  }
++  const verified = await state.deps.runCommandJob({
++    job: {
++      ...job,
++      payload: { ...repair.verify, timeoutSeconds: boundTimeout(repair.verify.timeoutSeconds) },
++    },
++    abortSignal,
++  });
++  assertCurrent();
++  // Only the fresh command owns the domain outcome; model prose is not verification.
++  return {
++    ...verified,
++    executionStarted: repaired.executionStarted,
++    sessionId: repaired.sessionId,
++    sessionKey: repaired.sessionKey,
++    model: repaired.model,
++    provider: repaired.provider,
++    usage: repaired.usage,
++  };
++}
 diff --git a/src/cron/service/jobs-tool-policy.ts b/src/cron/service/jobs-tool-policy.ts
 index e7b631eea73b6e95bac4a490ff3356ce0025e5de..651091461171729e57361558f9f20af6b8c3aacd 100644
 --- a/src/cron/service/jobs-tool-policy.ts
@@ -123797,6 +124352,127 @@ index e7b631eea73b6e95bac4a490ff3356ce0025e5de..651091461171729e57361558f9f20af6
    const callerOrigin = normalizeCronScheduledToolCallerOrigin(
      job.toolsAllowProvenance?.callerOrigin,
    );
+diff --git a/src/cron/service/jobs-validation.ts b/src/cron/service/jobs-validation.ts
+index c1f7a4585c4ae57c7bad2a5133035d13270e7811..412e9f730a146c52a8b29a4c4c50c628bb479551 100644
+--- a/src/cron/service/jobs-validation.ts
++++ b/src/cron/service/jobs-validation.ts
+@@ -58,6 +58,9 @@ export function assertSupportedJobSpec(
+   if (job.sessionTarget.startsWith("session:")) {
+     assertSafeCronSessionTargetId(job.sessionTarget.slice(8));
+   }
++  if (job.payload.kind === "command" && job.payload.repair && job.payload.timeoutSeconds === 0) {
++    throw new Error("command repair requires a bounded original job timeout");
++  }
+   if (
+     job.sessionTarget === "main" &&
+     job.payload.kind !== "systemEvent" &&
+diff --git a/src/cron/service/payload-merge.test.ts b/src/cron/service/payload-merge.test.ts
+index 5b46d91316fcdcfdcdbd82b83febd0e467f09f6b..fbf03d2fbe93cf5e79f45c0a8e1ce691430e75aa 100644
+--- a/src/cron/service/payload-merge.test.ts
++++ b/src/cron/service/payload-merge.test.ts
+@@ -105,6 +105,39 @@ const installDefaultMarkerCases = [
+ ] satisfies MergeCase[];
+ 
+ describe("mergeCronPayload trigger tool caps", () => {
++  it("preserves, replaces, and explicitly removes the complete command repair", () => {
++    const repair = {
++      onExitCodes: [1],
++      agentTurn: { kind: "agentTurn" as const, message: "Restore capacity." },
++      verify: { kind: "command" as const, argv: ["check"] },
++    };
++    const existing: CronPayload = {
++      kind: "command",
++      argv: ["prune"],
++      repair,
++      toolsAllow: ["read"],
++    };
++    expect(mergeCronPayload(existing, { kind: "command", argv: ["new-prune"] })).toEqual({
++      ...existing,
++      argv: ["new-prune"],
++    });
++    const replacement = { ...repair, onExitCodes: [2] };
++    expect(mergeCronPayload(existing, { kind: "command", repair: replacement })).toEqual({
++      ...existing,
++      repair: replacement,
++    });
++    expect(mergeCronPayload(existing, { kind: "command", repair: null })).toEqual({
++      kind: "command",
++      argv: ["prune"],
++      toolsAllow: ["read"],
++    });
++    expect(
++      mergeCronPayload(
++        { kind: "agentTurn", message: "old", toolsAllow: ["read"] },
++        { kind: "command", argv: ["prune"], repair },
++      ),
++    ).toEqual(existing);
++  });
+   it.each(preserveCases)(
+     "preserves $label toolsAllow when omitted",
+     ({ existing, patch, expected }) => {
+diff --git a/src/cron/service/payload-merge.ts b/src/cron/service/payload-merge.ts
+index 4105b5647e470c031afcb5fb5b8d63100d5c33ca..b97dd2f3af7b4267f0aae5c99fc7548355ae4786 100644
+--- a/src/cron/service/payload-merge.ts
++++ b/src/cron/service/payload-merge.ts
+@@ -94,6 +94,11 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
+     if (typeof patch.outputMaxBytes === "number") {
+       next.outputMaxBytes = patch.outputMaxBytes;
+     }
++    if (patch.repair) {
++      next.repair = patch.repair;
++    } else if (patch.repair === null) {
++      delete next.repair;
++    }
+     applyToolsAllowPatch(next, patch, existing);
+     return next;
+   }
+@@ -182,6 +187,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
+         ? { noOutputTimeoutSeconds: patch.noOutputTimeoutSeconds }
+         : {}),
+       ...(patch.outputMaxBytes !== undefined ? { outputMaxBytes: patch.outputMaxBytes } : {}),
++      ...(patch.repair ? { repair: patch.repair } : {}),
+     };
+     applyToolsAllowPatch(next, patch);
+     return next;
+diff --git a/src/cron/service/timer-execution.ts b/src/cron/service/timer-execution.ts
+index 84a379e6d2d4de423a9ed3ba6cdb3dcc2c2660a4..ed381f5ab5e7326982e4d3483e69ca3120e64ed6 100644
+--- a/src/cron/service/timer-execution.ts
++++ b/src/cron/service/timer-execution.ts
+@@ -24,6 +24,7 @@ import type {
+   CronRunOutcome,
+   CronRunTelemetry,
+ } from "../types.js";
++import { repairCronCommand } from "./command-repair.js";
+ import { abortErrorMessage, timeoutErrorMessage } from "./execution-errors.js";
+ import { resolveJobPayloadTextForMain } from "./jobs-scheduling.js";
+ import type { CronServiceState } from "./state.js";
+@@ -372,10 +373,12 @@ async function executeDetachedCronJob(
+         }),
+       };
+     }
+-    const res = await state.deps.runCommandJob({
++    const startedAt = state.deps.nowMs();
++    const initial = await state.deps.runCommandJob({
+       job,
+       abortSignal,
+     });
++    const res = await repairCronCommand({ state, job, initial, startedAt, abortSignal, options });
+     if (
+       abortSignal?.aborted &&
+       !(
+@@ -400,6 +403,12 @@ async function executeDetachedCronJob(
+       delivery: res.delivery,
+       diagnostics: res.diagnostics,
+       failureNotificationDetail: res.failureNotificationDetail,
++      executionStarted: res.executionStarted,
++      sessionId: res.sessionId,
++      sessionKey: res.sessionKey,
++      model: res.model,
++      provider: res.provider,
++      usage: res.usage,
+     };
+   }
+ 
 diff --git a/src/cron/service/timer-outcome-finalization.ts b/src/cron/service/timer-outcome-finalization.ts
 index 8a0f461a30c23ac0524c2ef56bd026d25ce3c72a..114458269eb6cdcc8262128898b125af1705bade 100644
 --- a/src/cron/service/timer-outcome-finalization.ts
@@ -124555,6 +125231,18 @@ index 9e669ac417abb17a55586899e463b85a0c639957..f9beaffb81f8e5977ad13fc566796ad2
 +  }
 +  return requester;
  }
+diff --git a/src/cron/tools-allow.ts b/src/cron/tools-allow.ts
+index aeaa59d8a5e807c0073c449be714ef45ce6f7f50..21fc1088979b16793d0e9f4c0cb780b9fbb3c16c 100644
+--- a/src/cron/tools-allow.ts
++++ b/src/cron/tools-allow.ts
+@@ -6,6 +6,7 @@ type CronToolRuntimeSpec = Pick<CronJob, "payload" | "trigger">;
+ export function cronJobUsesToolRuntime(job: CronToolRuntimeSpec): boolean {
+   return (
+     job.payload.kind === "agentTurn" ||
++    (job.payload.kind === "command" && Boolean(job.payload.repair)) ||
+     job.payload.kind === "script" ||
+     Boolean(job.trigger?.script.trim())
+   );
 diff --git a/src/cron/trigger-script.refresh-scope.test.ts b/src/cron/trigger-script.refresh-scope.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..48c9654c6acf01d6463f631e1080ee0c2a7ba0fa
@@ -124780,7 +125468,7 @@ index 46241de0cbc3153230c83eb573a13bb600d1b227..3db146a6cc566353a3ed3ac866437b5e
  }
  
 diff --git a/src/cron/types.ts b/src/cron/types.ts
-index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca18a93be61 100644
+index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..c3e9a57ba890331b2e66e9ca91631e95a5a31a4d 100644
 --- a/src/cron/types.ts
 +++ b/src/cron/types.ts
 @@ -155,9 +155,15 @@ export type CronRunErrorClassification =
@@ -124800,6 +125488,45 @@ index ac7a8b1b1a1f50611ce63cc6cb95f6b20438750a..dd9d3e95f034cf6b0de5cf329a3f9ca1
    | { kind: "command-timeout"; mode: "wall-clock" | "no-output" }
    | {
        kind: "script-failure";
+@@ -302,7 +308,7 @@ type CronAgentTurnPayloadPatch = {
+     timeoutSeconds?: number | null;
+   };
+ 
+-type CronCommandPayloadFields = {
++type CronCommandExecutionFields = {
+   /** Explicit argv vector to execute. Use a shell wrapper argv for shell syntax. */
+   argv: string[];
+   cwd?: string;
+@@ -313,14 +319,28 @@ type CronCommandPayloadFields = {
+   outputMaxBytes?: number;
+ };
+ 
++type CronCommandRepair = {
++  /** Only these ordinary nonzero command exits may enter the repair turn. */
++  onExitCodes: number[];
++  agentTurn: Omit<CronAgentTurnPayload, "toolsAllow" | "toolsAllowIsDefault">;
++  /** Fresh deterministic postcondition; cannot carry another repair. */
++  verify: { kind: "command" } & CronCommandExecutionFields;
++};
++
++type CronCommandPayloadFields = CronCommandExecutionFields & {
++  /** Explicit opt-in for an owner-authorized repair followed by effect verification. */
++  repair?: CronCommandRepair;
++};
++
+ type CronCommandPayload = {
+   kind: "command";
+ } & CronCommandPayloadFields;
+ 
+ type CronCommandPayloadPatch = {
+   kind: "command";
+-} & Partial<Omit<CronCommandPayloadFields, "timeoutSeconds">> & {
++} & Partial<Omit<CronCommandPayloadFields, "timeoutSeconds" | "repair">> & {
+     timeoutSeconds?: number | null;
++    repair?: CronCommandRepair | null;
+   };
+ 
+ type CronScriptPayloadFields = {
 diff --git a/src/gateway/agent-runtime-identity-token.test.ts b/src/gateway/agent-runtime-identity-token.test.ts
 index 984b2fe487c0e1d6f672df4a105e4b3900546fc4..0fd93f25da287eb01745f5187d5899f9724acf75 100644
 --- a/src/gateway/agent-runtime-identity-token.test.ts
