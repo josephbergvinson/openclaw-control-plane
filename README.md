@@ -14,21 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway source reference is `add4f1c30dd6996b8370c55e9043e225719ff9bf`,
-source tree `18843cea6ca36f09f3d09460ed190c1ba814248b`. Its three-path
-successor renders permitted model-visible search snippets instead of a raw JSON
-prefix under the unchanged recall summary budget and authority checks. Source qualification and
-the normal build, stage, seal, activation and loaded-source readback passed.
-One genuine native text recall answered correctly in 56.777 seconds; the helper
-still timed out, so useful snippet injection and latency improvement are unproved.
-This does not establish voice execution or ordinary Chrome/Discord acceptance.
-Both Mac hosts retain signed companion 603 from
-`470392c53831b43342ddf7795d04e41638742589`. UI PR54 is not installed.
-Protected dialogs, sustained overbudget responsiveness and broader ordinary-use
-acceptance remain open. The
-[runtime qualification](runtime/README.md#october-5-search-snippet-recall-formatting)
-keeps current source, installation and bounded recall distinct from historical
-evidence and the open nineteen-item acceptance matrix.
+The installed Gateway source reference is `eb0ae40d72f2004a83a484b89084f2f337239039`,
+source tree `39a8e0354e4dcd6260ae3dfad88c1706d312c11b`. Its twelve-path
+successor lets explicitly repair-capable command jobs make one native repair
+attempt inside the original authority and deadline; a fresh deterministic command
+owns the final result. Source qualification, build, stage, seal, activation and
+loaded-source health checks passed. Actual adaptive-job effects, capacity
+restoration and ordinary-use acceptance remain separate. Both Mac hosts retain
+signed companion603 from `470392c53831b43342ddf7795d04e41638742589`.
+UI PR54 is not installed. The [runtime qualification](runtime/README.md#october-5-command-repair-with-deterministic-verification)
+retains prior recall and installation evidence with their original limits and
+the open nineteen-item acceptance matrix.
 
 The dated October 3 source reference is `04adc9cec81f56cfe6fc8b418178b719099f1a1c`,
 source tree `18f6cc162cab880dbe2f07ccb2220f7937fa5251`. It includes the
