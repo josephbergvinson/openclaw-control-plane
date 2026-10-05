@@ -13,6 +13,36 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 5 search-snippet recall formatting
+
+Reference `add4f1c30dd6996b8370c55e9043e225719ff9bf`, tree
+`18843cea6ca36f09f3d09460ed190c1ba814248b`, changes three source paths
+since the dated `7490` reference below. Successful permitted model-visible
+`memory_search` results now render ranked snippets and source labels instead of a raw JSON
+metadata prefix when the optional helper times out without an assistant summary.
+`memory_get` priority, returned rank order, private-details exclusions, authority,
+abort and cleanup checks stay unchanged. The existing 32,000-character custody
+bound and default 220-character injected-summary cap remain; no query, ranking,
+model, Max reasoning, timeout or configuration change is included.
+
+The matched original formatter failed three cases with seven controls passing.
+The candidate passed 246 registered-hook and neighboring cases and all 26 normal
+selected source gates. The complete normal Gateway build, stage, offline import
+and seal passed, followed by one activation at 13:07:08 UTC with no rollback.
+Loaded Gateway/Node source, health/readiness, configuration and original
+conversation continuity passed. Both companions remain signed build 603 from
+`470392c53831b43342ddf7795d04e41638742589`; no app or worker rebuild occurred.
+
+One genuine native text request recalled the standing voice instructions correctly
+in 56.777 seconds from click to canonical final. The helper still timed out;
+completed search evidence and actual snippet injection were not captured. This
+proves that bounded text-recall answer, not voice execution, formatter-branch
+acceptance or a latency improvement. Ordinary Chrome/Discord replies, current
+conversation/capture proofs and the nineteen-item acceptance matrix retain their
+separate open scopes. The UI steering-history PR54 remains unmerged/uninstalled
+and is excluded. All historical qualification below is retained. This public
+reference performs no installation, maintenance or business replay.
+
 ## October 5 bounded memory extraction and tool-only recall recovery
 
 Reference `7490d951e4a6dfcafba246df93f6c268aa41e48c`, tree
