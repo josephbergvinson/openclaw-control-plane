@@ -11,6 +11,72 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 5 bounded memory extraction and tool-only recall recovery
+
+Reference `7490d951e4a6dfcafba246df93f6c268aa41e48c`, tree
+`4eae8ce8b0f95b762ae363e21aa02dcae50b5ebb`, adds 32 net source paths
+since the dated `ea5e7c28aa6499a7b043974b4f058695621e4946` reference.
+Main and split-prefix compaction summaries run concurrently with their original
+prompts and options; both settle before the owner returns, including on failure
+or cancellation. Final fitting and content checks remain unchanged.
+
+Pre-compaction memory extraction reads the complete admission-fenced original
+history in ordered segments. It preserves tool-call/result groups, checks each
+rendered request against the effective budget, and does not let the maintenance
+helper compact its own detached history. Accepted private progress is retained
+without replay; failed or cancelled extraction does not record a success stamp.
+The waiting user input is admitted once after the one canonical compaction.
+The embedded prompt producer now passes the prepared current message's text and
+native idempotency key to existing hooks. Rendered history or a correlation run ID
+cannot stand in for that admitted input. No recall classifier, authorization,
+model policy or timeout is changed by this producer repair.
+
+If the optional recall helper completes allowed memory_search or memory_get tools
+but times out before an assistant summary, it retains only successful model-visible
+retrieved text as bounded, source-labelled evidence. Resolved memory_get content
+precedes search metadata within the existing summary cap. Candidate wording is
+not promoted to verified authority; private tool details and unrelated tools are
+excluded. Parent cancellation, current authority, failure, unavailable-memory and
+settled-cleanup vetoes retain their existing behavior. The actual registered hook
+and SDK SQLite/store/cleanup fixtures reproduce three original failures and pass
+26 cases after the repair; all 26 selected normal source gates pass.
+
+Native credential entry recognizes login-Keychain and administrator purposes from
+trusted native form evidence. It checks the current enrolled short username,
+secure-field and form ownership, associated username label and actual default
+submit control again around opaque entry. Login-Keychain purpose does not depend
+on a generic-password body, so signing and private-key bodies use the same custody
+checks. Source tests and isolated native fixtures passed; observation of the
+protected SecurityAgent UI was refused, and genuine dialog acceptance is unverified.
+
+This exact source passed the complete normal build, stage, offline import and seal,
+then activated on October 5 at 08:14:28 UTC with one attempt and no rollback.
+Loaded Gateway and Node source, preserved native state and health/readiness were
+verified. These installation checks do not establish ordinary recall acceptance.
+The official Chrome browser plugin's native-host registration is missing, so
+ordinary Chrome recall and latency remain untested, with current live receipts
+and replies null. Earlier b753 fitting replies remain dated evidence only.
+Tool-only recovery fixtures do not prove the genuine helper had no other veto or
+guarantee avoided parent lookups under the unchanged summary cap. Current-process
+capture, natural downstream freshness and sustained overbudget responsiveness
+retain separate open scopes; the 19-item acceptance matrix is not closed.
+
+Both Mac companions separately run signed build `2609000603` from
+`470392c53831b43342ddf7795d04e41638742589`, tree
+`833d8e4b1822668c32cad4260de33f00e662807c`. Normal whole-bundle, root-mode,
+strict-signature and current native-source readbacks passed on both hosts. Gateway
+and companion source identities remain distinct; the Gateway-only successors do
+not change app, worker or protocol source. The unmerged native active-input and
+accepted-duration repairs are excluded and not installed.
+
+The portable preferences retain Sol 6.1 Max with no fallback, a 272,000-token
+context allocation and 48,000 recent tokens during compaction. This configuration,
+summary guidance and final-fit validation do not establish a provider wire output
+or reasoning cap. The five-path portable maintenance projection and its dated
+118 fixtures remain unchanged. Deployment-specific copied-cache inputs remain
+private. This public reference does not perform installation or maintenance;
+new public reconstruction checks and exact-head hosted checks are still required.
+
 ## October 4 retained work, browser feedback and compaction budgets
 
 Reference `ea5e7c28aa6499a7b043974b4f058695621e4946`, tree
