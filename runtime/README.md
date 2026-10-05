@@ -11,6 +11,33 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 5 command repair with deterministic verification
+
+Reference `eb0ae40d72f2004a83a484b89084f2f337239039`, tree
+`39a8e0354e4dcd6260ae3dfad88c1706d312c11b`, changes twelve source paths
+since the dated `add4` reference below. Operator-authored command jobs can opt
+into one native repair turn for selected nonzero command exits, followed by a
+fresh deterministic verification command. Healthy commands, unselected exits,
+signals and timeouts do not start repair. The original job identity, authority,
+tool cap, cancellation and bounded deadline remain; repair sends no separate
+completion and cannot recursively invoke another repair. Only verification can
+mark the job successful. Model prose cannot turn an unrepaired effect into success.
+
+The matched original source failed eight cases with two controls passing. The
+candidate passed 145 cases across five owning and neighboring test files and all
+31 selected normal gates. The complete normal build, stage, offline import and
+seal passed, followed by one activation at 18:01:18 UTC with no rollback. Loaded
+Gateway/Node source, health/readiness and protected-state invariants passed.
+Both companions remain signed603 from
+`470392c53831b43342ddf7795d04e41638742589`; no app rebuild occurred.
+
+Actual adaptive job execution and fresh domain verification remain separate:
+source tests and installation do not establish capacity restoration. Current
+ordinary Chrome/Discord, voice execution and latency acceptance are unverified.
+Prior add4 text recall is retained as dated evidence. UI PR54 and the uninstalled
+minutes successor are excluded. This public reference performs no installation,
+job mutation, cleanup or business replay; all earlier qualification remains below.
+
 ## October 5 search-snippet recall formatting
 
 Reference `add4f1c30dd6996b8370c55e9043e225719ff9bf`, tree
