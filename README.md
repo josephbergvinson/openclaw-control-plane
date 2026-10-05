@@ -14,19 +14,21 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway source reference is `7490d951e4a6dfcafba246df93f6c268aa41e48c`,
-source tree `4eae8ce8b0f95b762ae363e21aa02dcae50b5ebb`. Its 32-path
-successor adds concurrent compaction summaries, bounded original-history memory
-extraction, prepared current-input identity, tool-only recall recovery and trusted
-native credential-form custody. Source checks and the normal build, stage, seal,
-activation and exact startup readback pass. Ordinary Chrome recall is untested
-because the official browser plugin's native-host registration is missing.
-Broader ordinary-use acceptance remains open. Both Mac hosts separately
-retain signed companion 603 from `470392c53831b43342ddf7795d04e41638742589`.
-Protected-dialog acceptance, broader recall latency and sustained overbudget
-responsiveness remain open. The
-[runtime qualification](runtime/README.md#october-5-bounded-memory-extraction-and-tool-only-recall-recovery)
-keeps source, activation, companion and ordinary-use evidence separate.
+The installed Gateway source reference is `add4f1c30dd6996b8370c55e9043e225719ff9bf`,
+source tree `18843cea6ca36f09f3d09460ed190c1ba814248b`. Its three-path
+successor renders permitted model-visible search snippets instead of a raw JSON
+prefix under the unchanged recall summary budget and authority checks. Source qualification and
+the normal build, stage, seal, activation and loaded-source readback passed.
+One genuine native text recall answered correctly in 56.777 seconds; the helper
+still timed out, so useful snippet injection and latency improvement are unproved.
+This does not establish voice execution or ordinary Chrome/Discord acceptance.
+Both Mac hosts retain signed companion 603 from
+`470392c53831b43342ddf7795d04e41638742589`. UI PR54 is not installed.
+Protected dialogs, sustained overbudget responsiveness and broader ordinary-use
+acceptance remain open. The
+[runtime qualification](runtime/README.md#october-5-search-snippet-recall-formatting)
+keeps current source, installation and bounded recall distinct from historical
+evidence and the open nineteen-item acceptance matrix.
 
 The dated October 3 source reference is `04adc9cec81f56cfe6fc8b418178b719099f1a1c`,
 source tree `18f6cc162cab880dbe2f07ccb2220f7937fa5251`. It includes the

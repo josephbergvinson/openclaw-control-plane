@@ -6244,6 +6244,227 @@ index 0b94fffdd4d608b79c41ffa35e6e486b69d7a755..7b4eff84679f9164cc896c91b0d45fd4
  `text`, `title`, and `warning` share `maxChars`, including their content wrappers.
  Titles and warnings retain at most 256 characters each, with a combined wrapped
  allowance of at most 512 characters and half of `maxChars`. Warnings take priority
+diff --git a/extensions/active-memory/index.search-snippet.test-support.ts b/extensions/active-memory/index.search-snippet.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ce8f624af18320b4f1949d860ac52e95b79a50c8
+--- /dev/null
++++ b/extensions/active-memory/index.search-snippet.test-support.ts
+@@ -0,0 +1,215 @@
++import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
++import type { SessionTranscriptTargetParams } from "openclaw/plugin-sdk/session-transcript-runtime";
++import { expect, it, vi } from "vitest";
++import type { ToolEvidenceHarness } from "./index.tool-evidence.test-support.js";
++import * as recallRun from "./recall-run.js";
++import * as recall from "./recall.js";
++
++// Reuse the registered hook's existing provider and real SDK SQLite fixture.
++export function registerSearchSnippetTimeoutTests(harness: ToolEvidenceHarness): void {
++  const {
++    testing,
++    hoisted,
++    runEmbeddedAgent,
++    registerPluginConfig,
++    seedSession,
++    writeRuntimeTranscript,
++    waitForAbort,
++    runPromptBuild,
++    requirePrependContext,
++    getInfoLines,
++  } = harness;
++  const unpairedSurrogate =
++    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
++
++  it.each([
++    "callback",
++    "transcript",
++    "ordered",
++    "large",
++    "unknown",
++    "failed",
++    "unavailable",
++    "denied",
++    "parent-abort",
++    "closed-authority",
++  ] as const)("preserves search snippet timeout evidence for %s", async (mode) => {
++    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
++    testing.setMinimumTimeoutMsForTests(1);
++    testing.setSetupGraceTimeoutMsForTests(0);
++    testing.setTimeoutPartialDataGraceMsForTests(50);
++    registerPluginConfig({ timeoutMs: 100, logging: true });
++    const sessionRuntime = await vi.importActual<
++      typeof import("openclaw/plugin-sdk/session-store-runtime")
++    >("openclaw/plugin-sdk/session-store-runtime");
++    const transcriptRuntime = await vi.importActual<
++      typeof import("openclaw/plugin-sdk/session-transcript-runtime")
++    >("openclaw/plugin-sdk/session-transcript-runtime");
++    hoisted.patchSessionEntry.mockImplementationOnce(sessionRuntime.patchSessionEntry);
++    hoisted.cleanupSessionLifecycleArtifacts.mockImplementationOnce(
++      sessionRuntime.cleanupSessionLifecycleArtifacts,
++    );
++    const parent = new AbortController();
++    if (mode === "parent-abort") {
++      const resolveRecall = recall.maybeResolveActiveRecall;
++      vi.spyOn(recall, "maybeResolveActiveRecall").mockImplementation((params) =>
++        resolveRecall({
++          ...params,
++          abortSignal: AbortSignal.any([
++            ...(params.abortSignal ? [params.abortSignal] : []),
++            parent.signal,
++          ]),
++        }),
++      );
++    }
++    const run = vi.spyOn(recallRun, "runRecallSubagent");
++    const sessionKey = `agent:main:search-snippet-${mode}`;
++    seedSession(sessionKey, `s-search-snippet-${mode}`, 0);
++    const written = createDeferred<SessionTranscriptTargetParams>();
++    runEmbeddedAgent.mockImplementationOnce(
++      async (params: {
++        sessionTarget: SessionTranscriptTargetParams;
++        abortSignal?: AbortSignal;
++        onAgentToolResult?: (event: {
++          toolName: string;
++          result: unknown;
++          isError: boolean;
++        }) => void;
++      }) => {
++        const snippet =
++          mode === "large"
++            ? `Selected model remains Sol 6.1 at Maximum. ${"🎉".repeat(18_000)}TAIL`
++            : "Selected model remains Sol 6.1 at Maximum.";
++        const results =
++          mode === "unknown"
++            ? [{ opaque: "PUBLIC_UNKNOWN_SHAPE", snippet: 42 }]
++            : mode === "ordered"
++              ? [
++                  { path: "memory/first.md", snippet: "First ranked candidate." },
++                  { path: "memory/second.md", snippet: "Second ranked candidate." },
++                ]
++              : [
++                  {
++                    path: "memory/decision.md",
++                    startLine: 32,
++                    endLine: 36,
++                    score: 0.7001361191272735,
++                    vectorScore: 0.5716230273246765,
++                    textScore: 0.8604869493109811,
++                    snippet,
++                    source: "memory",
++                  },
++                ];
++        const content = [{ type: "text", text: JSON.stringify({ results }, null, 2) }];
++        const result = { content, details: { text: "PRIVATE_RUNTIME_DETAILS" } };
++        if (mode !== "transcript") {
++          params.onAgentToolResult?.({
++            toolName: "memory_search",
++            result,
++            isError: mode === "failed",
++          });
++        }
++        const records: Parameters<typeof writeRuntimeTranscript>[0] =
++          mode === "callback"
++            ? []
++            : [
++                {
++                  message: {
++                    role: "toolResult",
++                    toolName: "memory_search",
++                    ...result,
++                    isError: mode === "failed",
++                  },
++                },
++              ];
++        if (mode === "unavailable") {
++          const unavailable = { content: [{ type: "text", text: '{"disabled":true}' }] };
++          params.onAgentToolResult?.({
++            toolName: "memory_search",
++            result: unavailable,
++            isError: false,
++          });
++          records.push({
++            message: {
++              role: "toolResult",
++              toolName: "memory_search",
++              content: unavailable.content,
++              isError: false,
++            },
++          });
++        }
++        written.resolve(await writeRuntimeTranscript(records, params.sessionTarget));
++        return await waitForAbort(params.abortSignal);
++      },
++    );
++    let authorityActive = true;
++    const resultPromise = runPromptBuild(
++      { prompt: `Which model did I choose? search snippet ${mode}` },
++      {
++        sessionKey,
++        toolAuthority: {
++          fingerprint: `search-snippet-${mode}`,
++          allows: (tool: string) => mode !== "denied" || tool !== "memory_search",
++          assertActive: () => {
++            if (!authorityActive) {
++              throw new Error("turn authority closed");
++            }
++          },
++        },
++      },
++    );
++    const target = await written.promise;
++    if (mode === "closed-authority") {
++      authorityActive = false;
++    }
++    if (mode === "parent-abort") {
++      parent.abort(new Error("owner cancelled recall"));
++    }
++    try {
++      await vi.advanceTimersByTimeAsync(100);
++      const result = await resultPromise;
++      if (["failed", "unavailable", "denied", "parent-abort", "closed-authority"].includes(mode)) {
++        expect(result).toBeUndefined();
++      } else {
++        const context = requirePrependContext(result);
++        expect(context).toContain("Retrieved memory_search result:");
++        expect(context).not.toContain("PRIVATE_RUNTIME_DETAILS");
++        if (mode === "unknown") {
++          expect(context).toContain("PUBLIC_UNKNOWN_SHAPE");
++        } else if (mode === "ordered") {
++          expect(context).toContain("First ranked candidate.");
++          expect(context).toContain("Second ranked candidate.");
++          expect(context.indexOf("First ranked")).toBeLessThan(context.indexOf("Second ranked"));
++          expect(context).toContain("memory/first.md");
++          expect(context).toContain("memory/second.md");
++        } else {
++          expect(context).toContain("Selected model remains Sol 6.1 at Maximum.");
++          if (mode !== "large") {
++            expect(context).toContain("memory/decision.md");
++          }
++          expect(context).not.toContain("vectorScore");
++          expect(context).not.toContain("textScore");
++          expect(context).not.toContain("TAIL");
++        }
++        const size = Number(
++          /done status=timeout_partial.*summaryChars=(\d+)/.exec(getInfoLines())?.[1],
++        );
++        expect(size).toBeGreaterThan(0);
++        expect(size).toBeLessThanOrEqual(220);
++        const settled = await Promise.allSettled(run.mock.results.map(({ value }) => value));
++        const error = settled[0]?.status === "rejected" ? settled[0].reason : undefined;
++        expect(error?.activeMemoryPartialData.memoryToolText.length).toBeLessThanOrEqual(32_000);
++        expect(error?.activeMemoryPartialData.memoryToolText).not.toMatch(unpairedSurrogate);
++        expect(error?.activeMemoryPartialData.memoryToolText).not.toContain(
++          "PRIVATE_RUNTIME_DETAILS",
++        );
++      }
++      expect(runEmbeddedAgent).toHaveBeenCalledOnce();
++    } finally {
++      // Parent cancellation can return before the child finally joins cleanup.
++      await Promise.allSettled(run.mock.results.map(({ value }) => value));
++    }
++    expect(sessionRuntime.getSessionEntry(target)).toBeUndefined();
++    expect(await transcriptRuntime.readSessionTranscriptEvents(target)).toEqual([]);
++  });
++}
 diff --git a/extensions/active-memory/index.test.ts b/extensions/active-memory/index.test.ts
 index 1b97be5c3ab204e3e3afeeb4ca52b67575766e09..164098e260d49ecb39779dc14c640d516dbfdd8e 100644
 --- a/extensions/active-memory/index.test.ts
@@ -6343,20 +6564,21 @@ index 1b97be5c3ab204e3e3afeeb4ca52b67575766e09..164098e260d49ecb39779dc14c640d51
    it("keeps timeout status when the timeout transcript is empty", async () => {
 diff --git a/extensions/active-memory/index.tool-evidence.test-support.ts b/extensions/active-memory/index.tool-evidence.test-support.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..56dd9857dbab6342f80c941677ffd84b5501cfd4
+index 0000000000000000000000000000000000000000..f7ab86bb1692fab0de99f50bd8c4f1cb08c392b6
 --- /dev/null
 +++ b/extensions/active-memory/index.tool-evidence.test-support.ts
-@@ -0,0 +1,489 @@
+@@ -0,0 +1,491 @@
 +import fs from "node:fs/promises";
 +import path from "node:path";
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import type { SessionTranscriptTargetParams } from "openclaw/plugin-sdk/session-transcript-runtime";
 +import { expect, it, vi, type Mock } from "vitest";
 +import type { testing as activeMemoryTesting } from "./index.js";
++import { registerSearchSnippetTimeoutTests } from "./index.search-snippet.test-support.js";
 +import * as recallRun from "./recall-run.js";
 +import * as recall from "./recall.js";
 +
-+type ToolEvidenceHarness = {
++export type ToolEvidenceHarness = {
 +  testing: typeof activeMemoryTesting;
 +  hoisted: {
 +    patchSessionEntry: Mock;
@@ -6389,6 +6611,7 @@ index 0000000000000000000000000000000000000000..56dd9857dbab6342f80c941677ffd84b
 +// This registration stays inside the original describe and uses its configured
 +// public hook/provider fixture. SQLite/store/cleanup below are the actual SDK.
 +export function registerToolEvidenceTimeoutTests(harness: ToolEvidenceHarness): void {
++  registerSearchSnippetTimeoutTests(harness);
 +  const {
 +    testing,
 +    hoisted,
@@ -6887,7 +7110,7 @@ index 42076db1e519d2b14facbea0aae14c86de4ccae4..2dbb6dbf6baf5e37a69fae5894426673
          searchDebug: transcriptState.searchDebug,
          hasUnavailableMemorySearchResult:
 diff --git a/extensions/active-memory/transcript-result.ts b/extensions/active-memory/transcript-result.ts
-index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842999b9f8e 100644
+index d22e893719eb460766850663664d76e537ea54a5..8c2ae2a6ed725e2676a63942f31dac8b034e7f53 100644
 --- a/extensions/active-memory/transcript-result.ts
 +++ b/extensions/active-memory/transcript-result.ts
 @@ -26,6 +26,9 @@ import {
@@ -6908,7 +7131,7 @@ index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842
  } {
    const result = asOptionalRecord(params.result);
    const rawContent = result?.content;
-@@ -53,13 +57,107 @@ function readMemoryToolResultEvidence(params: {
+@@ -53,13 +57,121 @@ function readMemoryToolResultEvidence(params: {
        details: result?.details,
      },
    };
@@ -6935,18 +7158,32 @@ index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842
 +  if (eligible) {
 +    const visibleText = extractTextContent(record.message.content).trim();
 +    let sourceText = `Retrieved ${toolName} result:\n${visibleText}`;
-+    if (toolName === "memory_get") {
-+      // Resolve only the already model-visible memory_get payload. No runtime
-+      // details or candidate document wording becomes independent authority.
-+      try {
-+        const payload = asOptionalRecord(JSON.parse(visibleText));
++    // Resolve only the already model-visible payload. No runtime details or
++    // candidate document wording becomes independent authority.
++    try {
++      const payload = asOptionalRecord(JSON.parse(visibleText));
++      if (toolName === "memory_get") {
 +        const text = normalizeOptionalString(payload?.text);
 +        const source = normalizeOptionalString(payload?.path);
 +        if (text) {
 +          sourceText = `Retrieved memory_get${source ? ` (${source})` : ""} result:\n${text}`;
 +        }
-+      } catch {}
-+    }
++      } else if (Array.isArray(payload?.results)) {
++        // Keep ranked snippets ahead of score/line metadata in the bounded note.
++        const snippets = payload.results.flatMap((value) => {
++          const hit = asOptionalRecord(value);
++          const snippet = normalizeOptionalString(hit?.snippet);
++          if (!snippet) {
++            return [];
++          }
++          const source = normalizeOptionalString(hit?.path);
++          return [`${snippet}${source ? `\nSource: ${source}` : ""}`];
++        });
++        if (snippets.length > 0) {
++          sourceText = `Retrieved memory_search result:\n${snippets.join("\n")}`;
++        }
++      }
++    } catch {}
 +    if (visibleText) {
 +      modelVisibleEvidence = { toolName, text: sourceText };
 +    }
@@ -7022,7 +7259,7 @@ index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842
  }
  
  function extractAssistantTextFromSessionRecord(value: unknown): string {
-@@ -194,6 +292,9 @@ async function buildTimeoutRecallResult(
+@@ -194,6 +306,9 @@ async function buildTimeoutRecallResult(
      params.rawReply ??
      subagentPartialData.rawReply ??
      (await readPartialAssistantTextFromSources(params.transcriptSources));
@@ -7032,7 +7269,7 @@ index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842
    const transcriptState =
      params.transcriptSources.length > 0
        ? await readMergedActiveMemoryTranscriptState({
-@@ -204,7 +305,7 @@ async function buildTimeoutRecallResult(
+@@ -204,7 +319,7 @@ async function buildTimeoutRecallResult(
    const searchDebug =
      params.searchDebug ?? subagentPartialData.searchDebug ?? transcriptState?.searchDebug;
    const summary = normalizeGroundedSummary(
@@ -7041,7 +7278,7 @@ index d22e893719eb460766850663664d76e537ea54a5..a9fd137085f7ca4f3278a564c37e7842
      params.maxSummaryChars,
      params.hasUsableMemoryResult === true ||
        subagentPartialData.hasUsableMemoryResult === true ||
-@@ -263,12 +364,15 @@ function setTimeoutPartialDataGraceMsForTests(value: number): void {
+@@ -263,12 +378,15 @@ function setTimeoutPartialDataGraceMsForTests(value: number): void {
  }
  
  export {
