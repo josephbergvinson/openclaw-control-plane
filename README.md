@@ -14,7 +14,19 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway source reference is `eb0ae40d72f2004a83a484b89084f2f337239039`,
+The installed Gateway source reference is
+`2d8406b58affbeed037ec2d739704fa835d31e05`, tree
+`9448813217d29446d3a412bf0d594c08a39395a8`. Its 28-path successor covers complete
+meeting finalization, exact private-task transcript recovery and tool-aware
+owner-authorized host maintenance. The full normal build, staging, offline import
+and seal passed, followed by one activation at 21:50:10 UTC and independent
+same-generation health and protected-state readback. The generic policy template
+carries the original outcome through
+implementation, verification and authorized delivery. This public revision requires
+normal local qualification and all five exact-head hosted checks. See the
+[current runtime qualification](runtime/README.md#october-5-authorized-follow-through-and-complete-meeting-finalization).
+
+The preceding dated installed Gateway projection was `eb0ae40d72f2004a83a484b89084f2f337239039`,
 source tree `39a8e0354e4dcd6260ae3dfad88c1706d312c11b`. Its twelve-path
 successor lets explicitly repair-capable command jobs make one native repair
 attempt inside the original authority and deadline; a fresh deterministic command

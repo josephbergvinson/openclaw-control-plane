@@ -11,6 +11,55 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 5 authorized follow-through and complete meeting finalization
+
+Reference `2d8406b58affbeed037ec2d739704fa835d31e05`, tree
+`9448813217d29446d3a412bf0d594c08a39395a8`, changes 28 source paths
+since the dated `eb0` reference below. The Gateway and Node now load `2d`;
+one normal activation finished at 21:50:10 UTC, followed by an independent
+readback of the same loaded generations and protected state.
+
+Meeting finalization uses the complete retained, ordered utterances in bounded
+summary segments and reduces them into useful notes. The recording end is stamped
+before audio drains, and finalization receives the completed descriptor rather
+than a stale start snapshot. Summary jobs retain their own cancellation signal
+and are physically joined before retirement; delivery failure releases custody
+for a bounded retry without duplicating already accepted delivery. Stop and retry
+continue to join outstanding notes before propagating the original cleanup error.
+
+Private task history now resolves the exact execution transcript owned by the
+current task run and incarnation. It revalidates requester authority, lifecycle,
+store and cancellation before publishing each page. An unmatched private-owner
+record preserves the existing logical-session history route; it does not authorize
+reading another task's transcript.
+
+Control guidance uses the admitted tool catalog. An owner-authorized update can
+use the supported shell or repository activation route when exposed system tools
+cannot select the requested release. Code Mode JavaScript is not treated as shell
+access. An already accepted update must finish before another update or restart.
+The supported drain, resumable work, successor identity and health remain required.
+The generic policy template also retains the original requested outcome through
+triage, delegated steps, implementation, verification and authorized delivery;
+explicit review-only scope, other owners and no-merge/no-deploy holds still apply.
+
+Minutes qualification contains 100 named passing cases: 54 at the final source,
+six reused from the preceding revision and 40 unchanged cases from an earlier
+qualified revision. Its 36 normal gates comprise 32 fresh gates and four exact
+input reuses. Task-history recovery passed 24 cases and 31 normal gates. Control
+guidance and owner-update coverage passed its owning suites and 31 normal gates.
+Matched failing baselines and intervening failed checks remain preserved as dated
+evidence. Workspace policy passed 63 of 64 cases; its known loaded-lineage drift
+is retained rather than represented as a new all-green qualification.
+
+The complete normal runtime build, staged source parity, offline import and seal
+passed for `2d`. Activation, exact loaded generations, health/readiness and
+protected-state preservation also passed. Signed companions603 remain
+`470392c53831b43342ddf7795d04e41638742589`; their installation history is unchanged.
+UI54 is excluded. Current ordinary Chrome/Discord, live meeting summaries,
+protected-dialog access and latency acceptance remain unverified. This public revision requires
+normal local qualification and all five exact-head hosted checks. All earlier
+source and deployment qualification below is historical and preserved.
+
 ## October 5 command repair with deterministic verification
 
 Reference `eb0ae40d72f2004a83a484b89084f2f337239039`, tree
