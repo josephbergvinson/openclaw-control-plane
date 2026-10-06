@@ -14,7 +14,21 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway source reference is
+The current installed Gateway and Node source reference is
+`34ae633fbd5f5cf90277adb58eda2ba56d929bd8`, with separately qualified native parent-task
+context and original-outcome completion protocol. See the
+[current source qualification](runtime/README.md#october-6-native-parent-task-context-and-completion-protocol).
+Normal activation and exact loaded-generation readback are separate from ordinary
+account, browser, Discord and task acceptance; all nineteen outcomes remain open.
+
+The dated predecessor installed Gateway and Node source reference was
+`1214d0ff7999bfbf0b548701d5ae6a9486236b6a`, with separately qualified original-task
+continuation and requester tool recovery. See the
+[dated predecessor source qualification](runtime/README.md#october-6-original-task-continuation-and-requester-tool-recovery).
+Normal activation and exact loaded-generation readback are separate from ordinary
+account, browser, Discord and task acceptance; all nineteen outcomes remain open.
+
+The dated predecessor installed Gateway source reference was
 `2d8406b58affbeed037ec2d739704fa835d31e05`, tree
 `9448813217d29446d3a412bf0d594c08a39395a8`. Its 28-path successor covers complete
 meeting finalization, exact private-task transcript recovery and tool-aware
@@ -24,7 +38,7 @@ same-generation health and protected-state readback. The generic policy template
 carries the original outcome through
 implementation, verification and authorized delivery. This public revision requires
 normal local qualification and all five exact-head hosted checks. See the
-[current runtime qualification](runtime/README.md#october-5-authorized-follow-through-and-complete-meeting-finalization).
+[dated predecessor runtime qualification](runtime/README.md#october-5-authorized-follow-through-and-complete-meeting-finalization).
 
 The preceding dated installed Gateway projection was `eb0ae40d72f2004a83a484b89084f2f337239039`,
 source tree `39a8e0354e4dcd6260ae3dfad88c1706d312c11b`. Its twelve-path
