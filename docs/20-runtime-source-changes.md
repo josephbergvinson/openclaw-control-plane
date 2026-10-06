@@ -13,7 +13,45 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 6 original-task restart and scheduled-context continuity
+
+The current installed Gateway and Node use source `57b8a6d654649d3efa13d44a0fe9e3212188c440`
+(tree `efcb1afe3cd6c037e15abc703a08e86baca230e5`). One normal full build, stage and seal,
+followed by one actual native activation and independent loaded-generation health
+and protected-state readback, passed. The dated `18873a6` command-repair installation
+is retained between the published `34ae633` predecessor and this deployment.
+Signed companions 603 remain `470392`; UI54 is excluded.
+
+This 24-path successor keeps the original private CUI conversation and durable
+adoption when a successful update carries an internal agent turn. Accepted restart
+interruption flows through the existing cron and run-loop cancellation owners.
+Scheduled work receives the full eligible bootstrap unless `lightContext: true`
+is explicitly selected; command-shaped wording no longer removes task instructions.
+Bounded command repairs retain the original repair session/phase and fixed wall deadline.
+Ordinary diagnostics, requester/session identity, private routing, unknown effects
+and explicit operator choices keep their existing boundaries.
+
+The final source has 247 passing internal-restart fixture observations, 124 passing
+eligible-bootstrap observations and 559 retained passing typed-restart observations.
+These overlapping groups are not a unique combined case count. Earlier 683 composed
+observations and their 18 original failures remain dated evidence; final fixture-only
+corrections preserve the selected case identities. 31 normal source checks passed,
+including all 20 default core-test type graphs. The graph count is separate from
+functional cases. The public workflow also retains the existing jobs and adds the
+whole owning restart/context fixtures to its existing regression step.
+
+The fixture evidence uses synthetic model and restart-interruption boundaries;
+installation and health do not prove live task completion or provider access.
+All 19 original ordinary-use outcomes remain open, including account actions,
+attachments, meeting notes, interrupted no-child work, original completion delivery
+and current-process capture. Source/local checks do not substitute for all five
+fresh hosted jobs on this public revision. The complete preceding qualification,
+activation chain and live-acceptance gap rows remain preserved below.
+
 ## October 6 native parent-task context and completion protocol
+
+This section records the dated34ae predecessor qualification and installation.
+Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.
 
 Native task and command results retain the original conversation and execution
 context while authorized parent work remains unfinished. The existing wake owner
