@@ -11,7 +11,38 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 6 native parent-task context and completion protocol
+
+Native task and command results retain the original conversation and execution
+context while authorized parent work remains unfinished. The existing wake owner
+admits only the captured task, command and reminder occurrences for that queue;
+foreign and later events remain separate. Continuations use ordinary task context,
+model and budget, and exclude monitor-only scratch or ignore-old-task instructions.
+
+Mixed admitted continuations retain their exact due-job list. Monitor-only turns
+keep their existing isolation and quiet completion rules. A genuine completed
+public original-task outcome uses the existing response owner; private results
+stay internal, and quiet completion applies only when no original work or
+substantive result is owed. No authority or tool-stack bypass is introduced.
+
+Five whole-file fixtures record 168 passing case observations, separate from one
+complete fresh 31-check normal source qualification, including the core graph and
+all 20 default core-test type graphs. The requester-recovery fixture correction
+adds one preceding test-only path; the remaining nine paths change the existing
+continuation owners and fixtures. Reporter-truncated case names and injected
+model/host boundaries are recorded in the manifest. Earlier 40, 91, 104, 82 and 93
+component results and their 34/31-check qualifications remain dated evidence below.
+
+The new normal full build, stage, seal, activation and independent same-generation
+health and protected-state readback are bound separately in the manifest. Source
+qualification and installation do not establish ordinary account, browser,
+Discord, meeting or latency acceptance. All nineteen original outcomes remain
+open; UI54 is excluded and signed companions 603 remain unchanged.
+
 ## October 6 original-task continuation and requester tool recovery
+
+This section records the dated1214 predecessor qualification and installation.
+Its observations describe that earlier deployment, before the native parent-task context successor.
 
 The successor keeps the original task active across parent recovery, nested and
 private child completion, requester authorization and asynchronous command results.
