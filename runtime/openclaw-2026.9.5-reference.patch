@@ -70037,10 +70037,10 @@ index 6af3cc157b7de0b8c49e05ed2b34ad64c338cbd5..9afd1e58557250115ed5744cff1adb11
        async () => {
 diff --git a/src/agents/mcp-oauth.requester-recovery.test.ts b/src/agents/mcp-oauth.requester-recovery.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b64f1ff261
+index 0000000000000000000000000000000000000000..1a3cf940de60e340d2cde9396b8138a5dfffc034
 --- /dev/null
 +++ b/src/agents/mcp-oauth.requester-recovery.test.ts
-@@ -0,0 +1,461 @@
+@@ -0,0 +1,524 @@
 +import { expectDefined } from "@openclaw/normalization-core";
 +import { beforeEach, describe, expect, it, vi } from "vitest";
 +import { getPluginToolMeta } from "../plugins/tool-metadata.js";
@@ -70051,7 +70051,14 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +  createRequesterMcpConnect,
 +  mergeMcpConnectCatalog,
 +} from "./agent-bundle-mcp-requester-connect.js";
-+import { SESSION_MCP_RUNTIME_MANAGER_KEY } from "./agent-bundle-mcp-runtime-shared.js";
++import {
++  captureMcpRequesterConnectRefreshCurrent,
++  sessionMcpRuntimeOwners,
++} from "./agent-bundle-mcp-runtime-owner.js";
++import {
++  SESSION_MCP_RUNTIME_MANAGER_KEY,
++  type CreateSessionMcpRuntime,
++} from "./agent-bundle-mcp-runtime-shared.js";
 +import type {
 +  McpToolCatalog,
 +  RequesterMcpConnect,
@@ -70383,8 +70390,11 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +        const otherBefore = readMcpOAuthStore(otherIdentity.storeKey);
 +        const singleton = globalThis as Record<PropertyKey, unknown>;
 +        const previous = singleton[SESSION_MCP_RUNTIME_MANAGER_KEY];
-+        const manager = createSessionMcpRuntimeManager({
-+          createRuntime: (params) => ({
++        const runtimes: SessionMcpRuntime[] = [];
++        function createRuntime(params: Parameters<CreateSessionMcpRuntime>[0]): SessionMcpRuntime {
++          let current = true;
++          let activeLeases = 0;
++          const runtime: SessionMcpRuntime = {
 +            ...cachedRuntime(
 +              params.requesterConnect,
 +              params.includeServerNames?.has(serverName) ? cachedToolName : undefined,
@@ -70395,8 +70405,49 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +            agentDir: params.agentDir,
 +            requesterScope: params.requesterScope,
 +            configFingerprint: params.configFingerprint ?? "fixture-config",
-+          }),
-+        });
++            get activeLeases() {
++              return activeLeases;
++            },
++            acquireLease: () => {
++              activeLeases += 1;
++              let released = false;
++              return () => {
++                if (!released) {
++                  released = true;
++                  activeLeases -= 1;
++                }
++              };
++            },
++            dispose: async () => {
++              current = false;
++              sessionMcpRuntimeOwners.delete(runtime);
++            },
++          };
++          // The real manager owns successor generations; this fixture supplies
++          // the runtime lifecycle witness that its production factory registers.
++          sessionMcpRuntimeOwners.set(runtime, {
++            hasServers: () =>
++              current && Object.keys(runtime.peekCatalog()?.servers ?? {}).length > 0,
++            isCurrent: () => current,
++            replace: createRuntime,
++            reload: async () => {
++              current = false;
++            },
++            retireUnusedServers: async (retainedServerNames) => {
++              if (
++                Object.keys(runtime.peekCatalog()?.servers ?? {}).some(
++                  (name) => !retainedServerNames.has(name),
++                )
++              ) {
++                current = false;
++              }
++            },
++          });
++          runtimes.push(runtime);
++          return runtime;
++        }
++        const manager = createSessionMcpRuntimeManager({ createRuntime });
++        let recoveryCurrent: (() => boolean) | undefined;
 +        singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = manager;
 +        const params = {
 +          sessionId: "previously-authenticated",
@@ -70424,6 +70475,10 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +          try {
 +            expect(recovery?.tools).toHaveLength(2);
 +            expect(recovery?.advertisedTools).toHaveLength(2);
++            const recoveryRuntime = expectDefined(runtimes.at(-1), "recovery runtime");
++            recoveryCurrent = captureMcpRequesterConnectRefreshCurrent(recoveryRuntime);
++            expect(recoveryCurrent()).toBe(true);
++            expect(recoveryRuntime.activeLeases).toBe(1);
 +            const restricted = await materializeRequesterScopedMcpToolsForHarnessRunCore({
 +              ...params,
 +              toolsAllow: [`calendar__${cachedToolName}`],
@@ -70435,6 +70490,8 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +              `calendar__${cachedToolName}`,
 +            ]);
 +            await restricted?.dispose();
++            expect(recoveryCurrent()).toBe(true);
++            expect(recoveryRuntime.activeLeases).toBe(1);
 +            const remote = recovery!.tools.find(
 +              (tool) => getPluginToolMeta(tool)?.mcp?.oauthConnectBootstrap !== true,
 +            )!;
@@ -70461,6 +70518,8 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +            await expect(bootstrap.execute("native-reconnect", {})).resolves.toMatchObject({
 +              content: [{ text: expect.stringContaining("is connected") }],
 +            });
++            expect(recoveryCurrent()).toBe(true);
++            expect(sessionMcpRuntimeOwners.has(recoveryRuntime)).toBe(false);
 +            expect(authMock).toHaveBeenCalledOnce();
 +            expect(readMcpOAuthStore(identity.storeKey)).toMatchObject({
 +              clientInformation: { client_id: "alice-client" },
@@ -70497,6 +70556,10 @@ index 0000000000000000000000000000000000000000..f83b960238e909d07c4ef4e98d6822b6
 +          } else {
 +            singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = previous;
 +          }
++          if (recoveryCurrent) {
++            expect(recoveryCurrent()).toBe(false);
++          }
++          expect(runtimes.every((runtime) => runtime.activeLeases === 0)).toBe(true);
 +        }
 +      }, tempOptions);
 +    },
@@ -140425,10 +140488,20 @@ index 4c744aa1bffd330b5076abbd8a608dcded3f72fb..42334db1b99beb89005b760886f6a614
    const nonce = crypto.randomBytes(16).toString("hex");
    const ts = Date.now();
 diff --git a/src/infra/heartbeat-events-filter.test.ts b/src/infra/heartbeat-events-filter.test.ts
-index 5a6c119fb564cebb110446056e70ce5b64ae54a1..84b546fc8eebb67140464e2c358f9dac737a4df7 100644
+index 5a6c119fb564cebb110446056e70ce5b64ae54a1..588fe7e7f7f67cb1dec2ce723c2ab2e572243bc6 100644
 --- a/src/infra/heartbeat-events-filter.test.ts
 +++ b/src/infra/heartbeat-events-filter.test.ts
-@@ -63,26 +63,42 @@ describe("heartbeat event prompts", () => {
+@@ -56,6 +56,9 @@ describe("heartbeat event prompts", () => {
+         "Uploaded file",
+         "Please relay the command output to the user",
+         "If it failed",
++        "continue any remaining authorized work",
++        "existing kept child session or native wait/yield owner",
++        "completed original-task outcome",
+       ],
+       unexpected: ["system messages above", "Handle the result internally"],
+     },
+@@ -63,26 +66,42 @@ describe("heartbeat event prompts", () => {
        name: "builds internal-only exec prompt when delivery is disabled",
        events: ["Exec failed (node=abc id=123, code 1)\nUpload failed"],
        opts: { deliverToUser: false },
@@ -140476,7 +140549,35 @@ index 5a6c119fb564cebb110446056e70ce5b64ae54a1..84b546fc8eebb67140464e2c358f9dac
      },
      {
        name: "reports metadata-only failed exec completions without asking for logs",
-@@ -127,6 +143,146 @@ describe("heartbeat event prompts", () => {
+@@ -92,6 +111,9 @@ describe("heartbeat event prompts", () => {
+         "without captured stdout/stderr",
+         "include the exit status or signal",
+         "Do not ask the user to provide missing logs",
++        "continue any remaining authorized work",
++        "existing kept child session or native wait/yield owner",
++        "completed original-task outcome",
+       ],
+       unexpected: ["Please relay the command output to the user"],
+     },
+@@ -105,6 +127,17 @@ describe("heartbeat event prompts", () => {
+     }
+   });
+ 
++  it.each([
++    "Exec completed (current-output, code 0) :: Build passed",
++    "Exec failed (current-failure, code 2)",
++  ])("preserves original outcome response-tool protocol for %s", (event) => {
++    const prompt = buildExecEventPrompt([event], { useHeartbeatResponseTool: true });
++    expect(prompt).toContain("continue any remaining authorized work");
++    expect(prompt).toContain("heartbeat_respond");
++    expect(prompt).toContain("notify=true");
++    expect(prompt).toContain("notify=false");
++  });
++
+   it("truncates oversized user-relay exec prompt output", () => {
+     const prompt = buildExecEventPrompt([`Exec finished: ${"x".repeat(8_100)}`]);
+ 
+@@ -127,6 +160,149 @@ describe("heartbeat event prompts", () => {
      expect(prompt).toContain("notify=false");
      expect(prompt).not.toContain("HEARTBEAT_OK");
    });
@@ -140618,13 +140719,16 @@ index 5a6c119fb564cebb110446056e70ce5b64ae54a1..84b546fc8eebb67140464e2c358f9dac
 +      "Exec failed (missing-failure, code 2) without captured stdout/stderr",
 +    );
 +    expect(prompt).toContain("Tell the user the command completed without captured output");
++    expect(prompt).toContain("continue any remaining authorized work");
++    expect(prompt).toContain("existing kept child session or native wait/yield owner");
++    expect(prompt).toContain("completed original-task outcome");
 +    expect(prompt).not.toContain("user delivery is disabled");
 +  });
  });
  
  describe("heartbeat event classification", () => {
 diff --git a/src/infra/heartbeat-events-filter.ts b/src/infra/heartbeat-events-filter.ts
-index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79c43aec12 100644
+index e41d8680b52f7f64c618f0067affb68e0d43416d..94775218dc2cd6c715769267b8178892d0fcf3ef 100644
 --- a/src/infra/heartbeat-events-filter.ts
 +++ b/src/infra/heartbeat-events-filter.ts
 @@ -50,7 +50,10 @@ export function isRelayableExecCompletionEvent(evt: string): boolean {
@@ -140652,7 +140756,7 @@ index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79
      return [
        `Exec ${parsed.action} (${parsed.id}, ${parsed.result}) without captured stdout/stderr.`,
      ];
-@@ -116,28 +119,41 @@ export function buildExecEventPrompt(
+@@ -116,45 +119,60 @@ export function buildExecEventPrompt(
  ): string {
    const deliverToUser = opts?.deliverToUser ?? true;
    const useHeartbeatResponseTool = opts?.useHeartbeatResponseTool ?? false;
@@ -140686,6 +140790,12 @@ index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79
 -        "Do not mention, summarize, or reuse command output."
 -      );
 -    }
+-    return (
+-      "An async command completion event was triggered, but user delivery is disabled for this run. " +
+-      `Handle the result internally and reply ${SILENT_REPLY_TOKEN} only. Do not mention, summarize, or reuse command output.`
+-    );
+-  }
+-  if (hasMissingOutputFailure) {
 +      ? deliverToUser
 +        ? "Report a genuinely completed original-task outcome through heartbeat_respond with notify=true. When no original work remains owed and no substantive original-task result remains to report, record this wake's internal outcome with notify=false."
 +        : "When no original work remains owed, use heartbeat_respond to record this wake's internal outcome with notify=false."
@@ -140693,8 +140803,11 @@ index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79
 +        ? `Reply ${SILENT_REPLY_TOKEN} only when no original work remains owed and no substantive original-task result remains to report.`
 +        : `Reply ${SILENT_REPLY_TOKEN} only when no original work remains owed.`;
      return (
--      "An async command completion event was triggered, but user delivery is disabled for this run. " +
--      `Handle the result internally and reply ${SILENT_REPLY_TOKEN} only. Do not mention, summarize, or reuse command output.`
+-      "An async command you ran earlier completed without captured stdout/stderr. The completion details are:\n\n" +
+-      eventText +
+-      "\n\n" +
+-      "Tell the user the command completed without captured output and include the exit status or signal. " +
+-      "Do not ask the user to provide missing logs, and do not try to retrieve logs from an exec/session id."
 +      "An async command completion event was triggered" +
 +      (deliverToUser
 +        ? ", but there is no current command output to relay. "
@@ -140712,9 +140825,31 @@ index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79
 +      completionInstruction
      );
    }
-   if (hasMissingOutputFailure) {
++  const completionDescription = hasMissingOutputFailure
++    ? "An async command you ran earlier completed without captured stdout/stderr. The completion details are:\n\n"
++    : "An async command you ran earlier has completed. The command completion details are:\n\n";
++  const reportInstruction = hasMissingOutputFailure
++    ? "Tell the user the command completed without captured output and include the exit status or signal. " +
++      "Do not ask the user to provide missing logs, and do not try to retrieve logs from an exec/session id. "
++    : "Please relay the command output to the user where relevant. If it failed, explain what went wrong. ";
+   return (
+-    "An async command you ran earlier has completed. The command completion details are:\n\n" +
++    completionDescription +
+     eventText +
+     "\n\n" +
+-    "Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
+-    "If it failed, explain what went wrong."
++    reportInstruction +
++    "A completed command does not complete unfinished original work. Use it to continue any remaining authorized work. " +
++    "If waiting, retain the existing kept child session or native wait/yield owner. " +
++    (useHeartbeatResponseTool
++      ? "Report the completed original-task outcome via heartbeat_respond (notify=true), or notify=false when no work or result remains owed."
++      : "Report the completed original-task outcome through the existing response route.")
+   );
+ }
+ 
 diff --git a/src/infra/heartbeat-runner-execution.ts b/src/infra/heartbeat-runner-execution.ts
-index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..edab46735e665175d4e6ba219858efbd8c870159 100644
+index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..e5883d092fc67112b560fbb87143e3dc39447f1f 100644
 --- a/src/infra/heartbeat-runner-execution.ts
 +++ b/src/infra/heartbeat-runner-execution.ts
 @@ -297,6 +297,13 @@ export async function resolveHeartbeatWakeStage(opts: HeartbeatRunOptions) {
@@ -140731,8 +140866,213 @@ index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..edab46735e665175d4e6ba219858efbd
    const isReplyRunActive =
      opts.deps?.isReplyRunActive ?? ((key: string) => replyRunRegistry.isActive(key));
    if (isReplyRunActive(sessionKey) || hasActiveRunForSession(sessionKey, listActiveEmbeddedRuns)) {
+@@ -332,9 +339,10 @@ export async function prepareHeartbeatRunStage(wake: ReadyHeartbeatWake) {
+   const { cfg, agentId, heartbeat, preflight } = wake;
+   const { scheduledTasks, startedAt } = wake;
+   const { listActiveEmbeddedRuns, isReplyRunActive } = wake;
+-  const { entry, sessionKey, run, conversationEntry } = preflight.session;
++  const { entry, sessionKey, run: selectedRun, conversationEntry } = preflight.session;
+   const previousUpdatedAt = entry?.updatedAt;
+-  const projectionSessionKey = run.kind === "isolated" ? run.baseSessionKey : sessionKey;
++  const projectionSessionKey =
++    selectedRun.kind === "isolated" ? selectedRun.baseSessionKey : sessionKey;
+   // Capture the client-owned generation before routing can await. The inspected
+   // completion queue owns publication eligibility, not the coalesced wake source.
+   const projectionCandidate =
+@@ -356,19 +364,16 @@ export async function prepareHeartbeatRunStage(wake: ReadyHeartbeatWake) {
+         }
+       : undefined;
+ 
+-  // When isolatedSession is enabled, create a fresh session via the same
+-  // pattern as cron sessionTarget: "isolated". This gives the heartbeat
+-  // a new session ID (empty transcript) each run, avoiding the cost of
+-  // sending the full conversation history (~100K tokens) to the LLM.
+-  // Delivery routing uses the selected conversation, not the fresh execution row.
++  // Monitor isolation uses a fresh execution row. Task continuations retain
++  // their selected history below; delivery still uses the selected conversation.
+   const delivery = await resolveHeartbeatDeliveryTargetWithSessionRoute({
+     cfg,
+     agentId,
+     entry: conversationEntry,
+     heartbeat,
+     currentSessionKey: sessionKey,
+-    // A base queue's route stays excluded; events on the actual isolated queue
+-    // own their route, including exec completion after the base route moves.
++    // Only the admitted snapshot owns its event route, including a native task
++    // on the base queue or an isolated completion after the base route moves.
+     turnSource: preflight.session.inspectsRunQueue
+       ? preflight.turnSourceDeliveryContext
+       : undefined,
+@@ -441,9 +446,17 @@ export async function prepareHeartbeatRunStage(wake: ReadyHeartbeatWake) {
+     useHeartbeatResponseTool: useHeartbeatResponseToolPrompt,
+   });
+ 
++  // A completion resumes its selected queue's task history; monitor isolation
++  // must not mint an empty transcript or retire that task's reusable runtime.
++  const run = heartbeatRunPrompt.hasTaskContinuation
++    ? ({ kind: "shared", sessionKey } as const)
++    : selectedRun;
+   const runSessionKey = run.sessionKey;
+   let runSessionEntry = entry;
+-  let outboundPolicySessionKey: string | undefined;
++  let outboundPolicySessionKey: string | undefined =
++    selectedRun.kind === "isolated" && selectedRun.baseSessionKey !== sessionKey
++      ? selectedRun.baseSessionKey
++      : undefined;
+   if (run.kind === "isolated") {
+     const { sessionKey: isolatedSessionKey, baseSessionKey: isolatedBaseSessionKey } = run;
+     const isolatedStorePath = preflight.session.storePath;
+@@ -550,6 +563,7 @@ export async function prepareHeartbeatRunStage(wake: ReadyHeartbeatWake) {
+   return {
+     kind: "ready",
+     ...preflight.session,
++    run,
+     previousUpdatedAt,
+     policySessionEntry:
+       outboundPolicySessionKey && (outboundPolicySessionKey !== sessionKey || !entry)
+diff --git a/src/infra/heartbeat-runner-prompt.ts b/src/infra/heartbeat-runner-prompt.ts
+index fb7f65abca4b80c1ea23fee81c799661dee394e6..4447534fd687bfc7f200c3fe40918f8af20160a7 100644
+--- a/src/infra/heartbeat-runner-prompt.ts
++++ b/src/infra/heartbeat-runner-prompt.ts
+@@ -93,16 +93,34 @@ export async function resolveHeartbeatPreflight(params: {
+     source: params.source,
+     reason: params.reason,
+   });
+-  const session = resolveHeartbeatSessionSelection(
++  const selectedSession = resolveHeartbeatSessionSelection(
+     params.cfg,
+     params.agentId,
+     params.heartbeat,
+     params.sessionKey,
+   );
+-  const pendingEventEntries = selectAgentSystemEvents(
+-    peekSystemEventEntries(session.sessionKey),
++  const selectedEntries = selectAgentSystemEvents(
++    peekSystemEventEntries(selectedSession.sessionKey),
+     params.agentId,
+   ).filter((event) => !isHeartbeatDeliveryAwarenessEvent(event));
++  // Native task results resume their original owner even when monitors use an
++  // isolated session. Admit only the captured task/dedicated-event occurrences;
++  // unrelated base notifications and late arrivals keep their queue ownership.
++  const admitsBaseTaskEvents =
++    !selectedSession.inspectsRunQueue &&
++    (wakeFlags.isWakePayload || wakeFlags.isExecEventWake || wakeFlags.isCronWake) &&
++    selectedEntries.some((event) => event.contextKey?.startsWith("task:"));
++  const pendingEventEntries = admitsBaseTaskEvents
++    ? selectedEntries.filter(
++        (event) =>
++          event.contextKey?.startsWith("task:") ||
++          isExecCompletionEvent(event.text) ||
++          event.contextKey?.startsWith("cron:"),
++      )
++    : selectedEntries;
++  const session = admitsBaseTaskEvents
++    ? { ...selectedSession, inspectsRunQueue: true }
++    : selectedSession;
+   const turnSourceDeliveryContext = resolveSystemEventDeliveryContext(pendingEventEntries);
+   const hasTaggedCronEvents = pendingEventEntries.some((event) =>
+     event.contextKey?.startsWith("cron:"),
+@@ -235,6 +253,9 @@ export function resolveHeartbeatRunPrompt(params: {
+       if (params.preflight.shouldInspectPendingEvents) {
+         execEvents.push(event);
+       }
++    } else if (params.preflight.session.inspectsRunQueue && event.contextKey?.startsWith("task:")) {
++      // A coalesced cron source does not turn an original parent result into a reminder.
++      genericEvents.push(event);
+     } else if (params.preflight.isCronWake || event.contextKey?.startsWith("cron:")) {
+       (isCronSystemEvent(event.text) ? cronEvents : cronNoise).push(event);
+     } else {
+@@ -248,6 +269,25 @@ export function resolveHeartbeatRunPrompt(params: {
+   const hasBackgroundTaskEvent =
+     params.preflight.session.inspectsRunQueue &&
+     genericEvents.some((event) => event.contextKey?.startsWith("task:"));
++  const hasTaskContinuation = hasExecCompletion || hasBackgroundTaskEvent;
++  const taskCompletionInstruction = params.useHeartbeatResponseTool
++    ? params.canRelayToUser
++      ? "Use heartbeat_respond with notify=true for a completed original-task outcome. Use notify=false only when no original work or substantive result remains owed. If heartbeat_respond is unavailable, report the original-task outcome as reply text, or reply NO_REPLY only when no work or result remains owed."
++      : "When no original work remains owed, use heartbeat_respond with notify=false. If heartbeat_respond is unavailable, reply NO_REPLY only when no original work remains owed."
++    : params.canRelayToUser
++      ? "Reply NO_REPLY only when no original work remains owed and no substantive original-task result remains to report."
++      : "Reply NO_REPLY only when no original work remains owed.";
++  const taskContinuationPrompt = hasBackgroundTaskEvent
++    ? "Review the current delegated-task results in the system events and original conversation. " +
++      "A child result does not complete unfinished original work. Continue any remaining authorized parent work, including implementation, verification and activation where requested. " +
++      "If it must wait, retain the existing kept child session or native wait/yield owner before ending this turn. " +
++      (params.canRelayToUser
++        ? "Report the completed original-task outcome through the existing response route."
++        : "Handle the result internally. Do not relay it or notify the user from this wake.") +
++      " " +
++      taskCompletionInstruction
++    : "";
++  let periodicTaskPrompt = "";
+   if (params.scheduledTasks.length > 0) {
+     const taskList = params.scheduledTasks
+       .map((task) => `- ${task.name}: ${task.prompt}`)
+@@ -260,17 +300,23 @@ export function resolveHeartbeatRunPrompt(params: {
+ ${taskList}
+ 
+ ${completionInstruction}`;
+-    const prompt = appendHeartbeatScratch(taskPrompt, params.heartbeatScratchContent);
+-    return {
+-      prompt,
+-      hasTaskContinuation: hasBackgroundTaskEvent,
+-      hasExecCompletion: false,
+-      hasRelayableExecCompletion: false,
+-      hasCronEvents: false,
+-      usesHeartbeatResponseTool: params.useHeartbeatResponseTool,
+-      genericEvents,
+-      inspectedSystemEventsToConsume: cronNoise,
+-    };
++    if (!hasTaskContinuation) {
++      return {
++        prompt: appendHeartbeatScratch(taskPrompt, params.heartbeatScratchContent),
++        hasTaskContinuation: false,
++        hasExecCompletion: false,
++        hasRelayableExecCompletion: false,
++        hasCronEvents: false,
++        usesHeartbeatResponseTool: params.useHeartbeatResponseTool,
++        genericEvents,
++        inspectedSystemEventsToConsume: cronNoise,
++      };
++    }
++    // Combined requests retain both payloads; periodic quiet closeout must not
++    // replace the original task's continuation or completed-outcome delivery.
++    periodicTaskPrompt = `Also run the following due periodic tasks:
++
++${taskList}`;
+   }
+ 
+   const baseUsesHeartbeatResponseTool = params.useHeartbeatResponseTool;
+@@ -290,19 +336,18 @@ ${completionInstruction}`;
+             useHeartbeatResponseTool: baseUsesHeartbeatResponseTool,
+           },
+         )
+-      : baseUsesHeartbeatResponseTool
+-        ? resolveHeartbeatResponseToolPrompt(params.cfg, params.heartbeat)
+-        : resolveConfiguredHeartbeatPrompt(params.cfg, params.heartbeat);
++      : hasBackgroundTaskEvent
++        ? ""
++        : baseUsesHeartbeatResponseTool
++          ? resolveHeartbeatResponseToolPrompt(params.cfg, params.heartbeat)
++          : resolveConfiguredHeartbeatPrompt(params.cfg, params.heartbeat);
+   const basePromptWithDirectives = appendHeartbeatScratch(
+-    basePrompt,
+-    params.heartbeatScratchContent,
++    [basePrompt, taskContinuationPrompt, periodicTaskPrompt].filter(Boolean).join("\n\n"),
++    hasTaskContinuation ? undefined : params.heartbeatScratchContent,
+   );
+   return {
+     prompt: basePromptWithDirectives,
+-    hasTaskContinuation:
+-      hasExecCompletion ||
+-      hasBackgroundTaskEvent ||
+-      cronEvents.some((event) => event.contextKey?.startsWith("task:")),
++    hasTaskContinuation,
+     hasExecCompletion,
+     hasRelayableExecCompletion,
+     hasCronEvents,
 diff --git a/src/infra/heartbeat-runner-run.ts b/src/infra/heartbeat-runner-run.ts
-index 15671b9aad5b6c9a264e0331864d420084d91e35..e59a8ce9efadb3e5e1951490e6e7e342f400d50d 100644
+index 15671b9aad5b6c9a264e0331864d420084d91e35..cc3d580295ff8f9f064fb2e6c530d62401de1f2b 100644
 --- a/src/infra/heartbeat-runner-run.ts
 +++ b/src/infra/heartbeat-runner-run.ts
 @@ -118,7 +118,11 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
@@ -140748,11 +141088,297 @@ index 15671b9aad5b6c9a264e0331864d420084d91e35..e59a8ce9efadb3e5e1951490e6e7e342
            ...(prepared.usesHeartbeatResponseTool
              ? {
                  enableHeartbeatTool: true,
+@@ -131,7 +135,10 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
+           timeoutOverrideSeconds: prepared.hasTaskContinuation
+             ? undefined
+             : resolveHeartbeatTimeoutOverrideSeconds(cfg, heartbeat),
+-          bootstrapContextMode: heartbeat?.lightContext === true ? "lightweight" : undefined,
++          bootstrapContextMode:
++            !prepared.hasTaskContinuation && heartbeat?.lightContext === true
++              ? "lightweight"
++              : undefined,
+           disableBlockStreaming: true,
+           suppressToolProgressMessages: true,
+           suppressDefaultToolProgressMessages: true,
+diff --git a/src/infra/heartbeat-runner.event-routing.test.ts b/src/infra/heartbeat-runner.event-routing.test.ts
+index e4b0b4fef8608d7ed899585b24d2cb7f66993959..a50afb9d439edd5d222a627d591238a909314d0a 100644
+--- a/src/infra/heartbeat-runner.event-routing.test.ts
++++ b/src/infra/heartbeat-runner.event-routing.test.ts
+@@ -8,6 +8,7 @@ import { resolveMainSessionKey } from "../config/sessions/main-session.js";
+ import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
+ import { loadExactSessionEntryReadOnly } from "../config/sessions/session-accessor.js";
+ import { resetCronActiveJobs } from "../cron/active-jobs.js";
++import { resolveHeartbeatPreflight, resolveHeartbeatRunPrompt } from "./heartbeat-runner-prompt.js";
+ import { runHeartbeatOnce, startHeartbeatRunner } from "./heartbeat-runner.js";
+ import {
+   getFirstReplyContext,
+@@ -18,6 +19,7 @@ import {
+   withTempHeartbeatSandbox,
+ } from "./heartbeat-runner.test-utils.js";
+ import { requestHeartbeatAndWait, setHeartbeatWakeHandler } from "./heartbeat-wake.js";
++import { withSystemEventOwner } from "./system-event-ownership.js";
+ import { enqueueSystemEvent, peekSystemEvents, resetSystemEventsForTest } from "./system-events.js";
+ 
+ beforeEach(() => {
+@@ -91,6 +93,67 @@ describe("Heartbeat event routing", () => {
+     );
+   };
+ 
++  it.each([
++    { canRelayToUser: true, useHeartbeatResponseTool: false },
++    { canRelayToUser: true, useHeartbeatResponseTool: true },
++    { canRelayToUser: false, useHeartbeatResponseTool: false },
++    { canRelayToUser: false, useHeartbeatResponseTool: true },
++  ])(
++    "preserves parent closeout and private response policy for $canRelayToUser/$useHeartbeatResponseTool",
++    async ({ canRelayToUser, useHeartbeatResponseTool }) => {
++      await withTempHeartbeatSandbox(async ({ tmpDir, storePath }) => {
++        const cfg = createLastTargetConfig({ tmpDir, storePath });
++        const sessionKey = resolveMainSessionKey(cfg);
++        await seedSessionStore(storePath, sessionKey, { sessionId: "parent-task-session" });
++        enqueueSystemEvent("Review the child result and finish the original repair.", {
++          sessionKey,
++          contextKey: "task:parent-review",
++        });
++        const preflight = await resolveHeartbeatPreflight({
++          cfg,
++          agentId: "main",
++          sessionKey,
++          source: "background-task",
++        });
++        const resolved = resolveHeartbeatRunPrompt({
++          cfg,
++          preflight,
++          canRelayToUser,
++          startedAt: 0,
++          scheduledTasks: [],
++          heartbeatScratchContent:
++            "Monitor-only scratch instruction that must not displace parent work.",
++          useHeartbeatResponseTool,
++        });
++        expect(resolved.hasTaskContinuation).toBe(true);
++        expect(resolved.prompt).toContain("remaining authorized parent work");
++        expect(resolved.prompt).not.toContain("Monitor-only scratch");
++        expect(resolved.prompt).not.toContain("Do not infer or repeat old tasks");
++        if (useHeartbeatResponseTool) {
++          expect(resolved.prompt).toContain("heartbeat_respond");
++          expect(resolved.prompt).toContain("notify=false");
++          expect(resolved.prompt).toContain("unavailable");
++          if (canRelayToUser) {
++            expect(resolved.prompt).toContain("notify=true");
++          } else {
++            expect(resolved.prompt).not.toContain("notify=true");
++          }
++        } else {
++          expect(resolved.prompt).toContain(
++            "Reply NO_REPLY only when no original work remains owed",
++          );
++        }
++        if (!canRelayToUser) {
++          expect(resolved.prompt).toContain("Do not relay it or notify the user");
++        }
++        expect(resolved.genericEvents).toHaveLength(1);
++        expect(peekSystemEvents(sessionKey)).toEqual([
++          "Review the child result and finish the original repair.",
++        ]);
++      });
++    },
++  );
++
+   it("routes wake-triggered heartbeat replies using queued system-event delivery context", async () => {
+     await withTempHeartbeatSandbox(async ({ tmpDir, storePath, replySpy }) => {
+       const cfg: OpenClawConfig = createLastTargetConfig({ tmpDir, storePath });
+@@ -132,6 +195,110 @@ describe("Heartbeat event routing", () => {
+     });
+   });
+ 
++  it.each([
++    { source: "background-task", contextKey: "task:review" },
++    { source: "background-task-blocked", contextKey: "task:review:blocked-followup" },
++    { source: "hook", contextKey: "task:review" },
++  ] as const)(
++    "admits the original base task once through a $source wake",
++    async ({ source, contextKey }) => {
++      await withTempHeartbeatSandbox(async ({ tmpDir, storePath, replySpy }) => {
++        const cfg = createLastTargetConfig({ tmpDir, storePath, isolatedSession: true });
++        cfg.agents!.defaults!.heartbeat!.lightContext = true;
++        const sessionKey = resolveMainSessionKey(cfg);
++        await writeTelegramSessionStore(storePath, sessionKey, {
++          sessionId: "original-task-session",
++          lastTo: "-100999999",
++        });
++        const taskText =
++          "Delegated review finished. Continue the authorized repair and verification.";
++        const unrelatedText = "Unrelated base notification";
++        const foreignText = "Another agent's task result";
++        const lateText = "A task result arriving after the selected snapshot";
++        enqueueSystemEvent(unrelatedText, { sessionKey });
++        enqueueSystemEvent(
++          foreignText,
++          withSystemEventOwner({ sessionKey, contextKey: "task:foreign" }, "ops"),
++        );
++        enqueueSystemEvent(
++          taskText,
++          withSystemEventOwner(
++            {
++              sessionKey,
++              contextKey,
++              deliveryContext: { channel: "telegram", to: "-100155462274", threadId: 42 },
++            },
++            "main",
++          ),
++        );
++        let formatted: string | undefined;
++        replySpy.mockImplementation(async (ctx, options) => {
++          expect(ctx.SessionKey).toBe(sessionKey);
++          expect(ctx.Body).not.toContain("Do not infer or repeat old tasks from prior chats");
++          expect(ctx.Body).toContain("remaining authorized parent work");
++          expect(readSessionStoreForTest(storePath)[sessionKey]?.sessionId).toBe(
++            "original-task-session",
++          );
++          expect(options?.bootstrapContextMode).toBeUndefined();
++          expect(options).not.toHaveProperty("cleanupBundleMcpOnRunEnd");
++          const selected = getReplySystemEventContext(options);
++          expect(selected?.sessionKey).toBe(sessionKey);
++          expect(selected?.events?.map((event) => event.text)).toEqual([taskText]);
++          enqueueSystemEvent(
++            lateText,
++            withSystemEventOwner({ sessionKey, contextKey: "task:late" }, "main"),
++          );
++          formatted = await drainFormattedSystemEvents({
++            cfg,
++            agentId: "main",
++            sessionKey,
++            isMainSession: false,
++            isNewSession: false,
++            events: selected?.events ?? [],
++          });
++          return { text: "Original repair completed and verified." };
++        });
++        const sendTelegram = vi
++          .fn()
++          .mockResolvedValue({ messageId: "m1", chatId: "-100155462274" });
++        const runner = startHeartbeatRunner({
++          cfg,
++          runOnce: (options) =>
++            runHeartbeatOnce({
++              ...options,
++              cfg,
++              deps: { getReplyFromConfig: replySpy, telegram: sendTelegram, getQueueSize: () => 0 },
++            }),
++        });
++        try {
++          const result = await requestHeartbeatAndWait({
++            source,
++            intent: "immediate",
++            reason: source === "hook" ? "hook:coalesced-task-review" : source,
++            agentId: "main",
++            sessionKey,
++            coalesceMs: 0,
++          });
++          expect(result.status).toBe("ran");
++          expect(replySpy).toHaveBeenCalledTimes(1);
++          expect(formatted).toContain(taskText);
++          expect(formatted).not.toContain(unrelatedText);
++          expect(formatted).not.toContain(foreignText);
++          expect(formatted).not.toContain(lateText);
++          expect(peekSystemEvents(sessionKey)).toEqual([unrelatedText, foreignText, lateText]);
++          expectTelegramSend(sendTelegram, {
++            to: "-100155462274",
++            messageThreadId: 42,
++            text: "Original repair completed and verified.",
++          });
++          expect(readSessionStoreForTest(storePath)[`${sessionKey}:heartbeat`]).toBeUndefined();
++        } finally {
++          runner.stop();
++        }
++      });
++    },
++  );
++
+   it.each([
+     {
+       name: "base route",
+@@ -223,7 +390,7 @@ describe("Heartbeat event routing", () => {
+           messageThreadId: expectedThreadId,
+         });
+         expect(getFirstReplyContext(replySpy)).toMatchObject({
+-          SessionKey: isolatedKey,
++          SessionKey: queueKey,
+           InternalTurnSource: "exec",
+           InputProvenance: { kind: "internal_system", sourceTool: "exec" },
+           MessageThreadId: expectedThreadId,
+@@ -250,13 +417,11 @@ describe("Heartbeat event routing", () => {
+         expect(peekSystemEvents(isolatedKey)).toEqual([]);
+         expect(peekSystemEvents(queueKey)).toEqual([]);
+         const rows = readSessionStoreForTest(storePath);
+-        if (legacy) {
+-          expect(rows[queueKey]).toBeUndefined();
+-        }
+         expect(rows[baseKey]?.sessionId).toBe("base-conversation");
+-        expect(rows[isolatedKey]?.heartbeatIsolatedBaseSessionKey).toBe(baseKey);
+-        expect(rows[isolatedKey]?.sessionId).not.toBe("previous-isolated-run");
+-        expect(rows[isolatedKey]?.groupActivation).toBeUndefined();
++        expect(rows[queueKey]?.heartbeatIsolatedBaseSessionKey).toBe(baseKey);
++        expect(rows[queueKey]?.sessionId).toBe("previous-isolated-run");
++        expect(rows[queueKey]?.groupActivation).toBeUndefined();
++        expect(options.cleanupBundleMcpOnRunEnd).toBeUndefined();
+       });
+     },
+   );
+@@ -320,7 +485,7 @@ describe("Heartbeat event routing", () => {
+         expect(
+           replySpy.mock.calls.map(([ctx]) => [ctx.AgentId, ctx.SessionKey, ctx.InternalTurnSource]),
+         ).toEqual([
+-          ["ops", isolatedKey, "exec"],
++          ["ops", queueKey, "exec"],
+           ["ops", isolatedKey, "cron"],
+         ]);
+         await vi.waitFor(() => expect(peekSystemEvents(queueKey)).toEqual([]));
+@@ -422,7 +587,9 @@ describe("Heartbeat event routing", () => {
+       expect(replySpy).toHaveBeenCalledTimes(1);
+       expect(queuedAtReply).toEqual(queuedBefore);
+       const context = getFirstReplyContext(replySpy);
+-      expect(context.SessionKey).toBe(queue === "shared" ? baseKey : isolatedKey);
++      expect(context.SessionKey).toBe(
++        dedicated === "exec" ? queueKey : queue === "shared" ? baseKey : isolatedKey,
++      );
+       expect(context.InternalTurnSource).toBe(dedicated === "none" ? "heartbeat" : dedicated);
+       expect(context.InputProvenance).toEqual({
+         kind: "internal_system",
+@@ -612,7 +779,11 @@ describe("Heartbeat event routing", () => {
+       });
+ 
+       expect(result.status).toBe("ran");
+-      expect(getFirstReplyContext(getReplySpy).Body).toContain("no command output was found");
++      const body = getFirstReplyContext(getReplySpy).Body;
++      expect(body).toContain("no current command output to relay");
++      expect(body).toContain("Exec completed (review-run, code 0) without captured stdout/stderr");
++      expect(body).toContain("continue any remaining authorized work");
++      expect(body).not.toContain("Please relay the command output to the user");
+       expect(sendTelegram).not.toHaveBeenCalled();
+     });
+   });
+diff --git a/src/infra/heartbeat-runner.isolated-session-mirror.test.ts b/src/infra/heartbeat-runner.isolated-session-mirror.test.ts
+index 2788fbd253e480f7d73c98c5462fa08edf530a6a..b1ddd64146016b77d34fcdd096871eed466d8b3a 100644
+--- a/src/infra/heartbeat-runner.isolated-session-mirror.test.ts
++++ b/src/infra/heartbeat-runner.isolated-session-mirror.test.ts
+@@ -264,6 +264,10 @@ describe("runHeartbeatOnce - isolated heartbeat outbound session mirror", () =>
+           policyKey: baseSessionKey,
+         },
+       });
++      expect(readSessionStoreForTest(storePath)[isolatedSessionKey]?.sessionId).toBe(
++        "isolated-session",
++      );
++      expect(replySpy.mock.calls[0]?.[1]).not.toHaveProperty("cleanupBundleMcpOnRunEnd");
+     });
+   });
+ 
 diff --git a/src/infra/heartbeat-runner.model-override.test.ts b/src/infra/heartbeat-runner.model-override.test.ts
-index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df78fc85a46 100644
+index 1d25937eebd61b008b2514ca92a96fc36b770de6..bf3d2ca782b38f917d82528ac645e1f6af4a3c76 100644
 --- a/src/infra/heartbeat-runner.model-override.test.ts
 +++ b/src/infra/heartbeat-runner.model-override.test.ts
-@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
+@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  import { resolveAgentTimeoutMs } from "../agents/timeout.js";
  import type { OpenClawConfig } from "../config/config.js";
  import { resolveAgentMainSessionKey, resolveMainSessionKey } from "../config/sessions.js";
@@ -140760,7 +141386,15 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
  import { runHeartbeatOnce } from "./heartbeat-runner.js";
  import {
    heartbeatTestConfig,
-@@ -22,6 +23,7 @@ type SeedSessionInput = {
++  readSessionStoreForTest,
+   seedSessionStore,
+   type HeartbeatReplySpy,
+   withTempHeartbeatSandbox,
+@@ -19,9 +21,11 @@ vi.mock("./outbound/deliver.js", () => ({
+ }));
+ 
+ type SeedSessionInput = {
++  sessionId?: string;
    lastChannel: string;
    lastTo: string;
    updatedAt?: number;
@@ -140768,15 +141402,17 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
  };
  type AgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]>;
  type HeartbeatConfig = NonNullable<AgentDefaultsConfig["heartbeat"]>;
-@@ -54,6 +56,7 @@ async function withHeartbeatFixture(
+@@ -53,7 +57,9 @@ async function withHeartbeatFixture(
+     async ({ tmpDir, storePath, replySpy }) => {
        const seedSession = async (sessionKey: string, input: SeedSessionInput) => {
          await seedSessionStore(storePath, sessionKey, {
++          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
            updatedAt: input.updatedAt,
 +          thinkingLevel: input.thinkingLevel,
            lastChannel: input.lastChannel,
            lastProvider: input.lastChannel,
            lastTo: input.lastTo,
-@@ -109,6 +112,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -109,6 +115,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
      every?: string;
      defaultTimeoutSeconds?: number;
      model?: string;
@@ -140784,7 +141420,7 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
      timeoutSeconds?: number;
      lightContext?: boolean;
      isolatedSession?: boolean;
-@@ -125,6 +129,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -125,6 +132,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
                every: params.every ?? "5m",
                target: "whatsapp",
                model: params.model,
@@ -140792,7 +141428,7 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
                timeoutSeconds: params.timeoutSeconds,
                lightContext: params.lightContext,
                isolatedSession: params.isolatedSession,
-@@ -215,6 +220,13 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -215,9 +223,22 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
      });
    });
  
@@ -140805,8 +141441,110 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
 +
    it.each<{
      name: string;
-     source?: "exec-event" | "hook" | "cron" | "background-task" | "background-task-blocked";
-@@ -345,9 +357,12 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+-    source?: "exec-event" | "hook" | "cron" | "background-task" | "background-task-blocked";
++    source?:
++      | "exec-event"
++      | "hook"
++      | "cron"
++      | "interval"
++      | "background-task"
++      | "background-task-blocked";
+     eventText?: string;
+     contextKey?: string;
+     isolatedEvent?: boolean;
+@@ -238,6 +259,11 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       heartbeat: { timeoutSeconds: 45 },
+       expectedTimeoutMs: 48 * 60 * 60_000,
+     },
++    {
++      name: "ordinary task context despite isolated lightweight monitor defaults",
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
++      expectedTimeoutMs: 48 * 60 * 60_000,
++    },
+     {
+       name: "ordinary agent default with recurring heartbeat disabled",
+       heartbeat: { every: "0m" },
+@@ -256,10 +282,10 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       expectedTimeoutMs: MAX_TIMER_TIMEOUT_MS,
+     },
+     {
+-      name: "heartbeat limit when scheduled tasks take precedence",
++      name: "ordinary task budget when due tasks accompany an exec result",
+       scheduledTasks: true,
+       heartbeat: { timeoutSeconds: 45 },
+-      expectedTimeoutMs: 45_000,
++      expectedTimeoutMs: 48 * 60 * 60_000,
+     },
+     {
+       name: "ordinary agent budget for background task review",
+@@ -275,7 +301,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       contextKey: "task:review:blocked-followup",
+       eventText: "Delegated task is blocked. Continue the remaining work.",
+       defaultTimeoutSeconds: 900,
+-      heartbeat: { timeoutSeconds: 45 },
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
+       expectedTimeoutMs: 900_000,
+     },
+     {
+@@ -284,7 +310,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       contextKey: "task:review",
+       eventText: "Delegated task completed. Review and verify the result.",
+       defaultTimeoutSeconds: 0,
+-      heartbeat: { timeoutSeconds: 45 },
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
+       expectedTimeoutMs: MAX_TIMER_TIMEOUT_MS,
+     },
+     {
+@@ -297,11 +323,19 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       expectedTimeoutMs: 48 * 60 * 60_000,
+     },
+     {
+-      name: "heartbeat budget for an unconsumed base-session task",
++      name: "ordinary agent budget for a native base-session task",
+       source: "background-task",
+       contextKey: "task:review",
+       eventText: "Delegated task completed. Review and verify the result.",
+       heartbeat: { timeoutSeconds: 45, isolatedSession: true },
++      expectedTimeoutMs: 48 * 60 * 60_000,
++    },
++    {
++      name: "heartbeat budget when an isolated periodic monitor does not own a queued task",
++      source: "interval",
++      contextKey: "task:review",
++      eventText: "Delegated task completed. Review and verify the result.",
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
+       expectedTimeoutMs: 45_000,
+     },
+     {
+@@ -318,16 +352,25 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+       source: "cron",
+       contextKey: "task:review",
+       eventText: "Delegated task completed. Review and verify the result.",
+-      heartbeat: { timeoutSeconds: 45 },
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
+       expectedTimeoutMs: 48 * 60 * 60_000,
+     },
+     {
+-      name: "heartbeat budget when a cron-carried review is deferred behind scheduled tasks",
++      name: "ordinary task budget when due tasks accompany a cron-carried parent review",
+       source: "cron",
+       contextKey: "task:review",
+       eventText: "Delegated task completed. Review and verify the result.",
+       scheduledTasks: true,
+       heartbeat: { timeoutSeconds: 45 },
++      expectedTimeoutMs: 48 * 60 * 60_000,
++    },
++    {
++      name: "heartbeat budget for due tasks without an admitted original-task result",
++      source: "interval",
++      contextKey: "notification:status",
++      eventText: "Service status changed.",
++      scheduledTasks: true,
++      heartbeat: { timeoutSeconds: 45, isolatedSession: true },
+       expectedTimeoutMs: 45_000,
+     },
+     {
+@@ -345,9 +388,13 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
            defaults: {
              workspace: tmpDir,
              timeoutSeconds: testCase.defaultTimeoutSeconds,
@@ -140816,15 +141554,17 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
                target: "whatsapp",
 +              model: "test/background",
 +              thinking: "xhigh",
++              lightContext: true,
                ...testCase.heartbeat,
              },
            },
-@@ -356,7 +371,11 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -356,7 +403,12 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
          session: { store: storePath },
        };
        const sessionKey = `${resolveMainSessionKey(cfg)}${testCase.isolatedEvent ? ":heartbeat" : ""}`;
 -      await seedSession(sessionKey, { lastChannel: "whatsapp", lastTo: "+1555" });
 +      await seedSession(sessionKey, {
++        sessionId: "original-task-session",
 +        lastChannel: "whatsapp",
 +        lastTo: "+1555",
 +        thinkingLevel: "ultra",
@@ -140832,7 +141572,20 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
        enqueueSystemEvent(
          testCase.eventText ?? "Exec finished (gateway id=build, code 0)\nBuild passed",
          { sessionKey, contextKey: testCase.contextKey },
-@@ -390,6 +409,12 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -378,18 +430,34 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+ 
+       expect(replySpy).toHaveBeenCalledTimes(1);
+       const [ctx, opts, passedConfig] = firstReplyCall(replySpy);
+-      expect(ctx?.InternalTurnSource).toBe(
+-        testCase.scheduledTasks
+-          ? "heartbeat"
+-          : source === "cron"
+-            ? "cron"
+-            : testCase.eventText
+-              ? "heartbeat"
+-              : "exec",
+-      );
++      expect(ctx?.InternalTurnSource).toBe(testCase.eventText ? "heartbeat" : "exec");
        expect(
          resolveAgentTimeoutMs({ cfg: passedConfig, overrideSeconds: opts?.timeoutOverrideSeconds }),
        ).toBe(testCase.expectedTimeoutMs);
@@ -140840,12 +141593,30 @@ index 1d25937eebd61b008b2514ca92a96fc36b770de6..9a06bbba280aed77469bfdd264420df7
 +      expectReplyOptions(opts, {
 +        heartbeatModelOverride: autonomous ? "test/background" : "",
 +        thinkingLevelOverride: autonomous ? "xhigh" : undefined,
++        bootstrapContextMode: autonomous ? "lightweight" : undefined,
 +      });
++      expect(ctx?.SessionKey).toBe(
++        autonomous && testCase.heartbeat?.isolatedSession ? `${sessionKey}:heartbeat` : sessionKey,
++      );
++      if (!autonomous) {
++        expect(ctx?.Body).not.toContain("Do not infer or repeat old tasks from prior chats");
++        if (testCase.contextKey?.startsWith("task:")) {
++          expect(ctx?.Body).toContain("remaining authorized parent work");
++        }
++        if (testCase.scheduledTasks) {
++          expect(ctx?.Body).toContain("Check service status");
++          expect(ctx?.Body).not.toContain("After completing all due tasks, reply NO_REPLY");
++        }
++        expectReplyOptions(opts, { cleanupBundleMcpOnRunEnd: undefined });
++        expect(readSessionStoreForTest(storePath)[sessionKey]?.sessionId).toBe(
++          "original-task-session",
++        );
++      }
 +      expect(cfg.agents?.defaults?.thinkingDefault).toBe("ultra");
      });
    });
  
-@@ -525,11 +550,14 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
+@@ -525,11 +593,14 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
      });
    });
  
@@ -140888,10 +141659,56 @@ index bd3586c21e0851e0177fe2a816ac1353e890ec37..4f951d5061d93054576742dac868e734
            await expect(drained).resolves.toBe("drained");
            operation.complete();
 diff --git a/src/infra/heartbeat-runner.webchat-exec-completion.test.ts b/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
-index f36a45ff5143aacc8503a9d442330b6ae35a9a0a..5e0335e6ac164175648d0a51a60b79553b8a01b7 100644
+index f36a45ff5143aacc8503a9d442330b6ae35a9a0a..a7902f97d501ffeeb353d5f49022a198ac4ae18e 100644
 --- a/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
 +++ b/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
-@@ -310,6 +310,221 @@ async function readProjectionMessages(scenario: ProjectionScenario) {
+@@ -29,14 +29,14 @@ import {
+ } from "./system-events.js";
+ 
+ describe("exec-completion reply on a WebChat-internal session (#147387)", () => {
+-  it("tells the model to relay the completion instead of suppressing it", async () => {
++  it("continues the original task after public output under isolated lightweight monitor defaults", async () => {
+     await withTempHeartbeatSandbox(async ({ tmpDir, storePath }) => {
+       setTestEnvValue("OPENCLAW_STATE_DIR", tmpDir);
+       const cfg: OpenClawConfig = {
+         agents: {
+           defaults: {
+             workspace: tmpDir,
+-            heartbeat: { every: "5m", target: "last" },
++            heartbeat: { every: "5m", target: "last", isolatedSession: true, lightContext: true },
+           },
+         },
+         session: { store: storePath },
+@@ -46,6 +46,7 @@ describe("exec-completion reply on a WebChat-internal session (#147387)", () =>
+         lastProvider: "",
+         lastTo: "",
+         createdVia: "operator",
++        sessionId: "original-public-task-session",
+       });
+       enqueueSystemEvent(
+         "Exec completed (background-report, code 0) :: COMPANION_COMPLETION_TEST",
+@@ -64,8 +65,19 @@ describe("exec-completion reply on a WebChat-internal session (#147387)", () =>
+ 
+       expect(result.status).toBe("ran");
+       expect(getReplyFromConfig).toHaveBeenCalledOnce();
+-      const [ctx] = getReplyFromConfig.mock.calls[0] as [Record<string, unknown>];
++      const [ctx, options] = getReplyFromConfig.mock.calls[0] as [
++        Record<string, unknown>,
++        Record<string, unknown>,
++      ];
+       expect(ctx.Body).toContain("Please relay the command output to the user");
++      expect(ctx.Body).toContain("continue any remaining authorized work");
++      expect(ctx.Body).toContain("existing kept child session or native wait/yield owner");
++      expect(ctx.SessionKey).toBe(sessionKey);
++      expect(options.bootstrapContextMode).toBeUndefined();
++      expect(options.cleanupBundleMcpOnRunEnd).toBeUndefined();
++      expect(readSessionStoreForTest(storePath)[sessionKey]?.sessionId).toBe(
++        "original-public-task-session",
++      );
+       expect(ctx.Body).not.toContain("user delivery is disabled");
+     });
+   });
+@@ -310,6 +322,228 @@ async function readProjectionMessages(scenario: ProjectionScenario) {
    return events.map(readTranscriptEventMessage).filter((message) => message?.role === "assistant");
  }
  
@@ -141038,6 +141855,8 @@ index f36a45ff5143aacc8503a9d442330b6ae35a9a0a..5e0335e6ac164175648d0a51a60b7955
 +      model: "test/background",
 +      thinking: "low",
 +      timeoutSeconds: 45,
++      lightContext: true,
++      isolatedSession: true,
 +    });
 +    enqueueSystemEvent("Exec completed (public-quiet-current, code 0)", {
 +      sessionKey: scenario.sessionKey,
@@ -141081,7 +141900,12 @@ index f36a45ff5143aacc8503a9d442330b6ae35a9a0a..5e0335e6ac164175648d0a51a60b7955
 +        heartbeatModelOverride: "",
 +        thinkingLevelOverride: undefined,
 +        timeoutOverrideSeconds: undefined,
++        bootstrapContextMode: undefined,
 +      });
++      expect(context?.SessionKey).toBe(scenario.sessionKey);
++      expect(readSessionStoreForTest(scenario.storePath)[scenario.sessionKey]?.sessionId).toBe(
++        scenario.sessionId,
++      );
 +      expect(context?.Body).toContain(
 +        "Exec completed (public-quiet-current, code 0) without captured stdout/stderr",
 +      );

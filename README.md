@@ -15,9 +15,16 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current installed Gateway and Node source reference is
+`34ae633fbd5f5cf90277adb58eda2ba56d929bd8`, with separately qualified native parent-task
+context and original-outcome completion protocol. See the
+[current source qualification](runtime/README.md#october-6-native-parent-task-context-and-completion-protocol).
+Normal activation and exact loaded-generation readback are separate from ordinary
+account, browser, Discord and task acceptance; all nineteen outcomes remain open.
+
+The dated predecessor installed Gateway and Node source reference was
 `1214d0ff7999bfbf0b548701d5ae6a9486236b6a`, with separately qualified original-task
 continuation and requester tool recovery. See the
-[current source qualification](runtime/README.md#october-6-original-task-continuation-and-requester-tool-recovery).
+[dated predecessor source qualification](runtime/README.md#october-6-original-task-continuation-and-requester-tool-recovery).
 Normal activation and exact loaded-generation readback are separate from ordinary
 account, browser, Discord and task acceptance; all nineteen outcomes remain open.
 
