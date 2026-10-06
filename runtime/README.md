@@ -11,7 +11,35 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 6 original-task continuation and requester tool recovery
+
+The successor keeps the original task active across parent recovery, nested and
+private child completion, requester authorization and asynchronous command results.
+Requester authorization rejoins bounded discovery for that server, releases its
+temporary lease, then uses the existing same-task refresh path. Current requester,
+revocation, cancellation, tool policy and generation checks still apply. Missing
+prepared model ownership returns bounded readiness metadata.
+
+Private command and child results remain internal. Their completion carries the
+current evidence into the original task; only a genuine public original-task final
+may produce its final outbound answer.
+
+Separate matched component fixtures record 40, 91, 104, 82 and 93 passing case
+observations. They are not one end-to-end acceptance suite. The preceding 18-path
+qualification has 34 normal results: 19 fresh, 12 retained and 3 exact-input core
+reuses. The final three-path qualification is one complete fresh 31-check run,
+including the core source graph and all 20 default core-test type graphs.
+
+The final normal build, activation and independent same-generation health and
+protected-state readback are bound separately in the manifest. Source qualification
+and installation do not establish ordinary account, browser, Discord, meeting or
+latency acceptance. All nineteen original outcomes remain open; UI54 is excluded
+and signed companions603 remain unchanged.
+
 ## October 5 authorized follow-through and complete meeting finalization
+
+This section records the dated2d predecessor qualification and installation.
+Its observations describe that earlier deployment, before the October6 successor.
 
 Reference `2d8406b58affbeed037ec2d739704fa835d31e05`, tree
 `9448813217d29446d3a412bf0d594c08a39395a8`, changes 28 source paths

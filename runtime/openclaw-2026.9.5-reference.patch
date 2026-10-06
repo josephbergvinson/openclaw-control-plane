@@ -18704,6 +18704,197 @@ index 851d444c874dba37e6cee0fa4cbaa50e59cba498..75b99d9909b4fbf7fc0d60139ec034f2
      // Restricted dynamic-tool profiles (private QA, exclusion lists) gate scoped
      // MCP tools exactly like every other dynamic tool. Filter both lists with the
      // same rule so execution and advertised specs stay name-aligned.
+diff --git a/extensions/codex/src/app-server/run-attempt.plugin-refresh.test.ts b/extensions/codex/src/app-server/run-attempt.plugin-refresh.test.ts
+index b851df58ea85257b223f484ce976d0a5102c5b76..33eb82e4327008af57c937040c67201ae5fe37cc 100644
+--- a/extensions/codex/src/app-server/run-attempt.plugin-refresh.test.ts
++++ b/extensions/codex/src/app-server/run-attempt.plugin-refresh.test.ts
+@@ -3,6 +3,7 @@ import path from "node:path";
+ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+ import { loadUserTurnTranscriptRecorderFactoryForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
+ import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
++import { readSessionTranscriptEvents } from "openclaw/plugin-sdk/session-transcript-runtime";
+ import { describe, expect, it, vi } from "vitest";
+ import { readAttemptTerminal } from "./attempt-terminal.test-helper.js";
+ import { resolveCodexAppServerHomeDir } from "./auth-start-options.js";
+@@ -28,6 +29,7 @@ import {
+ import { readCodexAppServerBinding } from "./session-binding.test-helpers.js";
+ import { getLeasedSharedCodexAppServerClient } from "./shared-client.js";
+ import { createClientHarness } from "./test-support.js";
++import { codexTranscriptMirrorRuntime } from "./transcript-mirror.js";
+ import { settleInput } from "./turn-router.test-support.js";
+ 
+ setupRunAttemptTestHooks();
+@@ -45,10 +47,13 @@ describe("managed Codex plugin refresh", () => {
+     "host-persisted",
+     "native-prompt",
+     "admitted-continuation",
++    "requester-auth",
+   ] as const)(
+     "persists concurrent and replayed results before the %s handoff",
+     async (scenario) => {
+-      const firstHandoff = scenario === "host-persisted" || scenario === "native-prompt";
++      const requesterAuth = scenario === "requester-auth";
++      const firstHandoff =
++        scenario === "host-persisted" || scenario === "native-prompt" || requesterAuth;
+       const outcome =
+         firstHandoff || scenario === "admitted-continuation" || scenario === "exited-terminal"
+           ? "confirmed"
+@@ -88,6 +93,8 @@ describe("managed Codex plugin refresh", () => {
+         await fs.writeFile(steeringImagePath, Buffer.from(STEERING_PNG, "base64"));
+       }
+       const events: string[] = [];
++      const authorizationReceipt = "fixture-requester-authorization-committed";
++      const refreshToolName = requesterAuth ? "recovery__connect" : "reload_runtime";
+       let pending = false;
+       let consumer: (() => boolean) | undefined;
+       const slow = createRuntimeDynamicTool("message");
+@@ -103,14 +110,21 @@ describe("managed Codex plugin refresh", () => {
+         events.push("sibling-finished");
+         return { content: [{ type: "text" as const, text: "sibling committed" }], details: {} };
+       });
+-      const reload = createRuntimeDynamicTool("reload_runtime");
++      const reload = createRuntimeDynamicTool(refreshToolName);
+       reload.execute = vi.fn(async () => {
+         expect(consumer?.()).toBe(true);
+         pending = true;
+         refreshRequested.resolve();
+         return {
+-          content: [{ type: "text" as const, text: "generation 2 committed" }],
+-          details: {},
++          content: [
++            {
++              type: "text" as const,
++              text: requesterAuth ? authorizationReceipt : "generation 2 committed",
++            },
++          ],
++          details: requesterAuth
++            ? { mcpConnect: { serverName: "recovery", status: "authorized" } }
++            : {},
+         };
+       });
+       dynamicToolBuildState.openClawCodingToolsFactory = () => [slow, reload];
+@@ -118,7 +132,9 @@ describe("managed Codex plugin refresh", () => {
+         path.join(tempDir, "session.jsonl"),
+         path.join(tempDir, "workspace"),
+       );
+-      const originalTask = "Reload the plugin and verify the changed behavior.";
++      const originalTask = requesterAuth
++        ? "Connect the requester's service and finish the original query."
++        : "Reload the plugin and verify the changed behavior.";
+       const receipt = "already-committed-effect-42";
+       const prior = new CodexAppServerEventProjector(
+         {
+@@ -153,7 +169,7 @@ describe("managed Codex plugin refresh", () => {
+         ? originalTask
+         : "Continue from completed work using refreshed tools.";
+       params.suppressNextUserMessagePersistence = scenario !== "native-prompt";
+-      if (scenario === "host-persisted" || scenario === "admitted-continuation") {
++      if (scenario === "host-persisted" || scenario === "admitted-continuation" || requesterAuth) {
+         const createRecorder = await loadUserTurnTranscriptRecorderFactoryForTest();
+         const target = {
+           agentId: "main",
+@@ -334,6 +350,36 @@ describe("managed Codex plugin refresh", () => {
+           },
+         });
+       const start = vi.spyOn(CodexAppServerClient, "start").mockResolvedValue(harness.client);
++      const mirror = codexTranscriptMirrorRuntime.mirror;
++      // The authorization response is synthetic; the bridge, checkpoint and drain are real.
++      const checkpoint = requesterAuth
++        ? vi.spyOn(codexTranscriptMirrorRuntime, "mirror").mockImplementation(async (input) => {
++            const result = await mirror(input);
++            if (
++              input.messages.some(
++                (message) => message.role === "toolResult" && message.toolCallId === "reload-call",
++              )
++            ) {
++              events.push("auth-checkpoint");
++            }
++            return result;
++          })
++        : undefined;
++      const readPersistedMessages = async () => {
++        const target = params.sessionTarget;
++        if (!target?.sessionId || !target.sessionKey) {
++          throw new Error("Expected the admitted requester transcript target");
++        }
++        return (
++          await readSessionTranscriptEvents({
++            ...target,
++            sessionId: target.sessionId,
++            sessionKey: target.sessionKey,
++          })
++        ).flatMap((event) =>
++          isJsonObject(event) && isJsonObject(event.message) ? [event.message] : [],
++        );
++      };
+       const closeHost = await bindProductionHarnessHostCapabilitiesForTest(params);
+       const run = runCodexAppServerAttempt(params, {
+         pluginConfig: {
+@@ -414,14 +460,30 @@ describe("managed Codex plugin refresh", () => {
+         }
+         const slowReply = request("message", "slow-call");
+         await siblingStarted.promise;
+-        const reloadReply = request("reload_runtime", "reload-call");
++        const reloadReply = request(refreshToolName, "reload-call");
+         await refreshRequested.promise;
+-        const replayReply = request("reload_runtime", "reload-call", "replay-call");
++        const replayReply = request(refreshToolName, "reload-call", "replay-call");
+         await settleInput();
+-        expect(events).toEqual([]);
++        expect(
++          requesterAuth ? events.filter((event) => event !== "auth-checkpoint") : events,
++        ).toEqual([]);
+         releaseSibling.resolve();
+         await interruptRequested.promise;
+-        expect(events).toEqual(["sibling-finished", "interrupt"]);
++        expect(
++          requesterAuth ? events.filter((event) => event !== "auth-checkpoint") : events,
++        ).toEqual(["sibling-finished", "interrupt"]);
++        if (requesterAuth) {
++          expect(events.filter((event) => event === "auth-checkpoint")).toHaveLength(1);
++          expect(events.indexOf("auth-checkpoint")).toBeLessThan(events.indexOf("interrupt"));
++          const persisted = await readPersistedMessages();
++          const authorizationResults = persisted.filter(
++            (message) => message.role === "toolResult" && message.toolCallId === "reload-call",
++          );
++          expect(authorizationResults).toHaveLength(1);
++          expect(authorizationResults[0]).toMatchObject({ isError: false });
++          expect(JSON.stringify(authorizationResults[0])).toContain(authorizationReceipt);
++          expect(persisted.filter((message) => message.role === "user")).toHaveLength(1);
++        }
+         const bindingBeforeHandoff = await readCodexAppServerBinding(params.sessionFile);
+         expect(bindingBeforeHandoff).toMatchObject({ threadId: "thread-1" });
+         expect(requests).not.toContain("thread/unsubscribe");
+@@ -522,6 +584,21 @@ describe("managed Codex plugin refresh", () => {
+               expect.objectContaining({ role: "toolResult", toolCallId: "reload-call" }),
+             ]),
+           );
++          if (requesterAuth) {
++            const authorizationResults = completed.result.pluginRuntimeRefreshMessages?.filter(
++              (message) => message.role === "toolResult" && message.toolCallId === "reload-call",
++            );
++            expect(authorizationResults).toHaveLength(1);
++            expect(authorizationResults?.[0]).toMatchObject({ isError: false });
++            expect(JSON.stringify(authorizationResults?.[0])).toContain(authorizationReceipt);
++            const persisted = await readPersistedMessages();
++            expect(
++              persisted.filter(
++                (message) => message.role === "toolResult" && message.toolCallId === "reload-call",
++              ),
++            ).toHaveLength(1);
++            expect(persisted.filter((message) => message.role === "user")).toHaveLength(1);
++          }
+           expect(
+             completed.result.pluginRuntimeRefreshMessages
+               ?.filter((message) => message.role === "user")
+@@ -571,6 +648,7 @@ describe("managed Codex plugin refresh", () => {
+         abort.abort("fixture cleanup");
+         finishInterrupt?.();
+         await settled;
++        checkpoint?.mockRestore();
+         closeHost();
+         start.mockRestore();
+         await harness.client.closeAndWait();
 diff --git a/extensions/codex/src/app-server/run-attempt.requester-continuity.test.ts b/extensions/codex/src/app-server/run-attempt.requester-continuity.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..800550f593c2ac7e5d0c0e9f07c53658efb0e0ce
@@ -40101,6 +40292,431 @@ index 8665f5682b2aa19b9abdbf0fb5e0e033f6566387..b019997946820c713217b5402ff8d8e5
      ...(requesterConnect ? { requesterConnect } : {}),
      isRequesterScopedServer(serverName) {
        // Owner map is populated by the catalog load that exposed the tool.
+diff --git a/src/agents/agent-bundle-mcp-harness.requester-connect-refresh.test.ts b/src/agents/agent-bundle-mcp-harness.requester-connect-refresh.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5273fdaf698eed5ce065db527725eba0439dd4a6
+--- /dev/null
++++ b/src/agents/agent-bundle-mcp-harness.requester-connect-refresh.test.ts
+@@ -0,0 +1,419 @@
++/** Requester OAuth continuation guards through the actual harness materializer. */
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { createDeferred, withTestTimeout } from "../../test/helpers/promise.js";
++import type { SessionMcpRuntime } from "./agent-bundle-mcp-types.js";
++
++const startAuthorization = vi.hoisted(() => vi.fn());
++const readCredentialsStatus = vi.hoisted(() => vi.fn());
++const readCredentialsStatusSync = vi.hoisted(() => vi.fn());
++
++const mocks = vi.hoisted(() => {
++  type Runtime = SessionMcpRuntime;
++  const advertised = new Map<
++    string,
++    {
++      version: number;
++      generatedAt: number;
++      servers: Record<string, { serverName: string; launchSummary: string; toolCount: number }>;
++      tools: Array<{
++        serverName: string;
++        safeServerName: string;
++        toolName: string;
++        description: string;
++        inputSchema: Record<string, unknown>;
++        fallbackDescription: string;
++      }>;
++    }
++  >();
++  const runtimes = new Map<string, Runtime>();
++  let resolveImpl:
++    | ((params: {
++        sessionId: string;
++        requesterSenderId?: string | null;
++      }) => Promise<Runtime | undefined>)
++    | undefined;
++
++  return {
++    advertised,
++    runtimes,
++    setResolveImpl(impl?: typeof resolveImpl) {
++      resolveImpl = impl;
++    },
++    acquireRequesterScopedMcpRuntime: vi.fn(
++      async (params: { sessionId: string; requesterSenderId?: string | null }) => {
++        if (resolveImpl) {
++          const runtime = await resolveImpl(params);
++          return runtime
++            ? {
++                runtime,
++                releaseLease: runtime.acquireLease?.() ?? (() => {}),
++                advertisedCatalogConfigFingerprint: runtime.configFingerprint,
++              }
++            : undefined;
++        }
++        return undefined;
++      },
++    ),
++    acquireSessionMcpRuntime: vi.fn(),
++    rememberAdvertisedScopedMcpCatalog: vi.fn(
++      (
++        handle: { runtime: Runtime },
++        catalog: typeof advertised extends Map<string, infer V> ? V : never,
++      ) => {
++        advertised.set(handle.runtime.sessionId, catalog);
++      },
++    ),
++    getAdvertisedScopedMcpCatalog: vi.fn((sessionId: string) => advertised.get(sessionId) ?? null),
++    reset() {
++      advertised.clear();
++      runtimes.clear();
++      resolveImpl = undefined;
++    },
++  };
++});
++
++vi.mock("./agent-bundle-mcp-manager-api.js", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("./agent-bundle-mcp-manager-api.js")>();
++  return {
++    ...actual,
++    acquireRequesterScopedMcpRuntime: mocks.acquireRequesterScopedMcpRuntime,
++    acquireSessionMcpRuntime: mocks.acquireSessionMcpRuntime,
++    rememberAdvertisedScopedMcpCatalog: mocks.rememberAdvertisedScopedMcpCatalog,
++    getAdvertisedScopedMcpCatalog: mocks.getAdvertisedScopedMcpCatalog,
++  };
++});
++
++vi.mock("./mcp-oauth.js", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("./mcp-oauth.js")>();
++  return {
++    ...actual,
++    readMcpOAuthCredentialsStatus: readCredentialsStatus,
++    readMcpOAuthCredentialsStatusSync: readCredentialsStatusSync,
++    startMcpOAuthAuthorization: startAuthorization,
++  };
++});
++
++import {
++  materializeRequesterScopedMcpToolsForHarnessRunCore,
++  materializeStaticMcpToolsForHarnessRunCore,
++} from "./agent-bundle-mcp-harness.js";
++import { makeConnectRuntime, makeRuntime } from "./agent-bundle-mcp-harness.test-support.js";
++import { getSessionMcpRequestSignal } from "./agent-bundle-mcp-request-context.js";
++import {
++  createAgentPluginRuntimeRefresh,
++  captureAgentPluginRuntimeRefresh,
++} from "./plugin-runtime-refresh.js";
++
++beforeEach(() => {
++  mocks.reset();
++  mocks.acquireRequesterScopedMcpRuntime.mockClear();
++  mocks.acquireSessionMcpRuntime.mockReset();
++  mocks.rememberAdvertisedScopedMcpCatalog.mockClear();
++  mocks.getAdvertisedScopedMcpCatalog.mockClear();
++  readCredentialsStatus.mockReset().mockResolvedValue({ state: "unauthenticated" });
++  readCredentialsStatusSync.mockReset().mockReturnValue({ state: "unauthenticated" });
++  startAuthorization.mockReset();
++});
++
++describe("requester authorization refresh boundaries", () => {
++  it.each([
++    "zero usable target",
++    "policy denies target",
++    "missing consumer",
++    "stale consumer",
++    "revoked during discovery",
++    "abort during discovery",
++    "abort during release",
++    "successor retired during release",
++    "requester retired during discovery",
++    "generation retired during discovery",
++    "failed discovery",
++    "advertised signal",
++  ] as const)("does not accept unsupported continuation after %s", async (boundary) => {
++    const signal = new AbortController();
++    let requesterCurrent = true;
++    let generationCurrent = true;
++    const scope = {
++      requesterSenderId: "alice",
++      messageChannel: "telegram",
++      agentAccountId: "bot",
++    };
++    const initial = await makeConnectRuntime({
++      sessionId: "shared",
++      requesterSenderId: scope.requesterSenderId,
++      publicOrigin: "https://gateway.example",
++    });
++    initial.requesterScope = scope;
++    initial.isRequesterConnectGenerationCurrent = () => generationCurrent;
++    initial.isSteeringCatalogCurrent = () => true;
++    let next: SessionMcpRuntime | undefined;
++    const discovery = createDeferred();
++    const releaseDiscovery = createDeferred();
++    const requests: unknown[] = [];
++    let acquisitions = 0;
++    mocks.setResolveImpl(async () => {
++      acquisitions += 1;
++      if (acquisitions === 1) {
++        return initial;
++      }
++      next = await makeConnectRuntime({
++        sessionId: "shared",
++        requesterSenderId: scope.requesterSenderId,
++        publicOrigin: "https://gateway.example",
++      });
++      next.requesterScope = scope;
++      let successorCurrent = true;
++      next.isSteeringCatalogCurrent = () => successorCurrent;
++      const acquireLease = next.acquireLease!;
++      next.acquireLease = () => {
++        const release = acquireLease();
++        return () => {
++          release();
++          if (boundary === "abort during release") {
++            signal.abort(new Error("request aborted during release"));
++          } else if (boundary === "successor retired during release") {
++            successorCurrent = false;
++          }
++        };
++      };
++      const catalog = {
++        version: 1,
++        generatedAt: 0,
++        servers: {
++          calendar: {
++            serverName: "calendar",
++            launchSummary: "calendar",
++            toolCount: boundary === "zero usable target" ? 0 : 1,
++          },
++        },
++        tools:
++          boundary === "zero usable target"
++            ? []
++            : [
++                {
++                  serverName: "calendar",
++                  safeServerName: "calendar",
++                  toolName: "events",
++                  description: "Read events",
++                  fallbackDescription: "Read events",
++                  inputSchema: { type: "object", properties: {} },
++                },
++              ],
++      };
++      next.peekCatalog = () => catalog;
++      next.getCatalog = async (options) => {
++        requests.push(options);
++        expect(getSessionMcpRequestSignal()).toBe(signal.signal);
++        discovery.resolve();
++        await releaseDiscovery.promise;
++        if (boundary === "failed discovery") {
++          throw new Error("target discovery failed");
++        }
++        return catalog;
++      };
++      return next;
++    });
++    startAuthorization.mockImplementation(async () => {
++      readCredentialsStatus.mockResolvedValue({ state: "authorized" });
++      readCredentialsStatusSync.mockReturnValue({ state: "authorized" });
++      return { status: "authorized" };
++    });
++    const owner = createAgentPluginRuntimeRefresh();
++    try {
++      await owner.run(async () => {
++        const refresh = captureAgentPluginRuntimeRefresh();
++        if (boundary !== "missing consumer") {
++          refresh.bindConsumer(() => {
++            expect(next?.activeLeases).toBe(0);
++            return boundary !== "stale consumer" && boundary !== "advertised signal";
++          });
++        }
++        const result = await materializeRequesterScopedMcpToolsForHarnessRunCore({
++          sessionId: "shared",
++          workspaceDir: "/workspace",
++          ...scope,
++          mcpRequesterScope: scope,
++          ...(boundary === "policy denies target" ? { toolsAllow: ["calendar__connect"] } : {}),
++          mcpRequesterScopeAssertCurrent: () => {
++            if (!requesterCurrent) {
++              throw new Error("requester retired");
++            }
++          },
++        });
++        expect(result).toBeDefined();
++        const connect = (
++          boundary === "advertised signal" ? result!.advertisedTools : result!.tools
++        ).find((tool) => tool.name === "calendar__connect")!;
++        expect(connect).toBeDefined();
++        try {
++          const connecting = Promise.resolve(connect.execute("connect", {}, signal.signal));
++          void connecting.catch(() => {});
++          await withTestTimeout(
++            discovery.promise,
++            1_000,
++            "connect did not enter bounded discovery",
++          );
++          expect(refresh.isPending()).toBe(false);
++          if (boundary === "revoked during discovery") {
++            readCredentialsStatusSync.mockReturnValue({ state: "unauthenticated" });
++          } else if (boundary === "abort during discovery") {
++            signal.abort(new Error("request aborted"));
++          } else if (boundary === "requester retired during discovery") {
++            requesterCurrent = false;
++          } else if (boundary === "generation retired during discovery") {
++            generationCurrent = false;
++          }
++          releaseDiscovery.resolve();
++          if (
++            [
++              "abort during discovery",
++              "abort during release",
++              "requester retired during discovery",
++              "generation retired during discovery",
++              "failed discovery",
++            ].includes(boundary)
++          ) {
++            await expect(connecting).rejects.toThrow(
++              /aborted|retired|no longer current|discovery failed/,
++            );
++          } else {
++            const receipt = await connecting;
++            expect(JSON.stringify(receipt)).toContain("keep the original task open");
++            expect(JSON.stringify(receipt)).not.toContain("available tools are refreshed");
++          }
++          expect(requests).toEqual([
++            { waitForRecovery: true, retryFailedServerNames: ["calendar"] },
++          ]);
++          expect(next?.activeLeases).toBe(0);
++          expect(refresh.isPending()).toBe(false);
++        } finally {
++          releaseDiscovery.resolve();
++          await result!.dispose();
++        }
++      });
++    } finally {
++      releaseDiscovery.resolve();
++      owner.close();
++    }
++  });
++});
++
++describe("materializeStaticMcpToolsForHarnessRunCore", () => {
++  it("returns a bounded operator-visible notice for failed configured MCP discovery", async () => {
++    const runtime = makeRuntime({ sessionId: "scheduled-diagnostic", requesterSenderId: "unused" });
++    delete runtime.requesterScope;
++    const failedCatalog = {
++      version: 1,
++      generatedAt: 0,
++      servers: {},
++      tools: [],
++      diagnostics: [
++        {
++          serverName: "user-mail",
++          safeServerName: "user-mail",
++          launchSummary: "user-mail",
++          message: "authentication required",
++        },
++      ],
++    };
++    runtime.peekCatalog = () => failedCatalog;
++    runtime.getCatalog = async () => failedCatalog;
++    mocks.acquireSessionMcpRuntime.mockResolvedValue({
++      runtime,
++      releaseLease: runtime.acquireLease?.() ?? (() => {}),
++    });
++
++    const result = await materializeStaticMcpToolsForHarnessRunCore({
++      sessionId: "scheduled-diagnostic",
++      workspaceDir: "/workspace",
++      toolsAllow: ["*"],
++    });
++
++    expect(result.diagnosticNotice).toContain("user-mail: authentication required");
++    expect(result.diagnosticNotice).toContain("Do not claim MCP-backed work succeeded");
++    expect(result.diagnosticNotice).toContain("repair available authentication or discovery");
++    expect(result.diagnosticNotice).toContain("continue the original requested outcome");
++    expect(result.tools).toEqual([]);
++    await result.dispose();
++  });
++
++  it("does not report incomplete MCP for a policy note that removed no tool", async () => {
++    const runtime = makeRuntime({ sessionId: "scheduled-group-note", requesterSenderId: "unused" });
++    delete runtime.requesterScope;
++    mocks.acquireSessionMcpRuntime.mockResolvedValue({
++      runtime,
++      releaseLease: runtime.acquireLease?.() ?? (() => {}),
++    });
++    const warnings: string[] = [];
++
++    // Isolated heartbeat session key with a caller-provided Telegram group id: the final
++    // policy pass drops the group id (and says so) but keeps every configured tool.
++    const result = await materializeStaticMcpToolsForHarnessRunCore({
++      sessionId: "scheduled-group-note",
++      workspaceDir: "/workspace",
++      toolsAllow: ["user-mail__inbox"],
++      autoApproveCodexAppServerApprovals: true,
++      policyContext: {
++        config: { agents: { entries: { demo: {} } } },
++        agentId: "demo",
++        sessionKey: "agent:demo:main:heartbeat",
++        groupId: "-1000000000001",
++        messageProvider: "telegram",
++        modelProvider: "openai",
++      },
++      warn: (message) => warnings.push(message),
++    });
++
++    expect(result.tools.map((tool) => tool.name)).toEqual(["user-mail__inbox"]);
++    expect(warnings).toContain(
++      "effective tool policy: dropping caller-provided groupId that does not match session-derived group context",
++    );
++    expect(result.diagnosticNotice).toBeUndefined();
++    await result.dispose();
++  });
++
++  it.each([undefined, "-1000000000001"])(
++    "reports heartbeat policy omissions independently of group warnings (groupId: %s)",
++    async (groupId) => {
++      const runtime = makeRuntime({
++        sessionId: "scheduled-group-deny",
++        requesterSenderId: "unused",
++      });
++      delete runtime.requesterScope;
++      mocks.acquireSessionMcpRuntime.mockResolvedValue({
++        runtime,
++        releaseLease: runtime.acquireLease?.() ?? (() => {}),
++      });
++
++      const result = await materializeStaticMcpToolsForHarnessRunCore({
++        sessionId: "scheduled-group-deny",
++        workspaceDir: "/workspace",
++        toolsAllow: ["user-mail__inbox"],
++        autoApproveCodexAppServerApprovals: true,
++        policyContext: {
++          config: {
++            agents: { entries: { demo: {} } },
++            tools: { deny: ["user-mail__inbox"] },
++          },
++          agentId: "demo",
++          sessionKey: "agent:demo:main:heartbeat",
++          groupId,
++          messageProvider: "telegram",
++          modelProvider: "openai",
++        },
++      });
++
++      expect(result.tools).toEqual([]);
++      expect(result.diagnosticNotice).toContain(
++        "Configured MCP is incomplete for this scheduled run",
++      );
++      expect(result.diagnosticNotice).toContain("1 configured MCP tool(s) omitted by policy");
++      expect(result.diagnosticNotice).toContain(
++        "Respect explicit tool denies and current requester authority",
++      );
++      expect(result.diagnosticNotice).toContain("not permission to bypass them");
++      expect(result.diagnosticNotice).not.toContain("dropping caller-provided groupId");
++      await result.dispose();
++    },
++  );
++});
 diff --git a/src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts b/src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..2bac8cde775ba53b9df33c9a4bb25843abcd39bf
@@ -40212,27 +40828,193 @@ index 0000000000000000000000000000000000000000..2bac8cde775ba53b9df33c9a4bb25843
 +  expect(catalog).not.toHaveBeenCalled();
 +  expect(release).toHaveBeenCalledOnce();
 +});
+diff --git a/src/agents/agent-bundle-mcp-harness.test.ts b/src/agents/agent-bundle-mcp-harness.test.ts
+index 83fdb56148151460e440effc1bcc3ea1af937d53..c21b4a335c67ba4390cae72af6b71bba84135094 100644
+--- a/src/agents/agent-bundle-mcp-harness.test.ts
++++ b/src/agents/agent-bundle-mcp-harness.test.ts
+@@ -8,6 +8,7 @@ import { testing as mcpUiResourceTesting } from "./mcp-ui-resource.test-support.
+ const MCP_APP_RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
+ const startAuthorization = vi.hoisted(() => vi.fn());
+ const readCredentialsStatus = vi.hoisted(() => vi.fn());
++const readCredentialsStatusSync = vi.hoisted(() => vi.fn());
+ 
+ const mocks = vi.hoisted(() => {
+   type Runtime = SessionMcpRuntime;
+@@ -90,6 +91,7 @@ vi.mock("./mcp-oauth.js", async (importOriginal) => {
+   return {
+     ...actual,
+     readMcpOAuthCredentialsStatus: readCredentialsStatus,
++    readMcpOAuthCredentialsStatusSync: readCredentialsStatusSync,
+     startMcpOAuthAuthorization: startAuthorization,
+   };
+ });
+@@ -107,6 +109,7 @@ beforeEach(() => {
+   mocks.rememberAdvertisedScopedMcpCatalog.mockClear();
+   mocks.getAdvertisedScopedMcpCatalog.mockClear();
+   readCredentialsStatus.mockReset().mockResolvedValue({ state: "unauthenticated" });
++  readCredentialsStatusSync.mockReset().mockReturnValue({ state: "unauthenticated" });
+   startAuthorization.mockReset();
+ });
+ 
+@@ -455,117 +458,6 @@ describe("materializeStaticMcpToolsForHarnessRunCore", () => {
+     await result?.dispose();
+   });
+ 
+-  it("returns a bounded operator-visible notice for failed configured MCP discovery", async () => {
+-    const runtime = makeRuntime({ sessionId: "scheduled-diagnostic", requesterSenderId: "unused" });
+-    delete runtime.requesterScope;
+-    const failedCatalog = {
+-      version: 1,
+-      generatedAt: 0,
+-      servers: {},
+-      tools: [],
+-      diagnostics: [
+-        {
+-          serverName: "user-mail",
+-          safeServerName: "user-mail",
+-          launchSummary: "user-mail",
+-          message: "authentication required",
+-        },
+-      ],
+-    };
+-    runtime.peekCatalog = () => failedCatalog;
+-    runtime.getCatalog = async () => failedCatalog;
+-    mocks.acquireSessionMcpRuntime.mockResolvedValue({
+-      runtime,
+-      releaseLease: runtime.acquireLease?.() ?? (() => {}),
+-    });
+-
+-    const result = await materializeStaticMcpToolsForHarnessRunCore({
+-      sessionId: "scheduled-diagnostic",
+-      workspaceDir: "/workspace",
+-      toolsAllow: ["*"],
+-    });
+-
+-    expect(result.diagnosticNotice).toContain("user-mail: authentication required");
+-    expect(result.diagnosticNotice).toContain("Do not claim MCP-backed work succeeded");
+-    await result.dispose();
+-  });
+-
+-  it("does not report incomplete MCP for a policy note that removed no tool", async () => {
+-    const runtime = makeRuntime({ sessionId: "scheduled-group-note", requesterSenderId: "unused" });
+-    delete runtime.requesterScope;
+-    mocks.acquireSessionMcpRuntime.mockResolvedValue({
+-      runtime,
+-      releaseLease: runtime.acquireLease?.() ?? (() => {}),
+-    });
+-    const warnings: string[] = [];
+-
+-    // Isolated heartbeat session key with a caller-provided Telegram group id: the final
+-    // policy pass drops the group id (and says so) but keeps every configured tool.
+-    const result = await materializeStaticMcpToolsForHarnessRunCore({
+-      sessionId: "scheduled-group-note",
+-      workspaceDir: "/workspace",
+-      toolsAllow: ["user-mail__inbox"],
+-      autoApproveCodexAppServerApprovals: true,
+-      policyContext: {
+-        config: { agents: { entries: { demo: {} } } },
+-        agentId: "demo",
+-        sessionKey: "agent:demo:main:heartbeat",
+-        groupId: "-1000000000001",
+-        messageProvider: "telegram",
+-        modelProvider: "openai",
+-      },
+-      warn: (message) => warnings.push(message),
+-    });
+-
+-    expect(result.tools.map((tool) => tool.name)).toEqual(["user-mail__inbox"]);
+-    expect(warnings).toContain(
+-      "effective tool policy: dropping caller-provided groupId that does not match session-derived group context",
+-    );
+-    expect(result.diagnosticNotice).toBeUndefined();
+-    await result.dispose();
+-  });
+-
+-  it.each([undefined, "-1000000000001"])(
+-    "reports heartbeat policy omissions independently of group warnings (groupId: %s)",
+-    async (groupId) => {
+-      const runtime = makeRuntime({
+-        sessionId: "scheduled-group-deny",
+-        requesterSenderId: "unused",
+-      });
+-      delete runtime.requesterScope;
+-      mocks.acquireSessionMcpRuntime.mockResolvedValue({
+-        runtime,
+-        releaseLease: runtime.acquireLease?.() ?? (() => {}),
+-      });
+-
+-      const result = await materializeStaticMcpToolsForHarnessRunCore({
+-        sessionId: "scheduled-group-deny",
+-        workspaceDir: "/workspace",
+-        toolsAllow: ["user-mail__inbox"],
+-        autoApproveCodexAppServerApprovals: true,
+-        policyContext: {
+-          config: {
+-            agents: { entries: { demo: {} } },
+-            tools: { deny: ["user-mail__inbox"] },
+-          },
+-          agentId: "demo",
+-          sessionKey: "agent:demo:main:heartbeat",
+-          groupId,
+-          messageProvider: "telegram",
+-          modelProvider: "openai",
+-        },
+-      });
+-
+-      expect(result.tools).toEqual([]);
+-      expect(result.diagnosticNotice).toContain(
+-        "Configured MCP is incomplete for this scheduled run",
+-      );
+-      expect(result.diagnosticNotice).toContain("1 configured MCP tool(s) omitted by policy");
+-      expect(result.diagnosticNotice).not.toContain("dropping caller-provided groupId");
+-      await result.dispose();
+-    },
+-  );
+-
+   it("omits prompt-approved MCP tools from unattended execution", async () => {
+     const runtime = makeRuntime({ sessionId: "scheduled-prompt", requesterSenderId: "unused" });
+     delete runtime.requesterScope;
 diff --git a/src/agents/agent-bundle-mcp-harness.ts b/src/agents/agent-bundle-mcp-harness.ts
-index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a3c2b4dbb 100644
+index 4e349425c84f9c8b38472349a707a6fc58daff65..84ba41013a29424afa73f7c49ac315f595e01fc2 100644
 --- a/src/agents/agent-bundle-mcp-harness.ts
 +++ b/src/agents/agent-bundle-mcp-harness.ts
-@@ -15,6 +15,7 @@ import {
+@@ -8,13 +8,22 @@ import {
+   acquireRequesterScopedMcpRuntime,
+   acquireSessionMcpRuntime,
+   rememberAdvertisedScopedMcpCatalog,
++  releaseSessionMcpRuntime,
+   retireSessionMcpRuntime,
+ } from "./agent-bundle-mcp-manager-api.js";
+ import {
+   buildBundleMcpToolsFromCatalog,
    materializeBundleMcpToolsForRun,
  } from "./agent-bundle-mcp-materialize.js";
++import {
++  getSessionMcpRequestSignal,
++  runWithSessionMcpRequestSignal,
++} from "./agent-bundle-mcp-request-context.js";
  import { mergeMcpConnectCatalog } from "./agent-bundle-mcp-requester-connect.js";
-+import { captureMcpSteeringCatalogCurrent } from "./agent-bundle-mcp-runtime-owner.js";
++import {
++  captureMcpRequesterConnectRefreshCurrent,
++  captureMcpSteeringCatalogCurrent,
++} from "./agent-bundle-mcp-runtime-owner.js";
  import type { McpToolCatalog, RequesterMcpConnect } from "./agent-bundle-mcp-types.js";
  import type { CodexMcpServersConfig } from "./codex-mcp-config.types.js";
  import {
-@@ -29,6 +30,7 @@ import {
+@@ -29,6 +38,12 @@ import {
    requiresMcpCodexToolApproval,
    resolveProjectedMcpCodexToolApprovalMode,
  } from "./mcp-codex-tool-approval.js";
-+import { resolveMcpRequesterScope, type McpRequesterScopeContext } from "./mcp-requester-scope.js";
++import {
++  assertMcpRequesterScopeMatches,
++  resolveMcpRequesterScope,
++  type McpRequesterScopeContext,
++} from "./mcp-requester-scope.js";
++import { captureAgentPluginRuntimeRefresh } from "./plugin-runtime-refresh.js";
  import type { ToolPolicyFilterEvent } from "./tool-policy-pipeline.js";
  import type { AnyAgentTool } from "./tools/common.js";
  
-@@ -40,12 +42,14 @@ type RequesterScopedHarnessMcpTools = {
+@@ -40,12 +55,14 @@ type RequesterScopedHarnessMcpTools = {
     * Identical for every sender once the session has observed a scoped catalog.
     */
    advertisedTools: AnyAgentTool[];
@@ -40247,7 +41029,17 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
    /** Bounded model/operator warning when configured servers or final policy were incomplete. */
    diagnosticNotice?: string;
    dispose: () => Promise<void>;
-@@ -153,7 +157,7 @@ function applyConfiguredMcpApproval(
+@@ -64,7 +81,8 @@ function formatConfiguredMcpDiagnosticNotice(
+   }
+   return (
+     `Configured MCP is incomplete for ${runLabel}: ${bounded.join("; ")}. ` +
+-    "Do not claim MCP-backed work succeeded; report this blocker to the operator."
++    "Do not claim MCP-backed work succeeded. For an authorized task, repair available authentication or discovery through the existing supported route, then continue the original requested outcome. " +
++    "Respect explicit tool denies and current requester authority; this diagnostic is not permission to bypass them. Report only a concrete remaining blocker and continue independent authorized work."
+   );
+ }
+ 
+@@ -153,7 +171,7 @@ function applyConfiguredMcpApproval(
    });
  }
  
@@ -40256,7 +41048,7 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
    sessionId: string;
    sessionKey?: string;
    agentId?: string;
-@@ -232,6 +236,13 @@ function applyHarnessToolPolicy(
+@@ -232,19 +250,40 @@ function applyHarnessToolPolicy(
    });
  }
  
@@ -40270,7 +41062,10 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
  function buildCatalogTools(
    catalog: McpToolCatalog,
    params: MaterializeRequesterScopedMcpToolsForHarnessRunParams,
-@@ -241,10 +252,16 @@ function buildCatalogTools(
+   requesterConnect?: RequesterMcpConnect,
++  onAuthorized?: (serverName: string) => Promise<boolean>,
+ ): AnyAgentTool[] {
+   return buildBundleMcpToolsFromCatalog({
      catalog,
      reservedToolNames: params.reservedToolNames ? Array.from(params.reservedToolNames) : undefined,
      createExecute: (tool) => {
@@ -40280,18 +41075,25 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
 -      );
 +      const execute =
 +        (tool.oauthConnectBootstrap === true
-+          ? requesterConnect?.createExecute(tool.serverName)
++          ? requesterConnect?.createExecute(
++              tool.serverName,
++              onAuthorized ? () => onAuthorized(tool.serverName) : undefined,
++            )
 +          : undefined) ?? (async () => notConnectedToolResult(tool.serverName, tool.toolName));
 +      return async (...args) => {
-+        params.mcpRequesterScopeAssertCurrent?.();
-+        const result = await execute(...args);
-+        params.mcpRequesterScopeAssertCurrent?.();
-+        return result;
++        return await runWithSessionMcpRequestSignal(args[2], async () => {
++          params.mcpRequesterScopeAssertCurrent?.();
++          getSessionMcpRequestSignal()?.throwIfAborted();
++          const result = await execute(...args);
++          params.mcpRequesterScopeAssertCurrent?.();
++          getSessionMcpRequestSignal()?.throwIfAborted();
++          return result;
++        });
 +      };
      },
    });
  }
-@@ -353,9 +370,24 @@ export async function materializeStaticMcpToolsForHarnessRunCore(
+@@ -353,9 +392,24 @@ export async function materializeStaticMcpToolsForHarnessRunCore(
        ],
        params.requestInteractiveCodexApproval ? "this run" : "this scheduled run",
      );
@@ -40316,20 +41118,22 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
        ...(diagnosticNotice ? { diagnosticNotice } : {}),
        dispose: async () => {
          if (disposed) {
-@@ -383,6 +415,12 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
+@@ -383,7 +437,13 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
      ...params,
      conversationCapabilityProfile: resolveHarnessCapabilityProfile(params),
    };
+-  const scopedRuntimeHandle = await acquireRequesterScopedMcpRuntime({
 +  const requesterScope = resolveMcpRequesterScope({
 +    ...params,
 +    senderId: params.requesterSenderId,
 +    agentAccountId: params.agentAccountId ?? undefined,
 +    messageChannel: params.messageChannel ?? undefined,
 +  });
-   const scopedRuntimeHandle = await acquireRequesterScopedMcpRuntime({
++  const acquisitionParams = Object.freeze({
      sessionId: params.sessionId,
      sessionKey: params.sessionKey,
-@@ -391,9 +429,9 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
+     workspaceDir: params.workspaceDir,
+@@ -391,12 +451,67 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
      cfg: params.cfg,
      manifestRegistry: params.manifestRegistry,
      toolOverrides: params.toolOverrides,
@@ -40341,8 +41145,66 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
 +    messageChannel: requesterScope?.messageChannel,
      toolDenylist: policyParams.conversationCapabilityProfile?.policy.explicitToolDenylist,
    });
++  const scopedRuntimeHandle = await acquireRequesterScopedMcpRuntime(acquisitionParams);
    const scopedRuntime = scopedRuntimeHandle?.runtime;
-@@ -404,21 +442,23 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
++  const refresh = captureAgentPluginRuntimeRefresh();
++  const refreshCurrent = scopedRuntime
++    ? captureMcpRequesterConnectRefreshCurrent(scopedRuntime)
++    : () => false;
++  let disposed = false;
++  const onRequesterConnectAuthorized = async (serverName: string): Promise<boolean> => {
++    const assertCurrent = () => {
++      params.mcpRequesterScopeAssertCurrent?.();
++      getSessionMcpRequestSignal()?.throwIfAborted();
++      refresh.assertCurrent();
++      if (disposed || !refreshCurrent()) {
++        throw new Error("MCP requester connect preparation is no longer current");
++      }
++    };
++    assertCurrent();
++    let next: Awaited<ReturnType<typeof acquireRequesterScopedMcpRuntime>> = undefined;
++    let successorCurrent: (() => boolean) | undefined;
++    let ready = false;
++    try {
++      next = await acquireRequesterScopedMcpRuntime(acquisitionParams);
++      assertCurrent();
++      if (next) {
++        assertMcpRequesterScopeMatches(next.runtime.requesterScope, requesterScope);
++        const catalog = await next.runtime.getCatalog({
++          waitForRecovery: true,
++          retryFailedServerNames: [serverName],
++        });
++        assertCurrent();
++        const recoveredTools = applyHarnessToolPolicy(
++          buildCatalogTools(catalog, policyParams),
++          policyParams,
++        );
++        ready =
++          Object.hasOwn(catalog.servers, serverName) &&
++          !catalog.diagnostics?.some((diagnostic) => diagnostic.serverName === serverName) &&
++          next.runtime.requesterConnect?.authorizedServerNames.includes(serverName) === true &&
++          recoveredTools.some((tool) => {
++            const mcp = getPluginToolMeta(tool)?.mcp;
++            return mcp?.serverName === serverName && mcp.oauthConnectBootstrap !== true;
++          });
++        successorCurrent = captureMcpSteeringCatalogCurrent({
++          runtime: next.runtime,
++          catalog: mergeMcpConnectCatalog(catalog, next.runtime.requesterConnect),
++          tools: recoveredTools,
++        });
++      }
++    } finally {
++      if (next) {
++        await releaseSessionMcpRuntime(next);
++      }
++    }
++    assertCurrent();
++    return ready && successorCurrent?.() === true && refresh.request();
++  };
+ 
+   let liveRuntime: Awaited<ReturnType<typeof materializeBundleMcpToolsForRun>> | undefined;
+   let liveCatalog: McpToolCatalog | undefined;
+@@ -404,21 +519,24 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
      if (scopedRuntime) {
        liveRuntime = await materializeBundleMcpToolsForRun({
          runtime: scopedRuntime,
@@ -40350,6 +41212,7 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
          releaseLease: scopedRuntimeHandle?.releaseLease,
          agentId: params.agentId,
          reservedToolNames: params.reservedToolNames,
++        onRequesterConnectAuthorized,
        });
        liveCatalog = scopedRuntime.peekCatalog() ?? (await scopedRuntime.getCatalog());
 +      params.mcpRequesterScopeAssertCurrent?.();
@@ -40371,17 +41234,19 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
      if (!advertisedCatalog || advertisedCatalog.tools.length === 0) {
        await liveRuntime?.dispose();
        return undefined;
-@@ -432,9 +472,21 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
+@@ -431,10 +549,23 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
+       advertisedCatalog,
        { ...params, reservedToolNames },
        scopedRuntime?.requesterConnect,
++      scopedRuntime ? onRequesterConnectAuthorized : undefined,
++    );
++    // Cached names can collide with bootstrap aliases; bind by trusted operation identity.
++    const liveByIdentity = new Map(
++      (liveRuntime?.tools ?? []).map((tool) => [mcpBindingKey(tool), tool]),
      );
 -    const liveByName = new Map((liveRuntime?.tools ?? []).map((tool) => [tool.name, tool]));
 -    // Live tools supply execution; advertised catalog supplies the stable name/schema surface.
 -    const tools = advertisedTools.map((tool) => liveByName.get(tool.name) ?? tool);
-+    // Cached names can collide with bootstrap aliases; bind by trusted operation identity.
-+    const liveByIdentity = new Map(
-+      (liveRuntime?.tools ?? []).map((tool) => [mcpBindingKey(tool), tool]),
-+    );
 +    const tools = advertisedTools.map((tool) => {
 +      const key = mcpBindingKey(tool);
 +      const live = key === undefined ? undefined : liveByIdentity.get(key);
@@ -40396,10 +41261,11 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
  
      const filteredTools = applyHarnessToolPolicy(tools, policyParams);
      const filteredAdvertised = applyHarnessToolPolicy(advertisedTools, policyParams);
-@@ -452,9 +504,24 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
+@@ -452,9 +583,23 @@ export async function materializeRequesterScopedMcpToolsForHarnessRunCore(
          })
        : filteredTools;
  
+-    let disposed = false;
 +    const catalogCurrent =
 +      scopedRuntime && liveRuntime && liveCatalog
 +        ? captureMcpSteeringCatalogCurrent({
@@ -40414,7 +41280,6 @@ index 4e349425c84f9c8b38472349a707a6fc58daff65..9e22f3452e7d163e650368774a93621a
 +            },
 +          })
 +        : () => false;
-     let disposed = false;
      return {
        tools: executableTools,
 +      isSteeringCatalogCurrent: () => !disposed && catalogCurrent(),
@@ -40493,7 +41358,7 @@ index ec49f19680f5a0ae94b7e980398c9a0788d56e14..63ec700dd2525ecc5e6bbc237a6868a0
  
    return {
 diff --git a/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts b/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
-index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d958abd2bef 100644
+index 4749b1c6baae863a290189040d87281d57c43351..2032551d0d0efe3fc1291a8e47009621b61d0b1d 100644
 --- a/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
 +++ b/src/agents/agent-bundle-mcp-manager.requester-connect.test.ts
 @@ -11,10 +11,12 @@ import {
@@ -40517,7 +41382,26 @@ index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d95
      startAuthorization.mockReset().mockResolvedValue({
        status: "redirect",
        authorizationUrl: "https://auth.example/authorize?state=opaque",
-@@ -141,7 +144,10 @@ describe("requester MCP connect runtime", () => {
+@@ -124,11 +127,18 @@ describe("requester MCP connect runtime", () => {
+       runtime: disconnectedRuntime,
+     });
+     expect(disconnected.tools.map((tool) => tool.name)).toEqual(["calendar__connect"]);
++    expect(disconnected.tools[0]?.description).toContain("task's existing authorization");
++    expect(disconnected.tools[0]?.description).toContain("original requested outcome");
+     expect(created.find((params) => params.requesterScope)?.includeServerNames).toEqual(new Set());
+     expect(startAuthorization).not.toHaveBeenCalled();
+     const connecting = disconnected.tools[0]!.execute("connect", {});
+     expect(startAuthorization).toHaveBeenCalledOnce();
+     await expect(connecting).resolves.toMatchObject({
++      content: [
++        {
++          text: expect.stringContaining("call this connect tool again to verify the connection"),
++        },
++      ],
+       details: {
+         mcpConnect: {
+           serverName: "calendar",
+@@ -141,7 +151,10 @@ describe("requester MCP connect runtime", () => {
          status: "redirect",
          authorizationUrl: "https://auth.example/authorize?state=opaque",
        })
@@ -40529,7 +41413,7 @@ index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d95
      const codeMode = createCodeModeHarness();
      applyCodeModeCatalog({
        tools: [...codeMode.tools, ...disconnected.tools],
-@@ -165,11 +171,17 @@ describe("requester MCP connect runtime", () => {
+@@ -165,11 +178,17 @@ describe("requester MCP connect runtime", () => {
          isError: false,
        },
        connected: {
@@ -40537,7 +41421,7 @@ index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d95
 +        content: [
 +          {
 +            type: "text",
-+            text: 'MCP server "calendar" is connected. Its tools become available on the next message.',
++            text: 'MCP server "calendar" is connected. This runtime has not refreshed its tools; keep the original task open and use its existing continuation or recovery path. Continue the original requested outcome; connecting alone is not completion.',
 +          },
 +        ],
          isError: false,
@@ -40548,11 +41432,25 @@ index 4749b1c6baae863a290189040d87281d57c43351..38b3e750f766bbe928e25c4f93944d95
      await disconnected.dispose();
  
      oauthStatus.mockResolvedValue({ state: "authorized" });
+@@ -204,6 +223,13 @@ describe("requester MCP connect runtime", () => {
+     const materialized = await materializeBundleMcpToolsForRun({ runtime });
+     const direct = await materialized.tools[0]!.execute("connect-direct", {});
+     expect(direct.details).toMatchObject({ status: "error", mcpServer: "calendar" });
++    expect(direct.content).toEqual([
++      {
++        type: "text",
++        text: expect.stringContaining("task authorizes configuration maintenance"),
++      },
++    ]);
++    expect(startAuthorization).not.toHaveBeenCalled();
+ 
+     const codeMode = createCodeModeHarness();
+     applyCodeModeCatalog({
 diff --git a/src/agents/agent-bundle-mcp-materialize.ts b/src/agents/agent-bundle-mcp-materialize.ts
-index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f0018ad7b 100644
+index 046fdc35ca6d2bf0b49825d96e4e86056d970511..0de1898b52fa59e3fb2fad60607f76a1e84a3d5d 100644
 --- a/src/agents/agent-bundle-mcp-materialize.ts
 +++ b/src/agents/agent-bundle-mcp-materialize.ts
-@@ -15,11 +15,12 @@ import {
+@@ -15,11 +15,13 @@ import {
    normalizeReservedToolNames,
    TOOL_NAME_SEPARATOR,
  } from "./agent-bundle-mcp-names.js";
@@ -40564,12 +41462,13 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
  import { mergeMcpConnectCatalog } from "./agent-bundle-mcp-requester-connect.js";
 +import {
 +  captureMcpRequesterConnectRefreshCurrent,
++  createMcpRequesterConnectAuthorizedContinuation,
 +  captureMcpSteeringCatalogCurrent,
 +} from "./agent-bundle-mcp-runtime-owner.js";
  import type {
    BundleMcpToolRuntime,
    McpCatalogTool,
-@@ -27,12 +28,13 @@ import type {
+@@ -27,12 +29,13 @@ import type {
    SessionMcpRuntime,
  } from "./agent-bundle-mcp-types.js";
  import {
@@ -40584,7 +41483,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
  import { buildMcpAppCanvasPayload, fetchMcpAppView } from "./mcp-ui-resource.js";
  import { recordAgentCleanupFailure } from "./run-cleanup-timeout.js";
  import type { AgentToolResult } from "./runtime/index.js";
-@@ -426,14 +428,25 @@ export function buildBundleMcpToolsFromCatalog(params: {
+@@ -426,14 +429,28 @@ export function buildBundleMcpToolsFromCatalog(params: {
  
  export async function materializeBundleMcpToolsForRun(params: {
    runtime: SessionMcpRuntime;
@@ -40600,17 +41499,20 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
 +  retryFailedServerNames?: readonly string[];
 +  /** Only the native next-turn owner consumes this materialization's connect signal. */
 +  nativeRequesterConnectContinuation?: boolean;
++  /** A managed non-native harness may join discovery and request its existing continuation. */
++  onRequesterConnectAuthorized?: (serverName: string) => boolean | Promise<boolean>;
  }): Promise<BundleMcpToolRuntime> {
    const runtime = params.runtime;
 +  const withCurrentRequest = createMcpToolResultProducer(params);
    let disposal: Promise<void> | undefined;
 +  const requesterConnectRefreshPending = new Set<string>();
++  const onRequesterConnectAuthorized = params.onRequesterConnectAuthorized;
 +  let requesterConnectRefreshConsumed = false;
 +  const refreshCurrent = captureMcpRequesterConnectRefreshCurrent(runtime);
    let allowedAppToolsByServer: Map<string, Set<string>> | undefined;
    let releaseLease: (() => void) | undefined;
    const dispose = async () => {
-@@ -465,8 +478,14 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -465,8 +482,14 @@ export async function materializeBundleMcpToolsForRun(params: {
    };
    try {
      releaseLease = params.releaseLease ?? runtime.acquireLease?.();
@@ -40626,7 +41528,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
      const reservedToolNames = params.reservedToolNames
        ? Array.from(params.reservedToolNames)
        : undefined;
-@@ -476,9 +495,18 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -476,9 +499,26 @@ export async function materializeBundleMcpToolsForRun(params: {
        catalog: materializedCatalog,
        reservedToolNames,
        createExecute: (tool) => (toolCallId: string, input: unknown, signal?: AbortSignal) =>
@@ -40641,14 +41543,22 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
 +                ? () => {
 +                    if (disposal === undefined && refreshCurrent()) {
 +                      requesterConnectRefreshPending.add(tool.serverName);
++                      return true;
 +                    }
++                    return false;
 +                  }
-+                : undefined,
++                : onRequesterConnectAuthorized
++                  ? createMcpRequesterConnectAuthorizedContinuation({
++                      assertCurrent: () => params.assertCurrent?.(),
++                      isCurrent: () => disposal === undefined && refreshCurrent(),
++                      onAuthorized: () => onRequesterConnectAuthorized(tool.serverName),
++                    })
++                  : undefined,
 +            );
              if (connect) {
                return setMcpCodeModeGuestResultFromAgentResult(await connect(toolCallId, input));
              }
-@@ -522,7 +550,7 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -522,7 +562,7 @@ export async function materializeBundleMcpToolsForRun(params: {
          }),
        createResourceListExecute: runtime.listResources
          ? (serverName) => (_toolCallId, _input, signal) =>
@@ -40657,7 +41567,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
                runtime.markUsed();
                return toJsonAgentToolResult({
                  serverName,
-@@ -533,7 +561,7 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -533,7 +573,7 @@ export async function materializeBundleMcpToolsForRun(params: {
          : undefined,
        createResourceReadExecute: runtime.readResource
          ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
@@ -40666,7 +41576,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
                const uri = requireStringArg(input, "uri");
                runtime.markUsed();
                return toJsonAgentToolResult({
-@@ -545,7 +573,7 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -545,7 +585,7 @@ export async function materializeBundleMcpToolsForRun(params: {
          : undefined,
        createPromptListExecute: runtime.listPrompts
          ? (serverName) => (_toolCallId, _input, signal) =>
@@ -40675,7 +41585,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
                runtime.markUsed();
                return toJsonAgentToolResult({
                  serverName,
-@@ -556,7 +584,7 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -556,7 +596,7 @@ export async function materializeBundleMcpToolsForRun(params: {
          : undefined,
        createPromptGetExecute: getPrompt
          ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
@@ -40684,7 +41594,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
                runtime.markUsed();
                return projectMcpGetPromptResult(
                  await getPrompt(
-@@ -579,24 +607,32 @@ export async function materializeBundleMcpToolsForRun(params: {
+@@ -579,24 +619,32 @@ export async function materializeBundleMcpToolsForRun(params: {
        reservedToolNames,
      });
  
@@ -40728,7 +41638,7 @@ index 046fdc35ca6d2bf0b49825d96e4e86056d970511..d1d2bb0ee59df26eb7e9da2b851c212f
        },
        dispose,
      };
-@@ -652,6 +688,7 @@ export async function createBundleMcpToolRuntime(params: {
+@@ -652,6 +700,7 @@ export async function createBundleMcpToolRuntime(params: {
    try {
      const materialized = await materializeBundleMcpToolsForRun({
        runtime,
@@ -41070,22 +41980,32 @@ index a8329e5b2be92bae0f033727f6bee83d65040989..a94275b9c80fc72d9eefc7f2022a04cf
    const { manager, config, params } = await fixture();
    const original = await manager.getOrCreate({ ...params, cfg: config() });
 diff --git a/src/agents/agent-bundle-mcp-requester-connect.ts b/src/agents/agent-bundle-mcp-requester-connect.ts
-index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069abf0080bb 100644
+index 7b616c45500101bfda8ba9f7650f63ee88531664..2619f05521a885d04bfc5a833ad81897c8eebd66 100644
 --- a/src/agents/agent-bundle-mcp-requester-connect.ts
 +++ b/src/agents/agent-bundle-mcp-requester-connect.ts
 @@ -12,6 +12,7 @@ import type { AgentToolResult } from "./runtime/index.js";
  async function connectRequesterOAuthServer(params: {
    serverName: string;
    publicOrigin?: string;
-+  onAuthorized?: () => void;
++  onAuthorized?: () => boolean | Promise<boolean>;
    authorize: (
      redirectUrl: string,
    ) => ReturnType<(typeof import("./mcp-oauth.js"))["startMcpOAuthAuthorization"]>;
-@@ -27,11 +28,16 @@ async function connectRequesterOAuthServer(params: {
+@@ -19,7 +20,8 @@ async function connectRequesterOAuthServer(params: {
+   if (!params.publicOrigin) {
+     const message =
+       `MCP server "${params.serverName}" needs requester sign-in, but gateway.publicOrigin is not configured. ` +
+-      "Ask the operator to set the public Gateway HTTP(S) origin.";
++      "If the task authorizes configuration maintenance, repair this setting through the existing supported operator route and retry this connection for the same requester. " +
++      "Otherwise report the remaining configuration blocker, keep the original task open, and continue independent authorized work.";
+     return {
+       content: [{ type: "text", text: message }],
+       details: { status: "error", error: message, mcpServer: params.serverName },
+@@ -27,11 +29,17 @@ async function connectRequesterOAuthServer(params: {
    }
    const result = await params.authorize(new URL("/oauth/mcp/callback", params.publicOrigin).href);
    if (result.status === "authorized") {
-+    params.onAuthorized?.();
++    const continuationAccepted = (await params.onAuthorized?.()) === true;
      return {
        content: [
          {
@@ -41093,38 +42013,50 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069a
 -          text: `MCP server "${params.serverName}" is connected. Its tools become available on the next message.`,
 +          text:
 +            `MCP server "${params.serverName}" is connected. ` +
-+            (params.onAuthorized
++            (continuationAccepted
 +              ? "Its available tools are refreshed before you continue this task."
-+              : "Its tools become available on the next message."),
++              : "This runtime has not refreshed its tools; keep the original task open and use its existing continuation or recovery path.") +
++            " Continue the original requested outcome; connecting alone is not completion.",
          },
        ],
        details: { mcpServer: params.serverName },
-@@ -75,8 +81,8 @@ function buildRequesterConnectCatalog(
+@@ -43,7 +51,9 @@ async function connectRequesterOAuthServer(params: {
+         type: "text",
+         text:
+           `Connect MCP server "${params.serverName}" at ${result.authorizationUrl}\n` +
+-          "After sign-in completes, the server's tools become available on the next message.",
++          "Complete sign-in for this requester through available authorized browser or credential routes, then call this connect tool again to verify the connection. " +
++          "After sign-in verification, use this task's supported tool refresh or continuation path. " +
++          "Continue the original requested outcome; a sign-in link is not completion. Respect the current requester identity and report only a concrete remaining authentication blocker.",
+       },
+     ],
+     details: {
+@@ -75,8 +85,8 @@ function buildRequesterConnectCatalog(
        serverName,
        safeServerName: safeServerNamesByServer.get(serverName) ?? serverName,
        toolName: "connect",
 -      description: `Connect your ${serverName} account.`,
 -      fallbackDescription: `Connect your ${serverName} account.`,
-+      description: `Connect or reconnect your ${serverName} account for this conversation's requester.`,
-+      fallbackDescription: `Connect or reconnect your ${serverName} account for this conversation's requester.`,
++      description: `Connect or reconnect your ${serverName} account for this conversation's requester. Under the task's existing authorization, complete available supported sign-in for that requester, verify the connection, and continue the original requested outcome.`,
++      fallbackDescription: `Connect or reconnect your ${serverName} account for this conversation's requester. Under the task's existing authorization, complete available supported sign-in for that requester, verify the connection, and continue the original requested outcome.`,
        inputSchema: Type.Object({}),
        oauthConnectBootstrap: true,
      })),
-@@ -92,8 +98,12 @@ export async function createRequesterMcpConnect(params: {
+@@ -92,8 +102,12 @@ export async function createRequesterMcpConnect(params: {
    cfg?: OpenClawConfig;
    configFingerprint: string;
  }): Promise<RequesterMcpConnect | undefined> {
 -  const servers = new Map<string, () => Promise<AgentToolResult<unknown>>>();
 +  const servers = new Map<
 +    string,
-+    (onAuthorized?: () => void) => Promise<AgentToolResult<unknown>>
++    (onAuthorized?: () => boolean | Promise<boolean>) => Promise<AgentToolResult<unknown>>
 +  >();
    const authorizedServerNames: string[] = [];
 +  const authorizationChecks: Array<() => boolean> = [];
    for (const serverName of [...params.serverNames].toSorted((a, b) => a.localeCompare(b))) {
      const resolved = resolveMcpTransportConfig(serverName, params.mcpServers[serverName], {
        logWarnings: false,
-@@ -105,26 +115,42 @@ export async function createRequesterMcpConnect(params: {
+@@ -105,26 +119,43 @@ export async function createRequesterMcpConnect(params: {
      ) {
        continue;
      }
@@ -41152,8 +42084,9 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069a
 +        onAuthorized: onAuthorized
 +          ? () => {
 +              if (readMcpOAuthCredentialsStatusSync(requesterIdentity).state === "authorized") {
-+                onAuthorized();
++                return onAuthorized();
 +              }
++              return false;
 +            }
 +          : undefined,
          publicOrigin: params.cfg?.gateway?.publicOrigin,
@@ -41180,7 +42113,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069a
        authorizedServerNames.push(serverName);
      }
    }
-@@ -139,12 +165,22 @@ export async function createRequesterMcpConnect(params: {
+@@ -139,12 +170,22 @@ export async function createRequesterMcpConnect(params: {
    return {
      catalog: buildRequesterConnectCatalog(servers.keys(), params.safeServerNamesByServer),
      authorizedServerNames,
@@ -41205,7 +42138,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069a
  export function mergeMcpConnectCatalog(
    liveCatalog: McpToolCatalog,
    requesterConnect?: RequesterMcpConnect,
-@@ -153,12 +189,17 @@ export function mergeMcpConnectCatalog(
+@@ -153,12 +194,17 @@ export function mergeMcpConnectCatalog(
    if (!connectCatalog) {
      return liveCatalog;
    }
@@ -41226,7 +42159,7 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..36facd334bb4f41ed20df7877e79069a
      return liveCatalog;
    }
    return {
-@@ -167,14 +208,22 @@ export function mergeMcpConnectCatalog(
+@@ -167,14 +213,22 @@ export function mergeMcpConnectCatalog(
      servers: {
        ...liveCatalog.servers,
        ...Object.fromEntries(
@@ -41580,13 +42513,14 @@ index 0000000000000000000000000000000000000000..e0d8c282255f59ad86b99105ef535444
 +  });
 +});
 diff --git a/src/agents/agent-bundle-mcp-runtime-owner.ts b/src/agents/agent-bundle-mcp-runtime-owner.ts
-index cc890413dbf0cc16e31afa10081c3c9d7c151aab..3e38a863a12b7e1e26352fa65d4bd763b29b1548 100644
+index cc890413dbf0cc16e31afa10081c3c9d7c151aab..4144dd052153759c5b0ee452b671e96dc9fb4eb6 100644
 --- a/src/agents/agent-bundle-mcp-runtime-owner.ts
 +++ b/src/agents/agent-bundle-mcp-runtime-owner.ts
-@@ -1,10 +1,24 @@
+@@ -1,17 +1,132 @@
 +import { stableStringify } from "@openclaw/normalization-core/stable-stringify";
 +import { getPluginToolMeta } from "../plugins/tool-metadata.js";
  import { resolveGlobalSingleton } from "../shared/global-singleton.js";
++import { getSessionMcpRequestSignal } from "./agent-bundle-mcp-request-context.js";
 +import { mergeMcpConnectCatalog } from "./agent-bundle-mcp-requester-connect.js";
  import type { CreateSessionMcpRuntime } from "./agent-bundle-mcp-runtime-shared.js";
 -import type { SessionMcpConfigReload, SessionMcpRuntime } from "./agent-bundle-mcp-types.js";
@@ -41609,7 +42543,31 @@ index cc890413dbf0cc16e31afa10081c3c9d7c151aab..3e38a863a12b7e1e26352fa65d4bd763
    replace: (params: Parameters<CreateSessionMcpRuntime>[0]) => SessionMcpRuntime;
    reload: (params: SessionMcpConfigReload) => Promise<void>;
    retireUnusedServers: (retainedServerNames: ReadonlySet<string>) => Promise<void>;
-@@ -15,3 +29,82 @@ export const sessionMcpRuntimeOwners = resolveGlobalSingleton(
+ };
+ 
++/** Revalidate the captured task owner before and after requester authorization. */
++export function createMcpRequesterConnectAuthorizedContinuation(params: {
++  assertCurrent?: () => void;
++  isCurrent: () => boolean;
++  onAuthorized: () => boolean | Promise<boolean>;
++}): () => Promise<boolean> {
++  const assertCurrent = () => {
++    params.assertCurrent?.();
++    getSessionMcpRequestSignal()?.throwIfAborted();
++    if (!params.isCurrent()) {
++      throw new Error("MCP requester connect preparation is no longer current");
++    }
++  };
++  return async () => {
++    assertCurrent();
++    const accepted = await params.onAuthorized();
++    assertCurrent();
++    return accepted;
++  };
++}
++
+ // SDK facades and the Gateway can load separate bundles of this module.
+ export const sessionMcpRuntimeOwners = resolveGlobalSingleton(
    Symbol.for("openclaw.sessionMcpRuntimeOwners"),
    () => new WeakMap<SessionMcpRuntime, SessionMcpRuntimeOwner>(),
  );
@@ -41948,7 +42906,7 @@ index 3c7739ba7a95266a4396b4f5d39c4174b391dbb8..17bc2895bf17cdecd498c24300c4ad9f
 +  }
 +});
 diff --git a/src/agents/agent-bundle-mcp-types.ts b/src/agents/agent-bundle-mcp-types.ts
-index f068cc9c8d4d73b8409196a7556cc35475f8e801..f8beb7282273088231a807d2fdc9085a969160aa 100644
+index f068cc9c8d4d73b8409196a7556cc35475f8e801..d076c0c767a37b873ddcf801a6ad8045fda9555d 100644
 --- a/src/agents/agent-bundle-mcp-types.ts
 +++ b/src/agents/agent-bundle-mcp-types.ts
 @@ -26,6 +26,12 @@ export type BundleMcpToolRuntime = {
@@ -41974,7 +42932,7 @@ index f068cc9c8d4d73b8409196a7556cc35475f8e801..f8beb7282273088231a807d2fdc9085a
 -  createExecute: (serverName: string) => AnyAgentTool["execute"] | undefined;
 +  createExecute: (
 +    serverName: string,
-+    onAuthorized?: () => void,
++    onAuthorized?: () => boolean | Promise<boolean>,
 +  ) => AnyAgentTool["execute"] | undefined;
  };
  
@@ -42604,6 +43562,229 @@ index 0000000000000000000000000000000000000000..0f0288a91f9fc717143a44ffcc778911
 +    }
 +  }
 +}
+diff --git a/src/agents/agent-command-recovery-owner.test.ts b/src/agents/agent-command-recovery-owner.test.ts
+index 52ba3b623eedbcdbc8ab00e7c3edc8db5730947e..523ed812d23385d0ba2551dbfded13fdd1cb0dca 100644
+--- a/src/agents/agent-command-recovery-owner.test.ts
++++ b/src/agents/agent-command-recovery-owner.test.ts
+@@ -26,6 +26,7 @@ vi.mock("./main-session-recovery/main-session-recovery-owner-release.js", () =>
+ 
+ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+ const sessionKey = "agent:main:main";
++const completionSourceTools = ["subagent_settle", "subagent_announce"] as const;
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -327,9 +328,13 @@ describe("agent command restart recovery ownership", () => {
+     }
+   });
+ 
+-  it.each(["before preparation", "during claim"] as const)(
+-    "keeps requester settlement pending when recovery starts %s",
+-    async (timing) => {
++  it.each(
++    completionSourceTools.flatMap((sourceTool) =>
++      (["before preparation", "during claim"] as const).map((timing) => ({ sourceTool, timing })),
++    ),
++  )(
++    "keeps $sourceTool requester completion pending when recovery starts $timing",
++    async ({ sourceTool, timing }) => {
+       const target = createTarget();
+       const lifecycleGeneration = getAgentEventLifecycleGeneration();
+       await write(target, {
+@@ -372,7 +377,7 @@ describe("agent command restart recovery ownership", () => {
+       }
+       vi.useFakeTimers();
+       const run = vi.fn(async () => "consolidated final");
+-      const prepare = vi.fn(async () => ({
++      const prepare = vi.fn(async (_opts: AgentCommandOpts) => ({
+         ...target,
+         sessionEntry: loadSessionEntry({ sessionKey, storePath: target.storePath }),
+         runLease: { release: vi.fn(async () => {}) },
+@@ -382,8 +387,8 @@ describe("agent command restart recovery ownership", () => {
+         lifecycleGeneration,
+         mode: "claim",
+         opts: {
+-          runId: "settle-turn",
+-          inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
++          runId: "completion-turn",
++          inputProvenance: { kind: "inter_session", sourceTool },
+         } as AgentCommandOpts,
+         prepare,
+         run,
+@@ -398,12 +403,23 @@ describe("agent command restart recovery ownership", () => {
+           settled: false,
+           executions: 0,
+         });
++        expect(loadSessionEntry({ sessionKey, storePath: target.storePath })?.sessionId).toBe(
++          target.sessionId,
++        );
+         await write(target, { sessionId: target.sessionId, updatedAt: 300, status: "done" });
+         owner!.release();
+         await expect(wake).resolves.toBe("consolidated final");
+         expect(run).toHaveBeenCalledOnce();
++        expect(prepare).toHaveBeenCalledTimes(2);
++        expect(prepare.mock.calls.map(([opts]) => opts.runId)).toEqual([
++          "completion-turn",
++          "completion-turn",
++        ]);
+         expect(run).toHaveBeenCalledWith(
+-          expect.objectContaining({ sessionEntry: expect.objectContaining({ status: "done" }) }),
++          expect.objectContaining({
++            sessionId: target.sessionId,
++            sessionEntry: expect.objectContaining({ sessionId: target.sessionId, status: "done" }),
++          }),
+         );
+         for (const result of prepare.mock.results) {
+           expect((await result.value).runLease.release).toHaveBeenCalledOnce();
+@@ -415,16 +431,22 @@ describe("agent command restart recovery ownership", () => {
+     },
+   );
+ 
+-  it.each([
+-    "cancelled",
+-    "cancelled during refresh",
+-    "cancelled during claim",
+-    "replaced",
+-    "rerouted",
+-    "tombstoned",
+-    "ownerless",
+-    "generation rotated",
+-  ] as const)("does not execute a %s requester settle turn", async (outcome) => {
++  it.each(
++    completionSourceTools.flatMap((sourceTool) =>
++      (
++        [
++          "cancelled",
++          "cancelled during refresh",
++          "cancelled during claim",
++          "replaced",
++          "rerouted",
++          "tombstoned",
++          "ownerless",
++          "generation rotated",
++        ] as const
++      ).map((outcome) => ({ sourceTool, outcome })),
++    ),
++  )("does not execute a $outcome requester $sourceTool turn", async ({ sourceTool, outcome }) => {
+     const target = createTarget();
+     const lifecycleGeneration = getAgentEventLifecycleGeneration();
+     const entry: SessionEntry = {
+@@ -467,9 +489,9 @@ describe("agent command restart recovery ownership", () => {
+       lifecycleGeneration,
+       mode: "claim",
+       opts: {
+-        runId: "settle-turn",
++        runId: "completion-turn",
+         abortSignal: controller.signal,
+-        inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
++        inputProvenance: { kind: "inter_session", sourceTool },
+       } as AgentCommandOpts,
+       prepare: async () => {
+         preparationCount += 1;
+@@ -533,6 +555,80 @@ describe("agent command restart recovery ownership", () => {
+     }
+   });
+ 
++  it.each(completionSourceTools)(
++    "cancels pending %s completion while a newer human turn claims interrupted recovery",
++    async (sourceTool) => {
++      const target = createTarget();
++      const lifecycleGeneration = getAgentEventLifecycleGeneration();
++      const entry: SessionEntry = {
++        sessionId: target.sessionId,
++        updatedAt: 200,
++        status: "running",
++        abortedLastRun: false,
++        restartRecoveryRuns: [{ runId: "recovery-run", lifecycleGeneration }],
++        mainRestartRecovery: { cycleId: "cycle-1", revision: 3, chargedAttempts: 1 },
++      };
++      await write(target, entry);
++      const owner = await beginSessionWorkAdmission({
++        scope: target.storePath,
++        identities: [sessionKey, target.sessionId],
++        owner: MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER,
++        assertAllowed: () => {},
++      });
++      const controller = new AbortController();
++      const prepared = createDeferred();
++      const completionRun = vi.fn();
++      const completion = runWithAgentCommandRecoveryOwner({
++        lifecycleGeneration,
++        mode: "claim",
++        opts: {
++          runId: "completion-turn",
++          abortSignal: controller.signal,
++          inputProvenance: { kind: "inter_session", sourceTool },
++        } as AgentCommandOpts,
++        prepare: async () => {
++          prepared.resolve();
++          return target;
++        },
++        run: completionRun,
++      });
++      void completion.catch(() => {});
++      try {
++        await prepared.promise;
++        // Native steering cancels the prior completion and interrupts recovery;
++        // that human turn retains the ordinary foreground claim contract.
++        controller.abort();
++        await expect(completion).rejects.toMatchObject({ name: "AbortError" });
++        await write(target, { ...entry, abortedLastRun: true, updatedAt: 300 });
++        const humanRun = vi.fn(async () => {
++          const stored = loadSessionEntry({ sessionKey, storePath: target.storePath });
++          expect(
++            Object.values(stored?.mainRestartRecovery?.foregroundClaims?.runIdsByClaimId ?? {}),
++          ).toContain("human-steering-turn");
++          return "human steering executed";
++        });
++        await expect(
++          runWithAgentCommandRecoveryOwner({
++            lifecycleGeneration,
++            mode: "claim",
++            opts: {
++              runId: "human-steering-turn",
++              inputProvenance: { kind: "external_user" },
++            } as AgentCommandOpts,
++            prepare: async () => target,
++            run: humanRun,
++          }),
++        ).resolves.toBe("human steering executed");
++        expect(humanRun).toHaveBeenCalledOnce();
++        expect(completionRun).not.toHaveBeenCalled();
++      } finally {
++        controller.abort();
++        owner.release();
++        await completion.catch(() => {});
++      }
++    },
++  );
++
+   it("rejects ordinary work while an admitted recovery is still running", async () => {
+     const target = createTarget();
+     const lifecycleGeneration = getAgentEventLifecycleGeneration();
+diff --git a/src/agents/agent-command-recovery-owner.ts b/src/agents/agent-command-recovery-owner.ts
+index 8b72604ad6ecc7db15c520c9d2f87a219f55da78..f0d1c11b159baa03705a360ece6feb51a0feeded 100644
+--- a/src/agents/agent-command-recovery-owner.ts
++++ b/src/agents/agent-command-recovery-owner.ts
+@@ -192,7 +192,8 @@ export async function runWithAgentCommandRecoveryOwner<
+     const target = prepared;
+     const mayWaitForRecovery =
+       params.mode === "claim" &&
+-      params.opts.inputProvenance?.sourceTool === "subagent_settle" &&
++      (params.opts.inputProvenance?.sourceTool === "subagent_settle" ||
++        params.opts.inputProvenance?.sourceTool === "subagent_announce") &&
+       params.opts.sessionEffects !== "internal" &&
+       !params.opts.mainRestartRecoveryAdmitted &&
+       !params.opts.mainRestartRecoveryOwnerLease;
+@@ -208,7 +209,7 @@ export async function runWithAgentCommandRecoveryOwner<
+     let acquired: AcquiredRecoveryOwner | undefined;
+     for (;;) {
+       if (pendingOwner) {
+-        // Keep the accepted settle turn (and its idempotency key) alive rather
++        // Keep the accepted completion turn (and its idempotency key) alive rather
+         // than returning a cached no-turn rejection to the durable delivery owner.
+         await racePromiseWithAbortSignal(pendingOwner, params.opts.abortSignal);
+         params.opts.abortSignal?.throwIfAborted();
 diff --git a/src/agents/agent-command-restart-recovery.test.ts b/src/agents/agent-command-restart-recovery.test.ts
 index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2feadc7c76ac227e2f6675196064d340a6f8955a 100644
 --- a/src/agents/agent-command-restart-recovery.test.ts
@@ -54331,6 +55512,361 @@ index 4518cec0ca3626084147c80bea188775dcb7cc68..7977f489e3c51ae5e216767a04a5ea9e
      ]);
      expect(JSON.stringify(result.payloads)).not.toContain("no final summary was produced");
    });
+diff --git a/src/agents/embedded-agent-runner/run.requester-connect-refresh.integration.test.ts b/src/agents/embedded-agent-runner/run.requester-connect-refresh.integration.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1db77bea9ee22871f3de2926945ebb75bd831242
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run.requester-connect-refresh.integration.test.ts
+@@ -0,0 +1,349 @@
++import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
++import { expectDefined } from "@openclaw/normalization-core";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { withTestTimeout } from "../../../test/helpers/promise.js";
++import type { OpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { startCatalogRecoveryMcpServer } from "../agent-bundle-mcp-catalog-recovery.test-support.js";
++import { materializeRequesterScopedMcpToolsForHarnessRunCore } from "../agent-bundle-mcp-harness.js";
++import { releaseSessionMcpRuntime } from "../agent-bundle-mcp-manager-api.js";
++import { createSessionMcpRuntimeManager } from "../agent-bundle-mcp-manager.js";
++import { SESSION_MCP_RUNTIME_MANAGER_KEY } from "../agent-bundle-mcp-runtime-shared.js";
++import { requesterMcpOAuthIdentity } from "../mcp-oauth-identity.js";
++import { readMcpOAuthStore, updateMcpOAuthStore } from "../mcp-oauth-store.js";
++import { completeOAuthCallback } from "../mcp-oauth.js";
++import { withTempHome } from "../mcp-oauth.test-harness.js";
++import { resolveMcpTransportConfig } from "../mcp-transport-config.js";
++import { captureAgentPluginRuntimeRefresh } from "../plugin-runtime-refresh.js";
++import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
++import {
++  loadRunOverflowCompactionHarness,
++  mockedBuildEmbeddedRunPayloads,
++  mockedRunEmbeddedAttempt,
++  createOverflowRunParams,
++  useOpenAIPlatformAuthFixture,
++} from "./run.overflow-compaction.harness.js";
++
++const requesterAuth = vi.hoisted(() => vi.fn());
++vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
++  auth: requesterAuth,
++  UnauthorizedError: class extends Error {},
++  // Provider/browser exchange and model attempt execution are synthetic. The
++  // canonical grant, MCP manager, HTTP discovery/query and outer run loop are real.
++  extractWWWAuthenticateParams: () => ({}),
++}));
++
++let state: OpenClawTestState;
++afterEach(async () => {
++  await state?.cleanup();
++});
++
++describe("plugin runtime refresh admission", () => {
++  it.each(["pending callback", "expired failed catalog"] as const)(
++    "continues the original non-native task through a protected HTTP query after %s",
++    async (boundary) => {
++      const { runEmbeddedAgent } = await loadRunOverflowCompactionHarness();
++      useOpenAIPlatformAuthFixture();
++      const { createOpenClawTestState } = await import("../../test-utils/openclaw-test-state.js");
++      const { getAgentRunContext } = await import("../../infra/agent-run-registry.js");
++      state = await createOpenClawTestState({ label: "requester-auth-outer-continuation" });
++      await withTempHome(
++        async () => {
++          const pending = boundary === "pending callback";
++          const server = await startCatalogRecoveryMcpServer("recovery", {
++            failFirstList: !pending,
++            holdFirstList: pending,
++          });
++          server.allowCalls();
++          const manager = createSessionMcpRuntimeManager({ enableIdleSweepTimer: false });
++          const singleton = globalThis as Record<PropertyKey, unknown>;
++          const previous = singleton[SESSION_MCP_RUNTIME_MANAGER_KEY];
++          singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = manager;
++          const requesterScope = {
++            requesterSenderId: "alice",
++            agentAccountId: "bot",
++            messageChannel: "discord",
++          };
++          const identity = requesterMcpOAuthIdentity("recovery", server.url, requesterScope);
++          const cfg = {
++            plugins: { enabled: false },
++            gateway: { publicOrigin: "https://gateway.example" },
++            tools: { profile: "full" as const, toolSearch: { enabled: false } },
++            mcp: {
++              servers: {
++                recovery: {
++                  transport: "streamable-http" as const,
++                  url: server.url,
++                  auth: "oauth" as const,
++                  oauth: {
++                    identity: "per-requester" as const,
++                    scope: "offline_access recovery:read",
++                  },
++                  requestTimeoutMs: 2_000,
++                },
++              },
++            },
++          };
++          updateMcpOAuthStore(identity.storeKey, () => ({
++            clientInformation: { client_id: "original-client" },
++            ...(!pending
++              ? {
++                  tokens: {
++                    access_token: "fixture-expired-access",
++                    refresh_token: "fixture-original-refresh",
++                    token_type: "Bearer",
++                    scope: "offline_access recovery:read",
++                  },
++                  tokenExpiresAt: Date.now() - 60_000,
++                }
++              : {}),
++          }));
++          let redirectIssued = false;
++          requesterAuth.mockImplementation(async (provider: OAuthClientProvider) => {
++            expect(await provider.clientInformation()).toMatchObject({
++              client_id: "original-client",
++            });
++            if (pending && !redirectIssued) {
++              redirectIssued = true;
++              await provider.saveCodeVerifier("fixture-code-verifier");
++              await provider.redirectToAuthorization(
++                new URL("https://auth.example/authorize?state=fixture"),
++              );
++              return "REDIRECT";
++            }
++            await provider.saveTokens({
++              access_token: "fixture-renewed-access",
++              refresh_token: "fixture-original-refresh",
++              token_type: "Bearer",
++              expires_in: 900,
++              scope: "offline_access recovery:read",
++            });
++            return "AUTHORIZED";
++          });
++          const runParams = createOverflowRunParams(state);
++          const acquisition = {
++            sessionId: runParams.sessionId,
++            sessionKey: runParams.sessionKey,
++            workspaceDir: state.workspaceDir,
++            cfg,
++            ...requesterScope,
++          };
++          const events: string[] = [];
++          const acquire = manager.acquireRequesterScoped.bind(manager);
++          const handles: Array<NonNullable<Awaited<ReturnType<typeof acquire>>>> = [];
++          vi.spyOn(manager, "acquireRequesterScoped").mockImplementation(async (input) => {
++            expect(input).toMatchObject(acquisition);
++            const handle = await acquire(input);
++            if (handle) {
++              const index = handles.length;
++              handles.push(handle);
++              const release = handle.releaseLease;
++              handle.releaseLease = () => {
++                events.push(`release-${index}`);
++                release();
++              };
++            }
++            return handle;
++          });
++          let admittedOwner: unknown;
++          let authReceipt = "";
++          let authResultMessages: NonNullable<
++            NonNullable<Parameters<typeof makeAttemptResult>[0]>["pluginRuntimeRefreshMessages"]
++          > = [];
++          const originalPrompt = "Recover the connection and query my protected account.";
++          const originalMessage = { role: "user" as const, content: originalPrompt, timestamp: 1 };
++          const onUserMessagePersisted = vi.fn();
++          const onAgentEvent = vi.fn();
++          mockedRunEmbeddedAttempt.mockImplementationOnce(async (params) => {
++            admittedOwner = getAgentRunContext(params.runId)?.delegatedAuthority;
++            expect(admittedOwner).toBeDefined();
++            params.onUserMessagePersisted?.(originalMessage);
++            params.registerPluginRuntimeRefreshConsumer?.(() => {
++              // The temporary discovery acquisition is released before requesting refresh.
++              expect(events).toContain(`release-${pending ? 1 : 2}`);
++              events.push("refresh-accepted");
++              return true;
++            });
++            const materialized = expectDefined(
++              await materializeRequesterScopedMcpToolsForHarnessRunCore(acquisition),
++              "initial requester materialization",
++            );
++            try {
++              expect(materialized.tools.some((tool) => tool.name === "recovery__probe")).toBe(
++                false,
++              );
++              const connect = expectDefined(
++                materialized.tools.find((tool) => tool.name === "recovery__connect"),
++                "requester connect",
++              );
++              if (pending) {
++                const redirect = await connect.execute("pending-connect", {});
++                expect(redirect.details).toMatchObject({
++                  mcpConnect: { serverName: "recovery", authorizationUrl: expect.any(String) },
++                });
++                const transport = expectDefined(
++                  resolveMcpTransportConfig("recovery", cfg.mcp.servers.recovery, {
++                    logWarnings: false,
++                  }),
++                  "callback transport",
++                );
++                if (transport.kind !== "http") {
++                  throw new Error("callback fixture requires HTTP");
++                }
++                expect(
++                  await completeOAuthCallback(identity, transport, {
++                    code: "fixture-code",
++                    state: "fixture",
++                  }),
++                ).toBe("authorized");
++              } else {
++                // A normal reacquisition alone preserves the failed cache and its backoff.
++                updateMcpOAuthStore(identity.storeKey, (current) => ({
++                  ...current,
++                  tokenExpiresAt: Date.now() - 60_000,
++                }));
++                const cached = expectDefined(
++                  await manager.acquireRequesterScoped(acquisition),
++                  "cached acquisition",
++                );
++                try {
++                  expect((await cached.runtime.getCatalog()).tools).toEqual([]);
++                  expect(server.listCount()).toBe(1);
++                } finally {
++                  await releaseSessionMcpRuntime(cached);
++                }
++              }
++              const connecting = connect.execute(
++                "verified-connect",
++                {},
++                new AbortController().signal,
++              );
++              // Attach the rejection observer before waiting for the protocol checkpoint.
++              const connected = Promise.resolve(connecting);
++              void connected.catch(() => {});
++              await withTestTimeout(
++                server.recoveryListStarted,
++                2_000,
++                "authorized connect did not join target catalog recovery",
++              );
++              expect(captureAgentPluginRuntimeRefresh().isPending()).toBe(false);
++              expect(server.callCount()).toBe(0);
++              expect(server.maxActiveLists()).toBe(1);
++              server.releaseLists();
++              const receipt = await connected;
++              authReceipt = JSON.stringify(receipt);
++              authResultMessages = [
++                {
++                  role: "toolResult",
++                  toolCallId: "verified-connect",
++                  toolName: "recovery__connect",
++                  content: receipt.content,
++                  details: receipt.details,
++                  isError: false,
++                  timestamp: 2,
++                },
++              ];
++              expect(authReceipt).toContain("available tools are refreshed");
++              expect(captureAgentPluginRuntimeRefresh().isPending()).toBe(true);
++              expect(readMcpOAuthStore(identity.storeKey)?.tokens?.access_token).toBe(
++                "fixture-renewed-access",
++              );
++              return makeAttemptResult({
++                assistantTexts: [],
++                sessionIdUsed: params.sessionId,
++                // Attempt transport is mocked here. Actual Codex result checkpoint/drain
++                // ordering is separately exercised by its existing app-server fixture.
++                pluginRuntimeRefreshMessages: authResultMessages,
++                toolMetas: [{ toolName: "recovery__connect", isError: false }],
++              });
++            } finally {
++              await materialized.dispose();
++            }
++          });
++          mockedRunEmbeddedAttempt.mockImplementationOnce(async (params) => {
++            expect(getAgentRunContext(params.runId)?.delegatedAuthority).toBe(admittedOwner);
++            expect(params.sessionId).toBe(runParams.sessionId);
++            expect(params.prompt).toContain("Continue the current task from the transcript");
++            expect(params.prompt).not.toContain(originalPrompt);
++            expect(params.suppressNextUserMessagePersistence).toBe(true);
++            expect(params.skipPreparedUserTurnMessage).toBe(true);
++            expect(params.pluginRuntimeRefreshMessages).toEqual(authResultMessages);
++            expect(
++              params.pluginRuntimeRefreshMessages?.filter((message) => message.role === "user"),
++            ).toEqual([]);
++            const materialized = expectDefined(
++              await materializeRequesterScopedMcpToolsForHarnessRunCore(acquisition),
++              "continued requester materialization",
++            );
++            try {
++              const query = expectDefined(
++                materialized.tools.find((tool) => tool.name === "recovery__probe"),
++                "protected query",
++              );
++              const receipt = await query.execute(
++                "protected-query",
++                {},
++                new AbortController().signal,
++              );
++              expect(JSON.stringify(receipt)).toContain("recovery-");
++              return makeAttemptResult({
++                assistantTexts: ["Protected account query completed."],
++                sessionIdUsed: params.sessionId,
++                toolMetas: [{ toolName: "recovery__probe", isError: false }],
++              });
++            } finally {
++              await materialized.dispose();
++            }
++          });
++          mockedBuildEmbeddedRunPayloads.mockReturnValue([
++            { text: "Protected account query completed." },
++          ]);
++          try {
++            const result = await runEmbeddedAgent({
++              ...runParams,
++              config: cfg,
++              prompt: originalPrompt,
++              agentHarnessId: "codex",
++              provider: "openai",
++              model: "fixture-model",
++              onUserMessagePersisted,
++              onAgentEvent,
++            });
++            expect(result.meta.error).toBeUndefined();
++            expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
++            expect(onUserMessagePersisted).toHaveBeenCalledExactlyOnceWith(originalMessage);
++            expect(
++              onAgentEvent.mock.calls.filter(
++                ([event]) => event.stream === "lifecycle" && event.data.phase === "end",
++              ),
++            ).toHaveLength(1);
++            expect(server.callCount()).toBe(1);
++            expect(server.listCount()).toBe(pending ? 1 : 2);
++            expect(result.meta.agentMeta?.terminalReceipt?.successfulToolNames).toEqual([
++              "recovery__connect",
++              "recovery__probe",
++            ]);
++            expect(events.filter((event) => event === "refresh-accepted")).toHaveLength(1);
++            expect(events.indexOf(`release-${pending ? 1 : 2}`)).toBeLessThan(
++              events.indexOf("refresh-accepted"),
++            );
++          } finally {
++            server.releaseLists();
++            await manager.disposeAll();
++            await server.close();
++            if (previous === undefined) {
++              delete singleton[SESSION_MCP_RUNTIME_MANAGER_KEY];
++            } else {
++              singleton[SESSION_MCP_RUNTIME_MANAGER_KEY] = previous;
++            }
++            requesterAuth.mockReset();
++            mockedRunEmbeddedAttempt.mockReset();
++          }
++        },
++        {
++          skipSessionCleanup: true,
++          env: { OPENCLAW_CONFIG_PATH: undefined, OPENCLAW_STATE_DIR: undefined },
++        },
++      );
++    },
++  );
++});
 diff --git a/src/agents/embedded-agent-runner/run.session-permissions.test.ts b/src/agents/embedded-agent-runner/run.session-permissions.test.ts
 index eab68e3556420bc6851129430fc5f2d08a2a1741..bd00bb29faec46778faacd237dfbdd7f0fb9f7cf 100644
 --- a/src/agents/embedded-agent-runner/run.session-permissions.test.ts
@@ -59114,13 +60650,14 @@ index 0000000000000000000000000000000000000000..444ab8d17f3bbba7c47b4fa71b4860ca
 +});
 diff --git a/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts b/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f77187d5da
+index 0000000000000000000000000000000000000000..ba797d59be4b69973ef75bc7c9c0c30385df0729
 --- /dev/null
 +++ b/src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts
-@@ -0,0 +1,554 @@
+@@ -0,0 +1,673 @@
 +import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 +import { expectDefined } from "@openclaw/normalization-core";
 +import type { Context, Model } from "openclaw/plugin-sdk/llm";
++import { Type } from "typebox";
 +import { beforeEach, describe, expect, it, vi } from "vitest";
 +import { withTestTimeout } from "../../../../test/helpers/promise.js";
 +import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -59132,7 +60669,9 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
 +import { requesterMcpOAuthIdentity } from "../../mcp-oauth-identity.js";
 +import { readMcpOAuthStore, updateMcpOAuthStore } from "../../mcp-oauth-store.js";
++import { completeOAuthCallback } from "../../mcp-oauth.js";
 +import { withTempHome } from "../../mcp-oauth.test-harness.js";
++import { resolveMcpTransportConfig } from "../../mcp-transport-config.js";
 +import {
 +  createAssistant,
 +  createAssistantResultStream,
@@ -59208,6 +60747,7 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +  | "prior-context"
 +  | "prior-stop"
 +  | "pending"
++  | "pending-completed"
 +  | "empty"
 +  | "wrong-owner"
 +  | "revoked"
@@ -59232,7 +60772,9 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +  await withTempHome(
 +    async (home) => {
 +      const initiallyUnauthorized =
-+        boundary === "requires-authorization" || boundary === "tokenless-authorized";
++        boundary === "requires-authorization" ||
++        boundary === "tokenless-authorized" ||
++        boundary === "pending-completed";
 +      const server = await startCatalogRecoveryMcpServer("recovery", {
 +        failFirstList: !initiallyUnauthorized,
 +        failRecoveryList: boundary === "empty",
@@ -59270,9 +60812,13 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +          },
 +        },
 +      };
++      const tokenless =
++        boundary === "pending" ||
++        boundary === "pending-completed" ||
++        boundary === "tokenless-authorized";
 +      updateMcpOAuthStore(identity.storeKey, () => ({
 +        clientInformation: { client_id: "original-client" },
-+        ...(boundary === "pending" || boundary === "tokenless-authorized"
++        ...(tokenless
 +          ? {}
 +          : {
 +              tokens: {
@@ -59322,8 +60868,39 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +        };
 +      }
 +      const setup = createAttemptSetupFixture({ effectiveCwd: home, effectiveWorkspace: home });
++      const callbackTransport = expectDefined(
++        resolveMcpTransportConfig("recovery", cfg.mcp?.servers?.recovery, { logWarnings: false }),
++        "callback transport",
++      );
++      if (callbackTransport.kind !== "http") {
++        throw new Error("callback fixture requires HTTP transport");
++      }
 +      const toolBase = {
-+        toolsRaw: [],
++        toolsRaw:
++          boundary === "pending-completed"
++            ? [
++                {
++                  name: "browser",
++                  label: "Browser callback fixture",
++                  description: "Complete the original requester's pending sign-in.",
++                  parameters: Type.Object({}),
++                  execute: async () => {
++                    // Only the external browser exchange is synthetic. The state,
++                    // callback claim, requester lease and saved grant use their real owners.
++                    expect(
++                      await completeOAuthCallback(identity, callbackTransport, {
++                        code: "fixture-code",
++                        state: "fixture",
++                      }),
++                    ).toBe("authorized");
++                    return {
++                      content: [{ type: "text", text: "Original requester sign-in completed." }],
++                      details: {},
++                    };
++                  },
++                },
++              ]
++            : [],
 +        toolsEnabled: true,
 +        toolAbortSignal: generation.signal,
 +        effectiveToolsAllow: undefined,
@@ -59345,9 +60922,14 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +        expect(params.sessionId).toBe(sessionId);
 +        return manager.acquire(params);
 +      });
++      let pendingAuthorizationIssued = false;
 +      mocks.auth.mockImplementation(async (provider: OAuthClientProvider) => {
 +        expect(await provider.clientInformation()).toMatchObject({ client_id: "original-client" });
-+        if (boundary === "pending") {
++        if (
++          boundary === "pending" ||
++          (boundary === "pending-completed" && !pendingAuthorizationIssued)
++        ) {
++          pendingAuthorizationIssued = true;
 +          await provider.saveCodeVerifier("fixture-code-verifier");
 +          await provider.redirectToAuthorization(
 +            new URL("https://auth.example/authorize?state=fixture"),
@@ -59395,9 +60977,9 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +        });
 +        expect(bundle.bundleMcpRuntime?.isRequesterConnectRefreshCurrent?.()).toBe(true);
 +      }
-+      expect(bundle.uncompactedEffectiveTools.map((tool) => tool.name)).toEqual([
-+        "recovery__connect",
-+      ]);
++      expect(bundle.uncompactedEffectiveTools.map((tool) => tool.name)).toEqual(
++        boundary === "pending-completed" ? ["browser", "recovery__connect"] : ["recovery__connect"],
++      );
 +      const catalog = prepareEmbeddedAttemptToolCatalog({
 +        attempt,
 +        setup,
@@ -59479,8 +61061,35 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +        streamMocks.streamSimple.mockImplementation((model: Model, context: Context) => {
 +          requests.push(context.tools?.map((tool) => tool.name) ?? []);
 +          const query = requests.length === 2 && requests[1]?.includes("recovery__probe");
-+          const toolName =
++          let toolName =
 +            requests.length === 1 ? "recovery__connect" : query ? "recovery__probe" : undefined;
++          if (boundary === "pending-completed") {
++            if (requests.length === 2) {
++              const redirect = expectDefined(
++                context.messages.find((message) => message.role === "toolResult"),
++                "pending connect result",
++              );
++              if (redirect.role !== "toolResult") {
++                throw new Error("pending connect result omitted tool content");
++              }
++              const text = redirect.content
++                .filter((part) => part.type === "text")
++                .map((part) => part.text)
++                .join("\n");
++              expect(text).toContain("call this connect tool again to verify the connection");
++              expect(text).toContain(
++                "After sign-in verification, use this task's supported tool refresh or continuation path",
++              );
++              expect(text).toContain("original requested outcome");
++              toolName = "browser";
++            } else if (requests.length === 3) {
++              toolName = "recovery__connect";
++            } else if (requests.length === 4 && requests[3]?.includes("recovery__probe")) {
++              toolName = "recovery__probe";
++            } else if (requests.length > 3) {
++              toolName = undefined;
++            }
++          }
 +          return createAssistantResultStream(
 +            createAssistant(
 +              model,
@@ -59597,6 +61206,52 @@ index 0000000000000000000000000000000000000000..15a0de3bedcd3c97e90ff3eedefa61f7
 +      });
 +    },
 +  );
++
++  it("completes a pending requester callback, verifies connection and queries without another inbound", async () => {
++    await withContinuation(
++      "pending-completed",
++      async ({ prompt, requests, server, originalStoreKey }) => {
++        await withTestTimeout(
++          server.recoveryListStarted,
++          2_000,
++          "callback discovery did not start",
++        );
++        expect(requests).toEqual([
++          ["browser", "recovery__connect"],
++          ["browser", "recovery__connect"],
++          ["browser", "recovery__connect"],
++        ]);
++        server.releaseLists();
++        await withTestTimeout(prompt, 2_000, "pending callback attempt did not continue");
++        expect(requests).toEqual([
++          ["browser", "recovery__connect"],
++          ["browser", "recovery__connect"],
++          ["browser", "recovery__connect"],
++          ["browser", "recovery__probe"],
++          ["browser", "recovery__probe"],
++        ]);
++        expect(mocks.acquire).toHaveBeenCalledTimes(2);
++        expect(mocks.auth).toHaveBeenCalledTimes(3);
++        expect(mocks.auth.mock.calls.map((call) => call[1]?.authorizationCode)).toEqual([
++          undefined,
++          "fixture-code",
++          undefined,
++        ]);
++        expect(server.listCount()).toBe(1);
++        expect(server.callCount()).toBe(1);
++        expect(readMcpOAuthStore(originalStoreKey)).toMatchObject({
++          clientInformation: { client_id: "original-client" },
++          tokens: {
++            refresh_token: "fixture-original-refresh",
++            scope: "offline_access recovery:read",
++          },
++        });
++        expect(readMcpOAuthStore(originalStoreKey).codeVerifier).toBeUndefined();
++        expect(readMcpOAuthStore(originalStoreKey).lastAuthorizationUrl).toBeUndefined();
++        expect(readMcpOAuthStore(originalStoreKey).redirectUrl).toBeUndefined();
++      },
++    );
++  });
 +
 +  it.each(["pending", "empty", "revoked"] as const)(
 +    "keeps %s authorization/discovery connect-only without a fabricated protected query",
@@ -74416,6 +76071,21 @@ index 0000000000000000000000000000000000000000..81496e81fa2f111a99efc78503b2e671
 +    expect(sendMessage).not.toHaveBeenCalled();
 +  });
 +});
+diff --git a/src/agents/subagents/announce/subagent-announce.format.e2e.test.ts b/src/agents/subagents/announce/subagent-announce.format.e2e.test.ts
+index f853e3a4fc26a8eeb67aa87e77ffe32eb6c71ff2..0d5cf381a71558e577f2e3b44459bbe6bed944c7 100644
+--- a/src/agents/subagents/announce/subagent-announce.format.e2e.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.format.e2e.test.ts
+@@ -2664,8 +2664,8 @@ describe("subagent announce formatting", () => {
+     expect(call?.params?.to).toBeUndefined();
+     expectInputProvenance(call?.params, "agent:main:subagent:orchestrator:subagent:worker");
+     const message = typeof call?.params?.message === "string" ? call.params.message : "";
+-    expect(message).toContain(
+-      "Convert this completion into a concise internal orchestration update for your parent agent",
++    expect(message).toMatch(
++      /Convert this completion into a concise internal orchestration update for your parent agent[\s\S]*This completion ends one child run, not necessarily the original user request\.[\s\S]*Compare the result with the requested outcome[\s\S]*fixable blockers require continued work or a follow-up in the kept child session/,
+     );
+     expect(message).toContain(modelRouteChange);
+     expect(message).toContain(
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-mcp-continuity.test.ts b/src/agents/subagents/announce/subagent-announce.requester-mcp-continuity.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..2a7d85bd5d59a82c0e36ffe9eae6fdf4e63bb1d3
@@ -74523,10 +76193,10 @@ index 0000000000000000000000000000000000000000..2a7d85bd5d59a82c0e36ffe9eae6fdf4
 +});
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts b/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7990491a3
+index 0000000000000000000000000000000000000000..5f48171c9363a4500870d492bdf157a7ab075e45
 --- /dev/null
 +++ b/src/agents/subagents/announce/subagent-announce.requester-private-wake.test-support.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,95 @@
 +import { expect, it } from "vitest";
 +import {
 +  registryRuntimeMock,
@@ -74551,12 +76221,16 @@ index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7
 +    const children = (single ? ["run-b"] : ["run-a", "run-b"]).map((runId, index) =>
 +      makeSettledChild({
 +        runId,
++        outcome: { status: "ok" },
 +        ...(!mixed || index === 0
 +          ? { completionTarget: "parent" as const, completionRequesterSessionId: "sess-main" }
 +          : {}),
 +        completion: {
 +          required: true,
-+          resultText: index === 0 ? "private marker" : "public sibling",
++          resultText:
++            index === 0
++              ? "private marker: implementation ready; required CI pending"
++              : "public sibling",
 +        },
 +        requesterSettleWake: {
 +          status: "pending",
@@ -74577,12 +76251,18 @@ index 0000000000000000000000000000000000000000..a56a2966980f7b2ac77148bca20123c7
 +    });
 +    expect(deliveredCallArg().requireVisibleReply).toBeUndefined();
 +    expect(String(deliveredCallArg().triggerMessage)).toContain("private marker");
++    expect(String(deliveredCallArg().triggerMessage)).toContain("required CI pending");
 +    expect(String(deliveredCallArg().triggerMessage)).toContain(
 +      "send it through an available, permitted messaging tool",
 +    );
 +    expect(String(deliveredCallArg().triggerMessage)).toContain(
-+      "when no further work or user-facing update is owed, or after sending that update",
++      "Sending an update does not complete unfinished original work",
 +    );
++    expect(String(deliveredCallArg().triggerMessage)).toContain("Continue remaining in-scope work");
++    expect(String(deliveredCallArg().triggerMessage)).toContain(
++      "when it must wait, retain that work through the kept child session or an available native wait/yield owner before ending this turn",
++    );
++    expect(String(deliveredCallArg().triggerMessage)).not.toContain("or after sending that update");
 +    expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);
 +    expect(deliverSpy).toHaveBeenCalledOnce();
 +    expect(completeBatchSpy.mock.calls[0]?.[2]).not.toHaveProperty(
@@ -75461,7 +77141,7 @@ index 0000000000000000000000000000000000000000..9beb73b93c8695ed34580e594574cd59
 +  });
 +});
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
-index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..5aa4c2290d1e983165a228cf5d5d108533b6a34e 100644
+index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..49a3b4ae149e94130612e4bfa813b244419e099d 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-message.ts
 @@ -1,5 +1,6 @@
@@ -75508,7 +77188,7 @@ index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..5aa4c2290d1e983165a228cf5d5d1085
      params.parentOnly
 -      ? `[Subagent Context] ${SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION}`
 +      ? hasPausedChildren
-+        ? `[Subagent Context] Process this status privately. Your final reply stays internal. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Reply ONLY: ${SILENT_REPLY_TOKEN} when no further work or user-facing update is owed, or after sending that update.`
++        ? `[Subagent Context] Process this status privately. Your final reply stays internal. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Sending an update does not complete unfinished original work. Continue remaining in-scope work; when it must wait, retain that work through the kept child session or an available native wait/yield owner before ending this turn. Reply ONLY: ${SILENT_REPLY_TOKEN} when no further work or user-facing update is owed.`
 +        : `[Subagent Context] ${SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION}`
        : params.requireVisibleReply
 -        ? "[Subagent Context] Child completion delivery is internal; the original user request still requires your visible final answer only after the requested outcome is complete or genuinely blocked."
@@ -75533,7 +77213,7 @@ index a51d377206a4eb4142ba62fd02b212db6f4f7cf9..5aa4c2290d1e983165a228cf5d5d1085
    ].join("\n");
  }
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
-index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..cb9677f39621412f889696adafd346b1becd8698 100644
+index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..e59a9d16f927bca646810de81ab75724c2ba143c 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts
 @@ -1,5 +1,7 @@
@@ -75553,7 +77233,7 @@ index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..cb9677f39621412f889696adafd346b1
    makeSettledChild,
    completeBatchSpy,
    deliveredCallArg,
-@@ -15,8 +18,315 @@ import {
+@@ -15,8 +18,322 @@ import {
  
  const { maybeWakeRequesterAfterAllChildrenSettled } =
    await import("./subagent-announce.requester-settle-wake.js");
@@ -75699,7 +77379,14 @@ index d1ef99219320fdcca5ff0f3eb08bc3d180d7064f..cb9677f39621412f889696adafd346b1
 +      expect(interim).toContain(child.childSessionKey);
 +      expect(interim).toContain("paused awaiting continuation");
 +      expect(interim).toContain("no completion result was submitted");
++      expect(interim).toContain("Continue the same child session when more work is needed");
 +      expect(interim).toContain("Your final reply stays internal");
++      expect(interim).toContain("Sending an update does not complete unfinished original work");
++      expect(interim).toContain("Continue remaining in-scope work");
++      expect(interim).toContain(
++        "when it must wait, retain that work through the kept child session or an available native wait/yield owner before ending this turn",
++      );
++      expect(interim).not.toContain("or after sending that update");
 +      expect(interim).not.toMatch(/Every subagent.*settled|status: unknown|\(no output\)/);
 +      expect(interim).not.toContain("This completion ends one child run");
 +      expect(interim).not.toContain("private checkpoint acknowledgment");
@@ -76402,8 +78089,43 @@ index 0000000000000000000000000000000000000000..e9b6b364f97532a9180492e49ac82599
 +    deferralCount: Math.max(0, ...states.map((state) => state.deferralCount ?? 0)),
 +  };
 +}
+diff --git a/src/agents/subagents/announce/subagent-announce.test.ts b/src/agents/subagents/announce/subagent-announce.test.ts
+index 49ab4e3dc5ef1766d64bd460d01c066926569c20..a6fea4eda74afef835a5eb89c3d20c8a1029d42e 100644
+--- a/src/agents/subagents/announce/subagent-announce.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.test.ts
+@@ -505,7 +505,7 @@ describe("subagent announce seam flow", () => {
+         cleanup: "keep" as const,
+         waitForCompletion: false,
+         outcome: { status: "ok" as const },
+-        roundOneReply: "private child result",
++        roundOneReply: "private child result: implementation ready; required CI pending",
+         expectsCompletionMessage: true,
+         startedAt: 10,
+         endedAt: 20,
+@@ -514,8 +514,20 @@ describe("subagent announce seam flow", () => {
+       usage = { inputTokens: 100, outputTokens: 20 };
+       await runSubagentAnnounceFlow(params);
+       expect(agentSpy).toHaveBeenCalledTimes(2);
+-      const first = agentSpy.mock.calls[0]?.[0].params?.message;
++      const firstParams = requireAgentCall().params;
++      expect(firstParams?.sessionKey).toBe("agent:main:main");
++      expect(firstParams?.deliver).toBe(false);
++      expect(firstParams?.channel).toBeUndefined();
++      expect(firstParams?.to).toBeUndefined();
++      const first = firstParams?.message;
+       expect(first).toContain("private child result");
++      expect(first).toContain("required CI pending");
++      expect(first).toContain("Sending an update does not complete unfinished original work");
++      expect(first).toContain("Continue remaining in-scope work");
++      expect(first).toContain(
++        "when it must wait, retain that work through the kept child session or an available native wait/yield owner before ending this turn",
++      );
++      expect(first).not.toContain("or after sending that update");
+       expect(first).not.toContain("Stats:");
+       expect(agentSpy.mock.calls[1]?.[0].params?.message).toBe(first);
+     },
 diff --git a/src/agents/subagents/announce/subagent-announce.ts b/src/agents/subagents/announce/subagent-announce.ts
-index 10a12706870c4a4d1024045862b7942ebb8eefee..f4c4b872cc03975b081a5cfdfd1fe0d668c6f184 100644
+index 10a12706870c4a4d1024045862b7942ebb8eefee..8043713c7dfef6ee7839dbe81ac190c893cc5101 100644
 --- a/src/agents/subagents/announce/subagent-announce.ts
 +++ b/src/agents/subagents/announce/subagent-announce.ts
 @@ -34,6 +34,7 @@ import {
@@ -76414,6 +78136,15 @@ index 10a12706870c4a4d1024045862b7942ebb8eefee..f4c4b872cc03975b081a5cfdfd1fe0d6
  import { isAnnounceSkip } from "../../tools/sessions-send-tokens.js";
  import {
    SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION,
+@@ -131,7 +132,7 @@ function buildAnnounceReplyInstruction(params: {
+     return SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION;
+   }
+   if (params.requesterIsSubagent) {
+-    return `Convert this completion into a concise internal orchestration update for your parent agent in your own words.${modelRouteInstruction} Keep this internal context private (don't mention system/log/stats/session details or announce type). If this result is duplicate or no update is needed, reply ONLY: ${SILENT_REPLY_TOKEN}.`;
++    return `Convert this completion into a concise internal orchestration update for your parent agent in your own words. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION}${modelRouteInstruction} Keep this internal context private (don't mention system/log/stats/session details or announce type). If this result is duplicate or no update is needed, reply ONLY: ${SILENT_REPLY_TOKEN}.`;
+   }
+   if (params.expectsCompletionMessage) {
+     return `A completed ${params.announceType} is ready for parent review. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION}${modelRouteInstruction} Otherwise send a truthful user-facing update. Keep this internal context private (don't mention system/log/stats/session details or announce type). Reply ONLY: ${SILENT_REPLY_TOKEN} only when this exact result is already visible to the user in this same turn.`;
 @@ -182,6 +183,7 @@ type SubagentAnnounceFlowParams = {
    requesterSessionKey: string;
    requesterAgentId?: string;
@@ -76486,6 +78217,16 @@ index 0000000000000000000000000000000000000000..44e4b527a48c3c3ca98f37f11bcf2048
 +  assertCurrent();
 +  return { mcpRequesterScope: scope, mcpRequesterScopeAssertCurrent: assertCurrent };
 +}
+diff --git a/src/agents/subagents/completion/subagent-completion-instructions.ts b/src/agents/subagents/completion/subagent-completion-instructions.ts
+index a09a5d5a0a3218fd0421c4aed20aa92f06d6aacb..81df49a0977a974ab18c3553ce6f9e39fba21823 100644
+--- a/src/agents/subagents/completion/subagent-completion-instructions.ts
++++ b/src/agents/subagents/completion/subagent-completion-instructions.ts
+@@ -3,4 +3,4 @@ import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
+ export const SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION =
+   "This completion ends one child run, not necessarily the original user request. Compare the result with the requested outcome before deciding the task is done. Reviews, failed checks, and other in-scope fixable blockers require continued work or a follow-up in the kept child session; report a blocker only when progress needs new user authority or an unavailable external decision.";
+ 
+-export const SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION = `Process this result privately. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION} Your final reply stays internal. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Reply ONLY: ${SILENT_REPLY_TOKEN} when no further work or user-facing update is owed, or after sending that update.`;
++export const SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION = `Process this result privately. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION} Your final reply stays internal. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Sending an update does not complete unfinished original work. Continue remaining in-scope work; when it must wait, retain that work through the kept child session or an available native wait/yield owner before ending this turn. Reply ONLY: ${SILENT_REPLY_TOKEN} when no further work or user-facing update is owed.`;
 diff --git a/src/agents/subagents/registry/subagent-control-kill.ts b/src/agents/subagents/registry/subagent-control-kill.ts
 index 040363bbfdcb7f11af9124a493af01dbd926abfe..467517481cae15b6c7e80b7b4fdda21a5058b648 100644
 --- a/src/agents/subagents/registry/subagent-control-kill.ts
@@ -132418,6 +134159,126 @@ index 50fa2287bddc6984659e265c07b39e38687849cc..daa13e92d29622a04177856b80ac93dc
    expiry?: ModelAuthExpiry;
    /** True only for saved OAuth/token profiles this gateway can remove. */
    logoutSupported?: boolean;
+diff --git a/src/gateway/server-methods/models-list-result.plugin-runtime.test.ts b/src/gateway/server-methods/models-list-result.plugin-runtime.test.ts
+index 3f0b8def5c4ea473a4eec1dcb671b0c27c0b402f..042c11f9e31bd84a139821efd9ba6bc26fba25f8 100644
+--- a/src/gateway/server-methods/models-list-result.plugin-runtime.test.ts
++++ b/src/gateway/server-methods/models-list-result.plugin-runtime.test.ts
+@@ -10,6 +10,7 @@ import {
+   setActivePluginRegistry,
+ } from "../../plugins/runtime.js";
+ import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { ModelAccountConnectAuthorityError } from "../model-account-connect.js";
+ import { registerGatewayModelCatalogPrivateAccess } from "../server-model-catalog-auth.js";
+ import {
+   buildModelsListResult,
+@@ -134,6 +135,85 @@ describe("models.list plugin metadata handoff", () => {
+     expect(loadGatewayModelCatalogSnapshot).not.toHaveBeenCalled();
+   });
+ 
++  it.each(["missing prepared owner", "forbidden authority", "unrelated failure"] as const)(
++    "keeps %s distinct in the normal models.list handler",
++    async (boundary) => {
++      await withOpenClawTestState(
++        {
++          layout: "state-only",
++          prefix: "openclaw-models-list-owner-readiness-",
++          agentEnv: "main",
++        },
++        async (state) => {
++          const cfg: OpenClawConfig = {
++            agents: { defaults: { workspace: state.workspaceDir, model: "custom/native-model" } },
++          };
++          const unrelatedFailure = new Error("unrelated catalog failure");
++          const loadGatewayModelCatalogSnapshot = vi.fn();
++          const loadDeferred = vi.fn();
++          const readPrepared = vi.fn(async () => {
++            if (boundary === "forbidden authority") {
++              throw new ModelAccountConnectAuthorityError();
++            }
++            if (boundary === "unrelated failure") {
++              throw unrelatedFailure;
++            }
++            return undefined;
++          });
++          registerGatewayModelCatalogPrivateAccess(loadGatewayModelCatalogSnapshot, {
++            loadDeferred,
++            readPrepared,
++          });
++          const respond = vi.fn();
++          const handler = modelsHandlers["models.list"];
++          if (!handler) {
++            throw new Error("models.list handler missing");
++          }
++          const request = handler({
++            req: {
++              type: "req",
++              id: "owner-readiness-models-list",
++              method: "models.list",
++              params: { agentId: "main", view: "configured" },
++            },
++            params: { agentId: "main", view: "configured" },
++            respond,
++            client: null,
++            isWebchatConnect: () => false,
++            context: {
++              getRuntimeConfig: () => cfg,
++              loadGatewayModelCatalogSnapshot,
++              logGateway: { debug: vi.fn(), warn: vi.fn() },
++            } as never,
++          });
++          if (boundary === "unrelated failure") {
++            await expect(request).rejects.toBe(unrelatedFailure);
++            expect(respond).not.toHaveBeenCalled();
++          } else {
++            await request;
++            if (boundary === "missing prepared owner") {
++              expect(respond).toHaveBeenCalledExactlyOnceWith(false, undefined, {
++                code: "UNAVAILABLE",
++                message:
++                  "Model catalog is not ready. Retry after Gateway startup or refresh finishes.",
++                retryable: true,
++                retryAfterMs: 0,
++              });
++            } else {
++              expect(respond).toHaveBeenCalledExactlyOnceWith(false, undefined, {
++                code: "FORBIDDEN",
++                message: new ModelAccountConnectAuthorityError().message,
++              });
++            }
++          }
++          expect(readPrepared).toHaveBeenCalledExactlyOnceWith({ agentId: "main" });
++          expect(loadDeferred).not.toHaveBeenCalled();
++          expect(loadGatewayModelCatalogSnapshot).not.toHaveBeenCalled();
++        },
++      );
++    },
++  );
++
+   it.each([
+     {
+       name: "uses the prepared generation registry in the normal models.list handler",
+diff --git a/src/gateway/server-methods/models.ts b/src/gateway/server-methods/models.ts
+index 381fe6f23f40510735dae461a759ff5c6bcc7cb7..4ea561b1a050a5cb53daf7c8ed68ffb5e18112ba 100644
+--- a/src/gateway/server-methods/models.ts
++++ b/src/gateway/server-methods/models.ts
+@@ -10,7 +10,7 @@ import {
+   validateModelsListParams,
+ } from "../../../packages/gateway-protocol/src/index.js";
+ import { tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope-config.js";
+-import { PreparedModelRuntimePublicationSupersededError } from "../../agents/prepared-model-runtime.errors.js";
++import { PreparedModelRuntimeOwnerNotPublishedError } from "../../agents/prepared-model-runtime.errors.js";
+ import { ModelAccountConnectAuthorityError } from "../model-account-connect.js";
+ import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
+ import type { ChatMetadataReadParams } from "./chat-metadata-contract.js";
+@@ -72,7 +72,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
+         undefined,
+       );
+     } catch (error) {
+-      if (error instanceof PreparedModelRuntimePublicationSupersededError) {
++      if (error instanceof PreparedModelRuntimeOwnerNotPublishedError) {
+         respond(
+           false,
+           undefined,
 diff --git a/src/gateway/server-methods/send.discord-voice-status.integration.test.ts b/src/gateway/server-methods/send.discord-voice-status.integration.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..5f12b82726221bd175c13a863cbd1fce2141f284
@@ -138563,6 +140424,295 @@ index 4c744aa1bffd330b5076abbd8a608dcded3f72fb..42334db1b99beb89005b760886f6a614
    const requestJson = JSON.stringify(request);
    const nonce = crypto.randomBytes(16).toString("hex");
    const ts = Date.now();
+diff --git a/src/infra/heartbeat-events-filter.test.ts b/src/infra/heartbeat-events-filter.test.ts
+index 5a6c119fb564cebb110446056e70ce5b64ae54a1..84b546fc8eebb67140464e2c358f9dac737a4df7 100644
+--- a/src/infra/heartbeat-events-filter.test.ts
++++ b/src/infra/heartbeat-events-filter.test.ts
+@@ -63,26 +63,42 @@ describe("heartbeat event prompts", () => {
+       name: "builds internal-only exec prompt when delivery is disabled",
+       events: ["Exec failed (node=abc id=123, code 1)\nUpload failed"],
+       opts: { deliverToUser: false },
+-      expected: ["user delivery is disabled", "Handle the result internally", "NO_REPLY only"],
+-      unexpected: [
++      expected: [
++        "user delivery is disabled",
+         "Upload failed",
++        "Handle the result internally",
++        "continue any remaining authorized work",
++        "NO_REPLY only when no original work remains owed",
++        "Do not relay this output or notify the user",
++      ],
++      unexpected: [
+         "system messages above",
+         "Please relay the command output to the user",
++        "Do not mention, summarize, or reuse command output",
+       ],
+     },
+     {
+       name: "suppresses empty exec completion prompts",
+       events: ["", "   "],
+       opts: undefined,
+-      expected: ["no command output was found", "Reply NO_REPLY only"],
++      expected: [
++        "command output was found",
++        "Reply NO_REPLY only when no original work remains owed",
++        "continue any remaining authorized work",
++      ],
+       unexpected: ["Please relay the command output to the user", "system messages above"],
+     },
+     {
+       name: "suppresses metadata-only successful exec completions",
+       events: ["Exec completed (abc12345, code 0)"],
+       opts: undefined,
+-      expected: ["no command output was found", "Reply NO_REPLY only"],
+-      unexpected: ["Please relay the command output to the user", "abc12345"],
++      expected: [
++        "no current command output to relay",
++        "Exec completed (abc12345, code 0) without captured stdout/stderr",
++        "Reply NO_REPLY only when no original work remains owed",
++        "continue any remaining authorized work",
++      ],
++      unexpected: ["Please relay the command output to the user", "user delivery is disabled"],
+     },
+     {
+       name: "reports metadata-only failed exec completions without asking for logs",
+@@ -127,6 +143,146 @@ describe("heartbeat event prompts", () => {
+     expect(prompt).toContain("notify=false");
+     expect(prompt).not.toContain("HEARTBEAT_OK");
+   });
++
++  it.each([false, true])(
++    "keeps bounded current completion evidence private with response-tool mode %s",
++    (useHeartbeatResponseTool) => {
++      const marker = "CURRENT_PRIVATE_RESULT";
++      const prompt = buildExecEventPrompt(
++        [`Exec completed (current-proof, code 0) :: ${marker}${"x".repeat(8_100)}LATE_TAIL`],
++        { deliverToUser: false, useHeartbeatResponseTool },
++      );
++
++      expect(prompt.split(marker)).toHaveLength(2);
++      expect(prompt).toContain("[truncated]");
++      expect(prompt).not.toContain("LATE_TAIL");
++      expect(prompt.length).toBeLessThan(9_000);
++      expect(prompt).toContain("existing kept child session or native wait/yield owner");
++      expect(prompt).toContain("Do not relay this output or notify the user");
++      expect(prompt).toContain("Do not mention, summarize, or reuse output from any earlier run");
++      expect(prompt).toContain("no original work remains owed");
++      if (useHeartbeatResponseTool) {
++        expect(prompt).toContain("heartbeat_respond");
++        expect(prompt).toContain("notify=false");
++        expect(prompt).not.toContain("notify=true");
++      } else {
++        expect(prompt).toContain("NO_REPLY only when no original work remains owed");
++      }
++    },
++  );
++
++  it.each([false, true])(
++    "keeps missing-output failure metadata private without inventing evidence in response-tool mode %s",
++    (useHeartbeatResponseTool) => {
++      const prompt = buildExecEventPrompt(["Exec failed (current-failure, code 2)"], {
++        deliverToUser: false,
++        useHeartbeatResponseTool,
++      });
++
++      expect(prompt).toContain(
++        "Exec failed (current-failure, code 2) without captured stdout/stderr",
++      );
++      expect(prompt).toContain("do not invent output, ask the user for missing logs");
++      expect(prompt).toContain("or try to retrieve logs from an exec/session id");
++      expect(prompt).toContain("continue any remaining authorized work");
++      expect(prompt).toContain("Do not relay this output or notify the user");
++      expect(prompt).not.toContain("Tell the user");
++    },
++  );
++
++  it.each([false, true])(
++    "retains successful metadata-only completion for private continuation in response-tool mode %s",
++    (useHeartbeatResponseTool) => {
++      const prompt = buildExecEventPrompt(["Exec completed (current-success, code 0)"], {
++        deliverToUser: false,
++        useHeartbeatResponseTool,
++      });
++
++      expect(prompt).toContain(
++        "Exec completed (current-success, code 0) without captured stdout/stderr",
++      );
++      expect(prompt).toContain("continue any remaining authorized work");
++      expect(prompt).toContain("existing kept child session or native wait/yield owner");
++      expect(prompt).toContain("no original work remains owed");
++      expect(prompt).toContain("do not invent output, ask the user for missing logs");
++      expect(prompt).toContain("Do not relay this output or notify the user");
++      expect(prompt).not.toContain("Please relay the command output to the user");
++      if (useHeartbeatResponseTool) {
++        expect(prompt).toContain("notify=false");
++        expect(prompt).not.toContain("notify=true");
++      }
++    },
++  );
++
++  it.each([false, true])(
++    "keeps true-empty private completion conditional on unfinished work in response-tool mode %s",
++    (useHeartbeatResponseTool) => {
++      const prompt = buildExecEventPrompt(["", "   "], {
++        deliverToUser: false,
++        useHeartbeatResponseTool,
++      });
++
++      expect(prompt).toContain("continue any remaining authorized work");
++      expect(prompt).toContain("No command output was found. Do not invent command output.");
++      expect(prompt).toContain("existing kept child session or native wait/yield owner");
++      expect(prompt).toContain("no original work remains owed");
++      expect(prompt).toContain("Do not relay this output or notify the user");
++      expect(prompt).toContain("Do not mention, summarize, or reuse output from any earlier run");
++      expect(prompt).not.toContain("The current completion details are:");
++      if (useHeartbeatResponseTool) {
++        expect(prompt).toContain("notify=false");
++        expect(prompt).not.toContain("notify=true");
++      } else {
++        expect(prompt).toContain("NO_REPLY only when no original work remains owed");
++        expect(prompt).not.toContain("Reply NO_REPLY only.");
++      }
++    },
++  );
++
++  it.each([false, true])(
++    "retains quiet public-target current metadata internally in response-tool mode %s",
++    (useHeartbeatResponseTool) => {
++      const prompt = buildExecEventPrompt(["Exec completed (quiet-current, code 0)"], {
++        useHeartbeatResponseTool,
++      });
++
++      expect(prompt).toContain(
++        "Exec completed (quiet-current, code 0) without captured stdout/stderr",
++      );
++      expect(prompt).toContain("no current command output to relay");
++      expect(prompt).not.toContain("user delivery is disabled");
++      expect(prompt).toContain("continue any remaining authorized work");
++      expect(prompt).toContain("existing kept child session or native wait/yield owner");
++      expect(prompt).toContain("no original work remains owed");
++      expect(prompt).toContain(
++        "Report a genuinely completed original-task outcome through the existing response route",
++      );
++      expect(prompt).toContain("Keep this command completion metadata quiet");
++      expect(prompt).toContain("no substantive original-task result remains to report");
++      expect(prompt).not.toContain("Do not relay this output or notify the user from this wake");
++      expect(prompt).toContain("Do not mention, summarize, or reuse output from any earlier run");
++      if (useHeartbeatResponseTool) {
++        expect(prompt).toContain("notify=false");
++        expect(prompt).toContain("through heartbeat_respond with notify=true");
++      }
++    },
++  );
++
++  it("keeps mixed public output and failure formatting while suppressing empty success metadata", () => {
++    const prompt = buildExecEventPrompt([
++      "Exec completed (quiet-success, code 0)",
++      "Exec completed (visible-success, code 0) :: CURRENT_PUBLIC_OUTPUT",
++      "Exec failed (missing-failure, code 2)",
++    ]);
++
++    expect(prompt).not.toContain("quiet-success");
++    expect(prompt).toContain("CURRENT_PUBLIC_OUTPUT");
++    expect(prompt).toContain(
++      "Exec failed (missing-failure, code 2) without captured stdout/stderr",
++    );
++    expect(prompt).toContain("Tell the user the command completed without captured output");
++    expect(prompt).not.toContain("user delivery is disabled");
++  });
+ });
+ 
+ describe("heartbeat event classification", () => {
+diff --git a/src/infra/heartbeat-events-filter.ts b/src/infra/heartbeat-events-filter.ts
+index e41d8680b52f7f64c618f0067affb68e0d43416d..8e9649ef12a6461b0ee9e860952aab79c43aec12 100644
+--- a/src/infra/heartbeat-events-filter.ts
++++ b/src/infra/heartbeat-events-filter.ts
+@@ -50,7 +50,10 @@ export function isRelayableExecCompletionEvent(evt: string): boolean {
+   return !parsed.succeeded;
+ }
+ 
+-function formatExecEventPromptText(pendingEvents: string[]): {
++function formatExecEventPromptText(
++  pendingEvents: string[],
++  retainSuccessfulMetadata = false,
++): {
+   text: string;
+   hasMissingOutputFailure: boolean;
+ } {
+@@ -64,10 +67,10 @@ function formatExecEventPromptText(pendingEvents: string[]): {
+     if (parsed.output) {
+       return [parsed.raw];
+     }
+-    if (parsed.succeeded) {
++    if (parsed.succeeded && !retainSuccessfulMetadata) {
+       return [];
+     }
+-    hasMissingOutputFailure = true;
++    hasMissingOutputFailure ||= !parsed.succeeded;
+     return [
+       `Exec ${parsed.action} (${parsed.id}, ${parsed.result}) without captured stdout/stderr.`,
+     ];
+@@ -116,28 +119,41 @@ export function buildExecEventPrompt(
+ ): string {
+   const deliverToUser = opts?.deliverToUser ?? true;
+   const useHeartbeatResponseTool = opts?.useHeartbeatResponseTool ?? false;
+-  const { text: rawEventText, hasMissingOutputFailure } = formatExecEventPromptText(pendingEvents);
++  const { text: rawEventText, hasMissingOutputFailure } = formatExecEventPromptText(
++    pendingEvents,
++    !deliverToUser,
++  );
++  // A successful command with no output is still current continuation evidence,
++  // even when this run has a valid user-delivery route. Keep it internal.
++  const rawCompletionDetails = rawEventText || formatExecEventPromptText(pendingEvents, true).text;
+   const eventText =
+-    rawEventText.length > MAX_EXEC_EVENT_PROMPT_CHARS
+-      ? `${truncateUtf16Safe(rawEventText, MAX_EXEC_EVENT_PROMPT_CHARS)}\n\n[truncated]`
+-      : rawEventText;
+-  if (!eventText) {
++    rawCompletionDetails.length > MAX_EXEC_EVENT_PROMPT_CHARS
++      ? `${truncateUtf16Safe(rawCompletionDetails, MAX_EXEC_EVENT_PROMPT_CHARS)}\n\n[truncated]`
++      : rawCompletionDetails;
++  if (!deliverToUser || !rawEventText) {
+     const completionInstruction = useHeartbeatResponseTool
+-      ? HEARTBEAT_RESPONSE_TOOL_INSTRUCTIONS
+-      : `Reply ${SILENT_REPLY_TOKEN} only.`;
+-    return `An async command completion event was triggered, but no command output was found. ${completionInstruction} Do not mention, summarize, or reuse output from any earlier run.`;
+-  }
+-  if (!deliverToUser) {
+-    if (useHeartbeatResponseTool) {
+-      return (
+-        "An async command completion event was triggered, but user delivery is disabled for this run. " +
+-        `Handle the result internally. ${HEARTBEAT_RESPONSE_TOOL_INSTRUCTIONS} ` +
+-        "Do not mention, summarize, or reuse command output."
+-      );
+-    }
++      ? deliverToUser
++        ? "Report a genuinely completed original-task outcome through heartbeat_respond with notify=true. When no original work remains owed and no substantive original-task result remains to report, record this wake's internal outcome with notify=false."
++        : "When no original work remains owed, use heartbeat_respond to record this wake's internal outcome with notify=false."
++      : deliverToUser
++        ? `Reply ${SILENT_REPLY_TOKEN} only when no original work remains owed and no substantive original-task result remains to report.`
++        : `Reply ${SILENT_REPLY_TOKEN} only when no original work remains owed.`;
+     return (
+-      "An async command completion event was triggered, but user delivery is disabled for this run. " +
+-      `Handle the result internally and reply ${SILENT_REPLY_TOKEN} only. Do not mention, summarize, or reuse command output.`
++      "An async command completion event was triggered" +
++      (deliverToUser
++        ? ", but there is no current command output to relay. "
++        : ", but user delivery is disabled for this run. ") +
++      (eventText
++        ? "The current completion details are:\n\n" + eventText
++        : "No command output was found. Do not invent command output.") +
++      "\n\nHandle the result internally. A completed command does not complete unfinished original work. " +
++      "Use these current details privately to continue any remaining authorized work. If it must wait, retain continuation through the existing kept child session or native wait/yield owner before ending this turn. " +
++      (deliverToUser
++        ? "Keep this command completion metadata quiet. Report a genuinely completed original-task outcome through the existing response route. "
++        : "Do not relay this output or notify the user from this wake. ") +
++      "Do not mention, summarize, or reuse output from any earlier run. " +
++      "For a completion marked without captured stdout/stderr, do not invent output, ask the user for missing logs, or try to retrieve logs from an exec/session id. " +
++      completionInstruction
+     );
+   }
+   if (hasMissingOutputFailure) {
 diff --git a/src/infra/heartbeat-runner-execution.ts b/src/infra/heartbeat-runner-execution.ts
 index a73c7f310666dfa8a6cc7538e882a1deb9f5c349..edab46735e665175d4e6ba219858efbd8c870159 100644
 --- a/src/infra/heartbeat-runner-execution.ts
@@ -138737,6 +140887,232 @@ index bd3586c21e0851e0177fe2a816ac1353e890ec37..4f951d5061d93054576742dac868e734
            clearActiveEmbeddedRun(sessionId, handle, sessionKey);
            await expect(drained).resolves.toBe("drained");
            operation.complete();
+diff --git a/src/infra/heartbeat-runner.webchat-exec-completion.test.ts b/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
+index f36a45ff5143aacc8503a9d442330b6ae35a9a0a..5e0335e6ac164175648d0a51a60b79553b8a01b7 100644
+--- a/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
++++ b/src/infra/heartbeat-runner.webchat-exec-completion.test.ts
+@@ -310,6 +310,221 @@ async function readProjectionMessages(scenario: ProjectionScenario) {
+   return events.map(readTranscriptEventMessage).filter((message) => message?.role === "assistant");
+ }
+ 
++it.each([
++  {
++    name: "explicit target:none",
++    target: "none",
++    entry: { createdVia: "operator" as const },
++    hasOutput: true,
++  },
++  {
++    name: "hidden internal-effects session",
++    target: "last",
++    entry: { createdVia: "internal" as const },
++    hasOutput: true,
++  },
++  {
++    name: "explicit target:none without captured output",
++    target: "none",
++    entry: { createdVia: "operator" as const },
++    hasOutput: false,
++  },
++  {
++    name: "hidden internal-effects session without captured output",
++    target: "last",
++    entry: { createdVia: "internal" as const },
++    hasOutput: false,
++  },
++])("retains private current exec evidence for continuation in $name", async (options) => {
++  await withProjectionScenario(
++    async (scenario) => {
++      const heartbeat = scenario.cfg.agents?.defaults?.heartbeat;
++      if (!heartbeat) {
++        throw new Error("projection scenario heartbeat is missing");
++      }
++      Object.assign(heartbeat, {
++        target: options.target,
++        model: "test/background",
++        thinking: "low",
++        timeoutSeconds: 45,
++      });
++      enqueueSystemEvent(
++        options.hasOutput
++          ? "Exec completed (private-current, code 0) :: CURRENT_PRIVATE_EVIDENCE"
++          : "Exec completed (CURRENT_PRIVATE_EVIDENCE, code 0)",
++        { sessionKey: scenario.sessionKey },
++      );
++      const first = peekSystemEventEntries(scenario.sessionKey);
++      const broadcastMessages: unknown[] = [];
++      const unsubscribe = onSessionTranscriptUpdate((update) => {
++        if (update.sessionKey === scenario.sessionKey && update.message !== undefined) {
++          broadcastMessages.push(update.message);
++        }
++      });
++      try {
++        // Only the model boundary is injected; dispatch, event custody and actual
++        // transcript/broadcast suppression use their normal owners.
++        const reply = vi
++          .fn<NonNullable<HeartbeatDeps["getReplyFromConfig"]>>()
++          .mockImplementationOnce(async () => {
++            enqueueSystemEvent("Exec completed (private-later, code 0) :: LATER_PRIVATE_EVIDENCE", {
++              sessionKey: scenario.sessionKey,
++            });
++            return createHeartbeatToolResponsePayload({
++              outcome: "done",
++              notify: true,
++              summary: "private current wake output",
++              notificationText: "CURRENT_PRIVATE_EVIDENCE",
++            });
++          })
++          .mockImplementationOnce(async () => {
++            return createHeartbeatToolResponsePayload({
++              outcome: "done",
++              notify: true,
++              summary: "private later wake output",
++              notificationText: "LATER_PRIVATE_EVIDENCE",
++            });
++          });
++        expect((await runProjectionWake(scenario, reply)).status).toBe("ran");
++        expect(reply).toHaveBeenCalledOnce();
++        const pending = peekSystemEventEntries(scenario.sessionKey);
++        expect(pending).toHaveLength(1);
++        expect(pending[0]?.id).not.toBe(first[0]?.id);
++        expect(pending[0]?.text).toContain("LATER_PRIVATE_EVIDENCE");
++        expect(await readProjectionMessages(scenario)).toEqual([]);
++        expect(broadcastMessages).toEqual([]);
++        expect(getLastHeartbeatEvent()?.status).not.toBe("sent");
++        expect((await runProjectionWake(scenario, reply)).status).toBe("ran");
++        expect(reply).toHaveBeenCalledTimes(2);
++        expect(peekSystemEventEntries(scenario.sessionKey)).toEqual([]);
++        expect(await readProjectionMessages(scenario)).toEqual([]);
++        expect(broadcastMessages).toEqual([]);
++        expect(getLastHeartbeatEvent()?.status).not.toBe("sent");
++        const [firstContext, firstOptions] = reply.mock.calls[0] ?? [];
++        const [laterContext] = reply.mock.calls[1] ?? [];
++        expect(firstOptions).toMatchObject({
++          heartbeatModelOverride: "",
++          thinkingLevelOverride: undefined,
++          timeoutOverrideSeconds: undefined,
++        });
++        expect(firstContext?.Body).toContain("CURRENT_PRIVATE_EVIDENCE");
++        if (!options.hasOutput) {
++          expect(firstContext?.Body).toContain(
++            "Exec completed (CURRENT_PRIVATE_EVIDENCE, code 0) without captured stdout/stderr",
++          );
++          expect(firstContext?.Body).toContain(
++            "do not invent output, ask the user for missing logs",
++          );
++        }
++        expect(firstContext?.Body).not.toContain("LATER_PRIVATE_EVIDENCE");
++        expect(firstContext?.Body).toContain("continue any remaining authorized work");
++        expect(firstContext?.Body).toContain(
++          "existing kept child session or native wait/yield owner",
++        );
++        expect(firstContext?.Body).toContain("no original work remains owed");
++        expect(firstContext?.Body).toContain("Do not relay this output or notify the user");
++        expect(laterContext?.Body).toContain("LATER_PRIVATE_EVIDENCE");
++        expect(laterContext?.Body).not.toContain("CURRENT_PRIVATE_EVIDENCE");
++      } finally {
++        unsubscribe();
++      }
++    },
++    { entry: options.entry },
++  );
++});
++
++it.each([
++  {
++    name: "keeps a public-target metadata-only success internal while admitting original-work continuation",
++    notify: false,
++  },
++  {
++    name: "reports a completed original-task outcome after public-target metadata-only continuation",
++    notify: true,
++  },
++])("$name", async ({ notify }) => {
++  await withProjectionScenario(async (scenario) => {
++    const heartbeat = scenario.cfg.agents?.defaults?.heartbeat;
++    if (!heartbeat) {
++      throw new Error("projection scenario heartbeat is missing");
++    }
++    Object.assign(heartbeat, {
++      target: "last",
++      model: "test/background",
++      thinking: "low",
++      timeoutSeconds: 45,
++    });
++    enqueueSystemEvent("Exec completed (public-quiet-current, code 0)", {
++      sessionKey: scenario.sessionKey,
++    });
++    const broadcastMessages: unknown[] = [];
++    const unsubscribe = onSessionTranscriptUpdate((update) => {
++      if (update.sessionKey === scenario.sessionKey && update.message !== undefined) {
++        broadcastMessages.push(update.message);
++      }
++    });
++    try {
++      // Only the model boundary is injected. The current code0 metadata stays
++      // quiet, while a substantive original-task final uses normal dispatch.
++      const marker = "ORIGINAL_TASK_OUTCOME_COMPLETED";
++      const reply = vi.fn<NonNullable<HeartbeatDeps["getReplyFromConfig"]>>().mockResolvedValue(
++        createHeartbeatToolResponsePayload({
++          outcome: "done",
++          notify,
++          summary: notify ? marker : "current successful completion retained internally",
++          ...(notify ? { notificationText: marker } : {}),
++        }),
++      );
++      expect((await runProjectionWake(scenario, reply)).status).toBe("ran");
++      expect(reply).toHaveBeenCalledOnce();
++      expect(peekSystemEventEntries(scenario.sessionKey)).toEqual([]);
++      const messages = await readProjectionMessages(scenario);
++      if (notify) {
++        expect(messages).toHaveLength(1);
++        expect(JSON.stringify(messages[0]?.content)).toContain(marker);
++        expect(broadcastMessages).toHaveLength(1);
++        expect(JSON.stringify(broadcastMessages[0])).toContain(marker);
++        expect(JSON.stringify(messages)).not.toContain("public-quiet-current");
++        expect(getLastHeartbeatEvent()?.status).toBe("sent");
++      } else {
++        expect(messages).toEqual([]);
++        expect(broadcastMessages).toEqual([]);
++        expect(getLastHeartbeatEvent()?.status).not.toBe("sent");
++      }
++      const [context, options] = reply.mock.calls[0] ?? [];
++      expect(options).toMatchObject({
++        heartbeatModelOverride: "",
++        thinkingLevelOverride: undefined,
++        timeoutOverrideSeconds: undefined,
++      });
++      expect(context?.Body).toContain(
++        "Exec completed (public-quiet-current, code 0) without captured stdout/stderr",
++      );
++      expect(context?.Body).toContain("no current command output to relay");
++      expect(context?.Body).not.toContain("user delivery is disabled");
++      expect(context?.Body).toContain("continue any remaining authorized work");
++      expect(context?.Body).toContain("existing kept child session or native wait/yield owner");
++      expect(context?.Body).toContain("no original work remains owed");
++      expect(context?.Body).toContain(
++        "Report a genuinely completed original-task outcome through the existing response route",
++      );
++      expect(context?.Body).toContain("Keep this command completion metadata quiet");
++      expect(context?.Body).toContain("no substantive original-task result remains to report");
++      expect(context?.Body).not.toContain(
++        "Do not relay this output or notify the user from this wake",
++      );
++      expect(context?.Body).toContain("through heartbeat_respond with notify=true");
++      expect(context?.Body).toContain("notify=false");
++      expect((await runProjectionWake(scenario, reply)).status).toBe("skipped");
++      expect(reply).toHaveBeenCalledOnce();
++      expect(await readProjectionMessages(scenario)).toEqual(messages);
++      expect(broadcastMessages).toHaveLength(notify ? 1 : 0);
++    } finally {
++      unsubscribe();
++    }
++  });
++});
++
+ it("preserves explicit target:none before target:last delivers in the same WebChat session", async () => {
+   await withProjectionScenario(async (scenario) => {
+     const heartbeat = scenario.cfg.agents?.defaults?.heartbeat;
 diff --git a/src/infra/heartbeat-runner.yielded-requester.test.ts b/src/infra/heartbeat-runner.yielded-requester.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..f96237df0ad3aafe581af364dd21850e9bdd34ab
