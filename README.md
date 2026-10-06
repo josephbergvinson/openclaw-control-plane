@@ -15,9 +15,19 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current installed Gateway and Node source reference is
+[`57b8a6d654649d3efa13d44a0fe9e3212188c440`](runtime/README.md#october-6-original-task-restart-and-scheduled-context-continuity).
+One normal build/stage/seal, native activation and independent loaded-source,
+health and protected-state readback passed. The successor preserves original CUI
+restart continuity, accepted restart cancellation and full eligible scheduled-task
+instructions unless light context is explicitly selected. Signed companions 603
+remain 470392 and all 19 ordinary-use outcomes remain open. The dated 1887
+intermediate installation and complete preceding qualification history are retained.
+Fresh public local and exact-head hosted qualification are required separately.
+
+The dated predecessor installed Gateway and Node source reference was
 `34ae633fbd5f5cf90277adb58eda2ba56d929bd8`, with separately qualified native parent-task
 context and original-outcome completion protocol. See the
-[current source qualification](runtime/README.md#october-6-native-parent-task-context-and-completion-protocol).
+[dated predecessor source qualification](runtime/README.md#october-6-native-parent-task-context-and-completion-protocol).
 Normal activation and exact loaded-generation readback are separate from ordinary
 account, browser, Discord and task acceptance; all nineteen outcomes remain open.
 

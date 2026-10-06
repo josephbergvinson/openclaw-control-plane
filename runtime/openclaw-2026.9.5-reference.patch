@@ -117836,6 +117836,112 @@ index 39341fd77f336a3645a2e090cb767e930cce29f3..d81546bae6e651c4e81b9a5552ae187d
                context: {
                  ...(localModelRunSystemPrompt ? { systemPrompt: localModelRunSystemPrompt } : {}),
                  messages: [
+diff --git a/src/cli/gateway-cli/lifecycle.runtime.ts b/src/cli/gateway-cli/lifecycle.runtime.ts
+index b121c4b3012ccbdcb0e3ac1d31ea88fe5d46531f..321fc5b8161bc96f4baf5ebfdc4c32b6938a5305 100644
+--- a/src/cli/gateway-cli/lifecycle.runtime.ts
++++ b/src/cli/gateway-cli/lifecycle.runtime.ts
+@@ -3,6 +3,7 @@
+ // must target the module that defines the symbol rather than a re-export facade;
+ // a facade also evaluates its siblings and drags their graphs onto cold start.
+ export { abortEmbeddedAgentRun } from "../../agents/embedded-agent-runner/runs.js";
++export { createAgentRunRestartAbortError } from "../../agents/run-termination.js";
+ export { listActiveEmbeddedRunSessionIds } from "../../agents/embedded-agent-runner/active-run-projections.js";
+ export { getDiagnosticSessionActivitySnapshot } from "../../logging/diagnostic-run-activity.js";
+ export {
+diff --git a/src/cli/gateway-cli/run-loop.test.ts b/src/cli/gateway-cli/run-loop.test.ts
+index d60eb32f4ffa9d9f7003a472fb82d38aa66e5759..8b9aac6cf04ee2910a788d5195726e6ac130e3e7 100644
+--- a/src/cli/gateway-cli/run-loop.test.ts
++++ b/src/cli/gateway-cli/run-loop.test.ts
+@@ -138,7 +138,7 @@ const waitForGatewayActiveWork = vi.fn(
+ );
+ const advanceCronActiveJobGeneration = vi.fn();
+ const resetCronActiveJobs = vi.fn();
+-const abortActiveCronTaskRuns = vi.fn((_reason?: string) => 0);
++const abortActiveCronTaskRuns = vi.fn((_reason?: string | Error) => 0);
+ const retireActiveCronTaskRunTracking = vi.fn();
+ const waitForActiveCronTaskRuns = vi.fn(async (_timeoutMs?: number) => ({
+   drained: true,
+@@ -271,7 +271,7 @@ vi.mock("../../cron/active-jobs.js", () => ({
+ }));
+ 
+ vi.mock("../../cron/service/active-run-cancellation.js", () => ({
+-  abortActiveCronTaskRuns: (reason?: string) => abortActiveCronTaskRuns(reason),
++  abortActiveCronTaskRuns: (reason?: string | Error) => abortActiveCronTaskRuns(reason),
+   retireActiveCronTaskRunTracking: () => retireActiveCronTaskRunTracking(),
+   waitForActiveCronTaskRuns: (timeoutMs: number) => waitForActiveCronTaskRuns(timeoutMs),
+ }));
+@@ -1672,6 +1672,7 @@ describe("runGatewayLoop", () => {
+         restartExpectedMs: null,
+       });
+       expect(runtime.exit).toHaveBeenCalledWith(0);
++      expect(abortActiveCronTaskRuns).toHaveBeenCalledWith("Gateway stopping.");
+     });
+   });
+ 
+@@ -2178,12 +2179,9 @@ describe("runGatewayLoop", () => {
+       const sigterm = captureSignal("SIGTERM");
+ 
+       sigterm();
+-      await new Promise<void>((resolve) => {
+-        setImmediate(resolve);
+-      });
+-      await new Promise<void>((resolve) => {
+-        setImmediate(resolve);
+-      });
++      await waitForLoopCondition(() => close.mock.calls.length > 0, "expected restart close");
++      const abortReason = abortActiveCronTaskRuns.mock.calls[0]?.[0];
++      expect(abortReason).toHaveProperty("code", "OPENCLAW_RESTART_ABORT");
+ 
+       expect(waitForGatewayActiveWork).toHaveBeenCalledOnce();
+       expect(waitForGatewayActiveWork.mock.calls[0]?.[0]).toBeLessThanOrEqual(
+@@ -2456,7 +2454,8 @@ describe("runGatewayLoop", () => {
+         "expected SIGUSR1 to trigger restart",
+       );
+ 
+-      expect(abortActiveCronTaskRuns).toHaveBeenCalledWith("Gateway restarting.");
++      const abortReason = abortActiveCronTaskRuns.mock.calls[0]?.[0];
++      expect(abortReason).toHaveProperty("code", "OPENCLAW_RESTART_ABORT");
+       expect(waitForActiveCronTaskRuns).toHaveBeenCalledWith(1_000);
+       expect(waitForActiveCronJobs).toHaveBeenCalledWith(1_000);
+       expect(advanceCronActiveJobGeneration).toHaveBeenCalledTimes(1);
+diff --git a/src/cli/gateway-cli/run-loop.ts b/src/cli/gateway-cli/run-loop.ts
+index a54fb956d86c580c46e1f22d0e4ea2e24a5ad054..2b6fd0e9a9e0b64d62846d7862392e40ee03a615 100644
+--- a/src/cli/gateway-cli/run-loop.ts
++++ b/src/cli/gateway-cli/run-loop.ts
+@@ -166,6 +166,7 @@ export async function runGatewayLoop(params: {
+   // here pulls the lifecycle re-export graph into memory, immune to later disk
+   // rotation.
+   const eagerLifecycleRuntime = await loadGatewayLifecycleRuntimeModule();
++  const { createAgentRunRestartAbortError } = eagerLifecycleRuntime;
+   const supervisor = eagerLifecycleRuntime.detectGatewayRespawnSupervisorIdentity(
+     process.env,
+     process.platform,
+@@ -865,7 +866,7 @@ export async function runGatewayLoop(params: {
+                 return;
+               }
+               drainTimedOut = true;
+-              eagerLifecycleRuntime.abortActiveCronTaskRuns("Gateway restarting.");
++              eagerLifecycleRuntime.abortActiveCronTaskRuns(createAgentRunRestartAbortError());
+               gatewayLog.warn(
+                 `active-work drain timeout reached; proceeding with restart: ${formatDrainCounts(drain.snapshot)}`,
+               );
+@@ -1292,7 +1293,6 @@ export async function runGatewayLoop(params: {
+       // deferral timers and reloads the task registry from durable state so
+       // cancelled/completed work is not kept alive by old in-memory maps.
+       const {
+-        abortActiveCronTaskRuns,
+         advanceCronActiveJobGeneration,
+         reloadTaskRuntimeStateFromStore,
+         retireActiveCronTaskRunTracking,
+@@ -1307,7 +1307,7 @@ export async function runGatewayLoop(params: {
+       // Rotation aborts rootless stale owners before reset pumps preserved queues.
+       rotateAgentEventLifecycleGeneration();
+       advanceCronActiveJobGeneration();
+-      abortActiveCronTaskRuns("Gateway restarting.");
++      eagerLifecycleRuntime.abortActiveCronTaskRuns(createAgentRunRestartAbortError());
+       const cronTaskDrain = await waitForActiveCronTaskRuns(1_000);
+       const cronDrain = await waitForActiveCronJobs(1_000);
+       if (!cronTaskDrain.drained || !cronDrain.drained) {
 diff --git a/src/cli/node-cli/register.ts b/src/cli/node-cli/register.ts
 index fe631752d57a127893d0583719af281c1cce4d5d..baae38637c1d901a4fded0fbd1ff1b57aad97a9f 100644
 --- a/src/cli/node-cli/register.ts
@@ -121020,6 +121126,28 @@ index f4803eb5741a530fce9995feb510556976140fae..f048f03732289ef4cc5ac493a5645f29
    it("does not turn a suppressed silent reply into an inspection-link announcement", async () => {
      await withTempCronHome(async (home) => {
        const storePath = await writeDefaultAgentSessionStoreEntries({});
+diff --git a/src/cron/isolated-agent.session-identity.test.ts b/src/cron/isolated-agent.session-identity.test.ts
+index 471b7667273f6d1e749fa70d5028031530aec276..a4ea726f71999904ae341b55afdecd0c71a98d82 100644
+--- a/src/cron/isolated-agent.session-identity.test.ts
++++ b/src/cron/isolated-agent.session-identity.test.ts
+@@ -406,7 +406,7 @@ describe("runCronIsolatedAgentTurn session identity", () => {
+     });
+   });
+ 
+-  it("uses lightweight bootstrap context for command-style cron payloads", async () => {
++  it("keeps normal bootstrap context for command-style cron payloads unless explicitly selected", async () => {
+     await withTempHome(async (home) => {
+       await runCronTurn(home, {
+         jobPayload: {
+@@ -415,7 +415,7 @@ describe("runCronIsolatedAgentTurn session identity", () => {
+         },
+       });
+ 
+-      expect(lastEmbeddedAgentCall().bootstrapContextMode).toBe("lightweight");
++      expect(lastEmbeddedAgentCall().bootstrapContextMode).toBeUndefined();
+     });
+   });
+ 
 diff --git a/src/cron/isolated-agent/delivery-dispatch-types.ts b/src/cron/isolated-agent/delivery-dispatch-types.ts
 index 771ebf1187df44d552a646e409fd83d020f628d7..449e8d85893ce279a135d8358b49e8529bc993da 100644
 --- a/src/cron/isolated-agent/delivery-dispatch-types.ts
@@ -123484,10 +123612,10 @@ index 0000000000000000000000000000000000000000..1eeb56acda45f60237452d2b7fb8ea69
 +}
 diff --git a/src/cron/isolated-agent/run-prompt-policy.ts b/src/cron/isolated-agent/run-prompt-policy.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..adbe8c51c44eba439465b9e3b4b3165b3dba5a69
+index 0000000000000000000000000000000000000000..711bfb3a0bf7f6757e05814c9cd0ef2b0f354ad5
 --- /dev/null
 +++ b/src/cron/isolated-agent/run-prompt-policy.ts
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,81 @@
 +import { createHash } from "node:crypto";
 +import type { BootstrapContextMode } from "../../agents/bootstrap-files.js";
 +import type { CliSessionBinding } from "../../config/sessions.js";
@@ -123501,9 +123629,6 @@ index 0000000000000000000000000000000000000000..adbe8c51c44eba439465b9e3b4b3165b
 +export function hasCliSessionReuseMetadata(binding: CliSessionBinding): boolean {
 +  return Object.entries(binding).some(([key, value]) => key !== "sessionId" && value !== undefined);
 +}
-+
-+const COMMAND_STYLE_CRON_PREFIX =
-+  /^(?:(?:[A-Z_][A-Z0-9_]*=\S+\s+)+)?(?:cd\s+\S+|(?:\.{1,2}|~)?\/\S+|[A-Za-z]:[\\/]\S+|(?:bash|bun|cargo|deno|docker|gh|git|go|make|node|npm|npx|pnpm|python|python3|ruby|sh|tsx|uv|zsh)\b)/u;
 +
 +export function resolveIsolatedCronPromptCacheKey(params: {
 +  job: CronJob;
@@ -123530,23 +123655,12 @@ index 0000000000000000000000000000000000000000..adbe8c51c44eba439465b9e3b4b3165b
 +  return `openclaw-cron-${digest}`;
 +}
 +
-+/** Detects single-line cron prompts that look like shell commands or command invocations. */
-+function isCommandStyleCronMessage(message: string): boolean {
-+  return !message.trim().includes("\n") && COMMAND_STYLE_CRON_PREFIX.test(message.trim());
-+}
-+
 +export function resolveCronBootstrapContextMode(
 +  payload: AgentTurnPayload,
 +): BootstrapContextMode | undefined {
-+  // Command-like cron prompts benefit from lightweight bootstrap context so
-+  // simple scheduled command tasks do not spend budget on full repo context.
-+  if (payload?.lightContext === true) {
-+    return "lightweight";
-+  }
-+  if (payload?.lightContext === false) {
-+    return undefined;
-+  }
-+  return isCommandStyleCronMessage(payload?.message ?? "") ? "lightweight" : undefined;
++  // A command prefix does not authorize dropping the original task's workspace
++  // instructions. Lightweight context remains an explicit per-job choice.
++  return payload?.lightContext === true ? "lightweight" : undefined;
 +}
 +
 +/** Binds the admitted source delivery policy to each finalized cron prompt. */
@@ -123961,6 +124075,329 @@ index 0000000000000000000000000000000000000000..4a2c55da2ffaa2733e9562d76f223627
 +    successfulCronAdds: (previous.successfulCronAdds ?? 0) + (current.successfulCronAdds ?? 0),
 +  };
 +}
+diff --git a/src/cron/isolated-agent/run.bootstrap-context-continuation.test.ts b/src/cron/isolated-agent/run.bootstrap-context-continuation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b01125d071c23b4c0f29e18611063ad8f273666f
+--- /dev/null
++++ b/src/cron/isolated-agent/run.bootstrap-context-continuation.test.ts
+@@ -0,0 +1,317 @@
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { createDeferred } from "../../../test/helpers/promise.js";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import { resolveBootstrapContextForRun } from "../../agents/bootstrap-files.js";
++import type { RunCliAgentParams } from "../../agents/cli-runner/types.js";
++import type { RunEmbeddedAgentParams } from "../../agents/embedded-agent-runner/run/params.js";
++import { clearInternalHooks } from "../../hooks/internal-hooks.js";
++import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
++import { makeIsolatedAgentJobFixture, makeIsolatedAgentParamsFixture } from "./job-fixtures.js";
++import { requireDeliveryRequest } from "./run.interim-retry.test-support.js";
++import { setupRunCronIsolatedAgentTurnSuite } from "./run.suite-helpers.js";
++import {
++  callGatewayMock,
++  dispatchCronDeliveryMock,
++  ensureAgentWorkspaceMock,
++  isCliProviderMock,
++  loadRunCronIsolatedAgentTurn,
++  makeCronSession,
++  makeCronSessionEntry,
++  mockRunCronFallbackPassthrough,
++  pickLastNonEmptyTextFromPayloadsMock,
++  resolveCronDeliveryPlanMock,
++  resolveCronSessionMock,
++  runCliAgentMock,
++  runEmbeddedAgentMock,
++  settleCronRequesterYieldBatchMock,
++} from "./run.test-harness.js";
++
++const runCronIsolatedAgentTurn = await loadRunCronIsolatedAgentTurn();
++setupRunCronIsolatedAgentTurnSuite();
++beforeEach(() => clearInternalHooks());
++afterEach(() => clearInternalHooks());
++const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
++  afterEach(() => {
++    closeOpenClawAgentDatabasesForTest();
++    cleanup();
++  }),
++);
++
++type ModelRequest = RunEmbeddedAgentParams | RunCliAgentParams;
++type Flow = "initial" | "ack" | "yield";
++const choices = [
++  { choice: "omitted", lightContext: undefined },
++  { choice: "full", lightContext: false },
++  { choice: "light", lightContext: true },
++] as const;
++const runners = ["embedded", "cli"] as const;
++const cases = runners.flatMap((runner) =>
++  choices.flatMap((choice) =>
++    (["initial", "ack", "yield"] as const).map((flow) => ({
++      runner,
++      choice: choice.choice,
++      lightContext: choice.lightContext,
++      flow,
++    })),
++  ),
++);
++const instructions = {
++  "AGENTS.md":
++    "Finish the original authorized outcome after enabling work; honor other owners' holds.",
++  "SOUL.md":
++    "Investigate concrete evidence and continue the task rather than giving generic advice.",
++  "USER.md": "Reuse authorized connected services without asking the requester to repeat the task.",
++  "IDENTITY.md": "The configured agent owns completing its original requested outcome.",
++  "TOOLS.md":
++    "Use the configured tools to verify the requested result before reporting completion.",
++};
++const toolsAllow = ["exec", "process", "read", "sessions_spawn", "sessions_yield"];
++const originalMessage = "gh pr checks 13 then investigate and fix every failed check";
++const parentFinal = "The original task is complete: the requested result was verified.";
++const childFinding =
++  "Private child evidence: the failed check has a recoverable configuration cause.";
++
++/** Runs the real cron preparation/retry/yield owner with a synthetic model boundary. */
++async function observeTurn(params: {
++  runner: (typeof runners)[number];
++  lightContext: boolean | undefined;
++  flow: Flow;
++  isolated?: boolean;
++}) {
++  const workspaceDir = tempDirs.make("cron-bootstrap-continuation-");
++  await Promise.all(
++    Object.entries(instructions).map(([name, content]) =>
++      fs.writeFile(path.join(workspaceDir, name), content),
++    ),
++  );
++  await fs.writeFile(path.join(workspaceDir, "MEMORY.md"), "Private root memory fixture.");
++  ensureAgentWorkspaceMock.mockResolvedValue({ dir: workspaceDir });
++  const sessionId = "bootstrap-continuation-session";
++  resolveCronSessionMock.mockReturnValue(
++    makeCronSession({ sessionEntry: makeCronSessionEntry({ sessionId }) }),
++  );
++  isCliProviderMock.mockReturnValue(params.runner === "cli");
++  mockRunCronFallbackPassthrough();
++  pickLastNonEmptyTextFromPayloadsMock.mockImplementation(
++    (payloads?: Array<{ text?: string }>) =>
++      payloads?.findLast((payload) => payload.text?.trim())?.text ?? "",
++  );
++  resolveCronDeliveryPlanMock.mockReturnValue({
++    requested: true,
++    mode: "announce",
++    channel: "messagechat",
++    to: "context-test-target",
++  });
++  const captures: Array<{
++    request: ModelRequest;
++    abortedAtExecution: boolean;
++    context: Awaited<ReturnType<typeof resolveBootstrapContextForRun>>;
++  }> = [];
++  const childDone = createDeferred<{
++    status: string;
++    endedAt: number;
++    terminalReply: { disposition: string; text: string };
++  }>();
++  const waitStarted = createDeferred();
++  const childRunId = "bootstrap-child-run";
++  callGatewayMock.mockImplementation(async (request) => {
++    if (request.method !== "agent.wait") {
++      return { ok: true, deleted: true };
++    }
++    expect(request.params.runId).toBe(childRunId);
++    expect(request.params.timeoutMs).toBeGreaterThan(0);
++    expect(request.params.timeoutMs).toBeLessThanOrEqual(1_000);
++    expect(dispatchCronDeliveryMock).not.toHaveBeenCalled();
++    waitStarted.resolve();
++    return childDone.promise;
++  });
++  const model = params.runner === "cli" ? runCliAgentMock : runEmbeddedAgentMock;
++  model.mockImplementation(async (request: ModelRequest) => {
++    // Call through the real file loader with precisely the context selection that
++    // this actual attempt received. The model/provider itself is a stand-in.
++    const context = await resolveBootstrapContextForRun({
++      workspaceDir: request.workspaceDir,
++      config: request.config,
++      agentId: request.agentId,
++      sessionKey: request.sessionKey,
++      sessionId: request.sessionId,
++      contextMode: request.bootstrapContextMode,
++      runKind: request.bootstrapContextRunKind,
++    });
++    captures.push({ request, context, abortedAtExecution: request.abortSignal?.aborted === true });
++    const first = captures.length === 1;
++    if (first && params.flow === "ack") {
++      return {
++        payloads: [{ text: "On it, checking the report now." }],
++        meta: { agentMeta: { usage: { input: 1, output: 1 } } },
++      };
++    }
++    if (first && params.flow === "yield") {
++      return {
++        payloads: [],
++        acceptedSessionSpawns: [
++          {
++            runId: childRunId,
++            childSessionKey: "agent:main:subagent:bootstrap-child",
++            expectsCompletionMessage: true,
++          },
++        ],
++        meta: { yielded: true, agentMeta: { usage: { input: 1, output: 1 } } },
++      };
++    }
++    return {
++      payloads: [{ text: parentFinal }],
++      meta: {
++        finalAssistantVisibleText: parentFinal,
++        agentMeta: { usage: { input: 1, output: 1 } },
++      },
++    };
++  });
++  const jobId = "bootstrap-policy-job";
++  const sessionKey = params.isolated ? "cron:bootstrap-policy" : "bootstrap-policy";
++  const turn = runCronIsolatedAgentTurn(
++    makeIsolatedAgentParamsFixture({
++      agentId: "main",
++      cfg: { agents: { list: [{ id: "main", workspace: workspaceDir }] } },
++      sessionKey,
++      message: originalMessage,
++      job: makeIsolatedAgentJobFixture({
++        id: jobId,
++        sessionTarget: params.isolated ? "isolated" : "session:bootstrap-policy",
++        payload: {
++          kind: "agentTurn",
++          message: originalMessage,
++          timeoutSeconds: 60,
++          toolsAllow,
++          ...(params.lightContext !== undefined ? { lightContext: params.lightContext } : {}),
++        },
++        delivery: { mode: "announce", channel: "messagechat", to: "context-test-target" },
++      }),
++    }),
++  );
++  if (params.flow === "yield") {
++    try {
++      await Promise.race([
++        waitStarted.promise,
++        turn.then((result) => {
++          throw new Error(`Parent finalized before its accepted child settled: ${result.status}`);
++        }),
++      ]);
++      expect(captures).toHaveLength(1);
++      expect(dispatchCronDeliveryMock).not.toHaveBeenCalled();
++    } finally {
++      childDone.resolve({
++        status: "ok",
++        endedAt: Date.now(),
++        terminalReply: { disposition: "visible", text: childFinding },
++      });
++      await turn;
++    }
++  }
++  const result = await turn;
++  expect(result.status).toBe("ok");
++  expect(result.delivered).toBe(true);
++  expect(captures).toHaveLength(params.flow === "initial" ? 1 : 2);
++  expect(model).toHaveBeenCalledTimes(captures.length);
++  expect(params.runner === "cli" ? runEmbeddedAgentMock : runCliAgentMock).not.toHaveBeenCalled();
++  const expectedKey = params.isolated
++    ? `agent:main:cron:bootstrap-policy:run:${sessionId}`
++    : "agent:main:bootstrap-policy";
++  for (const { request, abortedAtExecution } of captures) {
++    expect(request.workspaceDir).toBe(workspaceDir);
++    expect(request.sessionId).toBe(sessionId);
++    expect(request.sessionKey).toBe(expectedKey);
++    expect(request.bootstrapContextRunKind).toBe("cron");
++    expect(request.sessionTarget).toMatchObject({
++      agentId: "main",
++      sessionId,
++      sessionKey: expectedKey,
++    });
++    expect(request.toolsAllow).toEqual(toolsAllow);
++    // This fixture has no authenticated creator grant: context restoration must
++    // not fabricate one. Existing requester-grant whole-file controls are retained.
++    expect(request.mcpRequesterScope).toBeUndefined();
++    expect(request.mcpRequesterScopeAssertCurrent).toBeUndefined();
++    expect(request.timeoutMs).toBeGreaterThan(0);
++    expect(request.timeoutMs).toBeLessThanOrEqual(60_000);
++    expect(abortedAtExecution).toBe(false);
++  }
++  expect(captures[0]?.request.prompt).toContain(originalMessage);
++  if (params.flow !== "initial") {
++    expect(captures[1]?.request.timeoutMs).toBeLessThanOrEqual(captures[0]!.request.timeoutMs);
++    expect(captures[1]?.request.prompt).toContain(
++      params.flow === "ack" ? "Complete the original task now" : childFinding,
++    );
++    expect(captures[1]?.request.prompt).not.toContain(originalMessage);
++  }
++  if (params.flow === "yield") {
++    expect(settleCronRequesterYieldBatchMock).toHaveBeenCalledWith(
++      expect.objectContaining({ delivered: true, requesterVisibleFinalDelivered: true }),
++    );
++  }
++  expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
++  expect(requireDeliveryRequest().deliveryPayloads).toEqual([{ text: parentFinal }]);
++  return captures;
++}
++
++describe("cron command-headed original-task bootstrap context", () => {
++  it.each(cases)(
++    "$runner keeps operator $choice context through the $flow original-task attempts",
++    async ({ runner, lightContext, flow }) => {
++      // Check after both actual attempts have completed, so a baseline context
++      // failure cannot intercept the retry/yield path being covered.
++      const captures = await observeTurn({ runner, lightContext, flow });
++      for (const { request, context } of captures) {
++        expect(request.bootstrapContextMode).toBe(
++          lightContext === true ? "lightweight" : undefined,
++        );
++        if (lightContext === true) {
++          expect(context.bootstrapFiles).toEqual([]);
++          expect(context.contextFiles).toEqual([]);
++        } else {
++          for (const name of ["AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"] as const) {
++            expect(context.contextFiles).toContainEqual(
++              expect.objectContaining({
++                path: path.join(request.workspaceDir, name),
++                content: instructions[name],
++              }),
++            );
++          }
++          // Legacy TOOLS.md is not a recognized default bootstrap file. Restoring
++          // normal context must not silently expand that existing source contract.
++          expect(context.contextFiles.map((file) => path.basename(file.path))).not.toContain(
++            "TOOLS.md",
++          );
++        }
++      }
++    },
++    30_000,
++  );
++
++  it.each(runners)(
++    "%s restores eligible isolated-cron context without widening its bootstrap privacy filter",
++    async (runner) => {
++      const captures = await observeTurn({
++        runner,
++        lightContext: undefined,
++        flow: "initial",
++        isolated: true,
++      });
++      const context = captures[0]!.context;
++      for (const name of ["AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"] as const) {
++        expect(context.contextFiles).toContainEqual(
++          expect.objectContaining({
++            path: path.join(captures[0]!.request.workspaceDir, name),
++            content: instructions[name],
++          }),
++        );
++      }
++      const names = context.contextFiles.map((file) => path.basename(file.path));
++      expect(names).not.toContain("TOOLS.md");
++      expect(names).not.toContain("MEMORY.md");
++    },
++    30_000,
++  );
++});
 diff --git a/src/cron/isolated-agent/run.interim-retry.test-support.ts b/src/cron/isolated-agent/run.interim-retry.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..e9aee80b422af01dbe5feed713d822ea0e711eda
@@ -125863,10 +126300,10 @@ index 2a19cb707bcc0cd351ea810697218ba52b42c261..a0d914a1e9577d96fa82cb4bc7157d49
              } catch (sealError) {
 diff --git a/src/cron/isolated-agent/run.yielded-continuation.test.ts b/src/cron/isolated-agent/run.yielded-continuation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a0de47c8cffb83b78bf06a13d03bc9627ae47ded
+index 0000000000000000000000000000000000000000..097ac74aecfdd561547fe048a0ace4456340ba5b
 --- /dev/null
 +++ b/src/cron/isolated-agent/run.yielded-continuation.test.ts
-@@ -0,0 +1,919 @@
+@@ -0,0 +1,944 @@
 +import { describe, expect, it, vi } from "vitest";
 +import { createDeferred } from "../../../test/helpers/promise.js";
 +// Interim retry tests cover retry behavior for incomplete isolated cron runs.
@@ -126698,6 +127135,31 @@ index 0000000000000000000000000000000000000000..a0de47c8cffb83b78bf06a13d03bc962
 +    },
 +  );
 +
++  it.each(["operator", "restart"] as const)(
++    "retains an interrupted original no-child execution as an error on %s cancellation",
++    async (interruption) => {
++      const abort = new AbortController();
++      const reason =
++        interruption === "restart"
++          ? createAgentRunRestartAbortError()
++          : new Error("Operator cancelled this cron run");
++      runEmbeddedAgentMock.mockImplementationOnce(async () => {
++        abort.abort(reason);
++        throw reason;
++      });
++      mockRunCronFallbackPassthrough();
++      const result = await runCronIsolatedAgentTurn(
++        makeIsolatedAgentParamsFixture({ abortSignal: abort.signal }),
++      );
++      expect(abort.signal.reason).toBe(reason);
++      expect(result.status).toBe("error");
++      expect(result.error).toContain(reason.message);
++      expect(runEmbeddedAgentMock).toHaveBeenCalledOnce();
++      expect(abandonCronRequesterYieldBatchMock).not.toHaveBeenCalled();
++      expect(dispatchCronDeliveryMock).not.toHaveBeenCalled();
++    },
++  );
++
 +  it.each([20, Number.NaN, Number.POSITIVE_INFINITY])(
 +    "regression, retries once when cron returns interim acknowledgement with initial total %s and no descendants were spawned",
 +    async (initialTotal) => {
@@ -126990,6 +127452,109 @@ index 92fd5c6d3a9f5d7844ac6056b3fd69bcf11e049a..d86b0b1b554f84e5628c8eadf90b47e2
          const history = readCronTaskRunHistoryPage({
            storeKey: cronStoreKey(store.storePath),
            jobId: original.id,
+diff --git a/src/cron/service.ts b/src/cron/service.ts
+index 602dc30fe7bcddc55ed48a433fa7c14de486cc50..d577e04f356d54de2fed99ea1082033392b1e449 100644
+--- a/src/cron/service.ts
++++ b/src/cron/service.ts
+@@ -25,7 +25,7 @@ export type { CronEvent } from "./service/state.js";
+ 
+ /** Public cron service facade that owns mutable scheduler state and delegates to locked ops. */
+ export class CronService implements CronServiceContract {
+-  stopAndDrain?: () => Promise<void>;
++  stopAndDrain?: (reason?: string | Error) => Promise<void>;
+   private readonly state;
+   private startInProgress = 0;
+   private startState: { generation: number; promise: Promise<void> } | null = null;
+diff --git a/src/cron/service/active-run-cancellation.test.ts b/src/cron/service/active-run-cancellation.test.ts
+index 4e91ff49423280720b5d408538e7f00ed04bbe7d..fa1f1588fa11dfafcf63ccb49b01483ed3c2da17 100644
+--- a/src/cron/service/active-run-cancellation.test.ts
++++ b/src/cron/service/active-run-cancellation.test.ts
+@@ -1,5 +1,9 @@
+ import { describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
++import {
++  createAgentRunRestartAbortError,
++  isAgentRunRestartAbortReason,
++} from "../../agents/run-termination.js";
+ import { clearCronJobActive, markCronJobActive, noteActiveCronJobRemoval } from "../active-jobs.js";
+ import {
+   abortActiveCronTaskRuns,
+@@ -15,6 +19,39 @@ import { resetActiveCronTaskRunsForTests } from "./active-run-cancellation.test-
+ const CRON_TASK_RUN_SETTLEMENT_TRACKING_MAX_MS = 60_000;
+ 
+ describe("cron task cancellation tracking", () => {
++  it.each(["restart-error", "ordinary-error", "ordinary-string"] as const)(
++    "preserves exact %s signal reason while exposing only readable cancellation text",
++    (intent) => {
++      resetActiveCronTaskRunsForTests();
++      const controller = new AbortController();
++      const onCancel = vi.fn();
++      const reason =
++        intent === "restart-error"
++          ? createAgentRunRestartAbortError()
++          : intent === "ordinary-error"
++            ? new Error("Ordinary shutdown")
++            : "Gateway stopping.";
++      const release = registerActiveCronTaskRun({ runId: "intent-run", controller, onCancel });
++      try {
++        expect(abortActiveCronTaskRuns(reason)).toBe(1);
++        expect(controller.signal.reason).toBe(reason);
++        expect(isAgentRunRestartAbortReason(controller.signal.reason)).toBe(
++          intent === "restart-error",
++        );
++        expect(onCancel).toHaveBeenCalledExactlyOnceWith(
++          typeof reason === "string" ? reason : reason.message,
++        );
++        expect(abortActiveCronTaskRuns("later ordinary stop")).toBe(0);
++        expect(cancelActiveCronTaskRun({ runId: "intent-run" })).toBe(false);
++        expect(controller.signal.reason).toBe(reason);
++        expect(onCancel).toHaveBeenCalledOnce();
++      } finally {
++        release?.();
++        resetActiveCronTaskRunsForTests();
++      }
++    },
++  );
++
+   it("keeps a removed agent's unsettled core visible after cancellation and restart retirement", async () => {
+     vi.useFakeTimers();
+     resetActiveCronTaskRunsForTests();
+diff --git a/src/cron/service/active-run-cancellation.ts b/src/cron/service/active-run-cancellation.ts
+index 90ccda554d6e4024da10a69707a8a9d31650e89d..e067445d9de7e496e5c13b29b12f0de4e5a4a67e 100644
+--- a/src/cron/service/active-run-cancellation.ts
++++ b/src/cron/service/active-run-cancellation.ts
+@@ -74,14 +74,14 @@ export function registerActiveCronTaskRun(params: {
+   };
+ }
+ 
+-export function abortActiveCronTaskRuns(reason = "Gateway restarting."): number {
++export function abortActiveCronTaskRuns(reason: string | Error = "Gateway restarting."): number {
+   let aborted = 0;
+   for (const handle of activeCronTaskRunsByRunId.values()) {
+     if (handle.controller.signal.aborted) {
+       continue;
+     }
+     handle.controller.abort(reason);
+-    handle.onCancel?.(reason);
++    handle.onCancel?.(typeof reason === "string" ? reason : reason.message);
+     aborted += 1;
+   }
+   // Shutdown also retires main-session runs without cancellation handles.
+diff --git a/src/cron/service/agent-watchdog.ts b/src/cron/service/agent-watchdog.ts
+index 3d620e602304347e6f3033360117c476a31f3d12..a4ed6b047780126e23ccff11b3525c2919e712ea 100644
+--- a/src/cron/service/agent-watchdog.ts
++++ b/src/cron/service/agent-watchdog.ts
+@@ -182,7 +182,9 @@ export function createCronAgentWatchdog(params: {
+       }
+       clearSetupTimeout();
+       startTimeout();
+-      if (info?.isFallback === true) {
++      // Fixed-wall commands keep their original deadline across repair attempts;
++      // only deferred agent runs receive a separate fallback setup guard.
++      if (params.deferUntilRunner && info?.isFallback === true) {
+         clearPreExecutionTimeout();
+         state = "waiting_for_fallback_execution";
+       } else if (state === "waiting_for_runner") {
 diff --git a/src/cron/service/auto-disable.ts b/src/cron/service/auto-disable.ts
 index 63e5ec55fc2b39b89be63b9ddc3624a7c133992b..95e4cf8c692174fd497b157f8965ec96937edd4d 100644
 --- a/src/cron/service/auto-disable.ts
@@ -127391,6 +127956,243 @@ index 0000000000000000000000000000000000000000..b894824ecf5df01d490cf3e5df79699b
 +    usage: repaired.usage,
 +  };
 +}
+diff --git a/src/cron/service/command-timeout.test.ts b/src/cron/service/command-timeout.test.ts
+index 48612b79b26757cc7a549fef27ae3ea9612f21ba..f5f3176ad33fdf2c10143f15900ea0ff6160a578 100644
+--- a/src/cron/service/command-timeout.test.ts
++++ b/src/cron/service/command-timeout.test.ts
+@@ -1,3 +1,4 @@
++import fs from "node:fs/promises";
+ import path from "node:path";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import {
+@@ -8,16 +9,227 @@ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+ import { isPidAlive } from "../../shared/pid-alive.js";
+ import { runCronCommandJob } from "../command-runner.js";
++import type { CronJob } from "../types.js";
+ import {
+   cancelActiveCronTaskRun,
+   getSuspensionVisibleCronTaskRunCount,
+   waitForActiveCronTaskRuns,
+ } from "./active-run-cancellation.js";
++import type { CronServiceDeps } from "./state.js";
+ import { executeJobCoreWithTimeout } from "./timer-job-runner.js";
+ 
+ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+ 
++function createRepairJob(id: string, timeoutSeconds: number): CronJob {
++  return createIsolatedRegressionJob({
++    id,
++    name: id,
++    scheduledAt: Date.now(),
++    schedule: { kind: "every", everyMs: 60_000 },
++    payload: {
++      kind: "command",
++      argv: ["synthetic-check"],
++      timeoutSeconds,
++      repair: {
++        onExitCodes: [1],
++        agentTurn: { kind: "agentTurn", message: "Repair the failed check." },
++        verify: { kind: "command", argv: ["synthetic-verification"] },
++      },
++    },
++  });
++}
++
+ describe("scheduled command timeouts", () => {
++  it.each([false, true])(
++    "attributes repair timeout with fallback=%s under the original deadline",
++    async (isFallback) => {
++      vi.useFakeTimers();
++      const repair = createDeferred();
++      const job = createRepairJob("command-repair-deadline", 5);
++      job.delivery = { mode: "webhook", to: "https://example.com/automation" };
++      const execution = {
++        jobId: job.id,
++        agentId: "main",
++        sessionId: "repair-session",
++        sessionKey: "agent:main:cron:command-repair-deadline:run:repair-session",
++        isFallback,
++        phase: isFallback ? ("auth" as const) : ("model_call_started" as const),
++      };
++      let signal: AbortSignal | undefined;
++      const runCommandJob = vi.fn(async () => {
++        await new Promise<void>((resolve) => {
++          setTimeout(resolve, 2_000);
++        });
++        return {
++          status: "error" as const,
++          error: "command exited with code 1",
++          failureNotificationDetail: { kind: "command-exit" as const, exitCode: 1 },
++        };
++      });
++      const runIsolatedAgentJob = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(async (params) => {
++        signal = params.abortSignal;
++        params.onExecutionStarted?.({ ...execution, phase: "runner_entered" });
++        params.onExecutionPhase?.(execution);
++        await repair.promise;
++        return { status: "ok" as const, summary: "late, unverified model success" };
++      });
++      const cleanupTimedOutAgentRun = vi.fn(async () => {});
++      const sendCronWebhook = vi.fn();
++      const state = createCronRegressionState({
++        storePath: path.join(tempDirs.make("cron-repair-deadline-"), "jobs.json"),
++        runCommandJob,
++        runIsolatedAgentJob,
++        cleanupTimedOutAgentRun,
++        sendCronWebhook,
++      });
++      let settled = false;
++      const run = executeJobCoreWithTimeout(state, job).then((result) => {
++        settled = true;
++        return result;
++      });
++      try {
++        await vi.advanceTimersByTimeAsync(2_000);
++        expect(runIsolatedAgentJob.mock.calls[0]?.[0].job.payload).toMatchObject({
++          kind: "agentTurn",
++          timeoutSeconds: 3,
++        });
++        await vi.advanceTimersByTimeAsync(2_999);
++        expect(signal?.aborted).toBe(false);
++        await vi.advanceTimersByTimeAsync(1);
++        expect(signal?.aborted).toBe(true);
++        expect(settled).toBe(false);
++        expect(cleanupTimedOutAgentRun).toHaveBeenCalledWith({
++          job,
++          timeoutMs: 5_000,
++          execution,
++        });
++        await vi.advanceTimersByTimeAsync(20_000);
++        expect(await run).toMatchObject({
++          status: "error",
++          error: `cron: job execution timed out (last phase: ${isFallback ? "auth" : "model-call-started"})`,
++          sessionId: execution.sessionId,
++          sessionKey: execution.sessionKey,
++        });
++        expect(getSuspensionVisibleCronTaskRunCount()).toBe(1);
++        repair.resolve();
++        await expect(waitForActiveCronTaskRuns(1_000)).resolves.toEqual({
++          drained: true,
++          active: 0,
++        });
++        expect(runCommandJob).toHaveBeenCalledOnce();
++        expect(sendCronWebhook).not.toHaveBeenCalled();
++      } finally {
++        repair.resolve();
++        await vi.advanceTimersByTimeAsync(20_000);
++        await run;
++        await waitForActiveCronTaskRuns(1_000);
++        vi.useRealTimers();
++      }
++    },
++  );
++
++  it.each(["deadline", "operator cancellation"] as const)(
++    "retains the repair session and joins its real child after %s",
++    async (interruption) => {
++      const job = createRepairJob(`repair-child-${interruption}`, 2);
++      job.delivery = { mode: "webhook", to: "https://example.com/automation" };
++      const root = tempDirs.make("cron-repair-child-");
++      const pidPath = path.join(root, "repair.pid");
++      const started = createDeferred();
++      const execution = {
++        jobId: job.id,
++        agentId: "main",
++        sessionId: "repair-child-session",
++        sessionKey: `agent:main:cron:${job.id}:run:repair-child-session`,
++        phase: "tool_execution_started" as const,
++      };
++      let repairCommand: ReturnType<typeof runCronCommandJob> | undefined;
++      let repairResult: Awaited<ReturnType<typeof runCronCommandJob>> | undefined;
++      const runCommandJob = vi.fn(async () => {
++        await new Promise<void>((resolve) => {
++          setTimeout(resolve, 100);
++        });
++        return {
++          status: "error" as const,
++          failureNotificationDetail: { kind: "command-exit" as const, exitCode: 1 },
++        };
++      });
++      const sendCronWebhook = vi.fn();
++      const cleanupTimedOutAgentRun = vi.fn(async () => {
++        await repairCommand;
++      });
++      const state = createCronRegressionState({
++        storePath: path.join(root, "jobs.json"),
++        runCommandJob,
++        runIsolatedAgentJob: async (params) => {
++          params.onExecutionStarted?.({ ...execution, phase: "runner_entered" });
++          params.onExecutionPhase?.(execution);
++          repairCommand = runCronCommandJob({
++            job: {
++              ...params.job,
++              payload: {
++                kind: "command",
++                argv: [
++                  process.execPath,
++                  "-e",
++                  "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); console.log('repair child pid=' + process.pid); setInterval(() => {}, 1000)",
++                  pidPath,
++                ],
++                timeoutSeconds: 60,
++              },
++            },
++            abortSignal: params.abortSignal,
++          });
++          await vi.waitFor(async () => {
++            expect(await fs.readFile(pidPath, "utf8")).toMatch(/^\d+$/);
++          });
++          started.resolve();
++          repairResult = await repairCommand;
++          return { status: "ok", summary: "late, unverified model success" };
++        },
++        cleanupTimedOutAgentRun,
++        sendCronWebhook,
++      });
++      const run = executeJobCoreWithTimeout(state, job, { runId: job.id });
++      try {
++        await started.promise;
++        if (interruption === "operator cancellation") {
++          expect(cancelActiveCronTaskRun({ runId: job.id, reason: "Cancelled by operator." })).toBe(
++            true,
++          );
++        }
++        const result = await run;
++        await repairCommand;
++        await expect(waitForActiveCronTaskRuns(1_000)).resolves.toEqual({
++          drained: true,
++          active: 0,
++        });
++        expect(result).toMatchObject({
++          status: "error",
++          sessionId: execution.sessionId,
++          sessionKey: execution.sessionKey,
++        });
++        if (interruption === "deadline") {
++          expect(cleanupTimedOutAgentRun).toHaveBeenCalledWith({
++            job,
++            timeoutMs: 2_000,
++            execution,
++          });
++        }
++        const pid = Number(await fs.readFile(pidPath, "utf8"));
++        expect(repairResult?.summary).toContain(`pid=${pid}`);
++        expect(Number.isSafeInteger(pid)).toBe(true);
++        expect(isPidAlive(pid)).toBe(false);
++        expect(runCommandJob).toHaveBeenCalledOnce();
++        expect(sendCronWebhook).not.toHaveBeenCalled();
++      } finally {
++        await repairCommand;
++        await run;
++        await waitForActiveCronTaskRuns(1_000);
++      }
++    },
++  );
++
+   it.each(["deadline", "operator cancellation"] as const)(
+     "settles a real command after %s without late delivery",
+     async (interruption) => {
 diff --git a/src/cron/service/jobs-tool-policy.ts b/src/cron/service/jobs-tool-policy.ts
 index e7b631eea73b6e95bac4a490ff3356ce0025e5de..651091461171729e57361558f9f20af6b8c3aacd 100644
 --- a/src/cron/service/jobs-tool-policy.ts
@@ -127504,6 +128306,74 @@ index 4105b5647e470c031afcb5fb5b8d63100d5c33ca..b97dd2f3af7b4267f0aae5c99fc75483
      };
      applyToolsAllowPatch(next, patch);
      return next;
+diff --git a/src/cron/service/task-runs.test.ts b/src/cron/service/task-runs.test.ts
+index c7c152acf7e5851419566daf2fb59e7c7f6f0ab5..926ce4ac81ce71c25b891e5f4e5d17d05a8437eb 100644
+--- a/src/cron/service/task-runs.test.ts
++++ b/src/cron/service/task-runs.test.ts
+@@ -73,6 +73,16 @@ describe("cron task run terminal records", () => {
+       initialSessionKey: undefined,
+       executionSessionKey: "agent:ops:telegram:group:target",
+     },
++    {
++      label: "bounded command repair",
++      id: "command-repair-task-owner",
++      agentId: "ops",
++      sessionTarget: "isolated" as const,
++      timeoutSeconds: 30,
++      initialSessionKey: undefined,
++      executionSessionKey: "agent:ops:cron:command-repair-task-owner:run:session-1",
++      commandRepair: true,
++    },
+   ])("uses the authoritative $label execution transcript", async (testCase) => {
+     await withOpenClawTestState(
+       { layout: "state-only", prefix: `openclaw-cron-${testCase.id}-` },
+@@ -93,13 +103,25 @@ describe("cron task run terminal records", () => {
+           sessionKey: "agent:ops:telegram:group:creator",
+           sessionTarget: testCase.sessionTarget,
+           wakeMode: "next-heartbeat",
+-          payload: {
+-            kind: "agentTurn",
+-            message: "work",
+-            ...(testCase.timeoutSeconds !== undefined
+-              ? { timeoutSeconds: testCase.timeoutSeconds }
+-              : {}),
+-          },
++          payload:
++            "commandRepair" in testCase
++              ? {
++                  kind: "command",
++                  argv: ["synthetic-check"],
++                  timeoutSeconds: testCase.timeoutSeconds,
++                  repair: {
++                    onExitCodes: [1],
++                    agentTurn: { kind: "agentTurn", message: "work" },
++                    verify: { kind: "command", argv: ["synthetic-verification"] },
++                  },
++                }
++              : {
++                  kind: "agentTurn",
++                  message: "work",
++                  ...(testCase.timeoutSeconds !== undefined
++                    ? { timeoutSeconds: testCase.timeoutSeconds }
++                    : {}),
++                },
+           schedule: { kind: "every", everyMs: 60_000 },
+           state: {},
+           createdAtMs: 100,
+@@ -129,6 +151,13 @@ describe("cron task run terminal records", () => {
+           enqueueSystemEvent: vi.fn(),
+           requestHeartbeat: vi.fn(),
+           runIsolatedAgentJob,
++          runCommandJob: vi
++            .fn()
++            .mockResolvedValueOnce({
++              status: "error",
++              failureNotificationDetail: { kind: "command-exit", exitCode: 1 },
++            })
++            .mockResolvedValue({ status: "ok" }),
+         });
+ 
+         const taskRunId = tryCreateCronTaskRun({ state, job, startedAt: 1_500 });
 diff --git a/src/cron/service/timer-execution.ts b/src/cron/service/timer-execution.ts
 index 84a379e6d2d4de423a9ed3ba6cdb3dcc2c2660a4..ed381f5ab5e7326982e4d3483e69ca3120e64ed6 100644
 --- a/src/cron/service/timer-execution.ts
@@ -127543,6 +128413,46 @@ index 84a379e6d2d4de423a9ed3ba6cdb3dcc2c2660a4..ed381f5ab5e7326982e4d3483e69ca31
      };
    }
  
+diff --git a/src/cron/service/timer-job-runner.ts b/src/cron/service/timer-job-runner.ts
+index 5648cc8c6a4481c79a7c1896555d7ccd4213e86e..1f33d38f2b6edd2db34845594040ed8c54f7d14a 100644
+--- a/src/cron/service/timer-job-runner.ts
++++ b/src/cron/service/timer-job-runner.ts
+@@ -274,7 +274,12 @@ async function executeJobCoreWithTimeoutUnfinalized(
+       }
+       tryUpdateCronTaskRunSession(state, opts?.runId, info?.sessionKey);
+     };
+-    const trackExecution = !watchdog || deferTimeoutUntilExecutionStart;
++    // A repair turn inherits the running command deadline, but still supplies
++    // the exact session and phase needed for cleanup and task history.
++    const trackExecution =
++      !watchdog ||
++      deferTimeoutUntilExecutionStart ||
++      (job.payload.kind === "command" && Boolean(job.payload.repair));
+     const resolveHeartbeatTimeoutMs = state.deps.resolveHeartbeatTimeoutMs;
+     const executionIdentity = opts?.executionIdentity;
+     const coreOptions: ExecuteJobCoreOptions = {
+@@ -313,7 +318,20 @@ async function executeJobCoreWithTimeoutUnfinalized(
+     watchdog?.start();
+     const corePromise = executeJobCore(state, job, runAbortController.signal, coreOptions);
+     commandSettlement = job.payload.kind === "command" ? corePromise : undefined;
+-    const runPromise = corePromise.then(async (result) => {
++    const runPromise = corePromise.then(async (coreResult) => {
++      // An abort-aware command core can settle during exact-session cleanup.
++      // Its generic interruption must retain the repair runner's attribution.
++      const execution = watchdog?.activeExecution() ?? untimedExecution;
++      const result =
++        runAbortController.signal.aborted && execution
++          ? {
++              ...coreResult,
++              provider: coreResult.provider ?? execution.provider,
++              model: coreResult.model ?? execution.model,
++              sessionId: coreResult.sessionId ?? execution.sessionId,
++              sessionKey: coreResult.sessionKey ?? execution.sessionKey,
++            }
++          : coreResult;
+       progress.completedCoreResult = result;
+       return await deliverPrimaryWebhook(
+         state,
 diff --git a/src/cron/service/timer-outcome-finalization.ts b/src/cron/service/timer-outcome-finalization.ts
 index 8a0f461a30c23ac0524c2ef56bd026d25ce3c72a..114458269eb6cdcc8262128898b125af1705bade 100644
 --- a/src/cron/service/timer-outcome-finalization.ts
@@ -130924,6 +131834,274 @@ index 51c91819ae439920342ba29f211f9b0de760c51f..b915081ebfd70dfa4c258ac2ff93ffce
 +    });
    });
  }
+diff --git a/src/gateway/server-close.cron-restart.test.ts b/src/gateway/server-close.cron-restart.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c49737987ed716451d4f8b6c1a57132ae71f7bf7
+--- /dev/null
++++ b/src/gateway/server-close.cron-restart.test.ts
+@@ -0,0 +1,77 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { isAgentRunRestartAbortReason } from "../agents/run-termination.js";
++import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
++import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
++import { createGatewayCloseTestDepsFactory } from "./server-close.test-support.js";
++
++vi.mock("../agents/session-suspension.js", () => ({
++  fenceSessionSuspensionWritesForGatewayShutdown: vi.fn(),
++}));
++vi.mock("../agents/harness/registry.js", () => ({
++  disposeRegisteredAgentHarnesses: vi.fn(async () => {}),
++}));
++vi.mock("../agents/agent-bundle-mcp-tools.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../agents/agent-bundle-mcp-tools.js")>()),
++  disposeAllSessionMcpRuntimes: vi.fn(async () => {}),
++}));
++vi.mock("../acp/control-plane/manager.js", () => ({ getAcpSessionManager: vi.fn(() => ({})) }));
++vi.mock("../acp/control-plane/manager.lifecycle.js", () => ({
++  disposeAcpSessionManagerInstance: vi.fn(async () => {}),
++}));
++vi.mock("../plugin-state/plugin-state-store.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../plugin-state/plugin-state-store.js")>()),
++  closePluginStateDatabaseAsync: vi.fn(async () => {}),
++}));
++vi.mock("../hooks/internal-hooks.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../hooks/internal-hooks.js")>()),
++  triggerInternalHook: vi.fn(async () => {}),
++}));
++
++const { prepareGatewayClose, completeGatewayClose } = await import("./server-close.js");
++const createDeps = createGatewayCloseTestDepsFactory({
++  disposeAllBundleLspRuntimes: vi.fn(async () => {}),
++  stopGmailWatcher: vi.fn(async () => {}),
++  disposeAllCodeModeRuns: vi.fn(async () => {}),
++  closeProviderTransportDispatcherPool: vi.fn(async () => {}),
++  drainRetainedEmbeddingProviders: vi.fn(async () => {}),
++});
++
++describe("gateway close cron interruption intent", () => {
++  beforeEach(() => {
++    resetPluginRuntimeStateForTest();
++    setActivePluginRegistry(createEmptyPluginRegistry());
++  });
++  afterEach(() => resetPluginRuntimeStateForTest());
++
++  it.each([
++    { intent: "absent", restartExpectedMs: undefined, restarting: false },
++    { intent: "null", restartExpectedMs: null, restarting: false },
++    { intent: "NaN", restartExpectedMs: Number.NaN, restarting: false },
++    { intent: "infinity", restartExpectedMs: Number.POSITIVE_INFINITY, restarting: false },
++    { intent: "zero", restartExpectedMs: 0, restarting: true },
++    { intent: "positive", restartExpectedMs: 123, restarting: true },
++  ])("uses normalized $intent restart metadata, never display text", async (entry) => {
++    const stopAndDrain = vi.fn(async (_reason?: string | Error) => {});
++    const httpClose = vi.fn((callback: (error?: Error | null) => void) => callback(null));
++    const deps = createDeps({
++      cron: { stop: vi.fn(), stopAndDrain },
++      httpServer: { close: httpClose, closeIdleConnections: vi.fn() } as never,
++    });
++    const options = { reason: "gateway restarting", restartExpectedMs: entry.restartExpectedMs };
++    const prepared = await prepareGatewayClose(deps, options);
++    await completeGatewayClose(deps, prepared);
++
++    expect(stopAndDrain).toHaveBeenCalledOnce();
++    if (entry.restarting) {
++      const [reason] = stopAndDrain.mock.calls[0]!;
++      expect(isAgentRunRestartAbortReason(reason)).toBe(true);
++      expect(reason).toBeInstanceOf(Error);
++    } else {
++      expect(stopAndDrain).toHaveBeenCalledExactlyOnceWith();
++    }
++    expect(deps.cron.stop).not.toHaveBeenCalled();
++    expect(deps.heartbeatRunner.stop).toHaveBeenCalledOnce();
++    expect(httpClose).toHaveBeenCalledOnce();
++    expect(deps.chatRunState.clear).toHaveBeenCalledOnce();
++  });
++});
+diff --git a/src/gateway/server-close.ts b/src/gateway/server-close.ts
+index b3fd85c7fd60263d19f4c5cc77adf6cbfd3596eb..a0b08f96ec042f846f4c0c182733d8e642e4fc74 100644
+--- a/src/gateway/server-close.ts
++++ b/src/gateway/server-close.ts
+@@ -6,6 +6,7 @@ import { disposeAcpSessionManagerInstance } from "../acp/control-plane/manager.l
+ import { disposeAllSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
+ import { disposeRegisteredAgentHarnesses } from "../agents/harness/registry.js";
+ import { closePreparedModelRuntimeSnapshots } from "../agents/prepared-model-runtime.lifecycle.js";
++import { createAgentRunRestartAbortError } from "../agents/run-termination.js";
+ import { fenceSessionSuspensionWritesForGatewayShutdown } from "../agents/session-suspension.js";
+ import { closeSwarmScheduler } from "../agents/subagents/swarm/swarm-scheduler.js";
+ import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
+@@ -30,6 +31,7 @@ import {
+ } from "./restart-trace.js";
+ import type { ChatRunState } from "./server-chat-state.js";
+ import { WEBSOCKET_CLOSE_GRACE_MS } from "./server-constants.js";
++import type { GatewayCronServiceContract } from "./server-cron-contract.js";
+ import {
+   waitForMediaCleanupDrainsToSettle,
+   type MediaCleanupStopResult,
+@@ -251,7 +253,7 @@ export type GatewayCloseParams = {
+   stopGmailWatcher: () => Promise<void>;
+   disposeAllCodeModeRuns: () => Promise<void> | void;
+   closeProviderTransportDispatcherPool: () => Promise<void>;
+-  cron: { stop: () => void; stopAndDrain?: () => Promise<void> };
++  cron: Pick<GatewayCronServiceContract, "stop" | "stopAndDrain">;
+   heartbeatRunner: HeartbeatRunner;
+   stopTaskRegistryMaintenance?: (() => Promise<void> | void) | null;
+   nodePresenceTimers: Map<string, ReturnType<typeof setInterval>>;
+@@ -503,7 +505,12 @@ export async function completeGatewayClose(
+     );
+     await shutdownStep(
+       "cron",
+-      () => (params.cron.stopAndDrain ? params.cron.stopAndDrain() : params.cron.stop()),
++      () =>
++        params.cron.stopAndDrain
++          ? restartExpectedMs !== null
++            ? params.cron.stopAndDrain(createAgentRunRestartAbortError())
++            : params.cron.stopAndDrain()
++          : params.cron.stop(),
+       warnings,
+     );
+     await shutdownStep("heartbeat-runner", () => params.heartbeatRunner.stop(), warnings);
+diff --git a/src/gateway/server-cron-contract.ts b/src/gateway/server-cron-contract.ts
+index c87aa031a782287b774c8ecbf9118fd426f5b570..30ee4ab932ac2828abd6198066bfc80c51df5129 100644
+--- a/src/gateway/server-cron-contract.ts
++++ b/src/gateway/server-cron-contract.ts
+@@ -34,5 +34,5 @@ export type GatewayCronServiceContract = CronServiceContract & {
+   /** Materialize lazy cron dependencies before a synchronous operator wake. */
+   prepareWake?(): Promise<void>;
+   /** Stop cron and await scheduler-owned child process teardown. */
+-  stopAndDrain?(): Promise<void>;
++  stopAndDrain?(reason?: string | Error): Promise<void>;
+ };
+diff --git a/src/gateway/server-cron-lazy.test.ts b/src/gateway/server-cron-lazy.test.ts
+index 9e29bea56aed1259da4bea4f10d915cf59ffb9bb..ba0830aac1b04b152cd9452a8dd5b5584988faa3 100644
+--- a/src/gateway/server-cron-lazy.test.ts
++++ b/src/gateway/server-cron-lazy.test.ts
+@@ -3,6 +3,7 @@
+  */
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { createDeferred as deferred } from "../../test/helpers/promise.js";
++import { createAgentRunRestartAbortError } from "../agents/run-termination.js";
+ import type { CliDeps } from "../cli/deps.types.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import { createMockCronStateForJobs } from "../cron/service.test-harness.js";
+@@ -119,6 +120,54 @@ describe("createLazyGatewayCronState", () => {
+     expect(start).not.toHaveBeenCalled();
+   });
+ 
++  it.each(["ordinary", "restart"] as const)(
++    "forwards the exact %s drain intent to an already loaded scheduler",
++    async (intent) => {
++      const cron = createCronService();
++      const stopAndDrain = vi.fn(async (_reason?: string | Error) => {});
++      cron.stopAndDrain = stopAndDrain;
++      hoisted.setState(createCronState(cron));
++      const lazy = createLazyGatewayCronState(createParams());
++      await lazy.cron.status();
++      const reason = createAgentRunRestartAbortError();
++      if (intent === "restart") {
++        await lazy.cron.stopAndDrain?.(reason);
++        expect(stopAndDrain).toHaveBeenCalledExactlyOnceWith(reason);
++      } else {
++        await lazy.cron.stopAndDrain?.();
++        expect(stopAndDrain).toHaveBeenCalledExactlyOnceWith();
++      }
++      expect(cron["stop"]).not.toHaveBeenCalled();
++    },
++  );
++
++  it("retains the exact restart reason when startup retires after the requested drain", async () => {
++    const finishStart = deferred();
++    const cron = createCronService();
++    cron.start = vi.fn(async () => await finishStart.promise);
++    const stopAndDrain = vi.fn(async (_reason?: string | Error) => {});
++    cron.stopAndDrain = stopAndDrain;
++    hoisted.setState(createCronState(cron));
++    const lazy = createLazyGatewayCronState(createParams());
++    const reason = createAgentRunRestartAbortError();
++    const start = lazy.cron.start();
++    try {
++      await vi.waitFor(() => expect(cron["start"]).toHaveBeenCalledOnce());
++      await lazy.cron.stopAndDrain?.(reason);
++      expect(stopAndDrain).toHaveBeenCalledExactlyOnceWith(reason);
++      finishStart.resolve();
++      await start;
++      expect(stopAndDrain).toHaveBeenCalledTimes(2);
++      for (const [observed] of stopAndDrain.mock.calls) {
++        expect(observed).toBe(reason);
++      }
++      expect(cron["stop"]).not.toHaveBeenCalled();
++    } finally {
++      finishStart.resolve();
++      await start;
++    }
++  });
++
+   it("preserves a watcher owner when hot reload overtakes lazy startup", async () => {
+     const finishStart = deferred();
+     const cron = createCronService();
+@@ -153,7 +202,7 @@ describe("createLazyGatewayCronState", () => {
+     await handoff?.stopOwner();
+ 
+     expect(prepareExitWatcherHandoff).toHaveBeenCalledOnce();
+-    expect(stopOwner).toHaveBeenCalledOnce();
++    expect(stopOwner).toHaveBeenCalledExactlyOnceWith();
+     expect(watchers.cancelAll).not.toHaveBeenCalled();
+     expect(cron["stop"]).not.toHaveBeenCalled();
+   });
+diff --git a/src/gateway/server-cron-lazy.ts b/src/gateway/server-cron-lazy.ts
+index 71c8877e04b88cd64bcd3c670a9442eb8d1b64e7..6f94528ae05402dd878b7e389604350389b46aab 100644
+--- a/src/gateway/server-cron-lazy.ts
++++ b/src/gateway/server-cron-lazy.ts
+@@ -38,6 +38,7 @@ export function createLazyGatewayCronState(params: LazyGatewayCronParams): Gatew
+   const cronEnabled = env.OPENCLAW_SKIP_CRON !== "1" && params.cfg.cron?.enabled !== false;
+   let loaded: LoadedGatewayCronState | null = null;
+   let stopped = false;
++  let stopReason: string | Error | undefined;
+   let exitWatcherHandoff: GatewayCronExitWatcherHandoff | undefined;
+   let exitWatcherHandoffStop: Promise<void> | undefined;
+   let lifecycleGeneration = 0;
+@@ -96,15 +97,21 @@ export function createLazyGatewayCronState(params: LazyGatewayCronParams): Gatew
+       // prepare or stop another owner after its watchers have been adopted.
+       await (exitWatcherHandoffStop ??= exitWatcherHandoff.stopOwner());
+     } else if (resolved.state.cron.stopAndDrain) {
+-      await resolved.state.cron.stopAndDrain();
++      await (stopReason === undefined
++        ? resolved.state.cron.stopAndDrain()
++        : resolved.state.cron.stopAndDrain(stopReason));
+     } else {
+       resolved.state.cron.stop();
+       await resolved.state.stopStreamWatchers();
+     }
+   };
+ 
+-  const stopLoadedCronAndDrain = async (handoff?: GatewayCronExitWatcherHandoff): Promise<void> => {
++  const stopLoadedCronAndDrain = async (
++    handoff?: GatewayCronExitWatcherHandoff,
++    reason?: string | Error,
++  ): Promise<void> => {
+     stopped = true;
++    stopReason = reason;
+     exitWatcherHandoff ??= handoff;
+     lifecycleGeneration += 1;
+     releaseSchedulingResumeWaiters();
+@@ -207,6 +214,7 @@ export function createLazyGatewayCronState(params: LazyGatewayCronParams): Gatew
+     },
+     stop() {
+       stopped = true;
++      stopReason = undefined;
+       lifecycleGeneration += 1;
+       releaseSchedulingResumeWaiters();
+       if (loaded) {
+@@ -231,8 +239,8 @@ export function createLazyGatewayCronState(params: LazyGatewayCronParams): Gatew
+           .catch(() => {});
+       }
+     },
+-    async stopAndDrain() {
+-      await stopLoadedCronAndDrain();
++    async stopAndDrain(reason) {
++      await stopLoadedCronAndDrain(undefined, reason);
+     },
+     pauseScheduling() {
+       schedulingPaused = true;
 diff --git a/src/gateway/server-cron-notifications.presentation.test.ts b/src/gateway/server-cron-notifications.presentation.test.ts
 index c5ec36f074ce211bd7e5c32103d11e27a9721fe7..98259806b6826c793366dbf6b95ac37932b6d826 100644
 --- a/src/gateway/server-cron-notifications.presentation.test.ts
@@ -131020,6 +132198,101 @@ index 215af0f6bcd36bfdc42735072e1b3f026e523658..33e5766e8058df88dbc96a4928e4f836
          abortSignal: abortController.signal,
          onDeliveryAttempt,
        }),
+diff --git a/src/gateway/server-cron.drain.test.ts b/src/gateway/server-cron.drain.test.ts
+index 282996454e1e4cdabe36cc0a60fb52a421b30414..4944badd21477641b900b15e628cab01ad948da4 100644
+--- a/src/gateway/server-cron.drain.test.ts
++++ b/src/gateway/server-cron.drain.test.ts
+@@ -3,8 +3,17 @@ import os from "node:os";
+ import path from "node:path";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../test/helpers/promise.js";
++import {
++  createAgentRunRestartAbortError,
++  isAgentRunRestartAbortReason,
++} from "../agents/run-termination.js";
+ import type { CliDeps } from "../cli/deps.types.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
++import {
++  getSuspensionVisibleCronTaskRunCount,
++  registerActiveCronTaskRun,
++  trackActiveCronTaskRunSettlement,
++} from "../cron/service/active-run-cancellation.js";
+ 
+ const { cancelAllMock, getRuntimeConfigMock, stopAllMock } = vi.hoisted(() => ({
+   cancelAllMock: vi.fn<() => Promise<void>>(),
+@@ -91,6 +100,72 @@ describe("gateway cron stop-and-drain automation ownership", () => {
+     stopAllMock.mockReset();
+   });
+ 
++  it.each(["ordinary", "restart", "config-handoff"] as const)(
++    "drains the same physical no-child core with %s interruption intent",
++    async (intent) => {
++      stopAllMock.mockResolvedValue(undefined);
++      const original = await startGatewayCron(`intent-${intent}`);
++      const controller = new AbortController();
++      const core = createDeferred();
++      const cancelled = createDeferred();
++      const onCancel = vi.fn();
++      const reason = createAgentRunRestartAbortError();
++      controller.signal.addEventListener("abort", () => cancelled.resolve(), { once: true });
++      const release = registerActiveCronTaskRun({
++        runId: `no-child-${intent}`,
++        controller,
++        onCancel,
++      });
++      trackActiveCronTaskRunSettlement(core.promise, controller.signal, "intent-fixture");
++      let drain: Promise<void> | undefined;
++      let drained = false;
++      try {
++        if (intent === "config-handoff") {
++          const handoff = await original.state.prepareExitWatcherHandoff?.();
++          if (!handoff) {
++            throw new Error("expected existing watcher handoff owner");
++          }
++          drain = handoff.stopOwner();
++        } else {
++          drain =
++            intent === "restart"
++              ? original.state.cron.stopAndDrain?.(reason)
++              : original.state.cron.stopAndDrain?.();
++        }
++        if (!drain) {
++          throw new Error("expected cron stop-and-drain");
++        }
++        const observedDrain = drain.then(() => {
++          drained = true;
++        });
++        await cancelled.promise;
++        if (intent === "restart") {
++          expect(controller.signal.reason).toBe(reason);
++          expect(isAgentRunRestartAbortReason(controller.signal.reason)).toBe(true);
++          expect(onCancel).toHaveBeenCalledExactlyOnceWith(reason.message);
++        } else {
++          expect(controller.signal.reason).toBe("Gateway shutting down.");
++          expect(isAgentRunRestartAbortReason(controller.signal.reason)).toBe(false);
++          expect(onCancel).toHaveBeenCalledExactlyOnceWith("Gateway shutting down.");
++        }
++        expect(drained).toBe(false);
++        expect(getSuspensionVisibleCronTaskRunCount({ agentId: "intent-fixture" })).toBe(1);
++        release?.();
++        core.resolve();
++        await observedDrain;
++        expect(drained).toBe(true);
++        await vi.waitFor(() => {
++          expect(getSuspensionVisibleCronTaskRunCount({ agentId: "intent-fixture" })).toBe(0);
++        });
++      } finally {
++        release?.();
++        core.resolve();
++        await Promise.allSettled([core.promise, ...(drain ? [drain] : [])]);
++        await cleanGatewayCron(original);
++      }
++    },
++  );
++
+   it("waits for cancelled exit watchers to settle before completing the drain", async () => {
+     const exitWatcherDrain = createDeferred();
+     cancelAllMock.mockReturnValue(exitWatcherDrain.promise);
 diff --git a/src/gateway/server-cron.test.ts b/src/gateway/server-cron.test.ts
 index 08ceb9ffeeb3be7dc27e1da415e2b4901669ba96..0b2a45bc8709e22fb40cf72e16b36f8dddb98c0a 100644
 --- a/src/gateway/server-cron.test.ts
@@ -131057,7 +132330,7 @@ index 08ceb9ffeeb3be7dc27e1da415e2b4901669ba96..0b2a45bc8709e22fb40cf72e16b36f8d
        expect(state.cron.getJob(job.id)?.state.lastRunStatus).toBe("ok");
        expect(state.cron.getJob(job.id)?.state.lastDeliveryStatus).toBe("delivered");
 diff --git a/src/gateway/server-cron.ts b/src/gateway/server-cron.ts
-index 66ef660866c5ef5fcf628d6b9350924f5ffa898c..279b8e205d70789e1776b25fb852683e6ec49be8 100644
+index 66ef660866c5ef5fcf628d6b9350924f5ffa898c..4461232b9237a0e5094ea63baa18d708318e5828 100644
 --- a/src/gateway/server-cron.ts
 +++ b/src/gateway/server-cron.ts
 @@ -320,8 +320,6 @@ async function finalizeCronCompletionAnnouncement(params: {
@@ -131079,6 +132352,34 @@ index 66ef660866c5ef5fcf628d6b9350924f5ffa898c..279b8e205d70789e1776b25fb852683e
            abortSignal,
            onDeliveryAttempt: (reachedRecipient) => {
              deliveryMayHaveReachedRecipient ||= reachedRecipient;
+@@ -1483,14 +1482,14 @@ export function buildGatewayCronService(params: {
+   cron.stop = () => {
+     stopCronLifecycle();
+   };
+-  const stopAndDrainCron = async (preserveExitWatchers = false) => {
++  const stopAndDrainCron = async (preserveExitWatchers = false, reason?: string | Error) => {
+     stopCronLifecycle(preserveExitWatchers);
+     const exitWatchersStop = exitWatchersStopPromise ?? Promise.resolve();
+     const streamWatchersStop = stopStreamWatchers().then(
+       () => ({ ok: true as const }),
+       (error: unknown) => ({ ok: false as const, error }),
+     );
+-    const abortedRuns = abortActiveCronTaskRuns("Gateway shutting down.");
++    const abortedRuns = abortActiveCronTaskRuns(reason ?? "Gateway shutting down.");
+     const [activeRunDrain, , streamWatchersResult] = await Promise.all([
+       waitForActiveCronTaskRuns(CRON_ACTIVE_RUN_SHUTDOWN_DRAIN_MS),
+       exitWatchersStop,
+@@ -1506,9 +1505,7 @@ export function buildGatewayCronService(params: {
+       throw streamWatchersResult.error;
+     }
+   };
+-  cron.stopAndDrain = async () => {
+-    await stopAndDrainCron();
+-  };
++  cron.stopAndDrain = (reason) => stopAndDrainCron(false, reason);
+   // Serialize accepted-config convergence; newer requests and stop supersede this tail.
+   let systemJobReconcileEpoch = 0;
+   let systemJobReconcileTail = Promise.resolve<GatewaySystemJobReconciliationResult>("converged");
 diff --git a/src/gateway/server-instance-runtime.test.ts b/src/gateway/server-instance-runtime.test.ts
 index f3d337a133a99e4aefd54c3bb25f40d8c8195465..a690ecf3aba945afcc87cc363c79e4c4535fce94 100644
 --- a/src/gateway/server-instance-runtime.test.ts
@@ -135727,7 +137028,7 @@ index b34cfbffdb8352f5c710f7de6901406acf5f919f..e4cfe04898e6d3f44cb4421e3a420321
                prompt: params.message,
                timeoutMs,
 diff --git a/src/gateway/server-restart-sentinel-agent-delivery.ts b/src/gateway/server-restart-sentinel-agent-delivery.ts
-index 4c590888a34fabb61f5b674afabd46c133890db6..4a6c08eb7385bd41f35f4192ff6026855d5b252c 100644
+index 4c590888a34fabb61f5b674afabd46c133890db6..605da0601919ffb2873b0a080cc83bca839ca93e 100644
 --- a/src/gateway/server-restart-sentinel-agent-delivery.ts
 +++ b/src/gateway/server-restart-sentinel-agent-delivery.ts
 @@ -1,3 +1,4 @@
@@ -135735,7 +137036,71 @@ index 4c590888a34fabb61f5b674afabd46c133890db6..4a6c08eb7385bd41f35f4192ff602685
  import {
    collectAmbiguousAutomaticMediaUrls,
    collectAutomaticDeliveredMediaUrls,
-@@ -154,6 +155,11 @@ async function evaluateQueuedGeneratedMediaAgentResult(params: {
+@@ -14,6 +15,7 @@ import {
+   formatGeneratedMediaDeliveryRetryForPrompt,
+ } from "../agents/internal-events.js";
+ import type { RuntimeContextFragment } from "../agents/internal-runtime-context.js";
++import type { TurnAdoptionLifecycle } from "../auto-reply/get-reply-options.types.js";
+ import { resolveDurableCompletionDeliveryMode } from "../auto-reply/reply/completion-delivery-policy.js";
+ import {
+   getRestartRecoveryTerminalDeliveryEvidence,
+@@ -56,6 +58,55 @@ const AGENT_DELIVERY_OWNERSHIP_RETRY_MS = 1_000;
+ 
+ type QueuedAgentTurnSessionDelivery = Extract<QueuedSessionDelivery, { kind: "agentTurn" }>;
+ 
++/** Keeps native queued-turn adoption current before tools or replies can execute. */
++export function createQueuedAgentTurnAdoptionLifecycle(params: {
++  entry: QueuedAgentTurnSessionDelivery;
++  canonicalKey: string;
++  agentId: string;
++  storePath: string;
++  originalSessionId: string | undefined;
++  queueContext: OpenClawStateWorkerContext;
++}): TurnAdoptionLifecycle {
++  const route = params.entry.route;
++  const assertOriginalInternalSessionCurrent = () => {
++    if (route) {
++      return;
++    }
++    params.queueContext.admission.assertCurrent();
++    const current = loadSessionEntry(params.canonicalKey);
++    if (
++      current.canonicalKey !== params.canonicalKey ||
++      current.agentId !== params.agentId ||
++      current.storePath !== params.storePath ||
++      current.entry?.sessionId !== params.originalSessionId
++    ) {
++      throw new SessionDeliverySafeRetryError(
++        "restart continuation original session changed before adoption",
++      );
++    }
++  };
++  // Preflight remains retryable. Ownership starts only after the agent runner
++  // has durably adopted the turn and before it can execute tools or reply.
++  return {
++    admission: "cancel-only",
++    onAdopted: async () => {
++      assertOriginalInternalSessionCurrent();
++      await markSessionDeliveryAttemptStarted(params.entry, params.queueContext);
++      params.queueContext.admission.assertCurrent();
++      assertOriginalInternalSessionCurrent();
++    },
++    ...(!route
++      ? {
++          onDeferred: () => {
++            throw new SessionDeliverySafeRetryError(
++              "restart continuation deferred before native turn adoption",
++            );
++          },
++        }
++      : {}),
++  };
++}
++
+ async function deadLetterSessionDelivery(
+   entry: QueuedAgentTurnSessionDelivery,
+   reason: string,
+@@ -154,6 +205,11 @@ async function evaluateQueuedGeneratedMediaAgentResult(params: {
    queueContext: OpenClawStateWorkerContext;
    persistInternalMedia?: (mediaUrls: string[]) => Promise<void>;
  }) {
@@ -135747,7 +137112,7 @@ index 4c590888a34fabb61f5b674afabd46c133890db6..4a6c08eb7385bd41f35f4192ff602685
    if (hasUnexpectedRecoverySideEffects(params.result)) {
      log.warn("queued generated-media recovery reported an unexpected committed side effect", {
        queueId: params.entry.id,
-@@ -557,6 +563,14 @@ export async function deliverQueuedGeneratedMediaAgentTurn(params: {
+@@ -557,6 +613,14 @@ export async function deliverQueuedGeneratedMediaAgentTurn(params: {
      }
      throw error;
    }
@@ -135849,6 +137214,617 @@ index 0000000000000000000000000000000000000000..3ea4c24d929ee2c64028e8515eaac684
 +    { kind: "conversation-data", text: "Generated media:\nMEDIA:/tmp/proof.png" },
 +  ];
 +}
+diff --git a/src/gateway/server-restart-sentinel.internal-continuation.test.ts b/src/gateway/server-restart-sentinel.internal-continuation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..16283ee6d98863eadf59602674eae500e0a57075
+--- /dev/null
++++ b/src/gateway/server-restart-sentinel.internal-continuation.test.ts
+@@ -0,0 +1,605 @@
++// Internal restart continuations retain their native queue and original conversation.
++import path from "node:path";
++import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { setReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
++import type {
++  GetReplyFromConfig,
++  InternalGetReplyOptions,
++} from "../auto-reply/reply/get-reply.types.js";
++import { resetInboundDedupe } from "../auto-reply/reply/inbound-dedupe.js";
++import type { AssembledChannelTurn } from "../channels/turn/types.js";
++import {
++  appendTranscriptMessage,
++  loadSessionEntry as loadStoredSessionEntry,
++  loadTranscriptEvents,
++  upsertSessionEntryCore,
++} from "../config/sessions/session-accessor.js";
++import { appendAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++import {
++  resolveHeartbeatPreflight,
++  resolveHeartbeatRunPrompt,
++} from "../infra/heartbeat-runner-prompt.js";
++import { writeRestartSentinel } from "../infra/restart-sentinel.js";
++import { drainPendingSessionDelivery } from "../infra/session-delivery-queue-recovery.js";
++import * as queueStorage from "../infra/session-delivery-queue-storage.js";
++import {
++  SessionDeliverySafeRetryError,
++  type SessionDeliveryRoute,
++} from "../infra/session-delivery-queue.records.js";
++import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
++import { buildUpdateRestartSentinelPayload } from "../infra/update-restart-sentinel-payload.js";
++import { onInternalSessionTranscriptUpdate } from "../sessions/transcript-events.js";
++import { createDeferredCore } from "../shared/deferred.js";
++import { closeOpenClawStateDatabaseAsync } from "../state/openclaw-state-db.js";
++import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
++import type { OpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.types.js";
++import {
++  createOpenClawTestState,
++  type OpenClawTestState,
++} from "../test-utils/openclaw-test-state.js";
++import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.js";
++import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
++
++const mocks = vi.hoisted(() => ({
++  dispatch: vi.fn<(params: AssembledChannelTurn) => Promise<unknown>>(),
++  reply: vi.fn<GetReplyFromConfig>(),
++  requestHeartbeat: vi.fn(),
++  routeReply: vi.fn<typeof import("../auto-reply/reply/route-reply.js").routeReply>(),
++}));
++
++vi.mock("../channels/turn/lifecycle.js", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("../channels/turn/lifecycle.js")>();
++  mocks.dispatch.mockImplementation(async (params) =>
++    actual.dispatchAssembledChannelTurn({ ...params, replyResolver: mocks.reply }),
++  );
++  return { ...actual, dispatchAssembledChannelTurn: mocks.dispatch };
++});
++vi.mock("../infra/heartbeat-wake.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../infra/heartbeat-wake.js")>()),
++  requestHeartbeat: mocks.requestHeartbeat,
++}));
++vi.mock("../auto-reply/reply/route-reply.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("../auto-reply/reply/route-reply.js")>()),
++  routeReply: mocks.routeReply,
++}));
++
++const { deliverQueuedSessionDelivery, settleQueuedSessionDelivery, scheduleRestartSentinelWake } =
++  await import("./server-restart-sentinel.js");
++
++const sessionKey = "agent:main:restart-cui";
++const sessionId = "original-restart-conversation";
++const messageId = `restart-sentinel:${sessionKey}:agentTurn:123`;
++const originalTask = "Repair the original work, verify it, and report the result here.";
++const oldContext =
++  "The existing task concerns account recovery; a prepared artifact is not completion.";
++const finalText = "The original repair and verification are complete.";
++const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
++let state: OpenClawTestState;
++let queueContext: OpenClawStateWorkerContext;
++let cfg: OpenClawConfig;
++let storePath: string;
++let replyOptions: InternalGetReplyOptions | undefined;
++
++beforeEach(async () => {
++  resetInboundDedupe();
++  state = await createOpenClawTestState({ label: "internal-restart-continuation" });
++  storePath = path.join(state.sessionsDir(), "sessions.json");
++  cfg = {
++    agents: {
++      defaults: {
++        workspace: state.workspaceDir,
++        timeoutSeconds: 600,
++        heartbeat: {
++          every: "30m",
++          isolatedSession: true,
++          lightContext: true,
++          model: "monitor/model",
++          thinking: "low",
++          timeoutSeconds: 10,
++        },
++      },
++    },
++    session: { store: storePath },
++  };
++  await state.writeConfig(cfg);
++  await upsertSessionEntryCore(
++    { agentId: "main", sessionKey, storePath },
++    {
++      sessionId,
++      updatedAt: 1,
++      modelProvider: "task-provider",
++      model: "task-model",
++      thinkingLevel: "max",
++      delivery: normalizeSessionDeliveryState({
++        context: { channel: INTERNAL_MESSAGE_CHANNEL },
++        origin: { provider: INTERNAL_MESSAGE_CHANNEL, surface: INTERNAL_MESSAGE_CHANNEL },
++      }),
++    },
++  );
++  await appendTranscriptMessage(
++    { agentId: "main", sessionKey, sessionId, storePath },
++    { message: { role: "user", content: oldContext, timestamp: 1 } },
++  );
++  queueContext = captureOpenClawStateWorkerContext();
++  replyOptions = undefined;
++  mocks.dispatch.mockClear();
++  mocks.requestHeartbeat.mockClear();
++  mocks.routeReply.mockReset();
++  mocks.routeReply.mockRejectedValue(new Error("Unexpected external automatic reply"));
++  resetSystemEventsForTest();
++  mocks.reply.mockReset();
++  // The provider resolver stands in for a normal model result. The assembled
++  // dispatcher, queue, session store, transcript writer, and publication remain real.
++  mocks.reply.mockImplementation(async (ctx, options) => {
++    replyOptions = options;
++    await options?.turnAdoptionLifecycle?.onAdopted();
++    const result = await appendAssistantMessageToSessionTranscript({
++      agentId: "main",
++      sessionKey: ctx.SessionKey!,
++      storePath,
++      expectedSessionId: sessionId,
++      text: finalText,
++      idempotencyKey: `${ctx.MessageSid}:model-final`,
++      updateMode: "inline",
++    });
++    if (!result.ok) {
++      throw new Error(result.reason);
++    }
++    return setReplyPayloadMetadata({ text: finalText }, { assistantTranscriptOwned: true });
++  });
++});
++
++afterEach(async () => {
++  resetInboundDedupe();
++  vi.restoreAllMocks();
++  resetSystemEventsForTest();
++  await closeOpenClawStateDatabaseAsync();
++  await state.cleanup();
++});
++
++async function enqueueContinuation(route?: SessionDeliveryRoute): Promise<string> {
++  const payload = buildUpdateRestartSentinelPayload({
++    result: { status: "ok", mode: "npm", steps: [], durationMs: 1 },
++    meta: { sessionKey, continuationMessage: originalTask },
++    nowMs: 123,
++  });
++  expect(payload.continuation).toEqual({ kind: "agentTurn", message: originalTask });
++  if (payload.continuation?.kind !== "agentTurn") {
++    throw new Error("Expected a typed original-task continuation");
++  }
++  return queueStorage.enqueueSessionDelivery(
++    {
++      kind: payload.continuation.kind,
++      sessionKey: payload.sessionKey!,
++      message: payload.continuation.message,
++      messageId,
++      expectedSessionId: sessionId,
++      idempotencyKey: messageId,
++      completionRetention: "permanent",
++      ...(route ? { route } : {}),
++    },
++    queueContext,
++  );
++}
++
++function drain(id: string) {
++  return drainPendingSessionDelivery({
++    id,
++    bypassBackoff: true,
++    logLabel: "internal restart continuation",
++    log,
++    queueContext,
++    deliver: (entry, { queueContext: current }) =>
++      deliverQueuedSessionDelivery({ deps: {} as never, entry, queueContext: current }),
++    onSettled: settleQueuedSessionDelivery,
++  });
++}
++
++async function history() {
++  return loadTranscriptEvents({ agentId: "main", sessionKey, sessionId, storePath });
++}
++
++async function pendingAgentTurn(id: string) {
++  const entry = await queueStorage.loadPendingSessionDelivery(id, queueContext);
++  if (!entry || entry.kind !== "agentTurn") {
++    throw new Error("Expected pending typed agent turn");
++  }
++  return entry;
++}
++
++describe("typed internal restart continuations", () => {
++  it("keeps an internal continuation private despite a persisted external delivery route", async () => {
++    await upsertSessionEntryCore(
++      { agentId: "main", sessionKey, storePath },
++      {
++        delivery: normalizeSessionDeliveryState({
++          context: {
++            channel: "discord",
++            to: "channel:old-external-destination",
++            accountId: "old-account",
++          },
++          origin: {
++            provider: "discord",
++            surface: "discord",
++            to: "channel:old-external-destination",
++          },
++        }),
++      },
++    );
++    const before = await history();
++    const id = await enqueueContinuation();
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.reply).toHaveBeenCalledOnce();
++    expect(mocks.routeReply).not.toHaveBeenCalled();
++    expect(replyOptions).toMatchObject({
++      sourceReplyDeliveryMode: "automatic",
++      expectedExistingSessionId: sessionId,
++      pinExpectedExistingSession: true,
++    });
++    const ctx = mocks.dispatch.mock.calls[0]?.[0].ctxPayload;
++    expect(ctx?.OriginatingChannel).toBeUndefined();
++    expect(ctx?.OriginatingTo).toBeUndefined();
++    expect(ctx?.InternalTurnSource).toBeUndefined();
++    expect(loadStoredSessionEntry({ agentId: "main", sessionKey, storePath })?.sessionId).toBe(
++      sessionId,
++    );
++    const after = await history();
++    expect(after.slice(0, before.length)).toEqual(before);
++    expect(after).toContainEqual(
++      expect.objectContaining({
++        type: "message",
++        message: expect.objectContaining({
++          role: "assistant",
++          content: [{ type: "text", text: finalText }],
++        }),
++      }),
++    );
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++    expect(peekSystemEvents(sessionKey)).toEqual([]);
++  });
++
++  it("resumes a producer's internal continuation at startup without a redundant monitor wake", async () => {
++    const payload = buildUpdateRestartSentinelPayload({
++      result: { status: "ok", mode: "npm", steps: [], durationMs: 1 },
++      meta: { sessionKey, continuationMessage: originalTask },
++      nowMs: 123,
++    });
++    await writeRestartSentinel(payload);
++    await scheduleRestartSentinelWake({ deps: {} as never });
++    expect(mocks.reply).toHaveBeenCalledOnce();
++    expect(mocks.dispatch).toHaveBeenCalledWith(
++      expect.objectContaining({
++        channel: INTERNAL_MESSAGE_CHANNEL,
++        routeSessionKey: sessionKey,
++        ctxPayload: expect.objectContaining({ BodyForAgent: originalTask }),
++      }),
++    );
++    const messages = await history();
++    expect(messages).toContainEqual(
++      expect.objectContaining({
++        type: "message",
++        message: expect.objectContaining({
++          role: "assistant",
++          content: [{ type: "text", text: finalText }],
++        }),
++      }),
++    );
++    expect(
++      messages.filter((event) => {
++        const record = asOptionalRecord(event);
++        return record?.type === "message" && asOptionalRecord(record.message)?.role === "assistant";
++      }),
++    ).toHaveLength(2);
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++    expect(peekSystemEvents(sessionKey)).toEqual([]);
++  });
++
++  it("uses the original CUI conversation and ordinary execution despite isolated monitor settings", async () => {
++    const before = await history();
++    const publications: unknown[] = [];
++    const unsubscribe = onInternalSessionTranscriptUpdate((update) => publications.push(update));
++    try {
++      const id = await enqueueContinuation();
++      await expect(drain(id)).resolves.toBeNull();
++
++      expect(mocks.reply).toHaveBeenCalledOnce();
++      expect(mocks.dispatch).toHaveBeenCalledWith(
++        expect.objectContaining({
++          channel: INTERNAL_MESSAGE_CHANNEL,
++          routeSessionKey: sessionKey,
++          storePath,
++          ctxPayload: expect.objectContaining({
++            Body: originalTask,
++            BodyForAgent: originalTask,
++            SessionKey: sessionKey,
++            MessageSid: messageId,
++            Provider: INTERNAL_MESSAGE_CHANNEL,
++            Surface: INTERNAL_MESSAGE_CHANNEL,
++            ExplicitDeliverRoute: false,
++            InputProvenance: {
++              kind: "internal_system",
++              sourceChannel: INTERNAL_MESSAGE_CHANNEL,
++              sourceTool: "restart-sentinel",
++            },
++          }),
++        }),
++      );
++      expect(replyOptions).toMatchObject({
++        expectedExistingSessionId: sessionId,
++        pinExpectedExistingSession: true,
++        sourceReplyDeliveryMode: "automatic",
++      });
++      for (const key of [
++        "isHeartbeat",
++        "heartbeatModelOverride",
++        "thinkingLevelOverride",
++        "timeoutOverrideSeconds",
++        "bootstrapContextMode",
++        "disableTools",
++        "toolsAllow",
++        "cleanupBundleMcpOnRunEnd",
++      ]) {
++        expect(replyOptions).not.toHaveProperty(key);
++      }
++      const stored = loadStoredSessionEntry({ agentId: "main", sessionKey, storePath });
++      expect(stored).toMatchObject({
++        sessionId,
++        modelProvider: "task-provider",
++        model: "task-model",
++      });
++      const after = await history();
++      expect(after.slice(0, before.length)).toEqual(before);
++      expect(after).toContainEqual(
++        expect.objectContaining({
++          type: "message",
++          message: expect.objectContaining({
++            role: "assistant",
++            content: [{ type: "text", text: finalText }],
++          }),
++        }),
++      );
++      expect(publications).toContainEqual(
++        expect.objectContaining({
++          target: expect.objectContaining({ sessionKey, sessionId }),
++        }),
++      );
++      expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++      expect(peekSystemEvents(sessionKey)).toEqual([]);
++    } finally {
++      unsubscribe();
++    }
++  });
++
++  it("keeps the queue pending through adoption and joins the actual reply before settlement", async () => {
++    const started = createDeferredCore();
++    const finish = createDeferredCore();
++    let modelEntered = false;
++    let finished = false;
++    mocks.reply.mockImplementation(async (_ctx, options) => {
++      started.resolve();
++      await options?.turnAdoptionLifecycle?.onAdopted();
++      modelEntered = true;
++      await finish.promise;
++      return { text: "finished after adoption" };
++    });
++    const id = await enqueueContinuation();
++    const result = drain(id).finally(() => {
++      finished = true;
++    });
++    try {
++      await vi.waitFor(() => expect(mocks.reply).toHaveBeenCalledOnce());
++      await started.promise;
++      await vi.waitFor(() => expect(modelEntered).toBe(true));
++      expect(finished).toBe(false);
++      expect(await pendingAgentTurn(id)).toMatchObject({
++        expectedSessionId: sessionId,
++        deliveryStartedAt: expect.any(Number),
++      });
++    } finally {
++      finish.resolve();
++      await result;
++    }
++    expect(await queueStorage.loadPendingSessionDelivery(id, queueContext)).toBeNull();
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++
++  it("retains native queue ownership when ordinary dispatch would defer the continuation", async () => {
++    mocks.reply.mockImplementation(async (_ctx, options) => {
++      options?.turnAdoptionLifecycle?.onDeferred?.();
++      return undefined;
++    });
++    const before = await history();
++    const id = await enqueueContinuation();
++    const pending = await drain(id);
++    expect(pending).toMatchObject({ kind: "agentTurn", retryCount: 1 });
++    expect(pending).not.toHaveProperty("deliveryStartedAt");
++    expect(pending).not.toHaveProperty("settlementOutcome");
++    expect(await history()).toEqual(before);
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++
++  it("retries a proven pre-adoption failure without marking execution started", async () => {
++    mocks.reply.mockRejectedValueOnce(new SessionDeliverySafeRetryError("preflight unavailable"));
++    const id = await enqueueContinuation();
++    const pending = await drain(id);
++    expect(pending).toMatchObject({
++      kind: "agentTurn",
++      retryCount: 1,
++      lastError: "preflight unavailable",
++    });
++    expect(pending).not.toHaveProperty("deliveryStartedAt");
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.reply).toHaveBeenCalledTimes(2);
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++
++  it("does not replay an adopted turn after an unproven dispatch failure", async () => {
++    const dispatch = mocks.dispatch.getMockImplementation();
++    if (!dispatch) {
++      throw new Error("Expected the actual assembled dispatch fixture");
++    }
++    // Simulate loss of the outer dispatch result after real adoption and reply
++    // settlement. A handled model error is an ordinary terminal reply instead.
++    mocks.dispatch.mockImplementationOnce(async (params) => {
++      await dispatch(params);
++      throw new Error("unproven outer dispatch result after adoption");
++    });
++    try {
++      const id = await enqueueContinuation();
++      expect(await drain(id)).toMatchObject({
++        retryCount: 1,
++        deliveryStartedAt: expect.any(Number),
++      });
++      await expect(drain(id)).resolves.toBeNull();
++      expect(mocks.dispatch).toHaveBeenCalledOnce();
++      expect(mocks.reply).toHaveBeenCalledOnce();
++      expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++    } finally {
++      // OLD no-route dispatch never consumes the one-shot. Clear it even when
++      // the regression assertion fails, then restore the real pipeline wrapper.
++      mocks.dispatch.mockReset();
++      mocks.dispatch.mockImplementation(dispatch);
++    }
++  });
++
++  it("keeps a diagnostic system event on the isolated monitor path", async () => {
++    const diagnostic = "The gateway restarted; inspect its reported status.";
++    const id = await queueStorage.enqueueSessionDelivery(
++      {
++        kind: "systemEvent",
++        sessionKey,
++        text: diagnostic,
++      },
++      queueContext,
++    );
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.dispatch).not.toHaveBeenCalled();
++    expect(peekSystemEvents(sessionKey)).toEqual([diagnostic]);
++    const preflight = await resolveHeartbeatPreflight({
++      cfg,
++      agentId: "main",
++      heartbeat: cfg.agents?.defaults?.heartbeat,
++      sessionKey,
++      source: "restart-sentinel",
++      reason: "wake",
++    });
++    const prompt = resolveHeartbeatRunPrompt({
++      cfg,
++      preflight,
++      canRelayToUser: false,
++      useHeartbeatResponseTool: false,
++      startedAt: 0,
++      scheduledTasks: [],
++    });
++    expect(prompt.hasTaskContinuation).toBe(false);
++    expect(preflight.session.run.kind).toBe("isolated");
++    expect(mocks.requestHeartbeat).toHaveBeenCalledWith(
++      expect.objectContaining({
++        source: "restart-sentinel",
++        intent: "immediate",
++        reason: "wake",
++        sessionKey,
++      }),
++    );
++  });
++
++  it("keeps a changed original session diagnostic and does not execute on its replacement", async () => {
++    const id = await enqueueContinuation();
++    await upsertSessionEntryCore(
++      { agentId: "main", sessionKey, storePath },
++      {
++        sessionId: "replacement-session",
++        updatedAt: Date.now(),
++      },
++    );
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.dispatch).not.toHaveBeenCalled();
++    expect(peekSystemEvents(sessionKey)).toEqual([originalTask]);
++  });
++
++  it("does not create an original conversation when its expected session is missing", async () => {
++    const id = await queueStorage.enqueueSessionDelivery(
++      {
++        kind: "agentTurn",
++        sessionKey: "agent:main:missing-restart-cui",
++        message: originalTask,
++        messageId,
++        expectedSessionId: sessionId,
++      },
++      queueContext,
++    );
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.dispatch).not.toHaveBeenCalled();
++    expect(
++      loadStoredSessionEntry({
++        agentId: "main",
++        sessionKey: "agent:main:missing-restart-cui",
++        storePath,
++      }),
++    ).toBeUndefined();
++  });
++
++  it("rechecks the original session after dispatch preflight and before durable adoption", async () => {
++    mocks.reply.mockImplementationOnce(async (_ctx, options) => {
++      await upsertSessionEntryCore(
++        { agentId: "main", sessionKey, storePath },
++        {
++          sessionId: "replacement-before-adoption",
++          updatedAt: Date.now(),
++        },
++      );
++      await options?.turnAdoptionLifecycle?.onAdopted();
++      throw new Error("original session must not be adopted after replacement");
++    });
++    const id = await enqueueContinuation();
++    const pending = await drain(id);
++    expect(pending).toMatchObject({ kind: "agentTurn", retryCount: 1 });
++    expect(pending).not.toHaveProperty("deliveryStartedAt");
++    expect(pending).not.toHaveProperty("settlementOutcome");
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++
++  it("rejects a retired queue owner before any internal dispatch or wake", async () => {
++    const id = await enqueueContinuation();
++    const entry = await pendingAgentTurn(id);
++    await closeOpenClawStateDatabaseAsync();
++    await expect(
++      deliverQueuedSessionDelivery({
++        deps: {} as never,
++        entry,
++        queueContext,
++      }),
++    ).rejects.toThrow();
++    expect(mocks.dispatch).not.toHaveBeenCalled();
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++
++  it("retains the routed restart continuation's existing message-tool-only contract", async () => {
++    const route: SessionDeliveryRoute = {
++      channel: "whatsapp",
++      to: "+15550002",
++      accountId: "acct-2",
++      threadId: "thread-42",
++      chatType: "direct",
++    };
++    const id = await enqueueContinuation(route);
++    await expect(drain(id)).resolves.toBeNull();
++    expect(mocks.reply).toHaveBeenCalledOnce();
++    expect(mocks.dispatch).toHaveBeenCalledWith(
++      expect.objectContaining({
++        channel: route.channel,
++        accountId: route.accountId,
++        routeSessionKey: sessionKey,
++        replyOptions: expect.objectContaining({ sourceReplyDeliveryMode: "message_tool_only" }),
++        ctxPayload: expect.objectContaining({
++          OriginatingChannel: route.channel,
++          OriginatingTo: route.to,
++          MessageThreadId: route.threadId,
++        }),
++      }),
++    );
++    expect(mocks.requestHeartbeat).not.toHaveBeenCalled();
++  });
++});
 diff --git a/src/gateway/server-restart-sentinel.test.ts b/src/gateway/server-restart-sentinel.test.ts
 index c104a19e19d107df99021715067f400ef635a3b7..d56f40c0f67eae74848fc64e4d348d5a9129f316 100644
 --- a/src/gateway/server-restart-sentinel.test.ts
@@ -136052,6 +138028,182 @@ index c104a19e19d107df99021715067f400ef635a3b7..d56f40c0f67eae74848fc64e4d348d5a
      let attempt = 0;
      mocks.readRestartSentinel.mockResolvedValue({
        version: 1,
+diff --git a/src/gateway/server-restart-sentinel.ts b/src/gateway/server-restart-sentinel.ts
+index 177b25465cf9bb4a3ab647f788eec69d7c5d0ced..804700513b871d0e2443bfa9ee7cbc26aa2cfe75 100644
+--- a/src/gateway/server-restart-sentinel.ts
++++ b/src/gateway/server-restart-sentinel.ts
+@@ -4,6 +4,7 @@ import {
+   settleCorrelatedSubagentDelivery,
+ } from "../agents/subagents/completion/subagent-completion-delivery.js";
+ import { REPLY_RUN_STILL_SHUTTING_DOWN_TEXT } from "../auto-reply/reply/get-reply-run-queue.js";
++import type { InternalGetReplyOptions } from "../auto-reply/reply/get-reply.types.js";
+ import { finalizeInboundContext } from "../auto-reply/reply/inbound-context.js";
+ import { dispatchReplyWithBufferedBlockDispatcherCore } from "../auto-reply/reply/provider-dispatcher.js";
+ import { recordInboundSession } from "../channels/session.js";
+@@ -31,7 +32,6 @@ import {
+ } from "../infra/session-delivery-queue-recovery.js";
+ import {
+   enqueueSessionDelivery,
+-  markSessionDeliveryAttemptStarted,
+   markSessionDeliverySettlement,
+ } from "../infra/session-delivery-queue-storage.js";
+ import {
+@@ -62,7 +62,10 @@ import {
+   normalizeDeliveryContext,
+ } from "../utils/delivery-context.shared.js";
+ import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
+-import { deliverQueuedGeneratedMediaAgentTurn } from "./server-restart-sentinel-agent-delivery.js";
++import {
++  createQueuedAgentTurnAdoptionLifecycle,
++  deliverQueuedGeneratedMediaAgentTurn,
++} from "./server-restart-sentinel-agent-delivery.js";
+ import {
+   deliverRestartSentinelNotice,
+   enqueueRestartSentinelNotice,
+@@ -197,13 +200,16 @@ export async function deliverQueuedSessionDelivery(params: {
+     return;
+   }
+ 
+-  if (!queuedEntry.route) {
++  const route = queuedEntry.route;
++  const originalSessionId = entry?.sessionId;
++  if (!route && !originalSessionId) {
+     enqueueRestartSentinelWake(queuedEntry.message, canonicalKey, undefined, deliveryContext);
+     return;
+   }
+ 
+   if (
+-    await deliverQueuedGeneratedMediaAgentTurn({
++    route &&
++    (await deliverQueuedGeneratedMediaAgentTurn({
+       entry: queuedEntry,
+       runtimeContextFragments: queuedEntry.runtimeContextFragments,
+       canonicalKey,
+@@ -214,7 +220,7 @@ export async function deliverQueuedSessionDelivery(params: {
+       ...(params.resolveGatewayContext
+         ? { resolveGatewayContext: params.resolveGatewayContext }
+         : {}),
+-    })
++    }))
+   ) {
+     return;
+   }
+@@ -225,7 +231,13 @@ export async function deliverQueuedSessionDelivery(params: {
+     );
+   }
+ 
+-  const route = queuedEntry.route;
++  const replyOptions: InternalGetReplyOptions = route
++    ? { sourceReplyDeliveryMode: "message_tool_only" }
++    : {
++        sourceReplyDeliveryMode: "automatic",
++        expectedExistingSessionId: originalSessionId,
++        pinExpectedExistingSession: true,
++      };
+   const messageId = resolveQueuedRestartContinuationMessageId(queuedEntry);
+   const userMessage = queuedEntry.message.trim();
+   let dispatchError: unknown;
+@@ -241,25 +253,25 @@ export async function deliverQueuedSessionDelivery(params: {
+       RawBody: userMessage,
+       CommandBody: "",
+       SessionKey: canonicalKey,
+-      AccountId: route.accountId,
++      AccountId: route?.accountId,
+       MessageSid: messageId,
+       Timestamp: Date.now(),
+       InputProvenance: {
+         kind: "internal_system",
+-        sourceChannel: route.channel,
++        sourceChannel: route?.channel ?? INTERNAL_MESSAGE_CHANNEL,
+         sourceTool: "restart-sentinel",
+       },
+       Provider: INTERNAL_MESSAGE_CHANNEL,
+       Surface: INTERNAL_MESSAGE_CHANNEL,
+-      ChatType: route.chatType,
++      ChatType: route?.chatType ?? "direct",
+       CommandAuthorized: true,
+       GatewayClientScopes: ["operator.admin"],
+       GatewayClientCaps: [],
+-      ReplyToId: route.replyToId,
+-      OriginatingChannel: route.channel,
+-      OriginatingTo: route.to,
++      ReplyToId: route?.replyToId,
++      OriginatingChannel: route?.channel,
++      OriginatingTo: route?.to,
+       ExplicitDeliverRoute: false,
+-      MessageThreadId: route.threadId,
++      MessageThreadId: route?.threadId,
+     },
+     {
+       forceBodyForCommands: true,
+@@ -268,26 +280,23 @@ export async function deliverQueuedSessionDelivery(params: {
+   );
+   await dispatchAssembledChannelTurn({
+     cfg,
+-    channel: route.channel,
+-    accountId: route.accountId,
++    channel: route?.channel ?? INTERNAL_MESSAGE_CHANNEL,
++    accountId: route?.accountId,
+     agentId,
+     routeSessionKey: canonicalKey,
+     storePath,
+     ctxPayload,
+     recordInboundSession,
+     dispatchReplyWithBufferedBlockDispatcher: dispatchReplyWithBufferedBlockDispatcherCore,
+-    replyOptions: {
+-      sourceReplyDeliveryMode: "message_tool_only",
+-    },
+-    // Preflight remains retryable. Ownership starts only after the agent runner
+-    // has durably adopted the turn and before it can execute tools or reply.
+-    turnAdoptionLifecycle: {
+-      admission: "cancel-only",
+-      onAdopted: async () => {
+-        await markSessionDeliveryAttemptStarted(queuedEntry, params.queueContext);
+-        params.queueContext.admission.assertCurrent();
+-      },
+-    },
++    replyOptions,
++    turnAdoptionLifecycle: createQueuedAgentTurnAdoptionLifecycle({
++      entry: queuedEntry,
++      canonicalKey,
++      agentId,
++      storePath,
++      originalSessionId,
++      queueContext: params.queueContext,
++    }),
+     delivery: {
+       preparePayload: (payload) => {
+         if (isRestartContinuationBusyPayload(payload)) {
+@@ -296,8 +305,8 @@ export async function deliverQueuedSessionDelivery(params: {
+         return payload;
+       },
+       durable: false,
+-      // Restart continuations are internal lifecycle turns. Visible follow-up
+-      // must go through the message tool; automatic final delivery stays off.
++      // Routed follow-up uses the message tool. Internal CUI final responses
++      // are persisted and published by their original runtime transcript owner.
+       deliver: async () => ({ visibleReplySent: false }),
+       onError: (err, info) => {
+         dispatchError ??= err;
+@@ -596,8 +605,7 @@ async function loadRestartSentinelStartupTask(params: {
+       }
+     }
+ 
+-    const routedAgentTurnContinuation =
+-      continuation?.kind === "agentTurn" && continuationRoute !== undefined;
++    const agentTurnContinuation = continuation?.kind === "agentTurn";
+     // Inline transcript publication also broadcasts to Control UI. An update
+     // outcome needs no model wake unless continuation work remains; heartbeats
+     // can silently suppress the notice or contradict the recorded outcome.
+@@ -605,7 +613,7 @@ async function loadRestartSentinelStartupTask(params: {
+       (internalNoticeWritten || (updateRunId && route)) &&
+       payload.kind === "update" &&
+       !continuation;
+-    if (!routedAgentTurnContinuation && !updateComplete) {
++    if (!agentTurnContinuation && !updateComplete) {
+       wakeQueueId = await enqueueSessionDelivery(
+         buildQueuedRestartContinuation({
+           sessionKey: canonicalKey,
 diff --git a/src/gateway/server.agent-input-authority.test.ts b/src/gateway/server.agent-input-authority.test.ts
 index 9ffa0d311457a58a67f2860f82642749d66b48fb..fc07a45602c1f8eee22d355e006ef2e39aec9224 100644
 --- a/src/gateway/server.agent-input-authority.test.ts
