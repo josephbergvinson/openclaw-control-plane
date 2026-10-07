@@ -6246,6 +6246,30 @@ index 55cd2c4d08e2af352569d6123886c94985e78e50..214d65d6cc3aceac045dd6a250eef81e
  preparation before any model reply. The child's transcript includes a durable
  failure notice when no assistant reply was recorded for that run. A later
  successful run clears the previous failure reason.
+diff --git a/docs/tools/subagents/tool-policy.md b/docs/tools/subagents/tool-policy.md
+index 286c7ba0efcecd2abc80a34baadba74a73c5b141..1ede4039785fbf432c400eb662bd3e71c7b7ac25 100644
+--- a/docs/tools/subagents/tool-policy.md
++++ b/docs/tools/subagents/tool-policy.md
+@@ -12,7 +12,7 @@ Sub-agents use the same profile and tool-policy pipeline as the parent or
+ target agent first. After that, OpenClaw applies the sub-agent restriction
+ layer.
+ 
+-Sub-agents always lose `gateway`, `agents_list`, `session_status`, `progress_card`, `cron`,
++Sub-agents always lose `gateway`, `agents_list`, `progress_card`, `cron`,
+ `message`, `sessions_send`, and the `conversations_*` tools regardless of
+ depth or role (system-level/interactive tools, parent-owned progress cards, direct delivery surfaces, or
+ tools the main agent should coordinate). This hard-deny layer is derived from
+@@ -23,6 +23,10 @@ depth. Sub-agents at the configured depth cap additionally
+ lose `subagents`, `sessions_list`, `sessions_history`, and `sessions_spawn`, so
+ their communication stays on the announce chain.
+ 
++`session_status` remains available under the ordinary tool-policy pipeline.
++Session visibility and model policy still govern its reads and model changes;
++an explicit configured tool deny still removes it.
++
+ `sessions_history` remains a bounded, redacted recall view here too — it
+ is neither a raw transcript dump nor a prose-only rendering.
+ 
 diff --git a/docs/tools/subagents/tool-reference.md b/docs/tools/subagents/tool-reference.md
 index 16a2e5dc818590fd999089c135da00b5e4f81a32..52b9faf3486ac1be903c79514b3e3233f487df29 100644
 --- a/docs/tools/subagents/tool-reference.md
@@ -54353,6 +54377,255 @@ index a32a50146201000db52d40c77de233aa56740ae9..40a6fb52990890cc05ce7b21fb1198b7
 +    oneShotCliRun: options?.oneShotCliRun,
 +  };
 +}
+diff --git a/src/agents/agent-tools.policy.test.ts b/src/agents/agent-tools.policy.test.ts
+index c90f347d7f943effe016c547566c30d0bf6872d7..2e6534515a157206d514e321ca1733f6f5877797 100644
+--- a/src/agents/agent-tools.policy.test.ts
++++ b/src/agents/agent-tools.policy.test.ts
+@@ -353,7 +353,6 @@ describe("resolveSubagentToolPolicyForSession", () => {
+         "gateway",
+         "agents_list",
+         "openclaw",
+-        "session_status",
+         "progress_card",
+         "automations",
+         "cron",
+@@ -369,7 +368,7 @@ describe("resolveSubagentToolPolicyForSession", () => {
+         tools: {
+           subagents: {
+             tools: {
+-              [allowField]: [...hardDeniedTools, "update_plan", "memory_search"],
++              [allowField]: [...hardDeniedTools, "session_status", "update_plan", "memory_search"],
+             },
+           },
+         },
+@@ -381,6 +380,7 @@ describe("resolveSubagentToolPolicyForSession", () => {
+           expect(isToolAllowedByPolicyName(toolName, policy), toolName).toBe(false);
+         }
+         expect(isToolAllowedByPolicyName("memory_search", policy)).toBe(true);
++        expect(isToolAllowedByPolicyName("session_status", policy)).toBe(true);
+       }
+     },
+   );
+diff --git a/src/agents/agent-tools.policy.ts b/src/agents/agent-tools.policy.ts
+index bd53e03ee7411603f7e3b0807c34130e049c6997..def7a88ca1231b22d6cbaf881defdcd86b4fc175 100644
+--- a/src/agents/agent-tools.policy.ts
++++ b/src/agents/agent-tools.policy.ts
+@@ -54,8 +54,7 @@ const SUBAGENT_TOOL_DENY_ALWAYS = [
+   "gateway",
+   "agents_list",
+   "openclaw",
+-  // Status/scheduling - main agent coordinates
+-  "session_status",
++  // Progress/scheduling - main agent coordinates
+   "progress_card",
+   AUTOMATIONS_TOOL_NAME,
+   // Direct user/session sends - subagents communicate through announce chain
+diff --git a/src/agents/agent-tools.subagent-session-status.test.ts b/src/agents/agent-tools.subagent-session-status.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..98ba2003ea4e8e3dc4eef33f81d6204fc2d07d02
+--- /dev/null
++++ b/src/agents/agent-tools.subagent-session-status.test.ts
+@@ -0,0 +1,200 @@
++// Registered child status keeps normal session visibility and tool-policy boundaries.
++import path from "node:path";
++import { expectDefined, isRecord } from "@openclaw/normalization-core";
++import { describe, expect, it, vi } from "vitest";
++import "./test-helpers/fast-bash-tools.js";
++import "./test-helpers/fast-coding-tools.js";
++import "./test-helpers/fast-openclaw-tools.js";
++import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
++import { createOpenClawCodingTools } from "./agent-tools.js";
++import { createOpenClawTools } from "./openclaw-tools.js";
++import { createStubTool } from "./test-helpers/agent-tool-stubs.js";
++import {
++  createToolSearchCatalogRef,
++  createToolSearchTools,
++  registerHeadlessToolSearchCatalog,
++  TOOL_CALL_RAW_TOOL_NAME,
++  TOOL_SEARCH_RAW_TOOL_NAME,
++} from "./tool-search.js";
++import { createSessionStatusTool } from "./tools/session-status-tool.js";
++
++const buildStatusText = vi.hoisted(() => vi.fn(async () => "Synthetic child runtime status"));
++vi.mock("../status/status-text.js", () => ({ buildStatusText }));
++vi.mock("./prepared-model-catalog.js", () => ({
++  loadPublishedPreparedModelCatalog: async () => [],
++}));
++
++async function withRegisteredChildStatus(
++  options: { maxSpawnDepth?: number; deny?: string[]; visibility?: "self" | "agent" },
++  run: (fixture: {
++    childKey: string;
++    parentKey: string;
++    tools: ReturnType<typeof createOpenClawCodingTools>;
++    controls: ReturnType<typeof createToolSearchTools>;
++    catalogRef: ReturnType<typeof createToolSearchCatalogRef>;
++  }) => Promise<void>,
++) {
++  await withOpenClawTestState({ prefix: "registered-child-status-" }, async (state) => {
++    const childKey = "agent:main:subagent:status-child";
++    const parentKey = "agent:main:main";
++    const store = path.join(state.sessionsDir("main"), "sessions.json");
++    const config: OpenClawConfig = {
++      session: { store },
++      agents: {
++        defaults: {
++          workspace: state.workspaceDir,
++          model: { primary: "openai/gpt-5.4" },
++          subagents: { maxSpawnDepth: options.maxSpawnDepth ?? 2 },
++        },
++      },
++      tools: {
++        sessions: { visibility: options.visibility ?? "self" },
++        subagents: { tools: { deny: options.deny } },
++        toolSearch: { enabled: true, mode: "tools" },
++      },
++    };
++    await replaceSessionEntry(
++      { agentId: "main", sessionKey: childKey, storePath: store },
++      { sessionId: "status-child", updatedAt: 20, spawnDepth: 1, spawnedBy: parentKey },
++    );
++    await replaceSessionEntry(
++      { agentId: "main", sessionKey: parentKey, storePath: store },
++      { sessionId: "status-parent", updatedAt: 10 },
++    );
++    // Only sibling materialization is stubbed; policy, catalog and status execution stay native.
++    vi.mocked(createOpenClawTools).mockImplementationOnce((nativeOptions) => [
++      createSessionStatusTool({
++        agentSessionKey: nativeOptions?.agentSessionKey,
++        runSessionKey: nativeOptions?.runSessionKey,
++        config: nativeOptions?.config,
++        sandboxed: nativeOptions?.sandboxed,
++      }),
++      ...["gateway", "agents_list", "message", "sessions_send"].map(createStubTool),
++    ]);
++    buildStatusText.mockClear();
++    const tools = createOpenClawCodingTools({
++      config,
++      sessionKey: childKey,
++      runSessionKey: childKey,
++      workspaceDir: state.workspaceDir,
++      agentDir: state.agentDir("main"),
++      wrapBeforeToolCallHook: false,
++    });
++    const catalogRef = createToolSearchCatalogRef();
++    registerHeadlessToolSearchCatalog({ catalogRef, tools });
++    const controls = createToolSearchTools({ catalogRef, config });
++    await run({ childKey, parentKey, tools, controls, catalogRef });
++  });
++}
++
++describe("registered subagent session_status", () => {
++  it.each([1, 2])("discovers and executes own status at spawn cap %i", async (maxSpawnDepth) => {
++    await withRegisteredChildStatus({ maxSpawnDepth }, async ({ childKey, tools, controls }) => {
++      const search = expectDefined(
++        controls.find((tool) => tool.name === TOOL_SEARCH_RAW_TOOL_NAME),
++        "native tool_search",
++      );
++      const found = await search.execute("find-child-status", {
++        query: "session_status",
++        limit: 1,
++      });
++      expect(found.details).toMatchObject([
++        { id: "openclaw:core:session_status", name: "session_status" },
++      ]);
++      const candidate: unknown = Array.isArray(found.details) ? found.details[0] : undefined;
++      if (!isRecord(candidate) || typeof candidate.id !== "string") {
++        throw new Error("Expected discovered child status ID");
++      }
++      const call = expectDefined(
++        controls.find((tool) => tool.name === TOOL_CALL_RAW_TOOL_NAME),
++        "native tool_call",
++      );
++      const result = await call.execute("inspect-child-status", {
++        id: candidate.id,
++        args: { sessionKey: "current" },
++      });
++      expect(result.details).toMatchObject({
++        tool: { id: candidate.id, name: "session_status" },
++        result: {
++          details: { ok: true, sessionKey: childKey, agentId: "main", changedModel: false },
++        },
++      });
++      expect(buildStatusText).toHaveBeenCalledOnce();
++      expect(buildStatusText).toHaveBeenCalledWith(
++        expect.objectContaining({
++          sessionKey: childKey,
++          sessionEntry: expect.objectContaining({ sessionId: "status-child" }),
++        }),
++      );
++      const names = tools.map((tool) => tool.name);
++      for (const denied of ["gateway", "agents_list", "message", "sessions_send"]) {
++        expect(names).not.toContain(denied);
++      }
++    });
++  });
++
++  it("retains an explicit child status deny", async () => {
++    await withRegisteredChildStatus(
++      { deny: ["session_status"] },
++      async ({ tools, controls, catalogRef }) => {
++        expect(tools.map((tool) => tool.name)).not.toContain("session_status");
++        const catalog = expectDefined(catalogRef.current, "native child status catalog");
++        expect(catalog.entries.map((entry) => entry.name)).not.toContain("session_status");
++        expect(catalog.entries.map((entry) => entry.id)).not.toContain(
++          "openclaw:core:session_status",
++        );
++        const search = expectDefined(
++          controls.find((tool) => tool.name === TOOL_SEARCH_RAW_TOOL_NAME),
++          "native tool_search",
++        );
++        const found = await search.execute("find-denied-status", {
++          query: "session_status",
++          limit: 1,
++        });
++        expect(found.details).toEqual(expect.any(Array));
++        expect(found.details).not.toContainEqual(
++          expect.objectContaining({ name: "session_status" }),
++        );
++        expect(found.details).not.toContainEqual(
++          expect.objectContaining({ id: "openclaw:core:session_status" }),
++        );
++        const call = expectDefined(
++          controls.find((tool) => tool.name === TOOL_CALL_RAW_TOOL_NAME),
++          "native tool_call",
++        );
++        await expect(
++          call.execute("call-denied-status", {
++            id: "openclaw:core:session_status",
++            args: { sessionKey: "current" },
++          }),
++        ).rejects.toThrow("Unknown tool id: openclaw:core:session_status");
++        expect(buildStatusText).not.toHaveBeenCalled();
++      },
++    );
++  });
++
++  it.each(["self", "agent"] as const)(
++    "preserves %s visibility for a parent target",
++    async (visibility) => {
++      await withRegisteredChildStatus({ visibility }, async ({ parentKey, tools }) => {
++        const status = expectDefined(
++          tools.find((tool) => tool.name === "session_status"),
++          "registered status",
++        );
++        const operation = status.execute("inspect-parent-status", { sessionKey: parentKey });
++        if (visibility === "self") {
++          await expect(operation).rejects.toThrow("restricted to the current session");
++          expect(buildStatusText).not.toHaveBeenCalled();
++        } else {
++          expect((await operation).details).toMatchObject({
++            ok: true,
++            sessionKey: parentKey,
++            changedModel: false,
++          });
++        }
++      });
++    },
++  );
++});
 diff --git a/src/agents/agent-tools.ts b/src/agents/agent-tools.ts
 index de6798c1f1a1ad52de35822f5a6c2a9395214d4f..74a2a0bcebe8ce86dc6c291ea27379e90c2b4b32 100644
 --- a/src/agents/agent-tools.ts
@@ -95842,9 +96115,18 @@ index 0000000000000000000000000000000000000000..6498e7f546282d9170bee9d89f149467
 +  });
 +});
 diff --git a/src/agents/tools/cron-tool.test.ts b/src/agents/tools/cron-tool.test.ts
-index dfe7764aeaabc4e5df43321375f6ea0765bd2828..3fe2280209cde9a2c9645932185dcda2772525b9 100644
+index dfe7764aeaabc4e5df43321375f6ea0765bd2828..c2a109c1b5d45dc0acc46faa545bef9be5266dcd 100644
 --- a/src/agents/tools/cron-tool.test.ts
 +++ b/src/agents/tools/cron-tool.test.ts
+@@ -37,7 +37,7 @@ describe("cron tool", () => {
+     run: () => T,
+     signal?: AbortSignal,
+   ): T {
+-    const capability = createCronCreatorAuthorityCapability(runId);
++    const capability = createCronCreatorAuthorityCapability(runId, { kind: "local" });
+     if (!capability) {
+       throw new Error("expected cron creator authority capability");
+     }
 @@ -920,24 +920,6 @@ describe("cron tool", () => {
      });
    });
