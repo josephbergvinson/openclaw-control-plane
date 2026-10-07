@@ -1,5 +1,10 @@
 # Runtime source changes
 
+The sections below preserve dated qualification and deployment observations.
+References to “current” describe the state at that date. The
+[October 7 child-status qualification](#october-7-native-child-status-and-cron-fixture-qualification)
+identifies the current Gateway installation.
+
 This architecture uses the customized OpenClaw build pinned in the runtime
 manifest. Reproducing its behavior requires both the runtime source changes and
 the surrounding configuration
@@ -74,7 +79,40 @@ rows remain dated evidence. Public local qualification, complete reconstructed-t
 parity and all five hosted jobs must pass freshly for the new public revision.
 The hosted workflow retains all five jobs and the approved34 owning fixture selectors.
 
+## October 7 native child status and cron fixture qualification
+
+The qualified source reference is `1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`
+(tree `b822ed5df9e7d270426e651fdb0efe7d9addb0b1`). Children can discover
+and invoke their registered `session_status` tool; configured denials and session
+visibility rules remain in force. The cron write fixture now supplies its local
+origin, matching the existing authority contract.
+
+Qualification passed 207 tests in the cron owning suites, all 21 mapped checks
+and a scoped P0 review. The child-status change has separate registered-tool tests,
+mapped checks and P0 qualification. These overlapping counts are not summed.
+
+Gateway and Node run `98eb1d271b1e174707be092dd67be9c424e871ce`
+(tree `a3181074b3ba42134efe7c8beb7ee6208149ca83`). Native activation and
+independent checks of the loaded source, health and protected state passed.
+The qualified reference differs from that installed source only in
+`src/agents/tools/cron-tool.test.ts`.
+
+Both signed companions, build 605, and their bundled workers retain
+`4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`). Their dated inventory,
+signature and running-worker checks remain preserved.
+
+All previous qualification, deployment and acceptance records remain intact.
+Source and installation evidence does not establish every account, task, delivery
+or browser outcome. The hosted regression suite includes the new child-status
+test alongside the existing selectors, Chromium and pinned MCP prerequisites.
+Fresh local checks, complete reconstructed-tree parity and all five required
+hosted checks must pass for this public revision.
+
 ## October 6 native parent-task context and completion protocol
+
+This section records the dated predecessor qualification and installation preserved by the previous public source reference.
+Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.
 
 This section records the dated predecessor qualification and installation preserved by the previous public source reference.
 Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.

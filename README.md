@@ -14,7 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current installed Gateway and Node source reference is
+The qualified runtime source reference is
+[`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
+Gateway and Node run
+[`98eb1d271b1e174707be092dd67be9c424e871ce`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification);
+the qualified reference differs only in a cron test fixture. Native activation,
+loaded-source, health and protected-state checks passed. Both signed companions,
+build 605, retain their 4ce source and dated installation evidence.
+Previous records remain intact. Fresh local and required hosted qualification,
+plus ordinary-use acceptance, remain separate checks.
+
+The dated predecessor installed Gateway and Node source reference was
 [`4ce35c658e465161d98dce988729558b55030d22`](runtime/README.md#october-7-continuity-browser-confidentiality-and-authorized-outcomes).
 Actual native activation and independent same-generation loaded-source, health and
 protected-state readback passed. Both signed companions605 have exact installed
