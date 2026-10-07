@@ -15,6 +15,15 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current installed Gateway and Node source reference is
+[`4ce35c658e465161d98dce988729558b55030d22`](runtime/README.md#october-7-continuity-browser-confidentiality-and-authorized-outcomes).
+Actual native activation and independent same-generation loaded-source, health and
+protected-state readback passed. Both signed companions605 have exact installed
+inventory and live bundled-worker source identity readbacks. The preceding57b public
+source, baa18/364/753 actual deployments and complete earlier companion histories
+remain preserved. Source and installation evidence does not close all ordinary-use
+outcomes; fresh local and all five exact-head hosted public checks remain required.
+
+The dated predecessor installed Gateway and Node source reference was
 [`57b8a6d654649d3efa13d44a0fe9e3212188c440`](runtime/README.md#october-6-original-task-restart-and-scheduled-context-continuity).
 One normal build/stage/seal, native activation and independent loaded-source,
 health and protected-state readback passed. The successor preserves original CUI

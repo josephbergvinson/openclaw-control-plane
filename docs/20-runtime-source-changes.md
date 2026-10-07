@@ -48,7 +48,36 @@ and current-process capture. Source/local checks do not substitute for all five
 fresh hosted jobs on this public revision. The complete preceding qualification,
 activation chain and live-acceptance gap rows remain preserved below.
 
+## October 7 continuity, browser confidentiality and authorized outcomes
+
+The current installed Gateway and Node use final source `4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`). The normal package605 mandatory
+full build fed the existing stage/seal owners. Actual native activation and an
+independent same-generation loaded-source, health and protected-state readback passed.
+The dated baa18,364 and753 actual activation/readback pairs are retained between the
+previous public57b deployment and this final generation. Both signed companions605
+have exact installed whole inventory and live bundled-worker source identity readbacks.
+Fresh604 rollbacks and older app custody remain preserved; UI54 is excluded.
+
+The118-path source successor includes the qualified supplied-input storage,
+original requester continuation, browser capture confidentiality, selector reference
+scope, exact native attach-denial containment, loaded-source lineage, value-free
+Discord admission observability and established authorization guidance changes.
+Existing source qualification and regression receipts remain distinct from installed
+and ordinary-use acceptance. Historical failures, exact predecessor qualifications
+and the complete earlier deployment/companion history are preserved.
+
+These deployment and installation receipts do not by themselves prove every original
+ordinary-use outcome, account or delivery action, current-process capture, natural
+scheduled occurrence or live browser/Discord behavior. The existing acceptance-gap
+rows remain dated evidence. Public local qualification, complete reconstructed-tree
+parity and all five hosted jobs must pass freshly for the new public revision.
+The hosted workflow retains all five jobs and the approved34 owning fixture selectors.
+
 ## October 6 native parent-task context and completion protocol
+
+This section records the dated predecessor qualification and installation preserved by the previous public source reference.
+Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.
 
 This section records the dated34ae predecessor qualification and installation.
 Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.

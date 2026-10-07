@@ -130,13 +130,34 @@ jobs:
             ${{ runner.temp }}/reference-focused-reliability.log
           if-no-files-found: error
           retention-days: 7
+      - name: Install required Playwright Chromium
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts --require-playwright-chromium
+      - name: Pre-warm Chrome MCP
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: npx -y --audit=false chrome-devtools-mcp@1.8.0 --version
+      - name: Configure offline Chrome MCP
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: npm config set cache="$HOME/.npm" offline=true --location=project
       - name: Run owned follow-up and yield regressions
         id: followup
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
           set -o pipefail
-          OPENCLAW_BROWSER_HTTP_AUTH_E2E=1 pnpm test:serial \
+          OPENCLAW_BROWSER_HTTP_AUTH_E2E=1 OPENCLAW_BROWSER_SNAPSHOT_E2E=1 pnpm test:serial \
             src/agents/tools/sessions.test.ts \
+            extensions/browser/src/browser/chrome.internal.test.ts \
+            src/agents/openclaw-tools.requester-yield.test.ts \
+            src/agents/subagents/requester-cron-authority.test.ts \
+            src/agents/tools/gateway-caller-context.test.ts \
+            src/gateway/device-revocation.test.ts \
+            src/gateway/server-cron-command-repair-delivery.test.ts \
+            src/gateway/server-methods/requester-local-operator-authority.integration.test.ts \
+            src/gateway/server-methods/chat-send-requester-native-continuity.integration.test.ts \
+            src/gateway/server-methods/secrets.provided-input.test.ts \
+            src/gateway/server-methods/chat-send-provided-secret.test.ts \
+            src/gateway/message-action-turn-capability.provided-input.test.ts \
+            packages/gateway-protocol/src/schema/secrets.test.ts \
             src/agents/tools/sessions-send-tool.recovery.test.ts \
             src/agents/subagents/registry/subagent-registry-restart-recovery.test.ts \
             src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts \
@@ -200,8 +221,26 @@ jobs:
             src/gateway/config-reload.test.ts \
             src/gateway/config-reload.browser.test.ts \
             extensions/browser/index.test.ts \
+            extensions/browser/chrome-extension/background.native-cleanup.test.ts \
+            extensions/browser/chrome-extension/background.native-policy-enumeration.test.ts \
             extensions/browser/src/browser-tool.credentials.test.ts \
+            extensions/browser/src/browser-credential-fill.test.ts \
+            extensions/browser/src/browser/chrome-mcp.confidential-capture.test.ts \
+            extensions/browser/src/browser/chrome-mcp.test.ts \
+            extensions/browser/src/browser/pw-screenshots.chromium.test.ts \
+            extensions/browser/src/browser/pw-role-snapshot.chromium.test.ts \
+            extensions/browser/src/browser/pw-role-snapshot.test.ts \
+            extensions/browser/src/browser/pw-session.selector-refs.test.ts \
+            extensions/browser/src/browser/pw-tools-core.interactions.credential-origin.test.ts \
+            extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts \
+            extensions/browser/src/browser/pw-tools-core.snapshot.test.ts \
+            extensions/browser/src/browser/routes/agent.snapshot.local-managed.test.ts \
+            extensions/browser/src/browser/routes/agent.snapshot.timeout.test.ts \
+            extensions/browser/src/browser/routes/index.type-secret.test.ts \
             extensions/browser/src/browser/pw-tools-core.state.test.ts \
+            extensions/browser/src/browser/pw-tools-core.interactions.batch.test.ts \
+            extensions/browser/src/browser/extension-relay/relay-bridge.enumeration.test.ts \
+            extensions/browser/src/browser/extension-relay/relay-protocol.test.ts \
             extensions/browser/src/browser/routes/agent.storage.device.test.ts \
             extensions/browser/src/cli/browser-cli-state.option-collisions.test.ts \
             extensions/browser/src/browser/request-policy.test.ts \
@@ -288,6 +327,10 @@ jobs:
             src/agents/embedded-agent-runner/runs.publication-wait.test.ts \
             src/agents/main-session-recovery/main-session-restart-recovery.test.ts \
             src/agents/main-session-recovery/main-session-restart-recovery-progress.test.ts \
+            src/trajectory/metadata.test.ts \
+            src/auto-reply/reply/agent-runner-steer-adoption.context.test.ts \
+            src/agents/system-prompt.test.ts \
+            src/agents/system-prompt.behavior.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
           pnpm test:serial \
             src/gateway/server-methods/chat-send-message-injection.test.ts \
