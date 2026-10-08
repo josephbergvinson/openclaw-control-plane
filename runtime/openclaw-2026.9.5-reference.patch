@@ -14637,6 +14637,25 @@ index 0000000000000000000000000000000000000000..e6be87cdc5b5b5f47e254154b35b86bd
 +    throw new Error("Browser credential target origin changed before fill.");
 +  }
 +}
+diff --git a/extensions/browser/src/browser/extension-install-atomic.test.ts b/extensions/browser/src/browser/extension-install-atomic.test.ts
+index a115ce0a288c53595f5940fe1de54a288eb6c43a..2952644aeb154b4b85e5aeb6fcb414056c2ae996 100644
+--- a/extensions/browser/src/browser/extension-install-atomic.test.ts
++++ b/extensions/browser/src/browser/extension-install-atomic.test.ts
+@@ -70,7 +70,13 @@ describe("native host publication recovery", () => {
+       const retried = await installChromeExtensionBootstrap({ ...params, deps });
+       expect(retried.issues).toEqual([]);
+       expect(retried.manualSetupRequired).toBe(false);
+-      expect(retried.registrations).toEqual(before.registrations);
++      expect(retried.registrations).toEqual(
++        before.registrations.map((entry) =>
++          entry.state === "owned"
++            ? Object.assign({}, entry, { runtimeTargets: [value.deps.nodePath, nativeHostPath] })
++            : entry,
++        ),
++      );
+       expect(await fs.readFile(manifest.path, "utf8")).toContain(nativeHostPath);
+       expect((await fs.readdir(directory)).toSorted()).toEqual(entries);
+       if (process.platform !== "win32") {
 diff --git a/extensions/browser/src/browser/extension-install-external.ts b/extensions/browser/src/browser/extension-install-external.ts
 index e41fbbb67e46ec7ad7c679502bc4944534a2f121..5d58ef29486f65c35e4e456ebddc2e472688c311 100644
 --- a/extensions/browser/src/browser/extension-install-external.ts
@@ -15507,8 +15526,126 @@ index 0000000000000000000000000000000000000000..aa1242f20993686d710d947b60578e51
 +    throw new Error("registered launcher changed during cleanup");
 +  }
 +}
+diff --git a/extensions/browser/src/browser/extension-install.test.ts b/extensions/browser/src/browser/extension-install.test.ts
+index bc0cff8f9af3db8661a611ecf92156e2e6b73f85..2a9fc743d8348f1f75ddda28021d3a5b4c60bcee 100644
+--- a/extensions/browser/src/browser/extension-install.test.ts
++++ b/extensions/browser/src/browser/extension-install.test.ts
+@@ -507,6 +507,64 @@ describe("native host registration", () => {
+     ).toEqual(expectedOrigins);
+   });
+ 
++  it("refuses a same-path launcher's no-Store origins changed after inspection", async () => {
++    const value = await fixture();
++    const installed = await installStableChromeExtension(value.bundledDir, value.deps);
++    const installedId = await predictedId(installed, value.deps.platform);
++    const chrome = chromeProductRoots(value.deps).find((root) => root.product === "chrome");
++    if (!chrome) {
++      throw new Error("missing Chrome fixture root");
++    }
++    await writeChromePreferences({
++      userDataDir: chrome.userDataDir,
++      profile: "Default",
++      entries: { [installedId]: { location: 4, path: installed } },
++    });
++    const params = {
++      bundledDir: value.bundledDir,
++      pluginRoot: value.pluginRoot,
++      waitMs: 1_000,
++      deps: value.deps,
++    };
++    const status = await installChromeExtensionBootstrap(params);
++    const manifestPath =
++      status.registrations.find((entry) => entry.product === "chrome")?.manifestPath ?? "";
++    const manifest = await rewriteRegistrationOrigins(
++      manifestPath,
++      [installedId, "o".repeat(32)].toSorted().map((id) => `chrome-extension://${id}/`),
++    );
++    const manifestBytes = await fs.readFile(manifestPath, "utf8");
++    const launcher = await fs.readFile(manifest.path, "utf8");
++    const changedOrigins = [installedId, "p".repeat(32)]
++      .toSorted()
++      .map((id) => `chrome-extension://${id}/`);
++    const changedLauncher = launcher.replace(
++      /(?: '--expected-origin' 'chrome-extension:\/\/[a-p]{32}\/')+ "\$@"/u,
++      `${changedOrigins.map((origin) => ` '--expected-origin' '${origin}'`).join("")} "$@"`,
++    );
++    expect(changedLauncher).not.toBe(launcher);
++    const realpath = fs.realpath.bind(fs);
++    let nodeResolutions = 0;
++    let changed = false;
++    vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
++      // The first resolution belongs to inspection; the second prepares the replacement.
++      if (target === value.deps.nodePath && ++nodeResolutions === 2) {
++        changed = true;
++        await fs.writeFile(manifest.path, changedLauncher);
++      }
++      return await realpath(target);
++    });
++
++    const repair = await installChromeExtensionBootstrap(params);
++    expect(changed).toBe(true);
++    expect(repair.manualSetupRequired).toBe(true);
++    expect(repair.issues.join("\n")).toContain(
++      "Refusing to overwrite foreign native host launcher",
++    );
++    expect(await fs.readFile(manifestPath, "utf8")).toBe(manifestBytes);
++    expect(await fs.readFile(manifest.path, "utf8")).toBe(changedLauncher);
++  });
++
+   it("refuses path-origin cardinality and no-overlap drift", async () => {
+     const value = await fixture();
+     const installed = await installStableChromeExtension(value.bundledDir, value.deps);
+@@ -710,11 +768,17 @@ describe("native host registration", () => {
+       expect(brokenRegistration).toMatchObject({
+         state: "owned",
+         extensionIds: registration.extensionIds,
++        runtimeTargets: [registeredDeps.nodePath, registeredDeps.nativeHostPath].map((entry) =>
++          failure === "relative" && entry === registeredTarget
++            ? path.relative(process.cwd(), entry)
++            : entry,
++        ),
+       });
+       expect(brokenRegistration.issue).toContain("openclaw browser extension install");
+       expect(brokenRegistration.issue.length).toBeLessThan(200);
+       expect(broken.issues).toEqual([`Chromium: ${brokenRegistration.issue}`]);
+-      expect(JSON.stringify(broken)).not.toMatch(/pairingString|token|Bearer|runtime's version/u);
++      expect(JSON.stringify(broken)).not.toMatch(/pairingString|token|Bearer/u);
++      expect(JSON.stringify(broken.issues)).not.toMatch(/runtime's version/u);
+       expect(brokenRegistration.issue).not.toContain(value.root);
+       expect(await fs.readFile(registration.manifestPath, "utf8")).toBe(manifestBytes);
+       expect(await fs.readFile(manifest.path, "utf8")).toBe(launcherBytes);
+@@ -756,7 +820,13 @@ describe("native host registration", () => {
+       const repaired = await browserExtensionStatus({ ...params, deps });
+       expect(repaired.manualSetupRequired).toBe(false);
+       expect(repaired.issues).toEqual([]);
+-      expect(repaired.registrations).toEqual(before.registrations);
++      expect(repaired.registrations).toEqual(
++        before.registrations.map((entry) =>
++          entry.state === "owned"
++            ? Object.assign({}, entry, { runtimeTargets: [deps.nodePath, deps.nativeHostPath] })
++            : entry,
++        ),
++      );
+       expect(await fs.readFile(registration.manifestPath, "utf8")).toBe(manifestBytes);
+       expect((await fs.stat(registration.manifestPath)).mode & 0o777).toBe(0o600);
+       expect((await fs.stat(manifest.path)).mode & 0o777).toBe(0o700);
+@@ -795,7 +865,13 @@ describe("native host registration", () => {
+     );
+     const repaired = await browserExtensionStatus({ ...params, deps });
+     expect(repaired.manualSetupRequired).toBe(false);
+-    expect(repaired.registrations).toEqual(before.registrations);
++    expect(repaired.registrations).toEqual(
++      before.registrations.map((entry) =>
++        entry.state === "owned"
++          ? Object.assign({}, entry, { runtimeTargets: [nodePath, value.nativeHostPath] })
++          : entry,
++      ),
++    );
+     expect(repaired.issues).toEqual([]);
+   });
+ });
 diff --git a/extensions/browser/src/browser/extension-install.ts b/extensions/browser/src/browser/extension-install.ts
-index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89bc241b3a9 100644
+index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..a3277672627462c091fb7075cf9bcc64fb64a106 100644
 --- a/extensions/browser/src/browser/extension-install.ts
 +++ b/extensions/browser/src/browser/extension-install.ts
 @@ -2,7 +2,6 @@ import crypto from "node:crypto";
@@ -15784,7 +15921,7 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
    await ensurePrivateDirectory(root.nativeManifestDir);
    const launcher = await resolveLauncherInstall({
      manifestPath,
-@@ -368,9 +361,23 @@ async function installRegistration(params: {
+@@ -368,9 +361,31 @@ async function installRegistration(params: {
    });
    const launcherPath = launcher.path;
    if (await pathInfo(launcherPath)) {
@@ -15797,11 +15934,19 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
 +      manifestPath,
 +      launcherPath,
 +    });
++    // Registered launchers can predate Store authorization; their inspected origins bind repair.
++    const sameRegisteredDestination =
++      existing.state === "owned" &&
++      existing.launcherPath === launcherPath &&
++      JSON.stringify(destinationOrigins) ===
++        JSON.stringify(existing.extensionIds.map((id) => `chrome-extension://${id}/`));
 +    const destinationIsOwned =
 +      matchesLegacyInstallContext(existingLauncher, deps) &&
-+      destinationOrigins?.includes(
++      destinationOrigins &&
++      (destinationOrigins.includes(
 +        `chrome-extension://${FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID}/`,
-+      ) &&
++      ) ||
++        sameRegisteredDestination) &&
 +      isSafeOriginMigration(
 +        destinationOrigins.map((origin) => origin.slice("chrome-extension://".length, -1)),
 +        extensionIds,
@@ -15810,7 +15955,7 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
        throw new Error(`Refusing to overwrite foreign native host launcher: ${launcherPath}`);
      }
      if (existingLauncher !== launcher.content) {
-@@ -389,12 +396,48 @@ async function installRegistration(params: {
+@@ -389,12 +404,48 @@ async function installRegistration(params: {
      type: "stdio",
      allowed_origins: expectedOriginsForExtensionIds(extensionIds),
    };
@@ -15861,7 +16006,7 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
  }
  
  async function approvedInstallRealpaths(installed: string, bundled: string): Promise<string[]> {
-@@ -454,12 +497,15 @@ export async function installChromeExtensionBootstrap(params: {
+@@ -454,12 +505,15 @@ export async function installChromeExtensionBootstrap(params: {
      }
      try {
        await assertOwnedPath(root.userDataDir, "directory");
@@ -15878,7 +16023,7 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
        preRegisteredRoots += 1;
        params.onProgress?.(`Pre-registered the native host for ${root.label}.`);
      } catch (error) {
-@@ -563,8 +609,8 @@ export async function browserExtensionStatus(params: {
+@@ -563,8 +617,8 @@ export async function browserExtensionStatus(params: {
          );
    const unavailableRegistration = registrations.some((registration) => {
      const productWasDiscovered =
@@ -15889,7 +16034,7 @@ index 1fbb6ab53e0cce4cabfef089e042f49abffab6bb..0cfed0af191f3de10f5c73208dceb89b
      return productWasDiscovered && (registration.state !== "owned" || Boolean(registration.issue));
    });
    const storeInstallRequests = await chromeStoreInstallRequests(deps);
-@@ -619,20 +665,26 @@ export async function uninstallChromeExtensionNativeHosts(
+@@ -619,20 +673,26 @@ export async function uninstallChromeExtensionNativeHosts(
        refused.push(status.manifestPath);
        continue;
      }
@@ -18856,10 +19001,10 @@ index 7ffe6c87f622eb9e7eaef2ea4a6ae4e3cc761399..e5404886687a1d6516ef2c04d77b8320
          if (
            isBrowserObservedDialogBlockedError(err) ||
 diff --git a/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts b/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts
-index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..8b586d3acbf0d30534227905a8704d62b8462017 100644
+index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..25a243ddb3a4f8d050861c4667a467f45140a827 100644
 --- a/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts
 +++ b/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts
-@@ -89,6 +89,158 @@ describe("pw-tools-core", () => {
+@@ -89,6 +89,161 @@ describe("pw-tools-core", () => {
      expect(sessionMocks.refLocator).toHaveBeenCalledWith(page, "76");
      expect(refScreenshot).toHaveBeenCalledWith({ type: "jpeg", timeout: 0 });
    });
@@ -18871,6 +19016,7 @@ index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..8b586d3acbf0d30534227905a8704d62
 +      const mask = { count: async () => 1 };
 +      const dispose = vi.fn(async () => {});
 +      const frame = {
++        url: () => "https://fixture.example/",
 +        locator: vi.fn(() => mask),
 +        addStyleTag: vi.fn(async ({ content }: { content: string }) => {
 +          expect(content).toContain("data-openclaw-confidential-field");
@@ -18950,6 +19096,7 @@ index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..8b586d3acbf0d30534227905a8704d62
 +      hidden = false;
 +    });
 +    const frame = {
++      url: () => "https://fixture.example/",
 +      locator: vi.fn(() => ({ count: async () => 1 })),
 +      addStyleTag: vi.fn(async () => {
 +        hidden = true;
@@ -18957,6 +19104,7 @@ index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..8b586d3acbf0d30534227905a8704d62
 +      }),
 +    };
 +    const failingFrame = {
++      url: frame.url,
 +      locator: frame.locator,
 +      addStyleTag: vi.fn(async () => {
 +        throw setupError;
@@ -19801,7 +19949,7 @@ index 0000000000000000000000000000000000000000..cc8be586059556202038df00369cd1e8
 +  },
 +);
 diff --git a/extensions/browser/src/browser/pw-tools-core.state.test.ts b/extensions/browser/src/browser/pw-tools-core.state.test.ts
-index 1cf726b5dd4686546cab8eadcedd5afaa0928595..59d67104e802f3abd16b904a27775e1e45d0ba84 100644
+index 1cf726b5dd4686546cab8eadcedd5afaa0928595..61febc047f5ce331d359aeef1c06483de77710ca 100644
 --- a/extensions/browser/src/browser/pw-tools-core.state.test.ts
 +++ b/extensions/browser/src/browser/pw-tools-core.state.test.ts
 @@ -1,9 +1,12 @@
@@ -19818,7 +19966,7 @@ index 1cf726b5dd4686546cab8eadcedd5afaa0928595..59d67104e802f3abd16b904a27775e1e
    devices: {
      "iPhone 14": {
        userAgent: "iphone-14-user-agent",
-@@ -40,16 +43,514 @@ vi.mock("./playwright-core.runtime.js", () => ({
+@@ -40,16 +43,521 @@ vi.mock("./playwright-core.runtime.js", () => ({
  }));
  
  vi.mock("./pw-session.js", () => ({
@@ -19871,12 +20019,19 @@ index 1cf726b5dd4686546cab8eadcedd5afaa0928595..59d67104e802f3abd16b904a27775e1e
 +    stateMocks.getManagedHandle.mockReset().mockReturnValue({ fixtureNativeHandle: true });
 +    write = vi.fn(async () => {});
 +    startTrace = vi.fn(async () => {});
-+    const context = { setHTTPCredentials: write, tracing: { start: startTrace } };
-+    stateMocks.getPageForTargetId.mockResolvedValue({
++    const page = {
 +      url: () => url,
 +      isClosed: () => closed,
-+      context: () => context,
-+    });
++      frames: () => [],
++    };
++    const context = {
++      setHTTPCredentials: write,
++      tracing: { start: startTrace },
++      pages: () => [page],
++    };
++    stateMocks.getPageForTargetId.mockResolvedValue(
++      Object.assign(page, { context: () => context }),
++    );
 +    stateMocks.ensureContextState.mockReturnValue(contextState);
 +    stateMocks.resolveSecret.mockReset().mockResolvedValue("inert-fixture-password");
 +  });
@@ -36487,12 +36642,15 @@ index 0000000000000000000000000000000000000000..24a1d6fb5a726222ed04caaab8630b51
 +}
 diff --git a/extensions/lane-contract/src/detached-lane-checkpoint.test.ts b/extensions/lane-contract/src/detached-lane-checkpoint.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..bb77418467f29228999ef5512f6faa9dfda980e3
+index 0000000000000000000000000000000000000000..218e1e93faeaecdeba12802a00d266528129a642
 --- /dev/null
 +++ b/extensions/lane-contract/src/detached-lane-checkpoint.test.ts
-@@ -0,0 +1,131 @@
-+import { describe, expect, it } from "vitest";
-+import { DetachedLaneCheckpointProjector } from "./detached-lane-checkpoint.js";
+@@ -0,0 +1,174 @@
++import { describe, expect, it, vi } from "vitest";
++import {
++  createDetachedLaneCheckpointRequests,
++  DetachedLaneCheckpointProjector,
++} from "./detached-lane-checkpoint.js";
 +
 +type CheckpointEvent = Parameters<DetachedLaneCheckpointProjector["projectCheckpoint"]>[0];
 +
@@ -36622,12 +36780,52 @@ index 0000000000000000000000000000000000000000..bb77418467f29228999ef5512f6faa9d
 +    expect(projected).toEqual(expected);
 +  });
 +});
++
++it("queues an overdue checkpoint non-preemptively under the exact live lane guard", async () => {
++  type Request = Parameters<
++    ReturnType<
++      Parameters<typeof createDetachedLaneCheckpointRequests>[0]["taskRuntime"]
++    >["queueMessage"]
++  >[0];
++  const queueMessage = vi.fn(async (_request: Request) => ({ queued: true as const }));
++  const lane = {
++    runId: "checkpoint-run",
++    taskId: "checkpoint-task",
++    ownerSessionKey: "agent:main:main",
++    lastCheckpoint: { at: 0, key: "initial" },
++  };
++  let current = true;
++  const requests = createDetachedLaneCheckpointRequests({
++    progressNow: () => 180_000,
++    isDisposed: () => false,
++    isCurrentLane: () => current,
++    resolveCurrentLaneTask: () => ({ status: "running" }),
++    taskRuntime: () => ({ queueMessage }),
++    warn: vi.fn(),
++  });
++  requests.requestOverdue(lane);
++  requests.requestOverdue(lane);
++  expect(queueMessage).toHaveBeenCalledOnce();
++  const request = queueMessage.mock.calls[0]?.[0];
++  expect(request).toMatchObject({
++    taskId: lane.taskId,
++    runId: lane.runId,
++    deliveryBoundary: "after-tool-batch",
++    queueIdentity: "lane-contract:progress:checkpoint-run:initial",
++  });
++  expect(request?.canInject()).toBe(true);
++  current = false;
++  expect(request?.canInject()).toBe(false);
++  requests.recordReceipt(lane, { key: "complete", text: "The first checks passed." });
++  expect(request?.signal.aborted).toBe(true);
++  await Promise.resolve();
++});
 diff --git a/extensions/lane-contract/src/detached-lane-checkpoint.ts b/extensions/lane-contract/src/detached-lane-checkpoint.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..89b3f72651500979312bfcbff27452c7f9c56f70
+index 0000000000000000000000000000000000000000..1d1712909efda5446c40b0b3db27bcbf6a78df34
 --- /dev/null
 +++ b/extensions/lane-contract/src/detached-lane-checkpoint.ts
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,217 @@
 +import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 +import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 +
@@ -36693,6 +36891,7 @@ index 0000000000000000000000000000000000000000..89b3f72651500979312bfcbff27452c7
 +          queueIdentity: `lane-contract:progress:${lane.runId}:${lane.lastCheckpoint.key}`,
 +          signal: request.signal,
 +          canInject,
++          deliveryBoundary: "after-tool-batch",
 +        })
 +        .then((outcome) => {
 +          if (!request.signal.aborted && !outcome.queued) {
@@ -42377,6 +42576,392 @@ index 09bbdbc63035aafa355b57c1f16529c09bb17ff4..b0b3396ac1687c736b6ce150c8ae4511
      "acorn": "8.18.0",
      "chalk": "6.0.0",
      "chokidar": "5.0.0",
+diff --git a/packages/agent-core/src/agent-loop.ts b/packages/agent-core/src/agent-loop.ts
+index 01d297f556c88fe0788c6844c54c30ac79af2b01..7c32449d51e2c5c4c9619ee92e78e4102166ef11 100644
+--- a/packages/agent-core/src/agent-loop.ts
++++ b/packages/agent-core/src/agent-loop.ts
+@@ -20,7 +20,7 @@ import {
+   appendToolLoopWarning,
+   copyInternalToolResultState,
+   getInternalToolExecutionPreparer,
+-  getInternalSyncSteeringGetter,
++  getInternalSteeringMessages,
+   type InternalToolExecutionPreparation,
+   takeInternalToolBatchLifecycle,
+   type InternalToolBatchLifecycle,
+@@ -66,16 +66,6 @@ const TOOL_ADMISSION_FAILURE_DETAILS = {
+   deniedReason: "tool-admission",
+ } as const;
+ 
+-function getSteeringAtCheckpoint(
+-  config: AgentLoopConfig,
+-): AgentMessage[] | Promise<AgentMessage[]> {
+-  const callback = config.getSteeringMessages;
+-  if (!callback) {
+-    return [];
+-  }
+-  return getInternalSyncSteeringGetter(callback)?.() ?? callback.call(config);
+-}
+-
+ /**
+  * Start an agent loop with a new prompt message.
+  * The prompt is added to the context and events are emitted for it.
+@@ -249,7 +239,7 @@ async function runLoop(
+     criticalToolLoopSeen: false,
+   };
+   // Check for steering messages at start (user may have typed while waiting)
+-  const initialSteering = getSteeringAtCheckpoint(config);
++  const initialSteering = getInternalSteeringMessages(config);
+   let pendingMessages: AgentMessage[] = Array.isArray(initialSteering)
+     ? initialSteering
+     : await initialSteering;
+@@ -343,7 +333,7 @@ async function runLoop(
+         ...config,
+         getSteeringMessages: async () => {
+           if (streamedSteering.length === 0) {
+-            streamedSteering = await getSteeringAtCheckpoint(config);
++            streamedSteering = await getInternalSteeringMessages(config, "preemptive");
+           }
+           return streamedSteering;
+         },
+@@ -510,7 +500,7 @@ async function runLoop(
+           return newMessages;
+         }
+ 
+-        const steering = getSteeringAtCheckpoint(config);
++        const steering = getInternalSteeringMessages(config);
+         pendingMessages = Array.isArray(steering) ? steering : await steering;
+       }
+       if (await stopIfAborted()) {
+@@ -527,7 +517,7 @@ async function runLoop(
+     pendingMessages = (await config.getFollowUpMessages?.()) || [];
+     if (pendingMessages.length === 0) {
+       // Recheck after the awaited follow-up drain so agent_end cannot strand an accepted steer.
+-      const finalSteering = getSteeringAtCheckpoint(config);
++      const finalSteering = getInternalSteeringMessages(config);
+       pendingMessages = Array.isArray(finalSteering) ? finalSteering : await finalSteering;
+     }
+     if (pendingMessages.length === 0) {
+@@ -666,7 +656,7 @@ async function executeToolCallGroups(
+ 
+   while (cursor < toolCalls.length) {
+     if (sequential && !batch.signal?.aborted) {
+-      const steering = getSteeringAtCheckpoint(batch.config);
++      const steering = getInternalSteeringMessages(batch.config, "preemptive");
+       steeringMessages = Array.isArray(steering) ? steering : await steering;
+     }
+     if (steeringMessages.length > 0) {
+@@ -695,7 +685,7 @@ async function executeToolCallGroups(
+ 
+       const hasReady = entries.some((entry) => "kind" in entry);
+       if (!batch.signal?.aborted && (!sequential || hasReady)) {
+-        const steering = getSteeringAtCheckpoint(batch.config);
++        const steering = getInternalSteeringMessages(batch.config, "preemptive");
+         steeringMessages = Array.isArray(steering) ? steering : await steering;
+       }
+       const ordered: Array<FinalizedToolCallOutcome | undefined> = entries.map((entry) =>
+@@ -801,7 +791,7 @@ async function executeToolCallGroups(
+   // Steering accepted during the last sequential call must outrank the stop hook,
+   // even when there is no unstarted tail. Parallel batches retain their single poll.
+   if (sequential && !fatal && !batch.signal?.aborted && steeringMessages.length === 0) {
+-    const steering = getSteeringAtCheckpoint(batch.config);
++    const steering = getInternalSteeringMessages(batch.config, "preemptive");
+     steeringMessages = Array.isArray(steering) ? steering : await steering;
+     if (steeringMessages.length > 0) {
+       batch.lifecycle?.releaseSkippedCalls([]);
+diff --git a/packages/agent-core/src/agent.ts b/packages/agent-core/src/agent.ts
+index 0a9eff408f7e992843bd05924ecf1a7110014fd2..d0d91e4a1e6af131bbb057be249a886846168e76 100644
+--- a/packages/agent-core/src/agent.ts
++++ b/packages/agent-core/src/agent.ts
+@@ -9,7 +9,12 @@ import type {
+ } from "@openclaw/llm-core";
+ import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.js";
+ import { TranscriptNotContinuableError } from "./errors.js";
+-import { attachInternalSyncSteeringGetter, getInternalBeforeToolBatch } from "./internal-hooks.js";
++import {
++  attachInternalSyncSteeringGetter,
++  getInternalBeforeToolBatch,
++  isInternalPreemptiveSteeringMessage,
++  type InternalSteeringDrainPhase,
++} from "./internal-hooks.js";
+ import { resolveAgentReasoningOption } from "./reasoning.js";
+ import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps.js";
+ import {
+@@ -182,11 +187,11 @@ class PendingMessageQueue {
+     }
+   }
+ 
+-  peek(): readonly AgentMessage[] {
++  peek(isEligible: (message: AgentMessage) => boolean): readonly AgentMessage[] {
+     // A tool checkpoint fixes the next injection batch while the response is live.
+     // Later input must wait for that batch to commit before it can reach the provider.
+     const messages = this.inFlight.length > 0 ? this.inFlight : this.messages;
+-    return messages.slice(0, this.mode === "all" ? undefined : 1);
++    return messages.filter(isEligible).slice(0, this.mode === "all" ? undefined : 1);
+   }
+ 
+   subscribe(listener: () => void): () => void {
+@@ -209,15 +214,17 @@ class PendingMessageQueue {
+     return this.messages.length > 0;
+   }
+ 
+-  drain(): AgentMessage[] {
+-    let count = this.mode === "all" ? this.messages.length : 1;
+-    // Submitted input already belongs to one provider continuation. Later queued
+-    // messages must not rewrite that continuation's context before it completes.
+-    const boundary = this.messages.findIndex((message) => !this.submitted.has(message));
+-    if (boundary > 0) {
+-      count = Math.min(count, boundary);
++  drain(isEligible: (message: AgentMessage) => boolean = () => true): AgentMessage[] {
++    const eligible = this.messages.filter(isEligible);
++    // A reserved provider continuation keeps its exact admitted cohort, even
++    // when non-preemptive context was queued before an urgent message.
++    const reserved = eligible.filter((message) => this.submitted.has(message));
++    const pending = reserved.length > 0 ? reserved : eligible;
++    const drained = pending.slice(0, this.mode === "all" ? undefined : 1);
++    // Remove each selected occurrence; callers may enqueue the same object twice.
++    for (const message of drained) {
++      this.messages.splice(this.messages.indexOf(message), 1);
+     }
+-    const drained = this.messages.splice(0, count);
+     this.inFlight.push(...drained);
+     return drained;
+   }
+@@ -579,18 +586,20 @@ export class Agent {
+ 
+   private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
+     let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
+-    const drainSteeringMessages = () => {
++    const drainSteeringMessages = (phase: InternalSteeringDrainPhase = "model-boundary") => {
+       if (skipInitialSteeringPoll) {
+         skipInitialSteeringPoll = false;
+         return [];
+       }
+-      return this.steeringQueue.drain();
++      return this.steeringQueue.drain(
++        phase === "preemptive" ? isInternalPreemptiveSteeringMessage : undefined,
++      );
+     };
+     const getSteeringMessages = attachInternalSyncSteeringGetter(
+       async () => drainSteeringMessages(),
+       drainSteeringMessages,
+       {
+-        peek: () => this.steeringQueue.peek(),
++        peek: () => this.steeringQueue.peek(isInternalPreemptiveSteeringMessage),
+         reserve: (messages) => this.steeringQueue.reserve(messages),
+         subscribe: (listener) => this.steeringQueue.subscribe(listener),
+       },
+diff --git a/packages/agent-core/src/internal-hooks.ts b/packages/agent-core/src/internal-hooks.ts
+index bdfd7c3d3199eb6f4ee7ee019b82e84dce38e8a9..89a53119f17ba50136af23b10e4bd376a01f361c 100644
+--- a/packages/agent-core/src/internal-hooks.ts
++++ b/packages/agent-core/src/internal-hooks.ts
+@@ -30,7 +30,27 @@ const toolBatchLifecycleByResult = new WeakMap<
+ >();
+ 
+ type InternalSteeringGetter = NonNullable<AgentLoopConfig["getSteeringMessages"]>;
+-type InternalSyncSteeringGetter = () => AgentMessage[];
++export type InternalSteeringDeliveryBoundary = "after-tool-batch";
++export type InternalSteeringDrainPhase = "preemptive" | "model-boundary";
++const nonPreemptiveSteeringMessages = new WeakSet<AgentMessage>();
++
++/** Private scheduling metadata on the exact queued message, never a transcript field. */
++export function setInternalSteeringDeliveryBoundary(
++  message: AgentMessage,
++  boundary: InternalSteeringDeliveryBoundary | undefined,
++): void {
++  if (boundary === "after-tool-batch") {
++    nonPreemptiveSteeringMessages.add(message);
++  } else {
++    nonPreemptiveSteeringMessages.delete(message);
++  }
++}
++
++export function isInternalPreemptiveSteeringMessage(message: AgentMessage): boolean {
++  return !nonPreemptiveSteeringMessages.has(message);
++}
++
++type InternalSyncSteeringGetter = (phase: InternalSteeringDrainPhase) => AgentMessage[];
+ const syncSteeringGetterByCallback = new WeakMap<
+   InternalSteeringGetter,
+   InternalSyncSteeringGetter
+@@ -127,10 +147,16 @@ export function getInternalSteeringQueueObserver(
+   return callback ? steeringQueueObserverByCallback.get(callback) : undefined;
+ }
+ 
+-export function getInternalSyncSteeringGetter(
+-  callback: InternalSteeringGetter,
+-): InternalSyncSteeringGetter | undefined {
+-  return syncSteeringGetterByCallback.get(callback);
++/** Drain at the caller's boundary; legacy callbacks retain ordinary urgent behavior. */
++export function getInternalSteeringMessages(
++  config: AgentLoopConfig,
++  phase: InternalSteeringDrainPhase = "model-boundary",
++): AgentMessage[] | Promise<AgentMessage[]> {
++  const callback = config.getSteeringMessages;
++  if (!callback) {
++    return [];
++  }
++  return syncSteeringGetterByCallback.get(callback)?.(phase) ?? callback.call(config);
+ }
+ 
+ /** Attach OpenClaw-owned two-phase execution without changing the public AgentTool shape. */
+diff --git a/packages/agent-core/src/stream-steering.test.ts b/packages/agent-core/src/stream-steering.test.ts
+index c5153429e800c2b42feb2299a8eda95c1cc0b556..865cce698e91ab5274019489dc7e10aacf303605 100644
+--- a/packages/agent-core/src/stream-steering.test.ts
++++ b/packages/agent-core/src/stream-steering.test.ts
+@@ -10,6 +10,7 @@ import { Type } from "typebox";
+ import { describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { Agent } from "./agent.js";
++import { setInternalSteeringDeliveryBoundary } from "./internal-hooks.js";
+ import { createAssistantMessageEventStream } from "./llm.js";
+ import type { AgentLoopConfig, AgentMessage, AgentTool, StreamFn } from "./types.js";
+ 
+@@ -100,6 +101,144 @@ function createSteerableAgent(
+ }
+ 
+ describe("active response steering", () => {
++  it.each(["steer", "followUp"] as const)(
++    "retains duplicate object occurrences in the ordinary one-at-a-time %s queue",
++    async (enqueue) => {
++      const harness = createSteerableAgent(async () => false, { steeringMode: "one-at-a-time" });
++      const run = harness.agent.prompt("original question");
++      await harness.started;
++      const repeated: UserMessage = { role: "user", content: "same queued object", timestamp: 3 };
++      harness.agent[enqueue](repeated);
++      harness.agent[enqueue](repeated);
++      harness.finish();
++      await run;
++      expect(harness.requests).toHaveLength(3);
++      expect(harness.requests[1]?.at(-1)).toBe(repeated);
++      expect(harness.requests[2]?.at(-1)).toBe(repeated);
++      expect(harness.agent.state.messages.filter((message) => message === repeated)).toHaveLength(
++        2,
++      );
++      expect(harness.agent.hasQueuedMessages()).toBe(false);
++    },
++  );
++
++  it("keeps a checkpoint out of the active provider and cancellable until the model boundary", async () => {
++    const steer = vi.fn(async () => true);
++    const harness = createSteerableAgent(steer);
++    const run = harness.agent.prompt("original question");
++    await harness.started;
++    const checkpoint: UserMessage = { role: "user", content: "progress checkpoint", timestamp: 3 };
++    setInternalSteeringDeliveryBoundary(checkpoint, "after-tool-batch");
++    harness.agent.steer(checkpoint);
++    await setImmediate();
++    expect(JSON.stringify(checkpoint)).toBe(
++      JSON.stringify({
++        role: "user",
++        content: "progress checkpoint",
++        timestamp: 3,
++      }),
++    );
++    const cancelled = harness.agent.cancelSteeringMessage((message) => message === checkpoint);
++    harness.finish();
++    await run;
++    expect(steer).not.toHaveBeenCalled();
++    expect(cancelled).toBe(checkpoint);
++    expect(harness.requests).toHaveLength(1);
++    expect(harness.agent.state.messages).not.toContain(checkpoint);
++  });
++
++  it.each(["one-at-a-time", "all"] as const)(
++    "preserves an urgent reservation behind a checkpoint in %s mode",
++    async (steeringMode) => {
++      const submitted = createDeferred();
++      const steer = vi.fn(async () => {
++        submitted.resolve();
++        return true;
++      });
++      const harness = createSteerableAgent(steer, { steeringMode });
++      const run = harness.agent.prompt("original question");
++      await harness.started;
++      const checkpoint: UserMessage = {
++        role: "user",
++        content: "progress checkpoint",
++        timestamp: 3,
++      };
++      const urgent: UserMessage = { role: "user", content: "change direction", timestamp: 4 };
++      const later: UserMessage = { role: "user", content: "later correction", timestamp: 5 };
++      setInternalSteeringDeliveryBoundary(checkpoint, "after-tool-batch");
++      harness.agent.steer(checkpoint);
++      harness.agent.steer(urgent);
++      await submitted.promise;
++      harness.agent.steer(later);
++      await setImmediate();
++      harness.finish();
++      await run;
++      expect(steer).toHaveBeenCalledExactlyOnceWith([urgent]);
++      expect(harness.requests[1]?.filter((message) => message.role === "user")).toEqual([
++        expect.objectContaining({ content: [{ type: "text", text: "original question" }] }),
++        urgent,
++      ]);
++      expect(harness.agent.state.messages.filter((message) => message.role === "user")).toEqual([
++        expect.objectContaining({ content: [{ type: "text", text: "original question" }] }),
++        urgent,
++        checkpoint,
++        later,
++      ]);
++      expect(steer).toHaveBeenCalledOnce();
++    },
++  );
++
++  it("leaves later streamed tool chunks executable while a checkpoint waits", async () => {
++    const steer = vi.fn(async () => true);
++    const execute = vi.fn(async () => ({ content: [], details: {} }));
++    const harness = createSteerableAgent(steer, {
++      tools: [
++        {
++          name: "lookup",
++          label: "Lookup",
++          description: "Lookup",
++          parameters: Type.Object({}),
++          execute,
++        },
++      ],
++    });
++    const run = harness.agent.prompt("original question");
++    await harness.started;
++    const checkpoint: UserMessage = { role: "user", content: "progress checkpoint", timestamp: 3 };
++    setInternalSteeringDeliveryBoundary(checkpoint, "after-tool-batch");
++    harness.agent.steer(checkpoint);
++    const calls = ["first", "second"].map((id) => ({
++      type: "toolCall" as const,
++      id,
++      name: "lookup",
++      arguments: {},
++      async: true as const,
++    }));
++    try {
++      for (const [index, toolCall] of calls.entries()) {
++        harness.firstResponse.push({
++          type: "toolcall_end",
++          contentIndex: index,
++          toolCall,
++          partial: { ...assistant(""), content: calls.slice(0, index + 1) },
++        });
++        await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(index + 1));
++      }
++    } finally {
++      harness.finish({
++        ...assistant("original answer"),
++        content: [...calls, { type: "text", text: "original answer" }],
++      });
++      await run;
++    }
++    expect(steer).not.toHaveBeenCalled();
++    expect(execute.mock.calls).toHaveLength(2);
++    expect(harness.requests[1]?.at(-1)).toBe(checkpoint);
++    expect(harness.agent.state.messages.filter((message) => message === checkpoint)).toHaveLength(
++      1,
++    );
++  });
++
+   it("projects live steering through the same context hook as the next request", async () => {
+     const submitted = createDeferred();
+     const steer = vi.fn(async () => {
 diff --git a/packages/ai/src/providers/openai-chatgpt-responses-headers.ts b/packages/ai/src/providers/openai-chatgpt-responses-headers.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..de3b532acf2a7041b69bd108b354d15810ee027f
@@ -65728,7 +66313,7 @@ index 0000000000000000000000000000000000000000..d8b4abe27bad546b7cce363cd31317cf
 +  },
 +);
 diff --git a/src/agents/embedded-agent-runner/run/attempt-queue-message.ts b/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
-index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daaf2c0f57d 100644
+index 10688e32a08e894dc25d6fbc9f39573c3dba9796..29fd24e036c0eafad7e525347c2ac065ee583013 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
 @@ -1,6 +1,7 @@
@@ -65739,18 +66324,19 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
  import { toErrorObject } from "../../../infra/errors.js";
  import type { ImageContent } from "../../../llm/types.js";
  import type { MediaFact } from "../../../media/media-facts.js";
-@@ -11,8 +12,10 @@ import {
+@@ -11,8 +12,11 @@ import {
    cancelPendingAgentQuestionForSession,
    claimPendingAgentQuestionAnswer,
  } from "../../harness/gateway-question.js";
 +import type { RuntimeContextFragment } from "../../internal-runtime-context.js";
  import type { AgentMessage } from "../../runtime/index.js";
++import type { InternalSteeringDeliveryBoundary } from "../../runtime/internal-hooks.js";
  import { retireQueuedUserMessage } from "../../sessions/queued-user-message-retirement.js";
 +import type { ReadonlySessionManager } from "../../sessions/session-manager.js";
  import {
    getSteeringMessageIdentity,
    subscribeSteeringMessagePersistenceFailure,
-@@ -22,12 +25,26 @@ import type {
+@@ -22,12 +26,26 @@ import type {
    EmbeddedAgentQueueMessageOptions,
    EmbeddedAgentQueueMessageResult,
  } from "../run-state.js";
@@ -65777,20 +66363,35 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
    agent?: {
      cancelSteeringMessage?: (
        predicate: (message: AgentMessage) => boolean,
-@@ -41,6 +58,7 @@ type EmbeddedAgentActiveSessionSteerTarget = {
+@@ -41,6 +59,8 @@ type EmbeddedAgentActiveSessionSteerTarget = {
      imageOrder?: PromptImageOrderEntry[],
      queueIdentity?: string,
      canInject?: () => boolean,
 +    contextFragments?: readonly RuntimeContextFragment[],
++    deliveryBoundary?: InternalSteeringDeliveryBoundary,
    ): Promise<void>;
    subscribe(listener: (event: unknown) => void): () => void;
  };
-@@ -64,7 +82,20 @@ function steerActiveSession(
+@@ -64,7 +84,34 @@ function steerActiveSession(
    imageOrder?: PromptImageOrderEntry[],
    queueIdentity?: string,
    canInject?: () => boolean,
 +  contextFragments?: readonly RuntimeContextFragment[],
++  deliveryBoundary?: InternalSteeringDeliveryBoundary,
  ): Promise<void> {
++  if (deliveryBoundary) {
++    return activeSession.steer(
++      text,
++      images,
++      userTurnTranscriptRecorder,
++      media,
++      imageOrder,
++      queueIdentity,
++      canInject,
++      contextFragments,
++      deliveryBoundary,
++    );
++  }
 +  if (contextFragments?.length) {
 +    return activeSession.steer(
 +      text,
@@ -65806,7 +66407,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
    if (canInject) {
      return activeSession.steer(
        text,
-@@ -112,6 +143,34 @@ function getTerminalActiveSessionEvent(event: unknown): "settled" | "handoff" |
+@@ -112,6 +159,34 @@ function getTerminalActiveSessionEvent(event: unknown): "settled" | "handoff" |
    return type === "agent_handoff" ? "handoff" : undefined;
  }
  
@@ -65841,16 +66442,17 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
  /**
   * Removes one pending steered user message from both the runtime queue and its
   * exact identity-owned display entry.
-@@ -160,6 +219,8 @@ async function steerAndWaitForTranscriptCommit(
+@@ -160,6 +235,9 @@ async function steerAndWaitForTranscriptCommit(
    abortSignal?: AbortSignal,
    onQueueAccepted?: (accepted: boolean) => void,
    canInject?: () => boolean,
 +  contextFragments?: readonly RuntimeContextFragment[],
 +  stopAtCompletedAssistantTurn = false,
++  deliveryBoundary?: InternalSteeringDeliveryBoundary,
  ): Promise<void> {
    await new Promise<void>((resolve, reject) => {
      let settled = false;
-@@ -167,6 +228,11 @@ async function steerAndWaitForTranscriptCommit(
+@@ -167,6 +245,11 @@ async function steerAndWaitForTranscriptCommit(
      let abortRequested = abortSignal?.aborted === true;
      let acceptanceReported = false;
      let cancellation: Promise<void> | undefined;
@@ -65862,7 +66464,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
      let acceptanceOpen = true;
      const reportAcceptance = (value: boolean) => {
        if (acceptanceReported) {
-@@ -180,9 +246,13 @@ async function steerAndWaitForTranscriptCommit(
+@@ -180,9 +263,13 @@ async function steerAndWaitForTranscriptCommit(
          return;
        }
        settled = true;
@@ -65876,7 +66478,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
        unsubscribe?.();
        unsubscribePersistenceFailure?.();
        abortSignal?.removeEventListener("abort", onAbort);
-@@ -195,17 +265,26 @@ async function steerAndWaitForTranscriptCommit(
+@@ -195,17 +282,26 @@ async function steerAndWaitForTranscriptCommit(
      const rejectAfterCancellation = (message: string, allowReplay = false) => {
        acceptanceOpen = false;
        const wasAccepted = accepted;
@@ -65912,7 +66514,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
        void cancellation.then(
          () => finish(new Error(message)),
          (error: unknown) => {
-@@ -229,6 +308,7 @@ async function steerAndWaitForTranscriptCommit(
+@@ -229,6 +325,7 @@ async function steerAndWaitForTranscriptCommit(
      };
      const timer: ReturnType<typeof setTimeout> | undefined = setTimeout(
        () => {
@@ -65920,7 +66522,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
          const message =
            "queued steering message was not committed to the transcript before timeout";
          rejectAfterCancellation(message);
-@@ -241,6 +321,16 @@ async function steerAndWaitForTranscriptCommit(
+@@ -241,6 +338,16 @@ async function steerAndWaitForTranscriptCommit(
          finish();
          return;
        }
@@ -65937,11 +66539,12 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
        const terminalEvent = getTerminalActiveSessionEvent(event);
        if (terminalEvent) {
          const handedOff = terminalEvent === "handoff";
-@@ -267,6 +357,11 @@ async function steerAndWaitForTranscriptCommit(
+@@ -267,6 +374,12 @@ async function steerAndWaitForTranscriptCommit(
        imageOrder,
        queueIdentity,
        () => acceptanceOpen && (canInject?.() ?? true),
 +      contextFragments,
++      deliveryBoundary,
 +    );
 +    const steerOutcome = steer.then(
 +      () => true,
@@ -65949,7 +66552,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
      );
      void steer.then(
        () => {
-@@ -280,12 +375,18 @@ async function steerAndWaitForTranscriptCommit(
+@@ -280,12 +393,18 @@ async function steerAndWaitForTranscriptCommit(
          }
        },
        (err: unknown) => {
@@ -65968,7 +66571,7 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
        rejectAfterCancellation(
          accepted
            ? "queued steering message was cancelled before delivery"
-@@ -327,6 +428,22 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
+@@ -327,6 +446,22 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
    canInject?: () => boolean,
    authority?: Parameters<typeof claimPendingAgentQuestionAnswer>[0]["authority"],
  ): Promise<void | EmbeddedAgentQueueMessageResult> {
@@ -65991,17 +66594,18 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
    const isInboundUserMessage = options?.isInboundUserMessage === true;
    const isPlainTextAnswer = !hasPromptImageInput(options);
    if (isInboundUserMessage && !isPlainTextAnswer) {
-@@ -366,7 +483,8 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
+@@ -366,7 +501,9 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
          options?.media,
          options?.imageOrder,
          options?.queueIdentity,
 -        canInject,
 +        injectionAllowed,
 +        contextFragments,
++        options?.deliveryBoundary,
        );
        options?.onQueueAccepted?.(true);
      } catch (error) {
-@@ -387,7 +505,9 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
+@@ -387,7 +524,10 @@ export async function steerActiveSessionWithOptionalDeliveryWait(
        options.queueIdentity,
        options.abortSignal,
        options.onQueueAccepted,
@@ -66009,10 +66613,11 @@ index 10688e32a08e894dc25d6fbc9f39573c3dba9796..4f1db484094cd78a7425a30d252b3daa
 +      injectionAllowed,
 +      contextFragments,
 +      isTaskCheckpoint,
++      options.deliveryBoundary,
      );
    } catch (error) {
      if (error instanceof EmbeddedSteeringAcceptedUnconfirmedError) {
-@@ -416,3 +536,26 @@ export async function claimEmbeddedPendingUserInputAnswer(
+@@ -416,3 +556,26 @@ export async function claimEmbeddedPendingUserInputAnswer(
    });
    return claimed;
  }
@@ -80378,6 +80983,19 @@ index 5aafc25acbf18ddc1b6a3164d3d74019832035f9..93ca8427fa31c215785645d5c72ce18e
    it("resolves exact sender policy for an external requester", () => {
      const result = resolveRequesterToolPolicies({
        config: config(),
+diff --git a/src/agents/runtime/internal-hooks.ts b/src/agents/runtime/internal-hooks.ts
+index 4ff6adb522f30b7e43d7009d3d2280cb7fce948a..ab8e47c6ce3d0b12a540f938007a4e5152b8fb62 100644
+--- a/src/agents/runtime/internal-hooks.ts
++++ b/src/agents/runtime/internal-hooks.ts
+@@ -10,6 +10,8 @@ export {
+   getInternalToolResultProvenance,
+   getInternalToolExecutionPreparer,
+   setInternalBeforeToolBatch,
++  setInternalSteeringDeliveryBoundary,
++  type InternalSteeringDeliveryBoundary,
+   type InternalBeforeToolBatchHook,
+   type InternalToolExecutionPreparer,
+ } from "../../../packages/agent-core/src/internal-hooks.js";
 diff --git a/src/agents/session-goal-usage.test.ts b/src/agents/session-goal-usage.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..ab587e89bbe040b262fea90d1ecfd01a0daebe12
@@ -81608,16 +82226,17 @@ index 250e73f229eaf44cc88b027c305a65fa2661b845..ea6699e513e934a66098fef339a4c6c5
        ? resolvePersistedSessionRuntimeId(params.entry)
 diff --git a/src/agents/sessions/agent-session-checkpoint-admission.test.ts b/src/agents/sessions/agent-session-checkpoint-admission.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2edb3317964
+index 0000000000000000000000000000000000000000..03c9ef9e8db1ef647f40ac62199d7f7614be21c3
 --- /dev/null
 +++ b/src/agents/sessions/agent-session-checkpoint-admission.test.ts
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,355 @@
 +import {
 +  createAssistantMessageEventStream,
 +  type Context,
 +  type Model,
 +  type SimpleStreamOptions,
 +} from "openclaw/plugin-sdk/llm";
++import { Type } from "typebox";
 +import { describe, expect, it, vi } from "vitest";
 +import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 +import { createTestUserTurnTranscriptTarget } from "../../sessions/user-turn-transcript.test-support.js";
@@ -81625,6 +82244,7 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +import { steerActiveSessionWithOptionalDeliveryWait } from "../embedded-agent-runner/run/attempt-queue-message.js";
 +import {
 +  createAssistant,
++  createAssistantResultStream,
 +  createTestSession,
 +  registerAgentSessionLoopTestLifecycle,
 +  streamMocks,
@@ -81633,7 +82253,234 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +
 +registerAgentSessionLoopTestLifecycle();
 +
++const checkpointText = "Report the concrete progress, then continue this task.";
++
++async function createToolCheckpointHarness(toolExecution: "sequential" | "parallel") {
++  const responseStarted = createDeferredCore();
++  const toolStarted = createDeferredCore();
++  const releaseTool = createDeferredCore();
++  const firstResponse = createAssistantMessageEventStream();
++  const requests: Context["messages"][] = [];
++  const providerSteer = vi.fn(async () => false);
++  streamMocks.streamSimple.mockImplementation(
++    (model: Model, context: Context, options?: SimpleStreamOptions) => {
++      requests.push([...context.messages]);
++      if (requests.length === 1) {
++        options?.onActiveResponse?.({ steer: providerSteer, needsContinuation: () => false });
++        firstResponse.push({ type: "start", partial: createAssistant(model, []) });
++        responseStarted.resolve();
++        return firstResponse;
++      }
++      if (requests.length !== 2) {
++        throw new Error("unexpected third provider request");
++      }
++      return createAssistantResultStream(
++        createAssistant(model, [{ type: "text", text: "Work complete." }]),
++      );
++    },
++  );
++  const execute = vi.fn(async (toolCallId: string) => {
++    if (toolCallId === "first") {
++      toolStarted.resolve();
++      await releaseTool.promise;
++    }
++    return { content: [{ type: "text" as const, text: `${toolCallId} completed` }], details: {} };
++  });
++  const { session, sessionManager } = await createTestSession({
++    customTools: [
++      {
++        name: "inspect",
++        label: "Inspect",
++        description: "Inspect a fixture.",
++        parameters: Type.Object({}),
++        execute,
++      },
++    ],
++  });
++  session.agent.toolExecution = toolExecution;
++  session.agent.steeringMode = "all";
++  const finishResponse = () => {
++    firstResponse.push({
++      type: "done",
++      reason: "toolUse",
++      message: createAssistant(
++        testModel,
++        [
++          { type: "toolCall", id: "first", name: "inspect", arguments: {} },
++          { type: "toolCall", id: "second", name: "inspect", arguments: {} },
++        ],
++        "toolUse",
++      ),
++    });
++    firstResponse.end();
++  };
++  return {
++    session,
++    sessionManager,
++    responseStarted,
++    toolStarted,
++    releaseTool,
++    finishResponse,
++    requests,
++    execute,
++    providerSteer,
++  };
++}
++
++function queueCheckpoint(
++  session: Awaited<ReturnType<typeof createTestSession>>["session"],
++  signal?: AbortSignal,
++) {
++  const accepted = createDeferredCore();
++  const outcome = Promise.allSettled([
++    steerActiveSessionWithOptionalDeliveryWait(session, checkpointText, {
++      isInboundUserMessage: false,
++      deliveryBoundary: "after-tool-batch",
++      queueIdentity: "live-checkpoint",
++      waitForTranscriptCommit: true,
++      abortSignal: signal,
++      onQueueAccepted: () => accepted.resolve(),
++    }),
++  ]);
++  return { accepted: accepted.promise, outcome };
++}
++
 +describe("native AgentSession synthetic checkpoint admission", () => {
++  it.each([
++    ["sequential", "before-tools"],
++    ["parallel", "before-tools"],
++    ["sequential", "during-tool"],
++    ["parallel", "during-tool"],
++  ] as const)(
++    "delivers a checkpoint after %s tools without skipping work (%s)",
++    async (mode, arrival) => {
++      const h = await createToolCheckpointHarness(mode);
++      const prompt = h.session.prompt("inspect both fixtures");
++      await h.responseStarted.promise;
++      if (arrival === "during-tool") {
++        h.finishResponse();
++        await h.toolStarted.promise;
++      }
++      const checkpoint = queueCheckpoint(h.session);
++      await checkpoint.accepted;
++      const queuedUserCount = h.sessionManager
++        .getBranch()
++        .filter((entry) => entry.type === "message" && entry.message.role === "user").length;
++      if (arrival === "before-tools") {
++        h.finishResponse();
++      }
++      h.releaseTool.resolve();
++      await prompt;
++      expect(queuedUserCount).toBe(1);
++      await expect(checkpoint.outcome).resolves.toEqual([
++        { status: "fulfilled", value: undefined },
++      ]);
++      expect(h.execute.mock.calls.map(([id]) => id)).toEqual(["first", "second"]);
++      const nextRequest = h.requests[1];
++      expect(nextRequest?.filter((message) => message.role === "toolResult")).toMatchObject([
++        { toolCallId: "first", isError: false },
++        { toolCallId: "second", isError: false },
++      ]);
++      expect(nextRequest?.at(-1)).toMatchObject({
++        role: "user",
++        content: [{ type: "text", text: checkpointText }],
++      });
++      expect(
++        h.session.messages.filter(
++          (message) =>
++            message.role === "user" && JSON.stringify(message.content).includes(checkpointText),
++        ),
++      ).toHaveLength(1);
++      expect(h.session.pendingMessageCount).toBe(0);
++      expect(h.requests).toHaveLength(2);
++      expect(h.providerSteer).not.toHaveBeenCalled();
++    },
++  );
++
++  it.each(["sequential", "parallel"] as const)(
++    "still preempts %s tools for an urgent steer behind a checkpoint",
++    async (mode) => {
++      const h = await createToolCheckpointHarness(mode);
++      const prompt = h.session.prompt("inspect both fixtures");
++      await h.responseStarted.promise;
++      const checkpoint = queueCheckpoint(h.session);
++      await checkpoint.accepted;
++      await h.session.steer("Stop these inspections and change direction.");
++      h.finishResponse();
++      h.releaseTool.resolve();
++      await prompt;
++      expect(h.execute).not.toHaveBeenCalled();
++      expect(h.requests[1]?.filter((message) => message.role === "toolResult")).toMatchObject([
++        { toolCallId: "first", isError: true },
++        { toolCallId: "second", isError: true },
++      ]);
++      expect(h.requests[1]?.at(-1)).toMatchObject({
++        role: "user",
++        content: [{ type: "text", text: "Stop these inspections and change direction." }],
++      });
++      await expect(checkpoint.outcome).resolves.toEqual([
++        {
++          status: "rejected",
++          reason: expect.objectContaining({
++            message: "active session completed before task checkpoint delivery",
++          }),
++        },
++      ]);
++      expect(h.session.pendingMessageCount).toBe(0);
++    },
++  );
++
++  it("withdraws an aborted checkpoint during an active tool without skipping the remaining tool", async () => {
++    const h = await createToolCheckpointHarness("sequential");
++    const prompt = h.session.prompt("inspect both fixtures");
++    await h.responseStarted.promise;
++    h.finishResponse();
++    await h.toolStarted.promise;
++    const controller = new AbortController();
++    const checkpoint = queueCheckpoint(h.session, controller.signal);
++    await checkpoint.accepted;
++    controller.abort();
++    await expect(checkpoint.outcome).resolves.toEqual([
++      {
++        status: "rejected",
++        reason: expect.objectContaining({
++          message: "queued steering message was cancelled before delivery",
++        }),
++      },
++    ]);
++    h.releaseTool.resolve();
++    await prompt;
++    expect(h.execute.mock.calls.map(([id]) => id)).toEqual(["first", "second"]);
++    expect(JSON.stringify(h.sessionManager.getBranch())).not.toContain(checkpointText);
++    expect(h.session.pendingMessageCount).toBe(0);
++  });
++
++  it("rejects checkpoint delivery when the actual transcript append fails", async () => {
++    const h = await createToolCheckpointHarness("parallel");
++    const prompt = h.session.prompt("inspect both fixtures");
++    const promptOutcome = Promise.allSettled([prompt]);
++    await h.responseStarted.promise;
++    const checkpoint = queueCheckpoint(h.session);
++    await checkpoint.accepted;
++    const append = h.sessionManager.appendMessage.bind(h.sessionManager);
++    const persistenceError = new Error("fixture checkpoint append failed");
++    vi.spyOn(h.sessionManager, "appendMessage").mockImplementation((message, ...args) => {
++      if (message.role === "user" && JSON.stringify(message.content).includes(checkpointText)) {
++        throw persistenceError;
++      }
++      return append(message, ...args);
++    });
++    h.finishResponse();
++    h.releaseTool.resolve();
++    await expect(checkpoint.outcome).resolves.toEqual([
++      { status: "rejected", reason: persistenceError },
++    ]);
++    await promptOutcome;
++    expect(h.execute).toHaveBeenCalledTimes(2);
++    expect(h.requests).toHaveLength(1);
++    expect(JSON.stringify(h.sessionManager.getBranch())).not.toContain(checkpointText);
++  });
++
 +  it("refuses synthetic checkpoints at the final response before transcript persistence or provider reservation", async () => {
 +    const finalText = "The complete meeting notes remain the final result.";
 +    const providerSteer = vi.fn(async () => true);
@@ -81650,9 +82497,9 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +      },
 +    );
 +    const { session, sessionManager } = await createTestSession();
-+    const checkpointText = "synthetic task progress checkpoint";
++    const finalCheckpointText = "synthetic task progress checkpoint";
 +    const recorder = createUserTurnTranscriptRecorder({
-+      input: { text: checkpointText },
++      input: { text: finalCheckpointText },
 +      target: createTestUserTurnTranscriptTarget(),
 +    });
 +    vi.spyOn(recorder, "resolveMessage").mockImplementation(async () => {
@@ -81665,8 +82512,9 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +      if (event.type === "message_end" && event.message.role === "assistant" && !checkpoint) {
 +        // Runtime response is complete before this listener; the transcript append follows it.
 +        checkpoint = Promise.allSettled([
-+          steerActiveSessionWithOptionalDeliveryWait(session, checkpointText, {
++          steerActiveSessionWithOptionalDeliveryWait(session, finalCheckpointText, {
 +            isInboundUserMessage: false,
++            deliveryBoundary: "after-tool-batch",
 +            queueIdentity: "final-checkpoint",
 +            waitForTranscriptCommit: true,
 +          }),
@@ -81678,8 +82526,9 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +    const promptSettled = Promise.allSettled([prompt]);
 +    await responseStarted.promise;
 +    const delayedCheckpoint = Promise.allSettled([
-+      steerActiveSessionWithOptionalDeliveryWait(session, checkpointText, {
++      steerActiveSessionWithOptionalDeliveryWait(session, finalCheckpointText, {
 +        isInboundUserMessage: false,
++        deliveryBoundary: "after-tool-batch",
 +        queueIdentity: "prepared-checkpoint",
 +        userTurnTranscriptRecorder: recorder,
 +        waitForTranscriptCommit: true,
@@ -81720,10 +82569,11 @@ index 0000000000000000000000000000000000000000..458ad7872c2306a23f8101f4f842c2ed
 +        role: "assistant",
 +        content: [{ type: "text", text: finalText }],
 +      });
-+      expect(JSON.stringify(sessionManager.getBranch())).not.toContain(checkpointText);
++      expect(JSON.stringify(sessionManager.getBranch())).not.toContain(finalCheckpointText);
 +      await expect(
-+        steerActiveSessionWithOptionalDeliveryWait(session, checkpointText, {
++        steerActiveSessionWithOptionalDeliveryWait(session, finalCheckpointText, {
 +          isInboundUserMessage: false,
++          deliveryBoundary: "after-tool-batch",
 +          waitForTranscriptCommit: true,
 +        }),
 +      ).rejects.toThrow("active session completed before task checkpoint acceptance");
@@ -81776,10 +82626,10 @@ index b74dd5074a35180712b686e33e59be6ae730b5e6..cd0571ca5bc3560055644e318d930b1e
  
    private async compactWithSessionWriteSettlement(
 diff --git a/src/agents/sessions/agent-session-prompting.ts b/src/agents/sessions/agent-session-prompting.ts
-index e03aaa14c2a6ade1c67b8cc66154e9dc33fb0798..c6501ee9b4eec4de1581d5de7201404716d17e77 100644
+index e03aaa14c2a6ade1c67b8cc66154e9dc33fb0798..a5d4a36473debd90e9ed4d9e6bd3aea3d1363b34 100644
 --- a/src/agents/sessions/agent-session-prompting.ts
 +++ b/src/agents/sessions/agent-session-prompting.ts
-@@ -9,7 +9,11 @@ import type {
+@@ -9,8 +9,16 @@ import type {
    PersistedUserTurnMessage,
    UserTurnTranscriptRecorder,
  } from "../../sessions/user-turn-transcript.types.js";
@@ -81790,35 +82640,44 @@ index e03aaa14c2a6ade1c67b8cc66154e9dc33fb0798..c6501ee9b4eec4de1581d5de72014047
 +  type RuntimeContextFragment,
 +} from "../internal-runtime-context.js";
  import type { AgentMessage } from "../runtime/index.js";
++import {
++  setInternalSteeringDeliveryBoundary,
++  type InternalSteeringDeliveryBoundary,
++} from "../runtime/internal-hooks.js";
  import { stripFrontmatter } from "../utils/frontmatter.js";
  import { AgentSessionBase } from "./agent-session-base.js";
-@@ -451,6 +455,7 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
+ import type { PromptOptions } from "./agent-session-types.js";
+@@ -451,6 +459,8 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
      imageOrder?: PromptImageOrderEntry[],
      queueIdentity?: string,
      canInject?: () => boolean,
 +    contextFragments?: readonly RuntimeContextFragment[],
++    deliveryBoundary?: InternalSteeringDeliveryBoundary,
    ): Promise<void> {
      // Check for extension commands (cannot be queued)
      if (text.startsWith("/")) {
-@@ -476,6 +481,7 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
+@@ -476,6 +486,8 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
        media,
        imageOrder,
        queueIdentity,
 +      contextFragments,
++      deliveryBoundary,
      );
    }
  
-@@ -512,12 +518,14 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
+@@ -512,12 +524,16 @@ export abstract class AgentSessionPrompting extends AgentSessionBase {
      media?: MediaFact[],
      imageOrder?: PromptImageOrderEntry[],
      queueIdentity?: string,
 +    contextFragments?: readonly RuntimeContextFragment[],
++    deliveryBoundary?: InternalSteeringDeliveryBoundary,
    ): Promise<void> {
      const runtimeMessage = this.createUserMessage(text, images, transcriptContext?.message);
      const promptMessage = media?.length
        ? attachRuntimePromptMediaFacts(runtimeMessage, media, imageOrder)
        : runtimeMessage;
      setSteeringMessageIdentity(promptMessage, queueIdentity);
++    setInternalSteeringDeliveryBoundary(promptMessage, deliveryBoundary);
 +    attachSteeringContextFragments(promptMessage, contextFragments);
      this.trackQueuedUserMessage(promptMessage, "steering", text);
      this.agent.steer(
@@ -93096,6 +93955,214 @@ index e0fd8048d0aa35dd0cf42167b311cd03619e44f4..8bfee42013168992cb7cb7697e8fe13d
    mode?: SpawnAcpMode;
    runTimeoutSeconds?: number;
    expectsCompletionMessage?: boolean;
+diff --git a/src/agents/subagents/spawn/acp-spawn.session-accessor.test-support.ts b/src/agents/subagents/spawn/acp-spawn.session-accessor.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9c35062cb132cae50c5c0ee3a695e3c5f6c6dda3
+--- /dev/null
++++ b/src/agents/subagents/spawn/acp-spawn.session-accessor.test-support.ts
+@@ -0,0 +1,80 @@
++import { vi } from "vitest";
++import type { SessionEntry } from "../../../config/sessions/types.js";
++
++type AcpSessionAccessorMockDeps = {
++  loadSessionStoreMock: (storePath: string) => Record<string, SessionEntry>;
++  resolveStorePathMock: typeof import("../../../config/sessions/paths.js").resolveSessionStorePathCore;
++  resolveSessionTranscriptFileMock: typeof import("../../../config/sessions/transcript-file-resolve.js").resolveSessionTranscriptFile;
++  upsertSessionEntryMock: (scope: unknown, patch: SessionEntry) => unknown;
++};
++
++// Keeps ACP spawn's store and transcript mocks independent of actual persistence.
++export function createAcpSpawnSessionAccessorMock({
++  loadSessionStoreMock,
++  resolveStorePathMock,
++  resolveSessionTranscriptFileMock,
++  upsertSessionEntryMock,
++}: AcpSessionAccessorMockDeps) {
++  const resolveMockStorePath = (scope: {
++    agentId?: string;
++    env?: NodeJS.ProcessEnv;
++    storePath?: string;
++  }): string =>
++    scope.storePath ??
++    resolveStorePathMock(undefined, {
++      agentId: scope.agentId,
++      env: scope.env,
++    });
++  const loadMockEntry = (scope: {
++    agentId?: string;
++    env?: NodeJS.ProcessEnv;
++    sessionKey: string;
++    storePath?: string;
++  }): SessionEntry | undefined => {
++    const store = loadSessionStoreMock(resolveMockStorePath(scope)) as Record<string, SessionEntry>;
++    return store[scope.sessionKey];
++  };
++  const listMockEntries = (
++    scope: {
++      agentId?: string;
++      env?: NodeJS.ProcessEnv;
++      storePath?: string;
++    } = {},
++  ) => {
++    const store = loadSessionStoreMock(resolveMockStorePath(scope)) as Record<string, SessionEntry>;
++    return Object.entries(store).map(([sessionKey, entry]) => ({ sessionKey, entry }));
++  };
++  return {
++    findTranscriptEvent: vi.fn<
++      typeof import("../../../config/sessions/session-accessor.js").findTranscriptEvent
++    >(async () => undefined),
++    listSessionEntries: listMockEntries,
++    listSessionEntriesReadOnly: listMockEntries,
++    loadSessionEntry: loadMockEntry,
++    loadSessionEntryReadOnly: loadMockEntry,
++    upsertSessionEntryCore: async (scope: unknown, patch: SessionEntry) =>
++      await upsertSessionEntryMock(scope, patch),
++    resolveSessionTranscriptRuntimeTarget: async (scope: {
++      agentId: string;
++      sessionId: string;
++      sessionKey: string;
++      storePath?: string;
++      threadId?: string | number;
++    }) => {
++      const store = scope.storePath
++        ? (loadSessionStoreMock(scope.storePath) as Record<string, SessionEntry>)
++        : undefined;
++      const resolved = await resolveSessionTranscriptFileMock({
++        ...scope,
++        ...(store ? { sessionStore: store } : {}),
++        sessionEntry: loadMockEntry(scope),
++      });
++      return {
++        agentId: scope.agentId,
++        sessionFile: resolved.sessionFile,
++        sessionId: scope.sessionId,
++        sessionKey: scope.sessionKey,
++      };
++    },
++  };
++}
+diff --git a/src/agents/subagents/spawn/acp-spawn.test.ts b/src/agents/subagents/spawn/acp-spawn.test.ts
+index bea6db9d807c2408a93c610c1ec958bff1d4114a..cd37aeaac8da3f8db7b8b087ba73393401241699 100644
+--- a/src/agents/subagents/spawn/acp-spawn.test.ts
++++ b/src/agents/subagents/spawn/acp-spawn.test.ts
+@@ -96,73 +96,6 @@ const hoisted = vi.hoisted(() => {
+   const getSubagentRunByChildSessionKeyMock = vi.fn();
+   const listTasksForOwnerKeyMock = vi.fn();
+   const upsertSessionEntryMock = vi.fn();
+-  const createSessionAccessorMock = () => {
+-    const resolveMockStorePath = (scope: {
+-      agentId?: string;
+-      env?: NodeJS.ProcessEnv;
+-      storePath?: string;
+-    }): string =>
+-      scope.storePath ??
+-      resolveStorePathMock(undefined, {
+-        agentId: scope.agentId,
+-        env: scope.env,
+-      });
+-    const loadMockEntry = (scope: {
+-      agentId?: string;
+-      env?: NodeJS.ProcessEnv;
+-      sessionKey: string;
+-      storePath?: string;
+-    }): SessionEntry | undefined => {
+-      const store = loadSessionStoreMock(resolveMockStorePath(scope)) as Record<
+-        string,
+-        SessionEntry
+-      >;
+-      return store[scope.sessionKey];
+-    };
+-    const listMockEntries = (
+-      scope: {
+-        agentId?: string;
+-        env?: NodeJS.ProcessEnv;
+-        storePath?: string;
+-      } = {},
+-    ) => {
+-      const store = loadSessionStoreMock(resolveMockStorePath(scope)) as Record<
+-        string,
+-        SessionEntry
+-      >;
+-      return Object.entries(store).map(([sessionKey, entry]) => ({ sessionKey, entry }));
+-    };
+-    return {
+-      listSessionEntries: listMockEntries,
+-      listSessionEntriesReadOnly: listMockEntries,
+-      loadSessionEntry: loadMockEntry,
+-      loadSessionEntryReadOnly: loadMockEntry,
+-      upsertSessionEntryCore: async (scope: unknown, patch: SessionEntry) =>
+-        await upsertSessionEntryMock(scope, patch),
+-      resolveSessionTranscriptRuntimeTarget: async (scope: {
+-        agentId: string;
+-        sessionId: string;
+-        sessionKey: string;
+-        storePath?: string;
+-        threadId?: string | number;
+-      }) => {
+-        const store = scope.storePath
+-          ? (loadSessionStoreMock(scope.storePath) as Record<string, SessionEntry>)
+-          : undefined;
+-        const resolved = await resolveSessionTranscriptFileMock({
+-          ...scope,
+-          ...(store ? { sessionStore: store } : {}),
+-          sessionEntry: loadMockEntry(scope),
+-        });
+-        return {
+-          agentId: scope.agentId,
+-          sessionFile: resolved.sessionFile,
+-          sessionId: scope.sessionId,
+-          sessionKey: scope.sessionKey,
+-        };
+-      },
+-    };
+-  };
+   const state = {
+     cfg: createDefaultSpawnConfig(),
+   };
+@@ -189,7 +122,6 @@ const hoisted = vi.hoisted(() => {
+     getSubagentRunByChildSessionKeyMock,
+     listTasksForOwnerKeyMock,
+     upsertSessionEntryMock,
+-    createSessionAccessorMock,
+     state,
+   };
+ });
+@@ -222,7 +154,16 @@ vi.mock("../../../config/sessions/paths.js", () => ({
+   resolveSessionStorePathCore: hoisted.resolveStorePathMock,
+ }));
+ 
+-vi.mock("../../../config/sessions/session-accessor.js", () => hoisted.createSessionAccessorMock());
++vi.mock("../../../config/sessions/session-accessor.js", async () => {
++  const { createAcpSpawnSessionAccessorMock } =
++    await import("./acp-spawn.session-accessor.test-support.js");
++  return createAcpSpawnSessionAccessorMock({
++    loadSessionStoreMock: hoisted.loadSessionStoreMock,
++    resolveStorePathMock: hoisted.resolveStorePathMock,
++    resolveSessionTranscriptFileMock: hoisted.resolveSessionTranscriptFileMock,
++    upsertSessionEntryMock: hoisted.upsertSessionEntryMock,
++  });
++});
+ 
+ vi.mock("../../../config/sessions.js", () => ({
+   loadSessionStore: hoisted.loadSessionStoreMock,
+@@ -262,6 +203,7 @@ vi.mock("../registry/subagent-registry-read.js", () => ({
+ }));
+ 
+ vi.mock("../../../tasks/runtime-internal.js", () => ({
++  cancelTaskById: vi.fn(),
+   listTasksForOwnerKey: hoisted.listTasksForOwnerKeyMock,
+ }));
+ 
+@@ -725,8 +667,7 @@ describe("spawnAcpDirect", () => {
+         updatedAt: patch.updatedAt ?? Date.now(),
+       }));
+ 
+-    hoisted.callGatewayMock.mockReset();
+-    hoisted.callGatewayMock.mockImplementation(async (argsUnknown: unknown) => {
++    hoisted.callGatewayMock.mockReset().mockImplementation(async (argsUnknown: unknown) => {
+       const args = argsUnknown as { method?: string };
+       if (args.method === "sessions.patch") {
+         return { ok: true };
 diff --git a/src/agents/subagents/spawn/acp-spawn.ts b/src/agents/subagents/spawn/acp-spawn.ts
 index ffb990e8e4c4a0b29b6502b10d97cca2f8b5ec15..b9a937db25aa708d125e33dc791d2825a18cd49b 100644
 --- a/src/agents/subagents/spawn/acp-spawn.ts
@@ -95440,15 +96507,17 @@ index 350862682ff43203a0adae9047bc37cab136ca50..c2bbe3d79705df20bb4f202ee6af0915
      profiles: ["coding"],
      includeInOpenClawGroup: true,
 diff --git a/src/agents/tool-description-presets.ts b/src/agents/tool-description-presets.ts
-index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..a0491febd8b0eb8768bd50cb5441b1f8d2bdc98a 100644
+index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..4bbea45156c534ec97234eb9f77043eaaa5bcfc6 100644
 --- a/src/agents/tool-description-presets.ts
 +++ b/src/agents/tool-description-presets.ts
-@@ -145,8 +145,8 @@ export function describeSessionsSpawnTool(options?: {
+@@ -144,9 +144,9 @@ export function describeSessionsSpawnTool(options?: {
+     options?.threadAvailable
        ? '`mode="run"` one-shot; `mode="session"` persistent/thread-bound only on supporting requester channel.'
        : '`mode="run"` one-shot background.',
-     "`agentId` targets a configured agent; `model` overrides its model; `cleanup` delete|keep hidden child session; `sandbox` inherit|require.",
+-    "`agentId` targets a configured agent; `model` overrides its model; `cleanup` delete|keep hidden child session; `sandbox` inherit|require.",
 -    "Default to a hidden subagent for internal QA, research, coding, review, tests, and parallel work supporting the current task; omit `visible` or set it false, and report results through the parent.",
 -    '`visible=true`: durable visible session. Use only when the user requests a separate session or needs to revisit and steer the work independently. Shows in web UI sidebar; works without UI: announcing runs report back, progress checkable. `group` places it in a custom sidebar group (a new name creates the group); omission or an empty string leaves it ungrouped. Subagent only; omit `mode` (`mode="run"` is also accepted), `thread`, `thinking`, and `lightContext`; `attachments=[]` and omitted/blank `attachAs.mountPath` are accepted, but nonempty attachment staging is unsupported; inherits the caller tool-policy ceiling; select a registered project with `projectId` or a managed GitHub clone with `projectGitUrl` (mutually exclusive with each other and `cwd`); may check out a git worktree via `worktree`/`worktreeName`/`worktreeBaseRef`. When its accepted result includes `sessionUrl`, channel acknowledgements put the session URL on the first line and `Owner: <label>` on the second line.',
++    "`agentId` targets a configured agent; `model` overrides its model; `cleanup` delete|keep hidden child session; `sandbox` inherit|require. Omit `thinking` unless the user requests an override, preserving configured spawn defaults or inherited native-subagent effort. `xhigh`, `max`, and `ultra` are distinct levels subject to model/runtime support.",
 +    "Default to a hidden subagent for internal QA, research, coding, review, tests, and parallel work supporting the current task; omit `visible` or set it false unless the native project/worktree binding requires it, and report results through the parent.",
 +    '`visible=true`: durable visible session. Required for already-authorized work using `projectId`, `projectGitUrl`, or `worktree`; keep completion in the parent and do not ask again solely for this required visibility. Otherwise, use only when the user requests a separate session or needs to revisit and steer the work independently. Shows in web UI sidebar; works without UI: announcing runs report back, progress checkable. `group` places it in a custom sidebar group (a new name creates the group); omission or an empty string leaves it ungrouped. Subagent only; omit `mode` (`mode="run"` is also accepted), `thread`, `thinking`, and `lightContext`; `attachments=[]` and omitted/blank `attachAs.mountPath` are accepted, but nonempty attachment staging is unsupported; inherits the caller tool-policy ceiling; select a registered project with `projectId` or a managed GitHub clone with `projectGitUrl` (mutually exclusive with each other and `cwd`); may check out a git worktree via `worktree`/`worktreeName`/`worktreeBaseRef`. Channel updates describe progress naturally; include `sessionUrl` only when the user asks for a link or needs to open or steer the session. Do not add internal ownership headers.',
      visibilityLine,
@@ -100656,7 +101725,7 @@ index d1f115debed17925bd5fcf04d94d6102e2e01575..9cc3883b8bed00e6310375ba31dca57f
      { requested: 0, configured: 120, seconds: 0 },
      { requested: undefined, configured: 120, seconds: 120 },
 diff --git a/src/agents/tools/sessions-spawn-tool.ts b/src/agents/tools/sessions-spawn-tool.ts
-index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd09eeb59a3 100644
+index a89395a23aabe5499ddd311411310fcac78a219a..3305834390a4e56fd1c058cc465acb215e44c88e 100644
 --- a/src/agents/tools/sessions-spawn-tool.ts
 +++ b/src/agents/tools/sessions-spawn-tool.ts
 @@ -19,11 +19,13 @@ import {
@@ -100673,7 +101742,19 @@ index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd0
  import {
    SUBAGENT_SPAWN_CONTEXT_MODES,
    SUBAGENT_SPAWN_MODES,
-@@ -317,6 +319,8 @@ export function createSessionsSpawnTool(
+@@ -189,7 +191,10 @@ function createSessionsSpawnToolSchema(params: {
+       }),
+     ),
+     thinking: Type.Optional(
+-      Type.String({ description: "Thinking override; unavailable with visible=true." }),
++      Type.String({
++        description:
++          "Omit unless the user requests a thinking override; preserves configured defaults or inherited native-subagent thinking. xhigh, max, and ultra are distinct levels subject to model/runtime support. Unavailable with visible=true.",
++      }),
+     ),
+     cwd: Type.Optional(
+       Type.String({
+@@ -317,6 +322,8 @@ export function createSessionsSpawnTool(
    opts?: {
      agentSessionKey?: string;
      requesterTurnRunId?: string;
@@ -100682,7 +101763,7 @@ index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd0
      /** Separate key used only for completion routing (registerSubagentRun requesterSessionKey). */
      completionOwnerKey?: string;
      agentChannel?: string;
-@@ -336,7 +340,8 @@ export function createSessionsSpawnTool(
+@@ -336,7 +343,8 @@ export function createSessionsSpawnTool(
      /** Backend-derived parent incarnation; never sourced from model arguments. */
      expectedParentSessionId?: string;
      signal?: AbortSignal;
@@ -100692,7 +101773,7 @@ index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd0
      SpawnedToolContext,
  ): AnyAgentTool {
    const acpAvailable = isAcpRuntimeSpawnAvailable({
-@@ -387,6 +392,8 @@ export function createSessionsSpawnTool(
+@@ -387,6 +395,8 @@ export function createSessionsSpawnTool(
              ? AbortSignal.any([signal, opts.signal])
              : (signal ?? opts?.signal),
          );
@@ -100701,7 +101782,7 @@ index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd0
          const params = args as Record<PropertyKey, unknown>;
          if (opts?.swarmCollector && params.collect !== true) {
            throw new ToolInputError(
-@@ -404,8 +411,8 @@ export function createSessionsSpawnTool(
+@@ -404,8 +414,8 @@ export function createSessionsSpawnTool(
          const hasCollectParam = Object.hasOwn(params, "collect");
          const collect = params.collect === true;
          const assertActive = collect
@@ -100712,7 +101793,7 @@ index a89395a23aabe5499ddd311411310fcac78a219a..39d0cdd8c36ef5dc91ee7e2be572ffd0
          assertActive();
          if (params.outputSchema !== undefined && !collect) {
            throw new ToolInputError('sessions_spawn "outputSchema" requires collect=true.');
-@@ -671,6 +678,9 @@ export function createSessionsSpawnTool(
+@@ -671,6 +681,9 @@ export function createSessionsSpawnTool(
                requesterTurnRunId: opts?.requesterTurnRunId,
                requesterThinkingLevel: opts?.requesterThinkingLevel,
                requesterModel: opts?.requesterModel,
@@ -123225,7 +124306,7 @@ index 0000000000000000000000000000000000000000..8dd98228af573e264c694b4b8011222c
 +  });
 +}
 diff --git a/src/auto-reply/reply/reply-run-registry.contracts.ts b/src/auto-reply/reply/reply-run-registry.contracts.ts
-index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4e0ffdafa 100644
+index 9824a85a210aa8f8799109a3dd3dc5a079e02926..a135a7d13134a0d7983258db0104676af8f39273 100644
 --- a/src/auto-reply/reply/reply-run-registry.contracts.ts
 +++ b/src/auto-reply/reply/reply-run-registry.contracts.ts
 @@ -1,7 +1,9 @@
@@ -123238,16 +124319,18 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
  import type { GroupToolPolicyConfig } from "../../config/types.tools.js";
  import type { GatewayUiCommandTarget } from "../../gateway/ui-command-target.types.js";
  import type { ImageContent } from "../../llm/types.js";
-@@ -28,6 +30,8 @@ export type ReplyTurnKind = "visible" | "heartbeat" | "queued_followup";
+@@ -28,6 +30,10 @@ export type ReplyTurnKind = "visible" | "heartbeat" | "queued_followup";
  
  export type ReplyBackendQueueMessageOptions = {
    steeringMode?: "all";
++  /** Internal task context that must not interrupt useful tool execution. */
++  deliveryBoundary?: "after-tool-batch";
 +  /** Per-message model context; never part of the raw user transcript. */
 +  currentInboundContext?: CurrentInboundPromptContext;
    /** True when this queue item came from the channel's current user turn. */
    isInboundUserMessage?: boolean;
    /** Exact tool authority resolved for an inbound user turn before steering. */
-@@ -67,6 +71,12 @@ export type ReplyToolAuthorityRoute = Readonly<{
+@@ -67,6 +73,12 @@ export type ReplyToolAuthorityRoute = Readonly<{
  
  /** Per-message authority facts projected against an active run's frozen owner state. */
  export type ReplyToolAuthorityOverlay = Readonly<{
@@ -123260,7 +124343,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
    permissionMode?: SessionEntry["permissionMode"];
    toolOverrides?: SessionEntry["toolOverrides"];
    originatingChannel?: OriginatingChannelType;
-@@ -98,6 +108,9 @@ export type ReplyToolAuthorityOverlay = Readonly<{
+@@ -98,6 +110,9 @@ export type ReplyToolAuthorityOverlay = Readonly<{
  }>;
  
  export type ReplyToolAuthoritySnapshot = Readonly<{
@@ -123270,7 +124353,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
    fingerprint(route?: ReplyToolAuthorityRoute): string;
    project: (overlay: ReplyToolAuthorityOverlay, route: ReplyToolAuthorityRoute) => string;
  }>;
-@@ -145,10 +158,16 @@ export type ReplyBackendHandle = {
+@@ -145,10 +160,16 @@ export type ReplyBackendHandle = {
    readonly runId?: string;
    /** Exact authority of this concrete backend attempt, after fallback selection. */
    readonly toolAuthorityFingerprint?: string;
@@ -123287,7 +124370,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
    claimPendingUserInputAnswer?: (
      text: string,
      options?: ReplyBackendQueueMessageOptions,
-@@ -175,12 +194,26 @@ export type ReplyBackendHandle = {
+@@ -175,12 +196,26 @@ export type ReplyBackendHandle = {
  };
  
  export const replyMessageInjectionTargetOperation = Symbol("replyMessageInjectionTargetOperation");
@@ -123317,7 +124400,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
  
  export const replyRunInterruptTargetOperation = Symbol("replyRunInterruptTargetOperation");
  export type ReplyRunInterruptTarget = {
-@@ -192,9 +225,20 @@ type ReplyMessageInjectionRejectionReason =
+@@ -192,9 +227,20 @@ type ReplyMessageInjectionRejectionReason =
    | "not_running"
    | "stale_run"
    | "injection_unavailable"
@@ -123338,7 +124421,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
  export type ReplyMessageInjectionOutcome =
    | { status: "indeterminate"; errorMessage: string }
    | { status: "accepted"; result?: ReplyBackendQueueMessageResult }
-@@ -215,6 +259,7 @@ type ReplyBackendQueueMessageMismatch =
+@@ -215,6 +261,7 @@ type ReplyBackendQueueMessageMismatch =
    | "input_visibility_mismatch"
    | "tool_authority_mismatch"
    | "image_input_unsupported"
@@ -123346,7 +124429,7 @@ index 9824a85a210aa8f8799109a3dd3dc5a079e02926..29736054f0fcca9acd061793a5dbb3b4
    | "source_reply_delivery_mode_mismatch"
    | "task_suggestion_delivery_mode_mismatch";
  
-@@ -278,6 +323,12 @@ export type ReplyOperation = {
+@@ -278,6 +325,12 @@ export type ReplyOperation = {
    readonly toolAuthorityFingerprint?: string;
    /** Concrete provider/model route currently selected for this operation. */
    readonly toolAuthorityRoute?: ReplyToolAuthorityRoute;
@@ -161663,7 +162746,7 @@ index f7b52c257d74f6079fa0d39c694affeb1bcb6e57..b04809b5006fa5c6bb2ea6ff401b3335
                  options: {
                    maxTokens: asFiniteNumber(params.maxTokens),
 diff --git a/src/plugins/runtime/runtime-tasks.test.ts b/src/plugins/runtime/runtime-tasks.test.ts
-index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d42cf5220a 100644
+index 2bf08c5b9520cde505b93d60ff2703c49b910c52..7639b7fbba770850c0b7402f68c6f3ed3162e040 100644
 --- a/src/plugins/runtime/runtime-tasks.test.ts
 +++ b/src/plugins/runtime/runtime-tasks.test.ts
 @@ -1,10 +1,19 @@
@@ -161687,7 +162770,7 @@ index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d4
  import { setDetachedTaskLifecycleRuntime } from "../../tasks/task-runtime.test-helpers.js";
  import {
    getRuntimeTaskMocks,
-@@ -17,11 +26,159 @@ import { createRuntimeTasks } from "./runtime-tasks.js";
+@@ -17,11 +26,181 @@ import { createRuntimeTasks } from "./runtime-tasks.js";
  const runtimeTaskMocks = getRuntimeTaskMocks();
  
  afterEach(async () => {
@@ -161751,26 +162834,39 @@ index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d4
 +    };
 +  }
 +
-+  it("queues internal context into the exact live backend through the bound task API", async () => {
-+    const test = setup();
-+    setActiveEmbeddedRun(test.sessionId, test.handle, test.childKey);
-+    await expect(
-+      test.runs.bindSession({ sessionKey: test.ownerKey }).queueMessage(test.request),
-+    ).resolves.toEqual({ queued: true });
-+    expect(test.delivered).toHaveBeenCalledOnce();
-+    expect(test.delivered.mock.calls[0]).toEqual([
-+      test.request.message,
-+      expect.objectContaining({
-+        isInboundUserMessage: false,
-+        waitForTranscriptCommit: true,
-+        queueIdentity: test.request.queueIdentity,
-+      }),
-+    ]);
-+  });
++  it.each([undefined, "after-tool-batch"] as const)(
++    "queues %s context into the exact live backend through the bound task API",
++    async (deliveryBoundary) => {
++      const test = setup();
++      setActiveEmbeddedRun(test.sessionId, test.handle, test.childKey);
++      await expect(
++        test.runs
++          .bindSession({ sessionKey: test.ownerKey })
++          .queueMessage({ ...test.request, deliveryBoundary }),
++      ).resolves.toEqual({ queued: true });
++      expect(test.delivered).toHaveBeenCalledOnce();
++      expect(test.delivered.mock.calls[0]).toEqual([
++        test.request.message,
++        expect.objectContaining({
++          isInboundUserMessage: false,
++          waitForTranscriptCommit: true,
++          queueIdentity: test.request.queueIdentity,
++        }),
++      ]);
++      expect(test.delivered.mock.calls[0]?.[1]?.deliveryBoundary).toBe(deliveryBoundary);
++    },
++  );
 +
-+  it.each(["idle", "terminal", "other-owner", "replacement", "unguarded"] as const)(
-+    "refuses a checkpoint request for %s work without starting another run",
-+    async (state) => {
++  it.each(
++    (["idle", "terminal", "other-owner", "replacement", "unguarded"] as const).flatMap((state) =>
++      ([undefined, "after-tool-batch"] as const).map((deliveryBoundary) => ({
++        state,
++        deliveryBoundary,
++      })),
++    ),
++  )(
++    "refuses $deliveryBoundary input for $state work without starting another run",
++    async ({ state, deliveryBoundary }) => {
 +      const test = setup();
 +      if (state !== "idle") {
 +        if (state === "unguarded") {
@@ -161794,15 +162890,24 @@ index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d4
 +      }
 +      const ownerKey = state === "other-owner" ? "agent:main:other" : test.ownerKey;
 +      await expect(
-+        test.runs.bindSession({ sessionKey: ownerKey }).queueMessage(test.request),
++        test.runs
++          .bindSession({ sessionKey: ownerKey })
++          .queueMessage({ ...test.request, deliveryBoundary }),
 +      ).resolves.toMatchObject({ queued: false });
 +      expect(test.delivered).not.toHaveBeenCalled();
 +    },
 +  );
 +
-+  it.each(["terminal", "abort", "backend-replaced"] as const)(
-+    "fences %s work after asynchronous injection preparation",
-+    async (change) => {
++  it.each(
++    (["terminal", "abort", "backend-replaced"] as const).flatMap((change) =>
++      ([undefined, "after-tool-batch"] as const).map((deliveryBoundary) => ({
++        change,
++        deliveryBoundary,
++      })),
++    ),
++  )(
++    "fences $deliveryBoundary input after $change during asynchronous injection preparation",
++    async ({ change, deliveryBoundary }) => {
 +      const test = setup();
 +      const prepared = createDeferred();
 +      const release = createDeferred();
@@ -161819,7 +162924,7 @@ index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d4
 +      setActiveEmbeddedRun(test.sessionId, test.handle, test.childKey);
 +      const pending = test.runs
 +        .bindSession({ sessionKey: test.ownerKey })
-+        .queueMessage(test.request);
++        .queueMessage({ ...test.request, deliveryBoundary });
 +      await prepared.promise;
 +      if (change === "terminal") {
 +        markTaskTerminalById({
@@ -161848,10 +162953,10 @@ index 2bf08c5b9520cde505b93d60ff2703c49b910c52..52766d0c4e8cba978e75e1ddfff2f7d4
    for (const item of items) {
      const record = requireRecord(item);
 diff --git a/src/plugins/runtime/runtime-tasks.ts b/src/plugins/runtime/runtime-tasks.ts
-index 191b6d352f3a005d49b33fac7a4c199a3c79decb..d94d825a12ec266a63c4ac72eaf8283d30ec11fe 100644
+index 191b6d352f3a005d49b33fac7a4c199a3c79decb..d7a1ed079599e7479cba418da01f9fc4d6a980f8 100644
 --- a/src/plugins/runtime/runtime-tasks.ts
 +++ b/src/plugins/runtime/runtime-tasks.ts
-@@ -117,6 +117,67 @@ function createBoundTaskRunsRuntime(params: {
+@@ -117,6 +117,70 @@ function createBoundTaskRunsRuntime(params: {
          }),
        );
      },
@@ -161902,6 +163007,9 @@ index 191b6d352f3a005d49b33fac7a4c199a3c79decb..d94d825a12ec266a63c4ac72eaf8283d
 +        message,
 +        {
 +          steeringMode: "all",
++          ...(request.deliveryBoundary === "after-tool-batch"
++            ? { deliveryBoundary: request.deliveryBoundary }
++            : {}),
 +          isInboundUserMessage: false,
 +          queueIdentity,
 +          abortSignal: signal,
@@ -161920,14 +163028,16 @@ index 191b6d352f3a005d49b33fac7a4c199a3c79decb..d94d825a12ec266a63c4ac72eaf8283d
  }
  
 diff --git a/src/plugins/runtime/runtime-tasks.types.ts b/src/plugins/runtime/runtime-tasks.types.ts
-index 5f15e32d31801d42c8f0a44b432b40e6263772a8..41523c34854ca6e92cddb66ea76538639c7745fd 100644
+index 5f15e32d31801d42c8f0a44b432b40e6263772a8..0a88d716f4719dc844a42128211fa9c48e9699fb 100644
 --- a/src/plugins/runtime/runtime-tasks.types.ts
 +++ b/src/plugins/runtime/runtime-tasks.types.ts
-@@ -14,6 +14,20 @@ import type {
+@@ -14,6 +14,22 @@ import type {
  } from "./task-domain-types.js";
  export type { TaskFlowDetail, TaskRunCancelResult } from "./task-domain-types.js";
  
 +type TaskRunMessageRequest = {
++  /** Non-preemptive context, delivered after current tools finish. Default input remains urgent. */
++  deliveryBoundary?: "after-tool-batch";
 +  taskId: string;
 +  runId: string;
 +  message: string;
@@ -161944,7 +163054,7 @@ index 5f15e32d31801d42c8f0a44b432b40e6263772a8..41523c34854ca6e92cddb66ea7653863
  export type BoundTaskRunsRuntime = {
    readonly sessionKey: string;
    readonly requesterOrigin?: TaskDeliveryState["requesterOrigin"];
-@@ -26,6 +40,8 @@ export type BoundTaskRunsRuntime = {
+@@ -26,6 +42,8 @@ export type BoundTaskRunsRuntime = {
    /** @deprecated Use the same method on api.runtime.tasks.async.runs. */
    resolve: (token: string) => TaskRunDetail | undefined;
    cancel: (params: { taskId: string; cfg: OpenClawConfig }) => Promise<TaskRunCancelResult>;
