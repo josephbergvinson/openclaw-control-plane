@@ -1,5 +1,10 @@
 # Runtime source changes
 
+The sections below preserve dated qualification and deployment observations.
+References to “current” describe the state at that date. The
+[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
+identifies the current Gateway installation.
+
 This architecture uses the customized OpenClaw build pinned in the runtime
 manifest. Reproducing its behavior requires both the runtime source changes and
 the surrounding configuration
@@ -12,6 +17,41 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 8 checkpoint admission and owned browser migration
+
+The qualified source reference and installed Gateway and Node use
+`29cd18badf11734051eb12e5dde8bc0cc655e4e4`
+(tree `4c7f56ef590f9ed56b35b9d41481f0bd298aeb55`). One normal build, stage and seal
+fed the actual native activation. Independent same-generation loaded-source,
+health and protected-state readback matched that activation.
+
+The 23-path successor combines the 18-path checkpoint admission and ACP fixture
+repair with the five-path browser installation and privacy fixture repair.
+Checkpoint admission retains its owning loop, session, plugin and lane boundaries.
+The browser installer permits the established safe migration for the exact
+currently registered owned launcher even when its prior origins lack the Store
+origin. Orphan and different destinations retain their stricter Store-origin,
+ownership, grammar, mode and context requirements. Browser fixtures preserve
+runtime-target diagnostics and the current native privacy observation contract.
+
+Each component retains its owning test, normal source-check and scoped P0 review
+receipts. Source qualification, installation, hosted qualification and ordinary
+use are separate evidence. Previous failures and the complete prior source,
+deployment and companion history remain unchanged.
+
+Both signed companion605 applications and bundled workers retain
+`4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`).
+Their dated whole installed inventory, signature and running-worker receipts
+remain preserved. This Gateway projection asserts no new companion installation.
+
+All 19 ordinary-use outcomes remain open. Current-process capture, live account
+access, original task completion, provider effects, natural scheduled occurrence,
+Chrome/Discord delivery and latency are not established by these receipts.
+The existing acceptance-gap rows, historical qualification records and failures
+remain dated evidence. Fresh normal local checks, complete reconstructed-tree
+parity and all five hosted jobs are required for this public revision.
 
 ## October 6 original-task restart and scheduled-context continuity
 
@@ -48,7 +88,69 @@ and current-process capture. Source/local checks do not substitute for all five
 fresh hosted jobs on this public revision. The complete preceding qualification,
 activation chain and live-acceptance gap rows remain preserved below.
 
+## October 7 continuity, browser confidentiality and authorized outcomes
+
+The current installed Gateway and Node use final source `4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`). The normal package605 mandatory
+full build fed the existing stage/seal owners. Actual native activation and an
+independent same-generation loaded-source, health and protected-state readback passed.
+The dated baa18,364 and753 actual activation/readback pairs are retained between the
+previous public57b deployment and this final generation. Both signed companions605
+have exact installed whole inventory and live bundled-worker source identity readbacks.
+Fresh604 rollbacks and older app custody remain preserved; UI54 is excluded.
+
+The118-path source successor includes the qualified supplied-input storage,
+original requester continuation, browser capture confidentiality, selector reference
+scope, exact native attach-denial containment, loaded-source lineage, value-free
+Discord admission observability and established authorization guidance changes.
+Existing source qualification and regression receipts remain distinct from installed
+and ordinary-use acceptance. Historical failures, exact predecessor qualifications
+and the complete earlier deployment/companion history are preserved.
+
+These deployment and installation receipts do not by themselves prove every original
+ordinary-use outcome, account or delivery action, current-process capture, natural
+scheduled occurrence or live browser/Discord behavior. The existing acceptance-gap
+rows remain dated evidence. Public local qualification, complete reconstructed-tree
+parity and all five hosted jobs must pass freshly for the new public revision.
+The hosted workflow retains all five jobs and the approved34 owning fixture selectors.
+
+## October 7 native child status and cron fixture qualification
+
+The qualified source reference is `1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`
+(tree `b822ed5df9e7d270426e651fdb0efe7d9addb0b1`). Children can discover
+and invoke their registered `session_status` tool; configured denials and session
+visibility rules remain in force. The cron write fixture now supplies its local
+origin, matching the existing authority contract.
+
+Qualification passed 207 tests in the cron owning suites, all 21 mapped checks
+and a scoped P0 review. The child-status change has separate registered-tool tests,
+mapped checks and P0 qualification. These overlapping counts are not summed.
+
+Gateway and Node run `98eb1d271b1e174707be092dd67be9c424e871ce`
+(tree `a3181074b3ba42134efe7c8beb7ee6208149ca83`). Native activation and
+independent checks of the loaded source, health and protected state passed.
+The qualified reference differs from that installed source only in
+`src/agents/tools/cron-tool.test.ts`.
+
+Both signed companions, build 605, and their bundled workers retain
+`4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`). Their dated inventory,
+signature and running-worker checks remain preserved.
+
+All previous qualification, deployment and acceptance records remain intact.
+Source and installation evidence does not establish every account, task, delivery
+or browser outcome. The hosted regression suite includes the new child-status
+test alongside the existing selectors, Chromium and pinned MCP prerequisites.
+Fresh local checks, complete reconstructed-tree parity and all five required
+hosted checks must pass for this public revision.
+
 ## October 6 native parent-task context and completion protocol
+
+This section records the dated predecessor qualification and installation preserved by the previous public source reference.
+Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.
+
+This section records the dated predecessor qualification and installation preserved by the previous public source reference.
+Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.
 
 This section records the dated34ae predecessor qualification and installation.
 Its observations describe that earlier deployment, before the bounded command-repair, restart continuation and eligible-bootstrap context successor.

@@ -14,7 +14,34 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current installed Gateway and Node source reference is
+The installed Gateway and Node source reference is
+[`29cd18badf11734051eb12e5dde8bc0cc655e4e4`](runtime/README.md#october-8-checkpoint-admission-and-owned-browser-migration).
+The source reference and installed runtime have the same commit and tree.
+Normal native activation and independent loaded-source, health and protected-state
+checks passed. Both signed companions, build 605, retain their 4ce source and
+dated installation evidence. All 19 ordinary-use outcomes remain open; fresh
+local and all five required hosted public checks remain separate gates.
+
+The dated October 7 qualified runtime source reference was
+[`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
+At that checkpoint, Gateway and Node ran
+[`98eb1d271b1e174707be092dd67be9c424e871ce`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification);
+the qualified reference differs only in a cron test fixture. Native activation,
+loaded-source, health and protected-state checks passed. Both signed companions,
+build 605, retain their 4ce source and dated installation evidence.
+Previous records remain intact. Fresh local and required hosted qualification,
+plus ordinary-use acceptance, remain separate checks.
+
+The dated predecessor installed Gateway and Node source reference was
+[`4ce35c658e465161d98dce988729558b55030d22`](runtime/README.md#october-7-continuity-browser-confidentiality-and-authorized-outcomes).
+Actual native activation and independent same-generation loaded-source, health and
+protected-state readback passed. Both signed companions605 have exact installed
+inventory and live bundled-worker source identity readbacks. The preceding57b public
+source, baa18/364/753 actual deployments and complete earlier companion histories
+remain preserved. Source and installation evidence does not close all ordinary-use
+outcomes; fresh local and all five exact-head hosted public checks remain required.
+
+The dated predecessor installed Gateway and Node source reference was
 [`57b8a6d654649d3efa13d44a0fe9e3212188c440`](runtime/README.md#october-6-original-task-restart-and-scheduled-context-continuity).
 One normal build/stage/seal, native activation and independent loaded-source,
 health and protected-state readback passed. The successor preserves original CUI

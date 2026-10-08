@@ -913,7 +913,14 @@ def verify_screen_capture_binding(path: Path, node: Path, *,
                 expected.get(key) != native.get(key)
                 for key in ("path", "device", "inode", "bytes", "mtimeNs", "sha256")):
             raise ActivationError("ScreenCapture continuity file differs from native proof")
-        if screen_capture_code_identity(Path(expected["path"])) != expected:
+        actual = screen_capture_code_identity(Path(expected["path"]))
+        # A mount's device number is an observation, not durable code identity.
+        # Keep both recorded rows intact and every other identity field exact;
+        # contemporaneous file inspection and process/bootstrap leases stay exact.
+        if (actual.keys() != expected.keys()
+                or any(type(row.get("device")) is not int or row["device"] <= 0
+                       for row in (actual, expected))
+                or any(actual[key] != expected[key] for key in actual if key != "device")):
             raise ActivationError("ScreenCapture executable or signature drift")
     permission = screen_capture_permission(Path(binding["permission"]["database"]), node)
     if permission != binding["permission"]:
