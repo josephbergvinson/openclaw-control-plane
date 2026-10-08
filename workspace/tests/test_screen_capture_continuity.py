@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +18,7 @@ from test_openclaw_runtime_activate import (
 
 
 @pytest.fixture
-def capture_binding(fixture, monkeypatch):
+def capture_binding(fixture, monkeypatch, request):
     node = fixture.paths.node
     tool = fixture.root / "peekaboo"
     tool.write_bytes(b"fixture native capture tool")
@@ -24,7 +26,7 @@ def capture_binding(fixture, monkeypatch):
     for path in (node, tool):
         info = path.stat()
         identities[str(path)] = {
-            "path": str(path), "device": info.st_dev, "inode": info.st_ino,
+            "path": str(path), "device": getattr(request, "param", info.st_dev), "inode": info.st_ino,
             "bytes": info.st_size, "mtimeNs": info.st_mtime_ns,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "signingIdentity": {"Identifier=": path.name, "CDHash=": "a" * 40},
@@ -74,6 +76,97 @@ def test_exact_native_capture_binding_checks_current_permission_read_only(fixtur
     assert database.read_bytes() == before
 
 
+@pytest.mark.parametrize("capture_binding", [16777234], indirect=True)
+@pytest.mark.parametrize("roles", [("node",), ("tool",), ("node", "tool")])
+def test_device_renumber_preserves_durable_code_and_unchanged_native_evidence(
+        fixture, capture_binding, roles):
+    path, identities, database, source, _ = capture_binding
+    before = {item: item.read_bytes() for item in (path, source, database)}
+    for role in roles:
+        client = fixture.paths.node if role == "node" else fixture.root / "peekaboo"
+        identities[str(client)]["device"] = 16777229
+    result = activation.verify_screen_capture_binding(path, fixture.paths.node, require_current_process=True)
+    assert result["protectedCodeIdentityUnchanged"] is True
+    assert result["recordedPermissionUnchanged"] is True
+    assert result["effectiveCaptureVerifiedForCurrentProcess"] is True
+    assert result["scheduledSyncProven"] is False
+    assert {item: item.read_bytes() for item in before} == before
+    assert {row["device"] for row in json.loads(path.read_bytes())["files"]} == {16777234}
+
+
+@pytest.mark.parametrize("value", [None, True, "16777229", 0, -1, "missing"])
+def test_device_renumber_does_not_admit_malformed_current_identity(
+        fixture, capture_binding, value):
+    path, identities, _, _, _ = capture_binding
+    current = identities[str(fixture.paths.node)]
+    if value == "missing":
+        current.pop("device")
+    else:
+        current["device"] = value
+    with pytest.raises(activation.ActivationError, match="executable or signature drift"):
+        activation.verify_screen_capture_binding(path, fixture.paths.node)
+
+
+def test_device_renumber_does_not_admit_unbound_extra_identity_field(fixture, capture_binding):
+    path, identities, _, _, _ = capture_binding
+    identities[str(fixture.paths.node)]["device"] = 16777229
+    identities[str(fixture.paths.node)]["volumeUuid"] = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    with pytest.raises(activation.ActivationError, match="executable or signature drift"):
+        activation.verify_screen_capture_binding(path, fixture.paths.node)
+
+
+@pytest.mark.parametrize("capture_binding", [16777234], indirect=True)
+def test_same_bytes_signed_replacement_is_rejected_after_device_renumber(
+        fixture, capture_binding, monkeypatch):
+    path, identities, _, source, _ = capture_binding
+    before = {item: item.read_bytes() for item in (path, source)}
+    client = fixture.paths.node
+    old_info = client.stat()
+    replacement = client.with_name("replacement-node")
+    replacement.write_bytes(client.read_bytes())
+    os.utime(replacement, ns=(old_info.st_atime_ns, old_info.st_mtime_ns))
+    replacement.replace(client)
+    assert client.stat().st_ino != old_info.st_ino
+
+    def current_identity(observed):
+        identity = dict(identities[str(observed)])
+        info = observed.stat()
+        identity.update(device=16777229, inode=info.st_ino, bytes=info.st_size,
+                        mtimeNs=info.st_mtime_ns,
+                        sha256=hashlib.sha256(observed.read_bytes()).hexdigest())
+        return identity
+
+    monkeypatch.setattr(activation, "screen_capture_code_identity", current_identity)
+    with pytest.raises(activation.ActivationError, match="executable or signature drift"):
+        activation.verify_screen_capture_binding(path, fixture.paths.node)
+    assert {item: item.read_bytes() for item in before} == before
+
+
+def test_device_change_during_native_code_inspection_is_still_rejected(monkeypatch):
+    before = SimpleNamespace(st_dev=16777234, st_ino=17, st_size=3,
+                             st_mtime_ns=4, st_ctime_ns=5)
+    after = SimpleNamespace(**{**vars(before), "st_dev": 16777229})
+
+    class InspectedPath:
+        def __str__(self):
+            return "/fixture/native-client"
+
+        def stat(self):
+            return after
+
+    client = InspectedPath()
+    monkeypatch.setattr(activation, "sha256_physical_file", lambda path, label: ("a" * 64, before))
+
+    def codesign(argv, timeout):
+        details = (b"designated => fixture\nIdentifier=fixture\n"
+                   b"TeamIdentifier=fixture\nCDHash=fixture\n")
+        return activation.CommandResult(argv, 0, details if "-d" in argv else b"", b"", 1, False)
+
+    monkeypatch.setattr(activation, "run_bounded", codesign)
+    with pytest.raises(activation.ActivationError, match="changed during inspection"):
+        activation.screen_capture_code_identity(client)
+
+
 @pytest.mark.parametrize("returncode,timed_out", [(1, False), (0, True)])
 def test_tcc_requirement_failure_is_not_replaced_by_valid_self_signature(tmp_path, monkeypatch,
                                                                        returncode, timed_out):
@@ -101,11 +194,16 @@ def test_permission_row_is_checked_against_its_exact_client_and_blob(fixture, ca
     assert seen == [(fixture.paths.node, b"fixture requirement")]
 
 
-@pytest.mark.parametrize("field,value", [("inode", 999), ("sha256", "f" * 64), ("mtimeNs", 999),
+@pytest.mark.parametrize("role", ["node", "tool"])
+@pytest.mark.parametrize("field,value", [("path", "/different"), ("inode", 999), ("bytes", 999),
+                                        ("sha256", "f" * 64), ("mtimeNs", 999),
                                         ("signingIdentity", {"Identifier=": "different"})])
-def test_code_or_signature_drift_rejects_old_native_proof(fixture, capture_binding, field, value):
+def test_code_or_signature_drift_rejects_old_native_proof(fixture, capture_binding, role, field, value):
     path, identities, _, _, _ = capture_binding
-    identities[str(fixture.paths.node)][field] = value
+    for identity in identities.values():
+        identity["device"] = 16777229
+    client = fixture.paths.node if role == "node" else fixture.root / "peekaboo"
+    identities[str(client)][field] = value
     with pytest.raises(activation.ActivationError, match="executable or signature drift"):
         activation.verify_screen_capture_binding(path, fixture.paths.node)
 
@@ -121,7 +219,9 @@ def test_revoked_missing_or_changed_permission_invalidates(fixture, capture_bind
 
 
 def test_process_rollover_preserves_only_identity_preconditions(fixture, capture_binding, monkeypatch):
-    path, _, _, _, _ = capture_binding
+    path, identities, _, _, _ = capture_binding
+    for identity in identities.values():
+        identity["device"] = 16777229
     monkeypatch.setattr(activation, "process_identity", lambda pid: ("darwin:21:2", fixture.paths.node, 1))
     result = activation.verify_screen_capture_binding(path, fixture.paths.node)
     assert result["effectiveCaptureVerifiedForCurrentProcess"] is False
@@ -131,7 +231,9 @@ def test_process_rollover_preserves_only_identity_preconditions(fixture, capture
 
 
 def test_new_activation_invalidates_current_behavior_even_if_old_pid_remains(fixture, capture_binding):
-    path, _, _, _, active = capture_binding
+    path, identities, _, _, active = capture_binding
+    for identity in identities.values():
+        identity["device"] = 16777229
     active.write_text(json.dumps({"outcome": "activated", "generation": "new"}))
     with pytest.raises(activation.ActivationError, match="fresh native route probe"):
         activation.verify_screen_capture_binding(path, fixture.paths.node, require_current_process=True)

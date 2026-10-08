@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 7 child-status qualification](#october-7-native-child-status-and-cron-fixture-qualification)
+[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,41 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 8 checkpoint admission and owned browser migration
+
+The qualified source reference and installed Gateway and Node use
+`29cd18badf11734051eb12e5dde8bc0cc655e4e4`
+(tree `4c7f56ef590f9ed56b35b9d41481f0bd298aeb55`). One normal build, stage and seal
+fed the actual native activation. Independent same-generation loaded-source,
+health and protected-state readback matched that activation.
+
+The 23-path successor combines the 18-path checkpoint admission and ACP fixture
+repair with the five-path browser installation and privacy fixture repair.
+Checkpoint admission retains its owning loop, session, plugin and lane boundaries.
+The browser installer permits the established safe migration for the exact
+currently registered owned launcher even when its prior origins lack the Store
+origin. Orphan and different destinations retain their stricter Store-origin,
+ownership, grammar, mode and context requirements. Browser fixtures preserve
+runtime-target diagnostics and the current native privacy observation contract.
+
+Each component retains its owning test, normal source-check and scoped P0 review
+receipts. Source qualification, installation, hosted qualification and ordinary
+use are separate evidence. Previous failures and the complete prior source,
+deployment and companion history remain unchanged.
+
+Both signed companion605 applications and bundled workers retain
+`4ce35c658e465161d98dce988729558b55030d22`
+(tree `e621928b2f780e1b435c075a04cd5521de3fb868`).
+Their dated whole installed inventory, signature and running-worker receipts
+remain preserved. This Gateway projection asserts no new companion installation.
+
+All 19 ordinary-use outcomes remain open. Current-process capture, live account
+access, original task completion, provider effects, natural scheduled occurrence,
+Chrome/Discord delivery and latency are not established by these receipts.
+The existing acceptance-gap rows, historical qualification records and failures
+remain dated evidence. Fresh normal local checks, complete reconstructed-tree
+parity and all five hosted jobs are required for this public revision.
 
 ## October 6 original-task restart and scheduled-context continuity
 

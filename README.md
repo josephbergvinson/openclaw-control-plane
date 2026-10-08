@@ -14,9 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The qualified runtime source reference is
+The installed Gateway and Node source reference is
+[`29cd18badf11734051eb12e5dde8bc0cc655e4e4`](runtime/README.md#october-8-checkpoint-admission-and-owned-browser-migration).
+The source reference and installed runtime have the same commit and tree.
+Normal native activation and independent loaded-source, health and protected-state
+checks passed. Both signed companions, build 605, retain their 4ce source and
+dated installation evidence. All 19 ordinary-use outcomes remain open; fresh
+local and all five required hosted public checks remain separate gates.
+
+The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
-Gateway and Node run
+At that checkpoint, Gateway and Node ran
 [`98eb1d271b1e174707be092dd67be9c424e871ce`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification);
 the qualified reference differs only in a cron test fixture. Native activation,
 loaded-source, health and protected-state checks passed. Both signed companions,
