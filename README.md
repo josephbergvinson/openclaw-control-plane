@@ -20,8 +20,10 @@ The installed Gateway, Node and both signed companions, build 606, use native
 distribution `356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`. Its source differs
 from the reference only in two package YAML files. Native activation, independent
 loaded-source preservation, both whole installed inventories and post-install
-commands passed. The manifest preserves earlier failures and qualifications;
-separate managed-consumer and remaining ordinary-use gaps stay explicit.
+commands passed. The manifest preserves earlier failures and qualifications. The native Mac catalog
+now has direct qualified-consumer and successful list evidence, followed by a
+membership-bound turns read; its earlier TypeScript failure and remaining
+ordinary-use gaps stay explicit.
 Four normal local checks and independent native reconstruction, frozen
 installation, build and consumer readback passed. All five hosted jobs must still
 qualify the final public revision.
