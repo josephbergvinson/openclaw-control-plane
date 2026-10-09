@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
+[October 9 source reference and native distribution](#october-9-source-reference-and-native-distribution)
 identifies the current Gateway installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,39 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 9 source reference and native distribution
+
+The canonical source reference is `4aaf24a7177397c9e80a3b8fa32b74cb06a0b983`,
+tree `fd234ef53ef06aa4aeb056d3d180a461de810934`. The installed Gateway, Node
+and both signed606 companions use native distribution
+`356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`, tree
+`35cf4f47fbb63c79855f704e8b588a6b40f080cc`. Its two-YAML delta binds the
+qualified native Codex archive while retaining the patched Playwright dependency.
+The public patches normalize only the same two test-fixture labels; their full
+normalized trees are separately pinned in the manifest.
+
+One normal package, Gateway activation and independent loaded preservation passed.
+Both hosts passed complete signed606 installed inventories, live bundled-worker
+source readbacks, fresh native cohorts, reconnection, executable lookup and
+protected-state preservation. Complete605 rollback inventories remain retained.
+The package's original unjoined endpoint stays false; later complete observations
+separately proved natural retirement of its captured process cohort.
+
+The actual Gateway dependencies resolve the qualified native Codex, ACP1.10.0 and
+patched Playwright1.63.0. A fresh ordinary node-host catalog read succeeded after
+an earlier timeout. The separate native host passed normal managed adoption and
+registered-root qualified resolution; its running catalog owner and selected
+executable still need identification. Source, installed bundles and catalog reads
+do not close remaining connected-account, continuation or spoken-call outcomes.
+The manifest's current record states these limits without replacing individual
+accepted outcomes with the historical all-nineteen-open matrix.
+
+The [native reconstruction procedure](../docs/21-native-runtime-reconstruction.md)
+applies both bound patches and verifies the published archive. Independent public
+reconstruction, frozen installation, build and consumer readback passed, along
+with four normal local checks. All five hosted jobs must still qualify the final
+public revision. All dated predecessor records below remain unchanged.
 
 ## October 8 checkpoint admission and owned browser migration
 

@@ -14,13 +14,17 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway and Node source reference is
-[`29cd18badf11734051eb12e5dde8bc0cc655e4e4`](runtime/README.md#october-8-checkpoint-admission-and-owned-browser-migration).
-The source reference and installed runtime have the same commit and tree.
-Normal native activation and independent loaded-source, health and protected-state
-checks passed. Both signed companions, build 605, retain their 4ce source and
-dated installation evidence. All 19 ordinary-use outcomes remain open; fresh
-local and all five required hosted public checks remain separate gates.
+The current source reference is
+[`4aaf24a7177397c9e80a3b8fa32b74cb06a0b983`](runtime/README.md#october-9-source-reference-and-native-distribution).
+The installed Gateway, Node and both signed companions, build 606, use native
+distribution `356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`. Its source differs
+from the reference only in two package YAML files. Native activation, independent
+loaded-source preservation, both whole installed inventories and post-install
+commands passed. The manifest preserves earlier failures and qualifications;
+separate managed-consumer and remaining ordinary-use gaps stay explicit.
+Four normal local checks and independent native reconstruction, frozen
+installation, build and consumer readback passed. All five hosted jobs must still
+qualify the final public revision.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
@@ -263,6 +267,7 @@ helpers and adoption acceptance are separate evidence.
 | [18 Architecture evolution](docs/18-architecture-evolution.md) | Understand the direction and tradeoffs. |
 | [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, optional historical Backblaze templates, Docker/OrbStack and adjacent software. |
 | [20 Runtime source changes](docs/20-runtime-source-changes.md) | Inspect the complete patch and source map. |
+| [21 Native runtime reconstruction](docs/21-native-runtime-reconstruction.md) | Verify the separately bound native distribution source and archive. |
 
 ## Scope and evidence
 
