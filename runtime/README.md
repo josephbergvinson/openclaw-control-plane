@@ -37,8 +37,11 @@ separately proved natural retirement of its captured process cohort.
 The actual Gateway dependencies resolve the qualified native Codex, ACP1.10.0 and
 patched Playwright1.63.0. A fresh ordinary node-host catalog read succeeded after
 an earlier timeout. The separate native host passed normal managed adoption and
-registered-root qualified resolution; its running catalog owner and selected
-executable still need identification. Source, installed bundles and catalog reads
+registered-root qualified resolution. Supported native Swift catalog enablement
+then produced a successful normal list with a concurrent app-owned executable
+chain selecting the qualified native Codex. A later fresh eligible list and
+membership-bound turns read also passed. The earlier TypeScript catalog failure
+remains unresolved; native owner selection does not claim to fix it. Source, installed bundles and catalog reads
 do not close remaining connected-account, continuation or spoken-call outcomes.
 The manifest's current record states these limits without replacing individual
 accepted outcomes with the historical all-nineteen-open matrix.
