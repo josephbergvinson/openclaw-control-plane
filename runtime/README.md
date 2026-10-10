@@ -19,44 +19,45 @@ and the boundary between source reconstruction and installation.
 ## October 10 source reference and installation boundaries
 
 The qualified canonical source reference is
-`b950c3daba2c50a160f97f92d4bcc1fffd0d7abb`, tree
-`60ecf79df91e901d92d91bca9a57999745c75da6`. Native distribution
-`496d007a1848b4c3ba55d00d571dbbb3736cf50b`, tree
-`67e4e4b2413d38f0894156f30e4edf13456dfd76`, retains the same two-YAML native
+`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`, tree
+`2c7fc60f1d2d755e2a05720974f91d9c0103b2a0`. Native distribution
+`4f73fbf792a915051eb6895f8472e8c055f756eb`, tree
+`bf7b98f8f17f6341e2b60baf4624202a8feb42ca`, retains the same two-YAML native
 dependency overlay. The exported patch and normalized trees are bound in the
-manifest. The two-path routing clarification keeps this Gateway's messaging on
-native controls and permits user-authorized, documented operator CLI/API calls to
-independent company runtimes under their own account, session and run bindings.
-The existing full/minimal messaging owner passed 11 cases and required staged
-checks passed. Earlier requester settlement, summary paragraph preservation,
-image, catalog-cache, native and cron qualifications retain their dated receipts;
-failed public jobs retain their original failure status.
+manifest. The saved-call owner and the readable, dated-context prompt retain their
+separate source qualifications. The existing summary-model owner passed 30 cases
+and the required changed checks passed. Earlier requester, routing, catalog, native
+and fixture qualifications retain their original receipts; failed public jobs keep
+their original failure status.
 
 Gateway and Node now run distribution
-`496d007a1848b4c3ba55d00d571dbbb3736cf50b`. Its normal build, stage, seal, first activation,
-independent same-generation loaded-source, health and protected-state preservation
-passed at `2026-10-10T19:42:38.768260Z`. The activation receipt is
-`52cdb87dc784276d6c3e2c2240bf816457d14e6cba9320185f9643cebc6aa415` and the loaded-source receipt is
-`cb4921966400b86a6d3e02319d8cf5d572df53648cb18e8c70044ebccca754f9`.
-The exact preceding Gateway 9fe metadata and complete 36f/616 predecessor chain
-are retained separately.
+`4f73fbf792a915051eb6895f8472e8c055f756eb`. Normal build, stage, seal, first activation and
+fresh independent same-generation loaded-source, health and protected-state
+preservation passed at `2026-10-10T22:50:31.752423Z`. The activation receipt is
+`a7c27c99956347b2b63c50cb4ffe52d0806fbe5751f6a16e8a79d6246924034e` and the loaded-source receipt is
+`e16343f45fea5d55e9e98a86528b4082f0c5baae6be696f6af3645ed911bee40`.
+The first independent loaded observation failed its second approvals inspection;
+its original failure remains recorded. A later exact-inspector diagnostic and
+fresh unchanged-reader observation passed separately. The original failure's
+cause was not captured. The exact preceding public Gateway 496 metadata and
+complete 9fe/36f/616 chain are retained. The intervening 6f installation keeps its
+separate dated private activation and loaded-source receipts.
 
 Both signed 618 companions retain installed source
 `b6c925c4875d83abfb43b6587e7c9966b3634520`, tree
 `b0c68dc6a016338df1dd660a21c4aa77a9f1521d`. Their complete signed installed and retained
-rollback maps, live bundled-worker identity, native cohorts, selected-state
-preservation and paired-reconnection proofs remain unchanged. Actual 617 and
-complete 616/614 companion history, prior Gateway 613 history, October 9 signed
-606 records and complete 607 predecessors retain their original scope and dates.
+rollback maps, bundled-worker identity, native cohorts, selected-state preservation
+and paired-reconnection proofs remain unchanged. Actual 617 and complete 616/614
+companion history, prior Gateway 613 history, October 9 signed 606 records and
+complete 607 predecessors retain their original scope and dates.
 
 The separate uncoached Mac saved-credential unlock remains native acceptance;
 provider authorization is separately scoped. Earlier catalog discovery and
-unchanged-grant reuse retain their dated acceptance: seven calls exposed all five
-requested tools and input schemas without tool errors; independent full-profile
-readback found 44 entries, 42 provider tools and two resource utilities. These
-observations establish that earlier discovery and grant reuse. An ordinary remote
-acknowledgment, provider writes, broader goal completion and all five exact-head
-hosted jobs remain separate acceptance steps.
+unchanged-grant reuse retain their dated acceptance. Fresh ordinary minutes
+readability and factual acceptance remain pending. Source qualification and runtime
+installation do not establish that acceptance, provider writes, broader goal
+completion or exact-head hosted qualification. Prior failed public checks stay
+recorded.
 
 ## October 9 source reference and native distribution
 

@@ -15,31 +15,31 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current source reference is
-[`b950c3daba2c50a160f97f92d4bcc1fffd0d7abb`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
-Its native distribution is `496d007a1848b4c3ba55d00d571dbbb3736cf50b`;
+[`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `4f73fbf792a915051eb6895f8472e8c055f756eb`;
 the source trees differ only in the retained package YAML overlay.
-The two-path routing clarification keeps this Gateway's messaging on native
-controls and permits user-authorized, documented operator CLI/API calls to
-independent company runtimes under their own account, session and run bindings.
-The existing full/minimal messaging owner passed 11 cases and the required staged
-checks passed. Earlier requester settlement, summary paragraph preservation,
-image, catalog-cache, native and cron qualifications retain their dated receipts.
+The saved-call owner and the readable, dated-context prompt retain their separate
+source qualifications. The existing summary-model owner passed 30 cases and the
+required changed checks passed. Earlier requester, routing, catalog, native and
+fixture qualifications retain their original dated receipts.
 
 Gateway and Node now run that native distribution. Normal build, stage, seal,
-first activation and independent loaded-source checks passed at
-`2026-10-10T19:42:38.768260Z`, with same-generation, health and protected-state
-preservation verified. Both signed 618 companions retain source
-`b6c925c4875d83abfb43b6587e7c9966b3634520` and their original complete installed/rollback
-maps, worker/cohort, preservation and paired-reconnection evidence. The complete
-preceding Gateway chain, including 9fe, 36f and 616, remains intact.
+first activation and the fresh independent loaded-source observation passed at
+`2026-10-10T22:50:31.752423Z`, with same-generation, health and protected-state
+preservation verified. The original loaded001 approvals-inspection failure stays
+recorded; the later unchanged reader passed separately, without establishing the
+original failure's cause. Both signed 618 companions retain source
+`b6c925c4875d83abfb43b6587e7c9966b3634520` and their complete installed/rollback maps,
+worker/cohort, preservation and paired-reconnection evidence. The complete prior
+public Gateway chain, including 496, 9fe, 36f and 616, remains intact. The intervening
+6f installation retains its separate dated private receipts.
 
 The separate uncoached Mac saved-credential unlock remains native acceptance;
 provider authorization is separate. Earlier catalog discovery and unchanged-grant
-reuse retain their dated acceptance: seven calls exposed all five requested tools
-and schemas without tool errors, and independent profile readback found 44 entries.
-An ordinary remote acknowledgment remains a separate acceptance step, as do
-provider writes, broader goal completion and all five exact-head hosted jobs.
-Prior failed public checks remain recorded.
+reuse retain their dated acceptance. Fresh ordinary minutes readability and factual
+acceptance remain pending, as do the separate exact-head hosted checks. Installation
+and source qualification do not establish those outcomes. Prior failed public checks
+remain recorded.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
