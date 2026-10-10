@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
-identifies the current Gateway installation.
+[October 10 source reference and installation boundaries](#october-10-source-reference-and-installation-boundaries)
+separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
@@ -15,6 +15,83 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 10 source reference and installation boundaries
+
+The qualified canonical source reference is
+`c9263ab4b8976df7160ca192a39c15fdb0144322`, tree
+`5dc1abc7f89292c965a3f10a21f4403272ea80e4`. Native distribution
+`36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`, tree
+`15c5466f208b4740d8129f02be6b0f65f7e8ba6b`, retains the same two-YAML
+native dependency overlay. The exported patch and normalized trees are bound in
+the manifest. The latest source corrects the canonical image expectation in the
+steering fixture and refreshes retained MCP catalogs on OAuth grant-revision changes.
+The normal 17 steering and four image-integrity cases and 50 cache-owner cases passed,
+along with their required changed checks. The earlier 82 native and separate 200
+cron cases remain bound to their original qualifications; failed public jobs retain
+their original failure status.
+
+Gateway and Node now run distribution
+`36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`. Its normal first activation,
+independent same-generation loaded-source, health and protected-state preservation
+passed at `2026-10-10T15:36:44.874457Z`. The activation receipt is
+`cae9114e29572e7ef0342d1096d400a1d0c45676d8b7c522549320f3f401ee5e` and the loaded-source receipt is
+`b89fb51324dd9972d5e73b9e302eca11dee9b39aa6081d7290e647f1c0ee9760`. The exact old Gateway 616
+metadata and complete predecessor chain are retained separately.
+
+Both signed 618 companions retain installed source
+`b6c925c4875d83abfb43b6587e7c9966b3634520`, tree
+`b0c68dc6a016338df1dd660a21c4aa77a9f1521d`. Their complete signed installed and retained
+rollback maps, live bundled-worker identity, native cohorts, selected-state
+preservation and paired-reconnection proofs remain unchanged. Actual 617 and complete
+616/614 companion history, prior Gateway 613 history, October 9 signed 606 records and
+complete 607 predecessors retain their original scope and dates.
+
+The separate uncoached Mac saved-credential unlock remains native acceptance;
+provider authorization is separately scoped. An ordinary continuation in the same
+conversation passed discovery and reuse of the unchanged saved grant. Its seven
+calls, two searches and five descriptions, exposed all five requested tools and their
+input schemas without tool errors. Independent full-profile readback found 44 entries:
+42 provider tools and two resource utilities. The run finished in 77.411 seconds with
+no active runs or pending inputs. These results establish discovery and saved-grant
+reuse; provider writes and broader goal completion remain separate. Final normal
+local checks and all five exact-head hosted jobs remain separate acceptance steps.
+
+## October 9 source reference and native distribution
+
+The canonical source reference is `4aaf24a7177397c9e80a3b8fa32b74cb06a0b983`,
+tree `fd234ef53ef06aa4aeb056d3d180a461de810934`. The installed Gateway, Node
+and both signed606 companions use native distribution
+`356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`, tree
+`35cf4f47fbb63c79855f704e8b588a6b40f080cc`. Its two-YAML delta binds the
+qualified native Codex archive while retaining the patched Playwright dependency.
+The public patches normalize only the same two test-fixture labels; their full
+normalized trees are separately pinned in the manifest.
+
+One normal package, Gateway activation and independent loaded preservation passed.
+Both hosts passed complete signed606 installed inventories, live bundled-worker
+source readbacks, fresh native cohorts, reconnection, executable lookup and
+protected-state preservation. Complete605 rollback inventories remain retained.
+The package's original unjoined endpoint stays false; later complete observations
+separately proved natural retirement of its captured process cohort.
+
+The actual Gateway dependencies resolve the qualified native Codex, ACP1.10.0 and
+patched Playwright1.63.0. A fresh ordinary node-host catalog read succeeded after
+an earlier timeout. The separate native host passed normal managed adoption and
+registered-root qualified resolution. Supported native Swift catalog enablement
+then produced a successful normal list with a concurrent app-owned executable
+chain selecting the qualified native Codex. A later fresh eligible list and
+membership-bound turns read also passed. The earlier TypeScript catalog failure
+remains unresolved; native owner selection does not claim to fix it. Source, installed bundles and catalog reads
+do not close remaining connected-account, continuation or spoken-call outcomes.
+The manifest's current record states these limits without replacing individual
+accepted outcomes with the historical all-nineteen-open matrix.
+
+The [native reconstruction procedure](../docs/21-native-runtime-reconstruction.md)
+applies both bound patches and verifies the published archive. Independent public
+reconstruction, frozen installation, build and consumer readback passed, along
+with four normal local checks. All five hosted jobs must still qualify the final
+public revision. All dated predecessor records below remain unchanged.
 
 ## October 8 checkpoint admission and owned browser migration
 

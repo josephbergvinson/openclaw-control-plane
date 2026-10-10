@@ -14,13 +14,31 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway and Node source reference is
-[`29cd18badf11734051eb12e5dde8bc0cc655e4e4`](runtime/README.md#october-8-checkpoint-admission-and-owned-browser-migration).
-The source reference and installed runtime have the same commit and tree.
-Normal native activation and independent loaded-source, health and protected-state
-checks passed. Both signed companions, build 605, retain their 4ce source and
-dated installation evidence. All 19 ordinary-use outcomes remain open; fresh
-local and all five required hosted public checks remain separate gates.
+The current source reference is
+[`c9263ab4b8976df7160ca192a39c15fdb0144322`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`;
+the source trees differ only in the retained package YAML overlay.
+The latest source corrects the canonical image expectation in the steering fixture
+and invalidates retained MCP catalogs when an OAuth grant revision changes. The
+normal 17 steering and four image-integrity cases and 50 cache-owner cases passed;
+the required changed checks passed separately. The earlier 82 native and 200 cron
+cases retain their original qualification records.
+
+Gateway and Node now run that native distribution. The normal first activation and
+independent loaded-source check passed at `2026-10-10T15:36:44.874457Z`, with
+same-generation, health and protected-state preservation verified. Both signed 618
+companions retain source `b6c925c4875d83abfb43b6587e7c9966b3634520` and their original
+complete installed/rollback maps, worker/cohort, preservation and paired-reconnection
+evidence. Complete prior companion and Gateway 616 histories remain intact.
+A separate uncoached Mac saved-credential unlock remains its own native acceptance;
+provider authorization is separate. An ordinary continuation in the same conversation
+passed discovery and reuse of the unchanged saved grant: two searches and five tool
+descriptions exposed all five requested tools and their input schemas, with no tool
+errors. Independent full-profile readback found 44 entries: 42 provider tools and two
+resource utilities. The run finished in 77.411 seconds with no active runs or pending
+inputs. Provider writes and broader goal completion remain separate. Final normal
+local checks and all five exact-head public hosted jobs remain separate acceptance
+steps; prior failed public checks remain recorded.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
@@ -263,6 +281,7 @@ helpers and adoption acceptance are separate evidence.
 | [18 Architecture evolution](docs/18-architecture-evolution.md) | Understand the direction and tradeoffs. |
 | [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, optional historical Backblaze templates, Docker/OrbStack and adjacent software. |
 | [20 Runtime source changes](docs/20-runtime-source-changes.md) | Inspect the complete patch and source map. |
+| [21 Native runtime reconstruction](docs/21-native-runtime-reconstruction.md) | Verify the separately bound native distribution source and archive. |
 
 ## Scope and evidence
 

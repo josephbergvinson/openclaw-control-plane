@@ -108,6 +108,8 @@ Use the installed resolver with established typed facts: `python3 scripts/resolv
 
 Use `--compact` for ordinary route selection. It retains the selected account/workspace bindings, requested operation, probe outcomes, constraints and execution/fallback guards without repeating the full candidate/status catalogue. Omit it for full diagnostics. The flag changes presentation only; resolution, authority, probe execution and exit status are unchanged.
 
+Current provider roles determine available access. Resolve the exact account and task operation before treating a login failure as missing credentials. Use the portfolio's registered credential store: in this fictional example Company Beta uses its Bitwarden account `admin@company-beta.example`, with some passwords also in Apple Passwords; Company Alpha's vault contains credentials absent from Apple Passwords. Personal Google or Apple sign-in can reuse the existing personal session and Apple Passwords coverage. An account or role the operator cannot access is a concrete provider limit, not a reason to promote the account, reset credentials or keep repeating sign-in. Verify actual account access and the requested effect separately. For Apple passkeys and native challenges, follow the existing Browser and host UI procedure below; recognized-device status alone proves neither authenticated access nor an unavoidable human step.
+
 ## Exact resources and email
 
 Bind a supplied link or identifier first: selected account, owner/sender, title/subject and date where available. Related search can provide context but cannot replace an unopened exact target. An example provides structure, not identity facts for the actual recipient or object.
