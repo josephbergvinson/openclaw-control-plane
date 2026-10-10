@@ -492,10 +492,10 @@ index 0000000000000000000000000000000000000000..6bb0893be8b800c403a2d18d07950712
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d443010336a4c104
+index 0000000000000000000000000000000000000000..b3cca4b7a417d60960cfec1e62e64d9e05358b68
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
-@@ -0,0 +1,896 @@
+@@ -0,0 +1,912 @@
 +import AppKit
 +import ApplicationServices
 +import Darwin
@@ -674,6 +674,7 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +        var withSecret: @MainActor (NativeCredentialBinding, @MainActor (String) throws -> Void) async throws -> Void
 +        var now: @MainActor () -> Date
 +        var localAccount: @MainActor () -> String = { NSUserName() }
++        var localAccountFullName: @MainActor () -> String = { "" }
 +
 +        static var live: Self {
 +            Self(
@@ -681,7 +682,8 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +                bindings: NativeCredentialKeychain.bindings,
 +                prompts: NativeCredentialAX.prompts,
 +                withSecret: NativeCredentialResolver.withSecret,
-+                now: Date.init)
++                now: Date.init,
++                localAccountFullName: { NSFullUserName() })
 +        }
 +    }
 +
@@ -706,6 +708,8 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +        let scope: UUID
 +        let generation: UInt64
 +        let expires: Date
++        let localAccount: String
++        let localAccountFullName: String
 +    }
 +
 +    private let environment: Environment
@@ -728,6 +732,7 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +            self.admissions = self.admissions.filter { $0.value.scope != scope }
 +            let host = try self.environment.hostID()
 +            let localAccount = self.environment.localAccount()
++            let localAccountFullName = self.environment.localAccountFullName()
 +            let bindings = try self.environment.bindings()
 +            let discovery = try self.environment.prompts()
 +            var diagnostics = discovery.diagnostics
@@ -743,24 +748,29 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +                        accountEvidence: prompt.accountEvidence,
 +                        purpose: prompt.purpose,
 +                        localAccount: localAccount,
++                        localAccountFullName: localAccountFullName,
 +                        selectedUsername: prompt.selectedUsername)
 +                    else {
 +                        diagnostics.recordRejectedBinding(binding, host: host, bundleID: prompt.bundleID)
 +                        continue
 +                    }
 +                    let ref = "native-credential:v1:" + UUID().uuidString.lowercased()
++                    let expires = self.environment.now().addingTimeInterval(120)
 +                    self.admissions[ref] = Admission(
 +                        prompt: prompt,
 +                        binding: binding,
 +                        scope: scope,
 +                        generation: generation,
-+                        expires: self.environment.now().addingTimeInterval(60))
++                        expires: expires,
++                        localAccount: localAccount,
++                        localAccountFullName: localAccountFullName)
 +                    rows.append([
 +                        "promptRef": ref,
 +                        "alias": binding.alias,
 +                        "account": binding.account,
 +                        "kind": binding.kind.rawValue,
 +                        "bundleId": prompt.bundleID,
++                        "expiresAt": expires.ISO8601Format(.init(includingFractionalSeconds: true)),
 +                    ])
 +                }
 +            }
@@ -786,20 +796,26 @@ index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d4430103
 +                  admission.scope == scope, admission.generation == generation,
 +                  admission.binding.alias == alias, admission.expires > self.environment.now()
 +            else { throw NativeCredentialError.stalePrompt }
-+            // The reference was consumed within its 60s admission lifetime.
++            // The reference was consumed within its 120s admission lifetime.
 +            // Bound the admitted operation separately so sealed-app checks can
 +            // finish; current scope, binding and native field are still rechecked.
 +            let operationExpires = self.environment.now().addingTimeInterval(120)
 +            let validate = {
 +                try checkAllowed()
 +                guard operationExpires > self.environment.now() else { throw NativeCredentialError.stalePrompt }
++                let localAccount = self.environment.localAccount()
++                let localAccountFullName = self.environment.localAccountFullName()
++                guard admission.binding.kind != .macLogin ||
++                    (localAccount == admission.localAccount && localAccountFullName == admission.localAccountFullName)
++                else { throw NativeCredentialError.refused }
 +                guard try self.environment.bindings().contains(admission.binding),
 +                      try admission.binding.authorizes(
 +                          hostID: self.environment.hostID(),
 +                          bundleID: admission.prompt.bundleID,
 +                          accountEvidence: admission.prompt.accountEvidence,
 +                          purpose: admission.prompt.purpose,
-+                          localAccount: self.environment.localAccount(),
++                          localAccount: localAccount,
++                          localAccountFullName: localAccountFullName,
 +                          selectedUsername: admission.prompt.selectedUsername)
 +                else { throw NativeCredentialError.refused }
 +                try admission.prompt.validate()
@@ -3306,10 +3322,10 @@ index 9b2f9edc7b8c87dbb4080df96c4b73a3e25d4c73..467a5fc107864939aee24e00ab8ce653
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f838396684
+index 0000000000000000000000000000000000000000..7fb22c5391341ab3e5021244ef923ded46e00968
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-@@ -0,0 +1,984 @@
+@@ -0,0 +1,1052 @@
 +import Darwin
 +import Foundation
 +import OpenClawKit
@@ -3420,6 +3436,7 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        var accountEvidence = ["Sign in as operator@example.invalid"]
 +        var selectedUsername: String?
 +        var localAccount = NSUserName()
++        var localAccountFullName = "Fixture Operator"
 +        var discoveryDiagnostics = NativeCredentialDiscoveryDiagnostics(
 +            reason: .bindingUnmatched, observedSecureFieldCount: 1)
 +        var discoveryCalls = 0
@@ -3453,7 +3470,8 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +                    try consume("fixture-password")
 +                },
 +                now: { self.now },
-+                localAccount: { self.localAccount }))
++                localAccount: { self.localAccount },
++                localAccountFullName: { self.localAccountFullName }))
 +        }
 +
 +        init() throws {
@@ -3914,11 +3932,12 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        let existing = try NativeCredentialBinding(
 +            alias: "mac.fixture.password",
 +            kind: .macLogin,
-+            account: "Fixture Operator",
++            account: "fixture",
 +            hostID: host,
 +            bundleIDs: ["com.apple.SecurityAgent"])
 +        #expect(!existing.authorizes(
-+            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: [existing.account]))
++            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: [existing.account],
++            localAccount: "fixture"))
 +        let enrolled = try NativeCredentialBinding(
 +            alias: existing.alias,
 +            kind: .macLogin,
@@ -3926,14 +3945,34 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +            hostID: host,
 +            bundleIDs: ["com.apple.SecurityAgent", "com.apple.Passwords"])
 +        #expect(enrolled.authorizes(
-+            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: ["fixture operator"]))
++            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: ["Fixture Operator"],
++            localAccount: "fixture", localAccountFullName: "Fixture Operator"))
++        #expect(enrolled.authorizes(
++            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: ["fixture"], localAccount: "fixture"))
 +        #expect(!enrolled.authorizes(
 +            hostID: "22222222-2222-4222-8222-222222222222",
 +            bundleID: "com.apple.Passwords",
-+            accountEvidence: [enrolled.account]))
++            accountEvidence: [enrolled.account], localAccount: "fixture"))
 +        for account in ["Other", "Other Fixture Operator", "Fixture Operator (guest)", " Fixture Operator "] {
-+            #expect(!enrolled.authorizes(hostID: host, bundleID: "com.apple.Passwords", accountEvidence: [account]))
++            #expect(!enrolled.authorizes(
++                hostID: host, bundleID: "com.apple.Passwords", accountEvidence: [account],
++                localAccount: "fixture", localAccountFullName: "Fixture Operator"))
 +        }
++        for (principal, fullName) in [("other", "Fixture Operator"), ("fixture", "Other"), ("fixture", "")] {
++            #expect(!enrolled.authorizes(
++                hostID: host, bundleID: "com.apple.Passwords", accountEvidence: ["Fixture Operator"],
++                localAccount: principal, localAccountFullName: fullName))
++        }
++        let displayNameBinding = try NativeCredentialBinding(
++            alias: enrolled.alias, kind: .macLogin, account: "Fixture Operator", hostID: host,
++            bundleIDs: enrolled.bundleIDs)
++        #expect(!displayNameBinding.authorizes(
++            hostID: host, bundleID: "com.apple.Passwords", accountEvidence: ["Fixture Operator"],
++            localAccount: "fixture", localAccountFullName: "Fixture Operator"))
++        #expect(!enrolled.authorizes(
++            hostID: host, bundleID: "com.apple.SecurityAgent",
++            accountEvidence: ["Enter an administrator's name and password to allow this.", "Cancel"],
++            localAccount: "fixture", localAccountFullName: "Fixture Operator", selectedUsername: "Fixture Operator"))
 +    }
 +
 +    @Test func `Passwords unlock uses the same opaque single use entry and stale form checks`() async throws {
@@ -3942,10 +3981,11 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +            Self.passwordsLockedView(), bundleID: "com.apple.Passwords"))
 +        harness.promptBundleID = "com.apple.Passwords"
 +        harness.accountEvidence = context.evidence
++        harness.localAccount = "fixture"
 +        harness.bindings = try [.init(
 +            alias: "apple.fixture.password",
 +            kind: .macLogin,
-+            account: "Fixture Operator",
++            account: "fixture",
 +            hostID: harness.host,
 +            bundleIDs: [harness.promptBundleID])]
 +        let ref = try await harness.observe()
@@ -3958,6 +3998,36 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        harness.duringResolution = { harness.promptCurrent = false }
 +        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(stale) }
 +        #expect(harness.entries.count == 1)
++    }
++
++    @Test(arguments: ["principal", "full-name"], [false, true])
++    func `Passwords full name remains paired with the current short name through entry`(
++        _ change: String, _ afterResolution: Bool) async throws
++    {
++        let harness = try Harness()
++        harness.promptBundleID = "com.apple.Passwords"
++        harness.accountEvidence = ["Fixture Operator"]
++        harness.localAccount = "fixture"
++        harness.bindings = try [.init(
++            alias: "apple.fixture.password", kind: .macLogin, account: "fixture", hostID: harness.host,
++            bundleIDs: [harness.promptBundleID])]
++        let changeIdentity = {
++            if change == "principal" { harness.localAccount = "other" } else { harness.localAccountFullName = "Other" }
++        }
++        if !afterResolution {
++            changeIdentity()
++            let result = try await harness.call(.init(action: .credentialPrompts))
++            #expect((result.details?["credentialPrompts"]?.value as? [[String: String]])?.isEmpty == true)
++            #expect(harness.secretReads == 0)
++            #expect(harness.entries.isEmpty)
++            return
++        }
++        let ref = try await harness.observe()
++        harness.duringResolution = changeIdentity
++        await #expect(throws: NativeCredentialError.refused) { try await harness.fill(ref) }
++        #expect(harness.secretReads == 1)
++        #expect(harness.entries.isEmpty)
++        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(ref) }
 +    }
 +
 +    @Test func `discovery reports observation reasons without reading or entering a secret`() async throws {
@@ -4100,7 +4170,8 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        let rows = try #require(result.details?["credentialPrompts"]?.value as? [[String: String]])
 +        let row = try #require(rows.first)
 +        #expect(rows.count == 1)
-+        #expect(Set(row.keys) == ["promptRef", "alias", "account", "kind", "bundleId"])
++        #expect(Set(row.keys) == ["promptRef", "alias", "account", "kind", "bundleId", "expiresAt"])
++        #expect(row["expiresAt"] == "1970-01-01T00:03:40.000Z")
 +        let diagnostics = try #require(result.details?["credentialPromptDiagnostics"]?.value as? [String: Any])
 +        #expect(diagnostics["reason"] as? String == "eligible")
 +        #expect(diagnostics["axReadFailureCount"] as? Int == 1)
@@ -4162,7 +4233,7 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        for change in 0..<4 {
 +            let harness = try Harness()
 +            let ref = try await harness.observe()
-+            if change == 2 { harness.now.addTimeInterval(61) }
++            if change == 2 { harness.now.addTimeInterval(121) }
 +            if change == 3 { _ = try await harness.observe() }
 +            await #expect(throws: NativeCredentialError.stalePrompt) {
 +                try await harness.fill(ref, scope: change == 0 ? UUID() : nil, generation: change == 1 ? 2 : 1)
@@ -4202,6 +4273,19 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        #expect(harness.secretReads == 1)
 +        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(ref) }
 +        #expect(harness.secretReads == 1)
++    }
++
++    @Test func `model inference within the advertised admission lifetime permits entry once`() async throws {
++        let harness = try Harness()
++        let ref = try await harness.observe()
++        harness.now.addTimeInterval(90)
++        let result = try await harness.fill(ref)
++        #expect(result.ok)
++        #expect(harness.entries == ["fixture-password"])
++        #expect(harness.secretReads == 1)
++        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(ref) }
++        #expect(harness.secretReads == 1)
++        #expect(harness.entries == ["fixture-password"])
 +    }
 +
 +    @Test func `wrong host or account cannot obtain a prompt reference`() async throws {
@@ -4296,10 +4380,10 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af04b49a61b
+index 0000000000000000000000000000000000000000..3928c4acda1cfe479fc6ea6b7d4f2600f6e9da96
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,303 @@
 +import Foundation
 +import OpenClawKit
 +import Testing
@@ -4343,8 +4427,11 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +            bundleIDs: owners ?? self.existingOwners + [self.helper])
 +    }
 +
-+    @Test func `hosted passkey form binds the local computer account rather than the provider email`() throws {
-+        let nodes = Self.form()
++    @Test(arguments: ["fixture", "Fixture Operator"])
++    func `hosted passkey form binds the local computer account rather than the provider email`(
++        _ account: String) throws
++    {
++        let nodes = Self.form(account: account)
 +        let form = try #require(NativeCredentialPromptContext.resolve(nodes, bundleID: Self.helper))
 +        #expect(form.field == 6)
 +        #expect(form.context == 0)
@@ -4353,11 +4440,18 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +        let purpose = NativeCredentialPromptPurpose.resolve(nativeEvidence: form.evidence)
 +        #expect(purpose != .accountAuthentication)
 +        #expect(purpose != .passwordsUnlockAuthentication)
-+        #expect(NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: form.evidence) == "fixture")
++        #expect(NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: form.evidence) == account)
 +        let binding = try Self.binding()
 +        #expect(binding.authorizes(
 +            hostID: Self.host, bundleID: Self.helper, accountEvidence: form.evidence,
-+            purpose: purpose, localAccount: "fixture"))
++            purpose: purpose, localAccount: "fixture", localAccountFullName: "Fixture Operator"))
++        for (principal, fullName) in [("other", "Fixture Operator"), ("fixture", "Other")] {
++            let fullNameForm = try #require(NativeCredentialPromptContext.resolve(
++                Self.form(account: "Fixture Operator"), bundleID: Self.helper))
++            #expect(!binding.authorizes(
++                hostID: Self.host, bundleID: Self.helper, accountEvidence: fullNameForm.evidence,
++                localAccount: principal, localAccountFullName: fullName))
++        }
 +        let diagnostics = NativeCredentialPromptContext.diagnostics(
 +            nodes, bundleID: Self.helper, resolved: true, axReadFailureCount: 0, focusedSecureFieldMatches: true)
 +        #expect(diagnostics.formContext?.purpose == purpose)
@@ -4470,6 +4564,7 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +        let scope = UUID()
 +        var host = NativeCredentialPasskeyTests.host
 +        var localAccount = "fixture"
++        var localAccountFullName = "Fixture Operator"
 +        var allowed = true
 +        var now = Date(timeIntervalSince1970: 100)
 +        var secretReads = 0
@@ -4504,7 +4599,8 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +                    self.secretReads += 1
 +                    await self.duringResolution?()
 +                    try consume("synthetic-entry-only")
-+                }, now: { self.now }, localAccount: { self.localAccount }))
++                }, now: { self.now }, localAccount: { self.localAccount },
++                localAccountFullName: { self.localAccountFullName }))
 +        }
 +
 +        func call(_ params: OpenClawComputerActParams, scope: UUID? = nil, generation: UInt64 = 1) async throws
@@ -4529,8 +4625,10 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +        }
 +    }
 +
-+    @Test func `hosted passkey opaque entry is single use and does not claim authentication`() async throws {
++    @Test(arguments: ["fixture", "Fixture Operator"])
++    func `hosted passkey opaque entry is single use and does not claim authentication`(_ account: String) async throws {
 +        let h = try Harness()
++        h.nodes = Self.form(account: account)
 +        let ref = try await h.observe()
 +        let result = try await h.fill(ref)
 +        #expect(h.secretReads == 1)
@@ -4542,7 +4640,9 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +        #expect(h.secretReads == 1)
 +    }
 +
-+    @Test(arguments: ["host", "principal", "binding", "field-owner", "host-owner", "native-account", "scope"])
++    @Test(arguments: [
++        "host", "principal", "full-name", "binding", "field-owner", "host-owner", "native-account", "scope",
++    ])
 +    func `passkey revalidates both native owners and authority after resolution`(_ change: String) async throws {
 +        let h = try Harness()
 +        let ref = try await h.observe()
@@ -4550,6 +4650,7 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +            switch change {
 +            case "host": h.host = "22222222-2222-4222-8222-222222222222"
 +            case "principal": h.localAccount = "other"
++            case "full-name": h.localAccountFullName = "Other"
 +            case "binding": h.bindings.removeAll()
 +            case "field-owner": h.nodes[6].ownerPID = 44
 +            case "host-owner":
@@ -4578,7 +4679,7 @@ index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af0
 +    func `hosted passkey unused references retain task generation and expiry fences`(_ change: String) async throws {
 +        let h = try Harness()
 +        let ref = try await h.observe()
-+        if change == "expiry" { h.now.addTimeInterval(61) }
++        if change == "expiry" { h.now.addTimeInterval(121) }
 +        await #expect(throws: NativeCredentialError.stalePrompt) {
 +            try await h.fill(ref, scope: change == "scope" ? UUID() : nil, generation: change == "generation" ? 2 : 1)
 +        }
@@ -5436,10 +5537,10 @@ index 0000000000000000000000000000000000000000..ed77f2637d3986b29433e5037d828278
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialSafariAutoFillTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialSafariAutoFillTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e8781c2282ba
+index 0000000000000000000000000000000000000000..c51f0f7a9519fdfdea6d13914ff2d06aad670212
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialSafariAutoFillTests.swift
-@@ -0,0 +1,420 @@
+@@ -0,0 +1,431 @@
 +import Foundation
 +import OpenClawKit
 +import Testing
@@ -5534,22 +5635,30 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +        #expect(diagnostics.formContext?.purpose == purpose)
 +    }
 +
-+    @Test func `Safari embedded Passwords unlock binds its observed native account and controls`() throws {
-+        let nodes = Self.passwordsUnlockForm()
++    @Test(arguments: ["fixture", "Fixture Operator"])
++    func `Safari embedded Passwords unlock binds its observed native account and controls`(_ account: String) throws {
++        let nodes = Self.passwordsUnlockForm(account: account)
 +        let context = try #require(NativeCredentialPromptContext.resolve(nodes, bundleID: Self.safari))
 +        #expect(context.field == 10)
 +        #expect(context.context == 2)
 +        #expect(context.submit == 6)
 +        #expect(context.username?.field == nil)
 +        #expect(context.evidence.contains("Passwords Is Locked"))
-+        #expect(context.evidence.contains("Enter the password for the user “fixture” to unlock."))
++        #expect(context.evidence.contains("Enter the password for the user “\(account)” to unlock."))
 +        let purpose = NativeCredentialPromptPurpose.resolve(nativeEvidence: context.evidence)
 +        #expect(purpose != .accountAuthentication)
 +        #expect(purpose != .autoFillAuthentication)
 +        let binding = try Self.binding()
 +        #expect(binding.authorizes(
 +            hostID: Self.host, bundleID: Self.safari, accountEvidence: context.evidence,
-+            purpose: purpose, localAccount: "fixture"))
++            purpose: purpose, localAccount: "fixture", localAccountFullName: "Fixture Operator"))
++        let fullNameContext = try #require(NativeCredentialPromptContext.resolve(
++            Self.passwordsUnlockForm(account: "Fixture Operator"), bundleID: Self.safari))
++        for (principal, fullName) in [("other", "Fixture Operator"), ("fixture", "Other")] {
++            #expect(!binding.authorizes(
++                hostID: Self.host, bundleID: Self.safari, accountEvidence: fullNameContext.evidence,
++                localAccount: principal, localAccountFullName: fullName))
++        }
 +        #expect(!binding.authorizes(
 +            hostID: Self.host, bundleID: Self.safari, accountEvidence: ["fixture", "Unlock", "Cancel"],
 +            localAccount: "fixture"))
@@ -5742,6 +5851,7 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +        let scope = UUID()
 +        var host = NativeCredentialSafariAutoFillTests.host
 +        var localAccount = "fixture"
++        var localAccountFullName = "Fixture Operator"
 +        var allowed = true
 +        var promptCurrent = true
 +        var now = Date(timeIntervalSince1970: 100)
@@ -5772,13 +5882,14 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +                    try consume("synthetic-entry-only")
 +                },
 +                now: { self.now },
-+                localAccount: { self.localAccount }))
++                localAccount: { self.localAccount },
++                localAccountFullName: { self.localAccountFullName }))
 +        }
 +
 +        init(passwordsUnlock: Bool = false) throws {
 +            self.bindings = try [NativeCredentialSafariAutoFillTests.binding()]
 +            self.nodes = passwordsUnlock
-+                ? NativeCredentialSafariAutoFillTests.passwordsUnlockForm()
++                ? NativeCredentialSafariAutoFillTests.passwordsUnlockForm(account: "Fixture Operator")
 +                : NativeCredentialSafariAutoFillTests.form()
 +        }
 +
@@ -5821,7 +5932,7 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +        #expect(h.secretReads == 1)
 +    }
 +
-+    @Test(arguments: ["host", "principal", "binding", "prompt", "scope"])
++    @Test(arguments: ["host", "principal", "full-name", "binding", "prompt", "scope"])
 +    func `Safari revalidates native and task authority after awaited opaque resolution`(_ change: String) async throws {
 +        let h = try Harness()
 +        let ref = try await h.observe()
@@ -5829,6 +5940,7 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +            switch change {
 +            case "host": h.host = "22222222-2222-4222-8222-222222222222"
 +            case "principal": h.localAccount = "other"
++            case "full-name": h.localAccountFullName = "Other"
 +            case "binding": h.bindings.removeAll()
 +            case "prompt": h.promptCurrent = false
 +            case "scope": h.allowed = false
@@ -5852,7 +5964,7 @@ index 0000000000000000000000000000000000000000..0f3037fc0f11c904833cd8b64be8e878
 +    func `Safari prompt refs retain native scope generation and expiry fences`(_ change: String) async throws {
 +        let h = try Harness()
 +        let ref = try await h.observe()
-+        if change == "expiry" { h.now.addTimeInterval(61) }
++        if change == "expiry" { h.now.addTimeInterval(121) }
 +        await #expect(throws: NativeCredentialError.stalePrompt) {
 +            try await h.fill(ref, scope: change == "scope" ? UUID() : nil, generation: change == "generation" ? 2 : 1)
 +        }
@@ -6174,10 +6286,10 @@ index be9be07c226c98d8c465bd18df8fafbc771e2040..7edb60c9ce23e311d0c87218489d0f5a
          self.y = y
 diff --git a/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb50a3166f
+index 0000000000000000000000000000000000000000..c3a44029b108fcef7a0ce59062d43f3769092f11
 --- /dev/null
 +++ b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,340 @@
 +#if os(macOS)
 +import Foundation
 +import IOKit
@@ -6342,6 +6454,7 @@ index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb
 +        accountEvidence: [String],
 +        purpose: NativeCredentialPromptPurpose? = nil,
 +        localAccount: String = NSUserName(),
++        localAccountFullName: String = "",
 +        selectedUsername: String? = nil) -> Bool
 +    {
 +        guard (try? self.validate()) != nil,
@@ -6353,13 +6466,22 @@ index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb
 +        guard purpose == observedPurpose,
 +              purpose != .unsupportedKeychainAccess, purpose != .unsupportedAdministratorAuthentication
 +        else { return false }
++        // The native owner supplies the current OS short/full-name pair. A
++        // display name identifies this recipient only when the saved binding
++        // still belongs to the current short-name principal.
++        let matchesLocalRecipient: (String?) -> Bool = { recipient in
++            guard self.kind == .macLogin, !localAccount.isEmpty,
++                  self.account.caseInsensitiveCompare(localAccount) == .orderedSame,
++                  let recipient
++            else { return false }
++            return recipient.caseInsensitiveCompare(self.account) == .orderedSame ||
++                (!localAccountFullName.isEmpty && recipient == localAccountFullName)
++        }
 +        if bundleID == "com.apple.AuthenticationServices.Helper" {
 +            // The provider account names a passkey requester, not the recipient
 +            // of the Mac password. Only the complete local-user instruction does.
-+            return purpose == .localPasskeyAuthentication && self.kind == .macLogin && !localAccount.isEmpty &&
-+                self.account.caseInsensitiveCompare(localAccount) == .orderedSame &&
-+                NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: accountEvidence)?
-+                .caseInsensitiveCompare(self.account) == .orderedSame
++            return purpose == .localPasskeyAuthentication && matchesLocalRecipient(
++                NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: accountEvidence))
 +        }
 +        if purpose == .localPasskeyAuthentication { return false }
 +        if bundleID == "com.apple.Safari" {
@@ -6370,9 +6492,8 @@ index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb
 +                  self.account.caseInsensitiveCompare(localAccount) == .orderedSame
 +            else { return false }
 +            if purpose == .autoFillAuthentication { return true }
-+            return purpose == .passwordsUnlockAuthentication &&
-+                NativeCredentialPromptPurpose.passwordsUnlockAccount(nativeEvidence: accountEvidence)?
-+                .caseInsensitiveCompare(self.account) == .orderedSame
++            return purpose == .passwordsUnlockAuthentication && matchesLocalRecipient(
++                NativeCredentialPromptPurpose.passwordsUnlockAccount(nativeEvidence: accountEvidence))
 +        }
 +        if purpose == .autoFillAuthentication || purpose == .passwordsUnlockAuthentication { return false }
 +        if case .administratorAuthentication = purpose {
@@ -6394,7 +6515,8 @@ index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb
 +        if bundleID == "com.apple.Passwords" {
 +            // The locked view supplies the complete account from its native
 +            // instruction, not surrounding text that might name another user.
-+            return accountEvidence.contains { self.account.caseInsensitiveCompare($0) == .orderedSame }
++            return purpose == .accountAuthentication && accountEvidence.count == 1 &&
++                matchesLocalRecipient(accountEvidence.first)
 +        }
 +        // Exact token boundaries prevent another account's suffix/display name
 +        // from authorizing this credential. Evidence comes from native AX only.
@@ -7718,10 +7840,10 @@ index 4420c7359e697e6b5da351e48011e9a1ac1e935a..87161ec22b85bada407cb508fee6b5e9
  Node plugins still validate their own settings before publishing commands, and
 diff --git a/docs/platforms/mac/native-credentials.md b/docs/platforms/mac/native-credentials.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa575d137b6
+index 0000000000000000000000000000000000000000..deb675ac4cbe2efd47ef0ede42af98ecb0186f6a
 --- /dev/null
 +++ b/docs/platforms/mac/native-credentials.md
-@@ -0,0 +1,289 @@
+@@ -0,0 +1,303 @@
 +---
 +summary: "Enter stored credentials into account-bound native macOS authentication prompts"
 +read_when:
@@ -7761,14 +7883,15 @@ index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa5
 +openclaw-mac credentials bind \
 +  --alias mac.example.password \
 +  --kind macLogin \
-+  --account 'Example User' \
++  --account exampleuser \
 +  --bundle com.apple.ScreenContinuity
 +
 +openclaw-mac credentials list
 +```
 +
-+Use the identity shown in the actual authentication prompt and the alias for that
-+account's existing credential. Enrollment records the current Mac's hardware
++Use the current Mac short username for a `macLogin` binding and the Apple account
++identity for an `appleAccount` binding, with that account's existing credential alias.
++Enrollment records the current Mac's hardware
 +identity automatically. Multiple `--bundle` options can authorize supported
 +prompt owners for the same account. The CLI never accepts or prints a password.
 +
@@ -7797,8 +7920,9 @@ index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa5
 +group and sheet to its window. A missing or unsupported direct `AXWindow`
 +attribute uses that same chain; a supplied relationship must match the sheet.
 +The captured group, sheet and window must all remain unchanged through entry.
-+The displayed local account, enrolled `macLogin` account and current Mac short
-+username must match in full. A **Sign in with** provider email does not authorize
++The enrolled `macLogin` account must match the current Mac short username. The
++native local-account instruction must name that short username or its exact
++current OS full name. A **Sign in with** provider email does not authorize
 +the Mac password. Add the helper explicitly to the existing binding while
 +retaining its other owners; upgrading does not expand enrollment.
 +
@@ -7816,13 +7940,15 @@ index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa5
 +**Other Passwords**. Its lock icon, exact locked heading and complete local-account
 +instruction must accompany the secure field in its native hosting group, with
 +**Unlock** and **Cancel** in the enclosing group of the same sheet. The displayed
-+account and enrolled `macLogin` account must both match the host's current short
-+username. Website fields and unrelated Safari sheets do not qualify.
++account must match the host's current short username or its exact current OS full
++name; the enrolled `macLogin` account remains the short username. Website fields
++and unrelated Safari sheets do not qualify.
 +
 +Apple Passwords supports the English locked view shown after **Use Password**.
 +Its lock heading, lock icon and account instruction must accompany a single
 +secure field in the same native group. The displayed account must match the
-+enrolled Mac login account in full. Add `com.apple.Passwords` explicitly to an
++current Mac short username or its exact current OS full name, while the enrolled
++Mac login account remains the current short username. Add `com.apple.Passwords` explicitly to an
 +existing binding while retaining its other intended owners; upgrading the app
 +does not expand existing bindings. This unlocks the app only: it does not
 +authorize entry into vault-item editors or provide a vault-item retrieval API.
@@ -7874,9 +8000,11 @@ index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa5
 +1. Call `computer` with `action: "credential_prompts"`, optionally filtering by
 +   `alias`, on the actual target Mac.
 +2. Select the result matching the requested account and current prompt. Each
-+   result contains the non-secret alias, account, kind, bundle ID and `promptRef`.
++   result contains the non-secret alias, account, kind, bundle ID, `promptRef`, and
++   the host-created `expiresAt` deadline.
 +3. Call `computer` with `action: "type_secret"`, that `alias`, and that exact
-+   `promptRef` in the same execution.
++   `promptRef` in the same execution as the next tool call. Use the chosen reference
++   immediately rather than performing unrelated actions before entry.
 +4. Observe the current prompt, submit through the appropriate ordinary control
 +   if necessary, and verify the resulting account/service state.
 +   Use **Always Allow** when persistent access is appropriate for the authorized
@@ -7890,9 +8018,17 @@ index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa5
 +metadata requires repair of that specific route rather than borrowing identity
 +from the request body.
 +
++For recognized native Passwords unlock and saved-passkey forms, the local account
++instruction may show the current user's full name. The host pairs `NSUserName()`
++with `NSFullUserName()` and accepts that exact full name only for the enrolled
++current short-name account. It captures and rechecks the pair through entry;
++provider account text and administrator username selections do not use this mapping.
++
 +The computer tool supplies its execution ID. Direct operator invocations must
 +also supply a current execution ID. Discovery replaces older prompt references
-+for that execution. An unused reference is single-use and expires after 60 seconds.
++for that execution. An unused reference is single-use and expires after 120 seconds,
++at the returned `expiresAt` deadline. If it expires, rediscover the current prompt
++and use the new reference; do not retry or renew the old one.
 +Once consumed, the admitted operation has a separate 120-second deadline, including
 +the helper's 90-second limit for sealed-app verification and secret resolution.
 +Current execution, binding and native field ownership are rechecked before entry.
@@ -117567,7 +117703,7 @@ index 74462891b54918e3ab98fd91f5a7a7d1548e9195..780704d8d19d3c7cee45affdb0804894
      const composed = await waitUntilCompleted({
        details: resultDetails(
 diff --git a/src/agents/tools/cron-tool.test.ts b/src/agents/tools/cron-tool.test.ts
-index dfe7764aeaabc4e5df43321375f6ea0765bd2828..c2a109c1b5d45dc0acc46faa545bef9be5266dcd 100644
+index dfe7764aeaabc4e5df43321375f6ea0765bd2828..0b5176978aaa071788df091c85c5256a0eb723a2 100644
 --- a/src/agents/tools/cron-tool.test.ts
 +++ b/src/agents/tools/cron-tool.test.ts
 @@ -37,7 +37,7 @@ describe("cron tool", () => {
@@ -117604,6 +117740,15 @@ index dfe7764aeaabc4e5df43321375f6ea0765bd2828..c2a109c1b5d45dc0acc46faa545bef9b
    it.each([true, false])(
      "warns against replacing known jobs after scoped failures (triggers=%s)",
      (triggersEnabled) => {
+@@ -948,7 +930,7 @@ describe("cron tool", () => {
+       // #137418 / #123982: pin the non-revealing recovery guidance delivered to
+       // the model, not a guarantee that every model will follow it.
+       expect(tool.description).toContain(
+-        "configured channel owner and Control UI administrator turns can list/get/update/run/remove any Gateway automation",
++        "configured channel owner and Control UI administrator turns can list/get/runs/update/run/remove any Gateway automation",
+       );
+       expect(tool.description).toContain(
+         "totals/counts and hasMore describe that scoped view, not global inventory",
 diff --git a/src/agents/tools/cron-tool.ts b/src/agents/tools/cron-tool.ts
 index 9211919282ce3fccdf51d2ed63ef69b4d986f97b..ab506b4d8c7ffd15120cb51dedc28e6136ad1a4e 100644
 --- a/src/agents/tools/cron-tool.ts
