@@ -15,17 +15,19 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current source reference is
-[`d71e963cbb70227d1174c9358b597b14a8cc9dfa`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
-Its native distribution is `cbfe84261b67e63909f3b302308d5a1fc9732373`;
+[`e5a517b72a078b4f43ed24c4d09703e8253f1e42`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`;
 the source trees differ only in the retained package YAML overlay.
-Gateway and Node retain distribution `798bbc585215b68e9fd10a2f921fc2f3498e7847`,
-build 613. Both signed614 companions passed complete installed inventories, live bundled-worker and native-cohort checks, protected-state preservation and normal paired reconnection.
-The Mini's own-agent run entered the existing enrolled credential through the
-opaque native route, pressed Unlock once and observed the unlocked Passwords
-picker. A separate fresh read-only continuation confirmed provider Home navigation with no login form. The own agent observed the company in its screenshot; independent review checked accessibility navigation, not omitted pixels.
-Historical606,607,613 installation records and earlier failures remain intact.
-Independent source reconstruction passed; final normal local checks and all five
-hosted jobs must qualify the final public revision.
+Gateway and Node now run that distribution, build 616. Native activation,
+independent same-generation loaded-source, health and protected-state checks passed.
+Both signed616 companions passed complete installed and retained rollback maps,
+live bundled-worker and native-cohort checks, selected-state preservation and
+normal paired reconnection. Credential authentication for build616 remains a
+separate acceptance check; no result is inferred from installation or reconnect.
+The complete prior614 companion and prior613 Gateway records, including their
+dated native-entry observations, older installation histories and earlier failures,
+remain intact. Independent current-source reconstruction passed; final normal
+local checks and all five hosted jobs must qualify the final public revision.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).

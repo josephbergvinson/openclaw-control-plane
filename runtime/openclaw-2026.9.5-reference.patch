@@ -492,10 +492,10 @@ index 0000000000000000000000000000000000000000..6bb0893be8b800c403a2d18d07950712
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc435ed484f
+index 0000000000000000000000000000000000000000..6bded516a55064419055f6f0d443010336a4c104
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialEntryService.swift
-@@ -0,0 +1,794 @@
+@@ -0,0 +1,896 @@
 +import AppKit
 +import ApplicationServices
 +import Darwin
@@ -908,9 +908,11 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +        var focusedOwnerBundleID: String?
 +        var focusedOwnerStatus: NativeCredentialDiscoveryDiagnostics.FocusedOwnerStatus?
 +        var discovery = try NativeCredentialPromptFocus.discover(frontmost: {
-+            // Safari admission requires the actual system-focused secure field,
-+            // not a password field found while inspecting its frontmost window.
-+            guard self.supports(app.bundleIdentifier), app.bundleIdentifier != "com.apple.Safari" else {
++            // Browser-hosted authentication requires the actual system-focused
++            // secure field, not a field found in a frontmost or background window.
++            guard self.supports(app.bundleIdentifier),
++                  !["com.apple.Safari", "com.apple.AuthenticationServices.Helper"].contains(app.bundleIdentifier ?? "")
++            else {
 +                return .init(prompts: [], diagnostics: .init(reason: .focusedWindowUnavailable))
 +            }
 +            return try self.discover(app, focus: .frontmostApplication, focusedField: nil)
@@ -991,6 +993,8 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +        guard let window = lookup.window else {
 +            return .init(prompts: [], diagnostics: windowDiagnostics)
 +        }
++        let hosted = bundleID == "com.apple.AuthenticationServices.Helper"
++            ? try self.hostedPasskey(app: app, field: focusedField, sheet: window) : nil
 +        let initial = try self.snapshot(window)
 +        let resolved = NativeCredentialPromptContext.resolve(initial.nodes, bundleID: bundleID)
 +        let secureFields = initial.nodes.indices.filter { initial.nodes[$0].isSecureField }
@@ -1012,6 +1016,14 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +        diagnostics.windowLookupElementPresent = windowDiagnostics.windowLookupElementPresent
 +        guard let prompt = resolved else { return .init(prompts: [], diagnostics: diagnostics) }
 +        let field = initial.elements[prompt.field]
++        if let hosted {
++            guard self.matchesHostedOwners(
++                initial.nodes,
++                field: prompt.field,
++                helperPID: app.processIdentifier,
++                hostPID: hosted.identity.pid)
++            else { throw NativeCredentialError.refused }
++        }
 +        if let focusedField, !CFEqual(focusedField, field) {
 +            return .init(prompts: [], diagnostics: diagnostics)
 +        }
@@ -1033,7 +1045,8 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +            let currentFocus = focusedField == nil ? nil : self.focusedSecureField()
 +            var focusedPID: pid_t = 0
 +            if let currentFocus { AXUIElementGetPid(currentFocus, &focusedPID) }
-+            guard AXUIElementGetPid(window, &windowPID) == .success, windowPID == app.processIdentifier,
++            guard AXUIElementGetPid(window, &windowPID) == .success,
++                  windowPID == (hosted?.identity.pid ?? app.processIdentifier),
 +                  AXUIElementGetPid(field, &fieldPID) == .success, fieldPID == app.processIdentifier,
 +                  let current = NSRunningApplication(processIdentifier: app.processIdentifier),
 +                  (try? NativeCredentialProcessIdentity.capture(app.processIdentifier)) == identity,
@@ -1055,6 +1068,17 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +                  CFEqual(currentSnapshot.elements[currentPrompt.context], context),
 +                  currentPrompt.evidence == evidence
 +            else { throw NativeCredentialError.stalePrompt }
++            if let hosted {
++                let currentHosted = try self.hostedPasskey(app: current, field: currentFocus, sheet: window)
++                guard currentHosted.identity == hosted.identity,
++                      CFEqual(currentHosted.group, hosted.group), CFEqual(currentHosted.window, hosted.window),
++                      self.matchesHostedOwners(
++                          currentSnapshot.nodes,
++                          field: currentPrompt.field,
++                          helperPID: app.processIdentifier,
++                          hostPID: hosted.identity.pid)
++                else { throw NativeCredentialError.stalePrompt }
++            }
 +            if let submit {
 +                guard let currentSubmit = currentPrompt.submit,
 +                      CFEqual(currentSnapshot.elements[currentSubmit], submit),
@@ -1143,41 +1167,115 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +            directResult = $0
 +        })
 +        if directWindow == nil, [.noValue, .attributeUnsupported].contains(directResult),
-+           focusedField != nil, bundleID == "com.apple.Safari"
++           focusedField != nil,
++           ["com.apple.Safari", "com.apple.AuthenticationServices.Helper"].contains(bundleID)
 +        {
 +            diagnostics.windowLookupSource = .focusedFieldParentChain
 +        }
-+        let window = NativeCredentialPromptWindow.resolve(
-+            direct: (window: directWindow, result: directResult),
-+            bundleID: bundleID,
-+            focusedField: focusedField,
-+            ownerPID: ownerPID,
-+            readAncestor: { element, budget in
-+                let deadline = ProcessInfo.processInfo.systemUptime + budget
-+                let read: (String) -> CFTypeRef? = { name in
-+                    let remaining = deadline - ProcessInfo.processInfo.systemUptime
-+                    guard remaining > 0 else { return nil }
-+                    AXUIElementSetMessagingTimeout(element, Float(min(remaining, 0.1)))
-+                    return self.attribute(element, name, onRead: { diagnostics.recordAXRead($0) })
-+                }
-+                var pid: pid_t = 0
-+                guard AXUIElementGetPid(element, &pid) == .success, pid == ownerPID,
-+                      let role = read(kAXRoleAttribute) as? String, !role.isEmpty
-+                else { return nil }
-+                let subrole = role == kAXTextFieldRole ? read(kAXSubroleAttribute) as? String : nil
-+                var parent: AXUIElement?
-+                if role != kAXWindowRole {
-+                    guard let value = read(kAXParentAttribute), CFGetTypeID(value) == AXUIElementGetTypeID()
-+                    else { return nil }
-+                    parent = unsafeDowncast(value, to: AXUIElement.self)
-+                }
-+                return .init(role: role, subrole: subrole, ownerPID: pid, parent: parent)
-+            },
-+            sameElement: { CFEqual($0, $1) },
-+            now: { ProcessInfo.processInfo.systemUptime })
++        let window: AXUIElement?
++        if bundleID == "com.apple.AuthenticationServices.Helper" {
++            let host = NSWorkspace.shared.frontmostApplication
++            window = host?.bundleIdentifier == "com.apple.Safari"
++                ? NativeCredentialPromptWindow.hostingWindow(
++                    direct: (window: directWindow, result: directResult),
++                    bundleID: bundleID,
++                    focusedField: focusedField,
++                    ownerPIDs: (field: ownerPID, host: host?.processIdentifier ?? 0),
++                    readAncestor: { element, budget in
++                        self.ancestor(element, budget: budget, ownerPID: nil, onRead: { diagnostics.recordAXRead($0) })
++                    },
++                    sameElement: { CFEqual($0, $1) },
++                    now: { ProcessInfo.processInfo.systemUptime })?.sheet : nil
++        } else {
++            window = NativeCredentialPromptWindow.resolve(
++                direct: (window: directWindow, result: directResult),
++                bundleID: bundleID,
++                focusedField: focusedField,
++                ownerPID: ownerPID,
++                readAncestor: { element, budget in
++                    self.ancestor(element, budget: budget, ownerPID: ownerPID, onRead: { diagnostics.recordAXRead($0) })
++                },
++                sameElement: { CFEqual($0, $1) },
++                now: { ProcessInfo.processInfo.systemUptime })
++        }
 +        diagnostics.windowLookupElementPresent = window != nil
 +        if diagnostics.axReadFailureCount > 0 { diagnostics.reason = .axMetadataUnavailable }
 +        return (window, diagnostics)
++    }
++
++    private struct HostedPasskey {
++        let identity: NativeCredentialProcessIdentity
++        let group: AXUIElement
++        let window: AXUIElement
++    }
++
++    private static func matchesHostedOwners(
++        _ nodes: [NativeCredentialPromptContext.Node], field: Int, helperPID: pid_t, hostPID: pid_t) -> Bool
++    {
++        nodes.indices.allSatisfy { nodes[$0].ownerPID == ($0 == field ? helperPID : hostPID) }
++    }
++
++    private static func hostedPasskey(
++        app: NSRunningApplication, field: AXUIElement?, sheet: AXUIElement) throws -> HostedPasskey
++    {
++        // Apple vends its secure field through Safari's native remote hosting
++        // view. Its bounded parent chain identifies the sheet even when the
++        // field's AXWindow attribute has no value. A supplied direct relationship
++        // must identify that same sheet;
++        // the helper's unrelated CG window cannot identify this password form.
++        var directResult = AXError.failure
++        guard app.bundleIdentifier == "com.apple.AuthenticationServices.Helper", let field,
++              let host = NSWorkspace.shared.frontmostApplication, host.bundleIdentifier == "com.apple.Safari"
++        else { throw NativeCredentialError.stalePrompt }
++        let hostPID = host.processIdentifier
++        let identity = try NativeCredentialProcessIdentity.capture(hostPID)
++        let directSheet = self.element(field, kAXWindowAttribute, onRead: { directResult = $0 })
++        guard let hosted = NativeCredentialPromptWindow.hostingWindow(
++            direct: (window: directSheet, result: directResult),
++            bundleID: app.bundleIdentifier ?? "",
++            focusedField: field,
++            ownerPIDs: (field: app.processIdentifier, host: hostPID),
++            readAncestor: { element, budget in self.ancestor(element, budget: budget, ownerPID: nil) },
++            sameElement: { CFEqual($0, $1) },
++            now: { ProcessInfo.processInfo.systemUptime }),
++            CFEqual(hosted.sheet, sheet)
++        else { throw NativeCredentialError.stalePrompt }
++        AXUIElementSetMessagingTimeout(hosted.group, 0.25)
++        guard let children = self.attribute(hosted.group, kAXChildrenAttribute) as? [AXUIElement],
++              children.count <= 512,
++              children.contains(where: { CFEqual($0, field) })
++        else { throw NativeCredentialError.stalePrompt }
++        try self.checkAppleCode(pid: hostPID, bundleID: "com.apple.Safari")
++        guard try NativeCredentialProcessIdentity.capture(hostPID) == identity,
++              NSWorkspace.shared.frontmostApplication?.processIdentifier == hostPID
++        else { throw NativeCredentialError.stalePrompt }
++        return HostedPasskey(identity: identity, group: hosted.group, window: hosted.window)
++    }
++
++    private static func ancestor(
++        _ element: AXUIElement, budget: TimeInterval, ownerPID: pid_t?, onRead: ((AXError) -> Void)? = nil)
++        -> NativeCredentialPromptWindow.Ancestor<AXUIElement>?
++    {
++        let deadline = ProcessInfo.processInfo.systemUptime + budget
++        let read: (String) -> CFTypeRef? = { name in
++            let remaining = deadline - ProcessInfo.processInfo.systemUptime
++            guard remaining > 0 else { return nil }
++            AXUIElementSetMessagingTimeout(element, Float(min(remaining, 0.1)))
++            return self.attribute(element, name, onRead: onRead)
++        }
++        var pid: pid_t = 0
++        guard AXUIElementGetPid(element, &pid) == .success, pid > 0, ownerPID == nil || pid == ownerPID,
++              let role = read(kAXRoleAttribute) as? String, !role.isEmpty
++        else { return nil }
++        let needsSubrole = role == kAXTextFieldRole || (ownerPID == nil && role == kAXGroupRole)
++        let subrole = needsSubrole ? read(kAXSubroleAttribute) as? String : nil
++        var parent: AXUIElement?
++        if role != kAXWindowRole {
++            guard let value = read(kAXParentAttribute), CFGetTypeID(value) == AXUIElementGetTypeID()
++            else { return nil }
++            parent = unsafeDowncast(value, to: AXUIElement.self)
++        }
++        return .init(role: role, subrole: subrole, ownerPID: pid, parent: parent)
 +    }
 +
 +    private static func checkAppleCode(pid: pid_t, bundleID: String) throws {
@@ -1267,6 +1365,9 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +            {
 +                defaultButtons.append((nodeIndex, unsafeDowncast(button, to: AXUIElement.self)))
 +            }
++            var observedPID: pid_t = 0
++            let ownerPID: pid_t? = AXUIElementGetPid(next, &observedPID) == .success && observedPID > 0
++                ? observedPID : nil
 +            elements.append(next)
 +            nodes.append(.init(
 +                parent: parent,
@@ -1274,7 +1375,8 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +                subrole: subrole,
 +                text: text,
 +                identifier: identifier,
-+                buttonTitle: buttonTitle))
++                buttonTitle: buttonTitle,
++                ownerPID: ownerPID))
 +            if let children = try read(kAXChildrenAttribute) as? [AXUIElement] {
 +                guard children.count <= 512 - queue.count else { throw NativeCredentialError.refused }
 +                queue.append(contentsOf: children.map { ($0, nodeIndex) })
@@ -1292,11 +1394,12 @@ index 0000000000000000000000000000000000000000..9d04c9db8fcc44948cea226fcaa5cdc4
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift b/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e659bc08da8
+index 0000000000000000000000000000000000000000..fd340c7315a2edeaaf47f09cbc24e6e461104b93
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,411 @@
 +import ApplicationServices
++import Darwin
 +import Foundation
 +import OpenClawKit
 +
@@ -1312,6 +1415,7 @@ index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e65
 +        var titleElement: Int?
 +        var buttonTitle: String?
 +        var defaultButton: Int?
++        var ownerPID: pid_t?
 +
 +        var isSecureField: Bool {
 +            self.role == kAXTextFieldRole && self.subrole == kAXSecureTextFieldSubrole
@@ -1375,6 +1479,7 @@ index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e65
 +            case .loginKeychainAuthentication: "login_keychain_authentication"
 +            case .autoFillAuthentication: "autofill_authentication"
 +            case .passwordsUnlockAuthentication: "passwords_unlock_authentication"
++            case .localPasskeyAuthentication: "local_passkey_authentication"
 +            }
 +            return [
 +                "contextKind": self.contextKind.rawValue,
@@ -1429,6 +1534,9 @@ index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e65
 +    static func resolve(_ nodes: [Node], bundleID: String) -> Form? {
 +        let fields = nodes.indices.filter { nodes[$0].isSecureField }
 +        guard fields.count == 1, let field = fields.first else { return nil }
++        if bundleID == "com.apple.AuthenticationServices.Helper" {
++            return self.localPasskeyContext(nodes, field: field)
++        }
 +        if bundleID == "com.apple.Passwords" {
 +            return self.passwordsUnlockContext(nodes, field: field)
 +        }
@@ -1621,6 +1729,43 @@ index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e65
 +        return Form(field: field, context: context, evidence: [account])
 +    }
 +
++    private static func localPasskeyContext(_ nodes: [Node], field: Int) -> Form? {
++        // Safari owns the native sheet and controls while Apple's passkey helper
++        // owns the secure field. The AX owner attests both signed incarnations;
++        // this policy preserves their exact same-form ownership relationship.
++        var ancestor: Int? = field
++        while let index = ancestor {
++            guard nodes[index].role != "AXWebArea" else { return nil }
++            ancestor = nodes[index].parent
++        }
++        guard let observed = self.context(nodes, field: field, bundleID: "com.apple.AuthenticationServices.Helper"),
++              nodes[observed.index].role == kAXSheetRole,
++              let group = nodes[field].parent, nodes[group].parent == observed.index,
++              nodes[group].role == kAXGroupRole, nodes[group].subrole == "AXHostingView",
++              let fieldPID = nodes[field].ownerPID, fieldPID > 0,
++              let hostPID = nodes[group].ownerPID, hostPID > 0, hostPID != fieldPID,
++              observed.members.allSatisfy({ nodes[$0].ownerPID == hostPID }),
++              !observed.members.contains(where: {
++                  [kAXTextFieldRole, kAXTextAreaRole].contains(nodes[$0].role)
++              })
++        else { return nil }
++        let siblings = observed.members.filter { nodes[$0].parent == group }
++        let labels = siblings.filter { nodes[$0].role == kAXStaticTextRole }.flatMap { nodes[$0].text }
++        guard siblings.contains(where: { nodes[$0].role == kAXImageRole && nodes[$0].identifier == "lock.fill" }),
++              NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: labels) != nil
++        else { return nil }
++        let controls = observed.members.filter { nodes[$0].role == kAXButtonRole }
++        guard controls.count == 2, controls.allSatisfy({ nodes[$0].parent == group }),
++              let submit = controls.first(where: { nodes[$0].buttonTitle == "Unlock" }),
++              controls.contains(where: { nodes[$0].buttonTitle == "Cancel" })
++        else { return nil }
++        let evidence = observed.members.flatMap { nodes[$0].text }.sorted()
++        guard NativeCredentialPromptPurpose.resolve(nativeEvidence: evidence) == .localPasskeyAuthentication else {
++            return nil
++        }
++        return Form(field: field, context: observed.index, evidence: evidence, submit: submit)
++    }
++
 +    private static func safariPasswordsUnlockContext(_ nodes: [Node], field: Int) -> Form? {
 +        var ancestor: Int? = field
 +        while let index = ancestor {
@@ -1666,10 +1811,10 @@ index 0000000000000000000000000000000000000000..a4c46237127c15f97eccced1a6dd5e65
 +}
 diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialPromptWindow.swift b/apps/macos/Sources/OpenClaw/NativeCredentialPromptWindow.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..20be320e42bd9580388c139d342eef228e0783bf
+index 0000000000000000000000000000000000000000..c584aa28546937c9d05c050b01b48f573b2efacc
 --- /dev/null
 +++ b/apps/macos/Sources/OpenClaw/NativeCredentialPromptWindow.swift
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,107 @@
 +import ApplicationServices
 +import Darwin
 +import Foundation
@@ -1683,6 +1828,63 @@ index 0000000000000000000000000000000000000000..20be320e42bd9580388c139d342eef22
 +        let subrole: String?
 +        let ownerPID: pid_t
 +        let parent: Element?
++    }
++
++    struct Hosted<Element> {
++        let group: Element
++        let sheet: Element
++        let window: Element
++    }
++
++    static func hostingWindow<Element>(
++        direct: (window: Element?, result: AXError),
++        bundleID: String,
++        focusedField: Element?,
++        ownerPIDs: (field: pid_t, host: pid_t),
++        readAncestor: (Element, TimeInterval) -> Ancestor<Element>?,
++        sameElement: (Element, Element) -> Bool,
++        now: () -> TimeInterval) -> Hosted<Element>?
++    {
++        let validDirect = direct.result == .success && direct.window != nil
++        let missingDirect = direct.window == nil && [.noValue, .attributeUnsupported].contains(direct.result)
++        guard validDirect || missingDirect,
++              bundleID == "com.apple.AuthenticationServices.Helper", let focusedField,
++              ownerPIDs.field > 0, ownerPIDs.host > 0, ownerPIDs.field != ownerPIDs.host
++        else { return nil }
++        let deadline = now() + 1
++        var current = focusedField
++        var visited: [Element] = []
++        var group: Element?
++        var sheet: Element?
++        for index in 0..<16 {
++            let remaining = deadline - now()
++            guard remaining > 0, !visited.contains(where: { sameElement($0, current) }),
++                  let ancestor = readAncestor(current, remaining), ancestor.role != "AXWebArea", now() < deadline
++            else { return nil }
++            visited.append(current)
++            if index == 0 {
++                guard ancestor.ownerPID == ownerPIDs.field, ancestor.role == kAXTextFieldRole,
++                      ancestor.subrole == kAXSecureTextFieldSubrole
++                else { return nil }
++            } else {
++                guard ancestor.ownerPID == ownerPIDs.host else { return nil }
++                if index == 1 {
++                    guard ancestor.role == kAXGroupRole, ancestor.subrole == "AXHostingView" else { return nil }
++                    group = current
++                } else if index == 2 {
++                    guard ancestor.role == kAXSheetRole,
++                          direct.window.map({ sameElement(current, $0) }) ?? true
++                    else { return nil }
++                    sheet = current
++                } else if ancestor.role == kAXWindowRole {
++                    guard let group, let sheet else { return nil }
++                    return Hosted(group: group, sheet: sheet, window: current)
++                }
++            }
++            guard let parent = ancestor.parent else { return nil }
++            current = parent
++        }
++        return nil
 +    }
 +
 +    static func resolve<Element>(
@@ -4092,6 +4294,298 @@ index 0000000000000000000000000000000000000000..8f3eb1fe9bb7979ac51f95459897b4f8
 +        #expect(binding.alias == "mac.fixture.password")
 +    }
 +}
+diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..570653e7905e64733ab2160804ef5af04b49a61b
+--- /dev/null
++++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPasskeyTests.swift
+@@ -0,0 +1,286 @@
++import Foundation
++import OpenClawKit
++import Testing
++@testable import OpenClaw
++@testable import OpenClawMacCLI
++
++/// Synthetic native metadata and injected entry only; no AX, Keychain, process,
++/// app, preferences, Gateway, or credential retrieval calls.
++@MainActor
++struct NativeCredentialPasskeyTests {
++    private static let host = "11111111-1111-4111-8111-111111111111"
++    private static let helper = "com.apple.AuthenticationServices.Helper"
++    private static let existingOwners = [
++        "com.apple.SecurityAgent", "com.apple.LocalAuthentication.UIAgent", "com.apple.Passwords",
++        "com.apple.ScreenContinuity", "com.apple.Safari",
++    ]
++
++    private static func form(account: String = "fixture") -> [NativeCredentialPromptContext.Node] {
++        // The helper owns only the secure field; Safari owns the native sheet,
++        // immediate hosting group, noneditable instructions and actual buttons.
++        [
++            .init(parent: nil, role: "AXSheet", subrole: nil, text: [], ownerPID: 43),
++            .init(parent: 0, role: "AXGroup", subrole: "AXHostingView", text: [], ownerPID: 43),
++            .init(parent: 1, role: "AXImage", subrole: nil, text: ["Lock"], identifier: "lock.fill", ownerPID: 43),
++            .init(parent: 1, role: "AXImage", subrole: nil, text: [], ownerPID: 43),
++            .init(
++                parent: 1, role: "AXStaticText", subrole: nil,
++                text: ["Sign in with “fixture@example.com”."], ownerPID: 43),
++            .init(
++                parent: 1, role: "AXStaticText", subrole: nil,
++                text: ["Enter the computer account password for the user “\(account)”."], ownerPID: 43),
++            .init(parent: 1, role: "AXTextField", subrole: "AXSecureTextField", text: [], ownerPID: 42),
++            .init(parent: 1, role: "AXButton", subrole: nil, text: ["Unlock"], buttonTitle: "Unlock", ownerPID: 43),
++            .init(parent: 1, role: "AXButton", subrole: nil, text: ["Cancel"], buttonTitle: "Cancel", ownerPID: 43),
++        ]
++    }
++
++    private static func binding(owners: [String]? = nil) throws -> NativeCredentialBinding {
++        try .init(
++            alias: "mac.fixture.password", kind: .macLogin, account: "fixture", hostID: self.host,
++            bundleIDs: owners ?? self.existingOwners + [self.helper])
++    }
++
++    @Test func `hosted passkey form binds the local computer account rather than the provider email`() throws {
++        let nodes = Self.form()
++        let form = try #require(NativeCredentialPromptContext.resolve(nodes, bundleID: Self.helper))
++        #expect(form.field == 6)
++        #expect(form.context == 0)
++        #expect(form.submit == 7)
++        #expect(form.username?.field == nil)
++        let purpose = NativeCredentialPromptPurpose.resolve(nativeEvidence: form.evidence)
++        #expect(purpose != .accountAuthentication)
++        #expect(purpose != .passwordsUnlockAuthentication)
++        #expect(NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: form.evidence) == "fixture")
++        let binding = try Self.binding()
++        #expect(binding.authorizes(
++            hostID: Self.host, bundleID: Self.helper, accountEvidence: form.evidence,
++            purpose: purpose, localAccount: "fixture"))
++        let diagnostics = NativeCredentialPromptContext.diagnostics(
++            nodes, bundleID: Self.helper, resolved: true, axReadFailureCount: 0, focusedSecureFieldMatches: true)
++        #expect(diagnostics.formContext?.purpose == purpose)
++        #expect(diagnostics.observedSecureFieldCount == 1)
++    }
++
++    @Test(arguments: [
++        "web", "window", "hosting", "field-owner", "field-metadata", "host-metadata", "sheet-owner",
++        "control-owner", "nonsecure", "lock", "instruction-outside", "instruction-sibling", "cancel-role",
++        "unlock-role",
++        "unlock-outside", "extra-button", "extra-editor", "second-secure", "competing-account",
++    ])
++    func `passkey form cannot borrow identity controls or process ownership`(_ change: String) {
++        var nodes = Self.form()
++        switch change {
++        case "web": nodes[1] = .init(parent: 0, role: "AXWebArea", subrole: nil, text: [], ownerPID: 43)
++        case "window": nodes[0] = .init(parent: nil, role: "AXWindow", subrole: "AXDialog", text: [], ownerPID: 43)
++        case "hosting": nodes[1] = .init(parent: 0, role: "AXGroup", subrole: nil, text: [], ownerPID: 43)
++        case "field-owner": nodes[6].ownerPID = 43
++        case "field-metadata": nodes[6].ownerPID = nil
++        case "host-metadata": nodes[1].ownerPID = nil
++        case "sheet-owner": nodes[0].ownerPID = 44
++        case "control-owner": nodes[7].ownerPID = 42
++        case "nonsecure":
++            nodes[6] = .init(parent: 1, role: "AXTextField", subrole: nil, text: [], ownerPID: 42)
++        case "lock": nodes[2].identifier = "key.fill"
++        case "instruction-outside":
++            nodes[5] = .init(parent: nil, role: "AXStaticText", subrole: nil, text: nodes[5].text, ownerPID: 43)
++        case "instruction-sibling":
++            nodes.append(.init(parent: 0, role: "AXGroup", subrole: "AXHostingView", text: [], ownerPID: 43))
++            nodes[5] = .init(parent: 9, role: "AXStaticText", subrole: nil, text: nodes[5].text, ownerPID: 43)
++        case "cancel-role":
++            nodes[8] = .init(parent: 1, role: "AXStaticText", subrole: nil, text: ["Cancel"], ownerPID: 43)
++        case "unlock-role":
++            nodes[7] = .init(parent: 1, role: "AXStaticText", subrole: nil, text: ["Unlock"], ownerPID: 43)
++        case "unlock-outside":
++            nodes[7] = .init(
++                parent: nil,
++                role: "AXButton",
++                subrole: nil,
++                text: ["Unlock"],
++                buttonTitle: "Unlock",
++                ownerPID: 43)
++        case "extra-button": nodes.append(nodes[8])
++        case "extra-editor": nodes.append(.init(parent: 1, role: "AXTextField", subrole: nil, text: [], ownerPID: 43))
++        case "second-secure": nodes.append(nodes[6])
++        case "competing-account":
++            nodes.append(.init(
++                parent: 1,
++                role: "AXStaticText",
++                subrole: nil,
++                text: ["Enter the computer account password for the user “other”."],
++                ownerPID: 43))
++        default: Issue.record("Unknown synthetic passkey variant")
++        }
++        #expect(NativeCredentialPromptContext.resolve(nodes, bundleID: Self.helper) == nil)
++    }
++
++    @Test(arguments: [
++        "Enter an administrator's name and password to allow this.",
++        "To allow this, enter the “login” keychain password.",
++        "Enter the computer account password for another user.",
++    ])
++    func `passkey evidence rejects competing or unsupported instructions`(_ instruction: String) throws {
++        var nodes = Self.form()
++        nodes.append(.init(parent: 1, role: "AXStaticText", subrole: nil, text: [instruction], ownerPID: 43))
++        #expect(NativeCredentialPromptContext.resolve(nodes, bundleID: Self.helper) == nil)
++        let valid = try #require(NativeCredentialPromptContext.resolve(Self.form(), bundleID: Self.helper))
++        #expect(try !(Self.binding()).authorizes(
++            hostID: Self.host, bundleID: Self.helper, accountEvidence: valid.evidence + [instruction],
++            localAccount: "fixture"))
++    }
++
++    @Test(arguments: ["host", "principal", "native-account", "provider-only", "enrollment", "owner", "purpose"])
++    func `local passkey authority stays on the enrolled host principal recipient and purpose`(_ change: String) throws {
++        let form = try #require(NativeCredentialPromptContext.resolve(
++            Self.form(account: change == "native-account" ? "fixture@example.com" : "fixture"),
++            bundleID: Self.helper))
++        let binding = try Self.binding(owners: change == "enrollment" ? Self.existingOwners : nil)
++        let evidence = change == "provider-only" ? ["Sign in with “fixture”.", "Unlock", "Cancel"] : form.evidence
++        #expect(!binding.authorizes(
++            hostID: change == "host" ? "22222222-2222-4222-8222-222222222222" : Self.host,
++            bundleID: change == "owner" ? "com.apple.SecurityAgent" : Self.helper,
++            accountEvidence: evidence,
++            purpose: change == "purpose" ? .accountAuthentication : nil,
++            localAccount: change == "principal" ? "other" : "fixture"))
++    }
++
++    @Test func `helper enrollment preserves all prior explicitly bound owners`() throws {
++        var args = ["--alias", "mac.fixture.password", "--kind", "macLogin", "--account", "fixture"]
++        for owner in Self.existingOwners + [Self.helper] {
++            args += ["--bundle", owner]
++        }
++        let binding = try parseNativeCredentialBinding(args, hostID: Self.host)
++        #expect(binding.bundleIDs == Self.existingOwners + [Self.helper])
++        #expect(binding.account == "fixture")
++        #expect(binding.hostID == Self.host)
++        let form = try #require(NativeCredentialPromptContext.resolve(Self.form(), bundleID: Self.helper))
++        #expect(try !(Self.binding(owners: Self.existingOwners)).authorizes(
++            hostID: Self.host, bundleID: Self.helper, accountEvidence: form.evidence, localAccount: "fixture"))
++        #expect(throws: NativeCredentialError.invalidBinding) {
++            try NativeCredentialBinding(
++                alias: "apple.fixture.password", kind: .appleAccount, account: "fixture",
++                hostID: Self.host, bundleIDs: [Self.helper])
++        }
++    }
++
++    @MainActor
++    private final class Harness {
++        let scope = UUID()
++        var host = NativeCredentialPasskeyTests.host
++        var localAccount = "fixture"
++        var allowed = true
++        var now = Date(timeIntervalSince1970: 100)
++        var secretReads = 0
++        var entries = 0
++        var duringResolution: (() async -> Void)?
++        var nodes = NativeCredentialPasskeyTests.form()
++        var bindings: [NativeCredentialBinding]
++        lazy var service = self.makeService()
++
++        init() throws {
++            self.bindings = try [NativeCredentialPasskeyTests.binding()]
++        }
++
++        private func makeService() -> NativeCredentialEntryService {
++            NativeCredentialEntryService(environment: .init(
++                hostID: { self.host }, bindings: { self.bindings },
++                prompts: {
++                    let form = try #require(NativeCredentialPromptContext.resolve(
++                        self.nodes, bundleID: NativeCredentialPasskeyTests.helper))
++                    let owners = self.nodes.map(\.ownerPID)
++                    return .init(prompts: [.init(
++                        bundleID: NativeCredentialPasskeyTests.helper, accountEvidence: form.evidence,
++                        validate: {
++                            guard let current = NativeCredentialPromptContext.resolve(
++                                self.nodes, bundleID: NativeCredentialPasskeyTests.helper),
++                                current.field == form.field, current.context == form.context,
++                                current.submit == form.submit, current.evidence == form.evidence,
++                                self.nodes.map(\.ownerPID) == owners
++                            else { throw NativeCredentialError.stalePrompt }
++                        }, setSecret: { _ in self.entries += 1 })], diagnostics: .init(reason: .bindingUnmatched))
++                }, withSecret: { _, consume in
++                    self.secretReads += 1
++                    await self.duringResolution?()
++                    try consume("synthetic-entry-only")
++                }, now: { self.now }, localAccount: { self.localAccount }))
++        }
++
++        func call(_ params: OpenClawComputerActParams, scope: UUID? = nil, generation: UInt64 = 1) async throws
++            -> OpenClawComputerActResult
++        {
++            try await self.service.perform(params, scope: scope ?? self.scope, generation: generation) {
++                guard self.allowed else { throw CancellationError() }
++            }
++        }
++
++        func observe() async throws -> String {
++            let result = try await self.call(.init(action: .credentialPrompts))
++            let rows = try #require(result.details?["credentialPrompts"]?.value as? [[String: String]])
++            #expect(self.secretReads == 0)
++            return try #require(rows.first?["promptRef"])
++        }
++
++        func fill(_ ref: String, scope: UUID? = nil, generation: UInt64 = 1) async throws -> OpenClawComputerActResult {
++            try await self.call(
++                .init(action: .typeSecret, alias: "mac.fixture.password", promptRef: ref),
++                scope: scope, generation: generation)
++        }
++    }
++
++    @Test func `hosted passkey opaque entry is single use and does not claim authentication`() async throws {
++        let h = try Harness()
++        let ref = try await h.observe()
++        let result = try await h.fill(ref)
++        #expect(h.secretReads == 1)
++        #expect(h.entries == 1)
++        #expect(result.details?["authenticationVerified"]?.value as? Bool == false)
++        let encoded = try #require(String(data: JSONEncoder().encode(result), encoding: .utf8))
++        #expect(!encoded.contains("synthetic-entry-only"))
++        await #expect(throws: NativeCredentialError.stalePrompt) { try await h.fill(ref) }
++        #expect(h.secretReads == 1)
++    }
++
++    @Test(arguments: ["host", "principal", "binding", "field-owner", "host-owner", "native-account", "scope"])
++    func `passkey revalidates both native owners and authority after resolution`(_ change: String) async throws {
++        let h = try Harness()
++        let ref = try await h.observe()
++        h.duringResolution = {
++            switch change {
++            case "host": h.host = "22222222-2222-4222-8222-222222222222"
++            case "principal": h.localAccount = "other"
++            case "binding": h.bindings.removeAll()
++            case "field-owner": h.nodes[6].ownerPID = 44
++            case "host-owner":
++                for index in h.nodes.indices where index != 6 {
++                    h.nodes[index].ownerPID = 44
++                }
++            case "native-account": h.nodes = NativeCredentialPasskeyTests.form(account: "other")
++            case "scope": h.allowed = false
++            default: Issue.record("Unknown synthetic post-await variant")
++            }
++        }
++        if ["field-owner", "host-owner", "native-account"].contains(change) {
++            await #expect(throws: NativeCredentialError.stalePrompt) { try await h.fill(ref) }
++        } else if change == "scope" {
++            await #expect(throws: CancellationError.self) { try await h.fill(ref) }
++        } else {
++            await #expect(throws: NativeCredentialError.refused) { try await h.fill(ref) }
++        }
++        #expect(h.secretReads == 1)
++        #expect(h.entries == 0)
++        h.allowed = true
++        await #expect(throws: NativeCredentialError.stalePrompt) { try await h.fill(ref) }
++    }
++
++    @Test(arguments: ["scope", "generation", "expiry"])
++    func `hosted passkey unused references retain task generation and expiry fences`(_ change: String) async throws {
++        let h = try Harness()
++        let ref = try await h.observe()
++        if change == "expiry" { h.now.addTimeInterval(61) }
++        await #expect(throws: NativeCredentialError.stalePrompt) {
++            try await h.fill(ref, scope: change == "scope" ? UUID() : nil, generation: change == "generation" ? 2 : 1)
++        }
++        #expect(h.secretReads == 0)
++        #expect(h.entries == 0)
++    }
++}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPromptDiagnosticsTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPromptDiagnosticsTests.swift
 new file mode 100644
 index 0000000000000000000000000000000000000000..ebfbff44d80d8716c9e59da6667b7fd46c263563
@@ -4393,10 +4887,10 @@ index 0000000000000000000000000000000000000000..ebfbff44d80d8716c9e59da6667b7fd4
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPromptWindowTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPromptWindowTests.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..165f49057520a11dcf6c089be01749222112152e
+index 0000000000000000000000000000000000000000..cc00ca2a5656bbcfc958323303ade4015689fe23
 --- /dev/null
 +++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialPromptWindowTests.swift
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,367 @@
 +import ApplicationServices
 +import Darwin
 +import Foundation
@@ -4554,6 +5048,214 @@ index 0000000000000000000000000000000000000000..165f49057520a11dcf6c089be0174922
 +        }
 +        #expect(captured == 3)
 +        #expect(Self.locate(changed) != captured)
++    }
++
++    private static func hostedChain() -> [Int: Ancestor] {
++        [
++            0: .init(role: "AXTextField", subrole: "AXSecureTextField", ownerPID: 42, parent: 1),
++            1: .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 43, parent: 2),
++            2: .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 3),
++            3: .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 4),
++            4: .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 5),
++            5: .init(role: "AXWindow", subrole: "AXStandardWindow", ownerPID: 43, parent: nil),
++        ]
++    }
++
++    private static func locateHosted(
++        _ nodes: [Int: Ancestor],
++        direct: Int? = 2,
++        result: AXError = .success,
++        bundle: String = "com.apple.AuthenticationServices.Helper",
++        field: Int? = 0,
++        ownerPID: pid_t = 42,
++        hostPID: pid_t = 43,
++        read: ((Int, TimeInterval) -> Ancestor?)? = nil,
++        now: () -> TimeInterval = { 100 }) -> NativeCredentialPromptWindow.Hosted<Int>?
++    {
++        NativeCredentialPromptWindow.hostingWindow(
++            direct: (window: direct, result: result),
++            bundleID: bundle,
++            focusedField: field,
++            ownerPIDs: (field: ownerPID, host: hostPID),
++            readAncestor: read ?? { element, _ in nodes[element] },
++            sameElement: { $0 == $1 },
++            now: now)
++    }
++
++    @Test(arguments: [AXError.success, .noValue, .attributeUnsupported])
++    func `helper field captures its actual Safari hosting group sheet and outer window`(_ error: AXError) {
++        var reads: [Int] = []
++        let nodes = Self.hostedChain()
++        let relationship = Self.locateHosted(
++            nodes,
++            direct: error == .success ? 2 : nil,
++            result: error,
++            read: { element, budget in
++                #expect(budget > 0 && budget <= 1)
++                reads.append(element)
++                return nodes[element]
++            })
++        #expect(relationship?.group == 1)
++        #expect(relationship?.sheet == 2)
++        #expect(relationship?.window == 5)
++        #expect(reads == [0, 1, 2, 3, 4, 5])
++    }
++
++    @Test(arguments: [
++        "missing-direct", "failed-direct", "disabled", "not-implemented", "generic-failure", "invalid-element",
++        "no-value-with-window",
++        "unsupported-with-window",
++    ])
++    func `hosted lookup rejects inconsistent or unsafe direct AX results without reading parents`(_ change: String) {
++        var reads = 0
++        let result: AXError = switch change {
++        case "failed-direct": .cannotComplete
++        case "disabled": .apiDisabled
++        case "not-implemented": .notImplemented
++        case "generic-failure": .failure
++        case "invalid-element": .invalidUIElement
++        case "no-value-with-window": .noValue
++        case "unsupported-with-window": .attributeUnsupported
++        default: .success
++        }
++        let direct: Int? = [
++            "missing-direct", "failed-direct", "disabled", "not-implemented", "generic-failure", "invalid-element",
++        ].contains(change) ? nil : 2
++        let window = Self.locateHosted(
++            Self.hostedChain(),
++            direct: direct,
++            result: result,
++            read: { element, _ in
++                reads += 1
++                return Self.hostedChain()[element]
++            })
++        #expect(window == nil)
++        #expect(reads == 0)
++    }
++
++    @Test(arguments: [
++        "missing-field", "wrong-bundle", "missing-owner", "missing-host", "same-owner",
++    ], [AXError.success, .noValue, .attributeUnsupported])
++    func `hosted direct and parent lookup require the same focused field and process identities`(
++        _ change: String,
++        _ error: AXError)
++    {
++        var reads = 0
++        let relationship = Self.locateHosted(
++            Self.hostedChain(),
++            direct: error == .success ? 2 : nil,
++            result: error,
++            bundle: change == "wrong-bundle" ? "com.apple.Safari" : "com.apple.AuthenticationServices.Helper",
++            field: change == "missing-field" ? nil : 0,
++            ownerPID: change == "missing-owner" ? 0 : 42,
++            hostPID: change == "missing-host" ? 0 : change == "same-owner" ? 42 : 43,
++            read: { element, _ in
++                reads += 1
++                return Self.hostedChain()[element]
++            })
++        #expect(relationship == nil)
++        #expect(reads == 0)
++    }
++
++    @Test(arguments: [
++        "nonsecure", "nonfield", "field-owner", "group-owner", "group-role", "group-subrole", "sheet-owner",
++        "sheet-role", "wrong-direct-sheet", "ancestor-owner", "web-area", "window-owner", "missing-parent",
++        "metadata-failure", "cycle", "depth-budget", "time-budget", "read-time-budget",
++    ], [AXError.success, .noValue, .attributeUnsupported])
++    func `hosted lookup rejects unrelated malformed or unbounded relationships`(_ change: String, _ error: AXError) {
++        var nodes = Self.hostedChain()
++        switch change {
++        case "nonsecure":
++            nodes[0] = .init(role: "AXTextField", subrole: nil, ownerPID: 42, parent: 1)
++        case "nonfield":
++            nodes[0] = .init(role: "AXButton", subrole: "AXSecureTextField", ownerPID: 42, parent: 1)
++        case "field-owner":
++            nodes[0] = .init(role: "AXTextField", subrole: "AXSecureTextField", ownerPID: 43, parent: 1)
++        case "group-owner":
++            nodes[1] = .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 44, parent: 2)
++        case "group-role":
++            nodes[1] = .init(role: "AXSheet", subrole: "AXHostingView", ownerPID: 43, parent: 2)
++        case "group-subrole":
++            nodes[1] = .init(role: "AXGroup", subrole: nil, ownerPID: 43, parent: 2)
++        case "sheet-owner":
++            nodes[2] = .init(role: "AXSheet", subrole: nil, ownerPID: 44, parent: 3)
++        case "sheet-role":
++            nodes[2] = .init(role: "AXWindow", subrole: nil, ownerPID: 43, parent: 3)
++        case "ancestor-owner":
++            nodes[3] = .init(role: "AXSheet", subrole: nil, ownerPID: 44, parent: 4)
++        case "web-area":
++            nodes[3] = .init(role: "AXWebArea", subrole: nil, ownerPID: 43, parent: 4)
++        case "window-owner":
++            nodes[5] = .init(role: "AXWindow", subrole: "AXStandardWindow", ownerPID: 42, parent: nil)
++        case "missing-parent":
++            nodes[1] = .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 43, parent: nil)
++        case "metadata-failure":
++            nodes.removeValue(forKey: 3)
++        case "cycle":
++            nodes[4] = .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 2)
++        case "depth-budget":
++            for index in 3...15 {
++                nodes[index] = .init(role: "AXGroup", subrole: nil, ownerPID: 43, parent: index + 1)
++            }
++            nodes[16] = .init(role: "AXWindow", subrole: "AXStandardWindow", ownerPID: 43, parent: nil)
++        default:
++            break
++        }
++        var clock: TimeInterval = 100
++        let window = Self.locateHosted(
++            nodes,
++            direct: change == "wrong-direct-sheet" ? 3 : error == .success ? 2 : nil,
++            result: error,
++            read: { element, _ in
++                if change == "read-time-budget" { clock += 1 }
++                return nodes[element]
++            }, now: {
++                defer { if change == "time-budget" { clock += 1 } }
++                return clock
++            })
++        #expect(window == nil)
++    }
++
++    @Test(arguments: ["outer-window", "direct-sheet"])
++    func `hosted rediscovery does not preserve a replaced captured relationship`(_ change: String) {
++        let captured = Self.locateHosted(Self.hostedChain())
++        var changed = Self.hostedChain()
++        if change == "outer-window" {
++            changed[4] = .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 6)
++            changed[6] = .init(role: "AXWindow", subrole: "AXStandardWindow", ownerPID: 43, parent: nil)
++        } else {
++            changed[1] = .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 43, parent: 6)
++            changed[6] = .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 3)
++        }
++        #expect(captured?.window == 5)
++        #expect(Self.locateHosted(changed)?.window != captured?.window)
++    }
++
++    @Test(arguments: ["group", "sheet", "outer-window"], [AXError.noValue, .attributeUnsupported])
++    func `parent lookup captures replacement identities even when the outer window stays unchanged`(
++        _ change: String,
++        _ error: AXError)
++    {
++        let captured = Self.locateHosted(Self.hostedChain(), direct: nil, result: error)
++        var changed = Self.hostedChain()
++        switch change {
++        case "group":
++            changed[0] = .init(role: "AXTextField", subrole: "AXSecureTextField", ownerPID: 42, parent: 6)
++            changed[6] = .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 43, parent: 2)
++        case "sheet":
++            changed[1] = .init(role: "AXGroup", subrole: "AXHostingView", ownerPID: 43, parent: 6)
++            changed[6] = .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 3)
++        default:
++            changed[4] = .init(role: "AXSheet", subrole: nil, ownerPID: 43, parent: 6)
++            changed[6] = .init(role: "AXWindow", subrole: "AXStandardWindow", ownerPID: 43, parent: nil)
++        }
++        let rediscovered = Self.locateHosted(changed, direct: nil, result: error)
++        #expect(captured?.group == 1)
++        #expect(captured?.sheet == 2)
++        #expect(captured?.window == 5)
++        #expect(rediscovered?.group == (change == "group" ? 6 : 1))
++        #expect(rediscovered?.sheet == (change == "sheet" ? 6 : 2))
++        #expect(rediscovered?.window == (change == "outer-window" ? 6 : 5))
 +    }
 +}
 diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialResolverTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialResolverTests.swift
@@ -5472,10 +6174,10 @@ index be9be07c226c98d8c465bd18df8fafbc771e2040..7edb60c9ce23e311d0c87218489d0f5a
          self.y = y
 diff --git a/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..e1a72ea5f9fddc57c4d5762ba1dd3bf4f7e82f83
+index 0000000000000000000000000000000000000000..9ac7cf2bfe4b8d91513b93e7de3ecdcb50a3166f
 --- /dev/null
 +++ b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,330 @@
 +#if os(macOS)
 +import Foundation
 +import IOKit
@@ -5491,6 +6193,23 @@ index 0000000000000000000000000000000000000000..e1a72ea5f9fddc57c4d5762ba1dd3bf4
 +    case loginKeychainAuthentication
 +    case autoFillAuthentication
 +    case passwordsUnlockAuthentication
++    case localPasskeyAuthentication
++
++    public static func localPasskeyAccount(nativeEvidence: [String]) -> String? {
++        let prefix = "Enter the computer account password for the user “"
++        let suffix = "”."
++        let instructions = Set(nativeEvidence.filter { $0.hasPrefix("Enter the computer account password") })
++        guard instructions.count == 1, let instruction = instructions.first,
++              instruction.hasPrefix(prefix), instruction.hasSuffix(suffix)
++        else { return nil }
++        let account = String(instruction.dropFirst(prefix.count).dropLast(suffix.count))
++        guard !account.isEmpty, account.count <= 320,
++              account == account.trimmingCharacters(in: .whitespacesAndNewlines),
++              !account.contains("“"), !account.contains("”"),
++              !account.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
++        else { return nil }
++        return account
++    }
 +
 +    public static func passwordsUnlockAccount(nativeEvidence: [String]) -> String? {
 +        let prefix = "Enter the password for the user “"
@@ -5534,6 +6253,11 @@ index 0000000000000000000000000000000000000000..e1a72ea5f9fddc57c4d5762ba1dd3bf4
 +            $0.contains(" wants to use your confidential information stored in ") &&
 +                $0.hasSuffix(" in your keychain.")
 +        } ? .unsupportedKeychainAccess : .accountAuthentication
++        if fallback == .accountAuthentication, evidence.isSuperset(of: ["Unlock", "Cancel"]),
++           self.localPasskeyAccount(nativeEvidence: nativeEvidence) != nil
++        {
++            return .localPasskeyAuthentication
++        }
 +        if fallback == .accountAuthentication, evidence.contains("AutoFillAuthenticationSheet"),
 +           evidence.isSuperset(of: ["Sign In", "Cancel"])
 +        {
@@ -5576,6 +6300,7 @@ index 0000000000000000000000000000000000000000..e1a72ea5f9fddc57c4d5762ba1dd3bf4
 +                "com.apple.Passwords",
 +                "com.apple.ScreenContinuity",
 +                "com.apple.Safari",
++                "com.apple.AuthenticationServices.Helper",
 +            ]
 +        }
 +    }
@@ -5628,6 +6353,15 @@ index 0000000000000000000000000000000000000000..e1a72ea5f9fddc57c4d5762ba1dd3bf4
 +        guard purpose == observedPurpose,
 +              purpose != .unsupportedKeychainAccess, purpose != .unsupportedAdministratorAuthentication
 +        else { return false }
++        if bundleID == "com.apple.AuthenticationServices.Helper" {
++            // The provider account names a passkey requester, not the recipient
++            // of the Mac password. Only the complete local-user instruction does.
++            return purpose == .localPasskeyAuthentication && self.kind == .macLogin && !localAccount.isEmpty &&
++                self.account.caseInsensitiveCompare(localAccount) == .orderedSame &&
++                NativeCredentialPromptPurpose.localPasskeyAccount(nativeEvidence: accountEvidence)?
++                .caseInsensitiveCompare(self.account) == .orderedSame
++        }
++        if purpose == .localPasskeyAuthentication { return false }
 +        if bundleID == "com.apple.Safari" {
 +            // Native AutoFill authenticates the current Mac user even when its
 +            // account instruction is absent from AX. Provider account text is
@@ -6984,10 +7718,10 @@ index 4420c7359e697e6b5da351e48011e9a1ac1e935a..87161ec22b85bada407cb508fee6b5e9
  Node plugins still validate their own settings before publishing commands, and
 diff --git a/docs/platforms/mac/native-credentials.md b/docs/platforms/mac/native-credentials.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..de385cc92aff0f18105d1fb340c1ac939d08f7cc
+index 0000000000000000000000000000000000000000..eb855c3c7f56708c6b7405454b168fa575d137b6
 --- /dev/null
 +++ b/docs/platforms/mac/native-credentials.md
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,289 @@
 +---
 +summary: "Enter stored credentials into account-bound native macOS authentication prompts"
 +read_when:
@@ -7040,17 +7774,33 @@ index 0000000000000000000000000000000000000000..de385cc92aff0f18105d1fb340c1ac93
 +
 +Supported native owners are:
 +
-+| Credential kind | Native owner bundle ID                  |
-+| --------------- | --------------------------------------- |
-+| `appleAccount`  | `com.apple.systempreferences`           |
-+| `macLogin`      | `com.apple.LocalAuthentication.UIAgent` |
-+| `macLogin`      | `com.apple.Passwords`                   |
-+| `macLogin`      | `com.apple.Safari`                      |
-+| `macLogin`      | `com.apple.ScreenContinuity`            |
-+| `macLogin`      | `com.apple.SecurityAgent`               |
++| Credential kind | Native owner bundle ID                    |
++| --------------- | ----------------------------------------- |
++| `appleAccount`  | `com.apple.systempreferences`             |
++| `macLogin`      | `com.apple.AuthenticationServices.Helper` |
++| `macLogin`      | `com.apple.LocalAuthentication.UIAgent`   |
++| `macLogin`      | `com.apple.Passwords`                     |
++| `macLogin`      | `com.apple.Safari`                        |
++| `macLogin`      | `com.apple.ScreenContinuity`              |
++| `macLogin`      | `com.apple.SecurityAgent`                 |
 +
 +Bundle matching also requires Apple's code-signing identity on the running
 +process. Browser and web-view content use the separate browser credential route.
++
++Safari's native saved-passkey password alternative can place its secure field
++in `com.apple.AuthenticationServices.Helper` while Safari owns the enclosing
++sheet. The same native hosting group must contain a lock icon, the complete
++**Enter the computer account password for the user “…”** instruction, and actual
++**Unlock** and **Cancel** controls. The helper field and Safari host are checked
++as separate Apple-signed process incarnations and revalidated through entry.
++The bounded helper-field parent chain must lead through Safari's native hosting
++group and sheet to its window. A missing or unsupported direct `AXWindow`
++attribute uses that same chain; a supplied relationship must match the sheet.
++The captured group, sheet and window must all remain unchanged through entry.
++The displayed local account, enrolled `macLogin` account and current Mac short
++username must match in full. A **Sign in with** provider email does not authorize
++the Mac password. Add the helper explicitly to the existing binding while
++retaining its other owners; upgrading does not expand enrollment.
 +
 +Safari supports its native **AutoFillAuthenticationSheet** after choosing the
 +password alternative for a saved passkey. The actual system-focused secure field
@@ -7192,7 +7942,9 @@ index 0000000000000000000000000000000000000000..de385cc92aff0f18105d1fb340c1ac93
 +result remains the direct window lookup result; window availability reports the
 +final lookup. Safari parent lookup applies only when its focused secure field's
 +window attribute has no value or is unsupported, and every ancestor must have the same process
-+owner without crossing web content. Process IDs and bundle IDs are bounded
++owner without crossing web content. The saved-passkey helper uses its verified
++cross-process native hosting chain instead, retaining the helper field and
++Safari host identities separately. Process IDs and bundle IDs are bounded
 +non-secret metadata;
 +omitted fields describe branches that were not attempted. These observations do
 +not grant a prompt reference or change credential-entry checks.
@@ -80335,6 +81087,18 @@ index 892e503bc8a82307a0e99f02f6add414ffa2d077..5c786e0cea32013d1a4f957fab4f6384
   * internal leaves are always detached.
   */
  export function mergeOrphanedTrailingUserPrompt(params: {
+diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-phase.test-support.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-phase.test-support.ts
+index dffc848f61bd109a1315c06c4bda7d2dffe1b924..5465fedb92dad27b5f7a0d4cf9ce859c67f23b50 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-phase.test-support.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-phase.test-support.ts
+@@ -182,6 +182,7 @@ export function createFixture({ pendingPrompt = "hello", pendingImageCount = 1 }
+   mocks.handlePromptError.mockResolvedValue({});
+   const input = {
+     attempt: {
++      prompt: pendingPrompt,
+       model: { id: "model-1", provider: "test" },
+       modelId: "model-1",
+       provider: "test",
 diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts
 index 8e847c87c3985d091243ae3006ad1dcf3600614d..c5725724d437eeae8a0fa362404abaca4c9a3edd 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts
@@ -115463,10 +116227,18 @@ index 350862682ff43203a0adae9047bc37cab136ca50..c2bbe3d79705df20bb4f202ee6af0915
      profiles: ["coding"],
      includeInOpenClawGroup: true,
 diff --git a/src/agents/tool-description-presets.ts b/src/agents/tool-description-presets.ts
-index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..4bbea45156c534ec97234eb9f77043eaaa5bcfc6 100644
+index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..fcee654bafee8ce6943562f762ef16e2c7c51aa0 100644
 --- a/src/agents/tool-description-presets.ts
 +++ b/src/agents/tool-description-presets.ts
-@@ -144,9 +144,9 @@ export function describeSessionsSpawnTool(options?: {
+@@ -104,6 +104,7 @@ export function describeSessionsSendTool(): string {
+     "A session identifies model context, not an external address; its reply may still announce through established delivery context.",
+     SESSIONS_SEND_RESULT_GUIDANCE,
+     "mode:notify queues ephemeral context for the next turn without waking or starting work (bounded process memory, not a durable inbox). mode:steer injects guidance into an active supported run and never starts idle work; mode:followup starts or queues a later turn without steering. mode:resume continues your paused native child task; returns runId/taskRunId, with completion from the task owner, not inline. Resume rejects watch:true and positive timeoutSeconds. Omit mode for existing automatic routing.",
++    '`messageReadScope` requires explicit `mode:"resume"`; keep that mode on retries and recheck the child\'s paused state with `subagents` before retrying resume.',
+     'Thread chats rejected: target parent channel. Missing configured-agent main created. Waits for reply when available; status "no_reply" is terminal, so do not wait for an announcement.',
+     "watch:true: notice arrives when others later change target session.",
+   ].join(" ");
+@@ -144,9 +145,9 @@ export function describeSessionsSpawnTool(options?: {
      options?.threadAvailable
        ? '`mode="run"` one-shot; `mode="session"` persistent/thread-bound only on supporting requester channel.'
        : '`mode="run"` one-shot background.',
@@ -115479,7 +116251,7 @@ index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..4bbea45156c534ec97234eb9f77043ea
      visibilityLine,
      ...(options?.swarmEnabled ? [SESSIONS_SPAWN_COLLECTOR_GUIDANCE] : []),
      "Inherits parent workspace. Native task arrives in the child's initial `[Subagent Task]` message.",
-@@ -154,7 +154,7 @@ export function describeSessionsSpawnTool(options?: {
+@@ -154,7 +155,7 @@ export function describeSessionsSpawnTool(options?: {
        ? []
        : ['`runtime="acp"` ids: codex, claude, gemini, opencode, or configured ACP.']),
      describeSubagentSpawnContext(options?.subagentThreadAvailable === true),
@@ -115488,7 +116260,7 @@ index 62ef2f1749a2e38bd4a2fa4aa3fa19731bf81078..4bbea45156c534ec97234eb9f77043ea
      "After spawn, do non-overlap work; follow the receipt's completion mode.",
    ].join(" ");
  }
-@@ -184,10 +184,10 @@ export function describeAskUserTool(): string {
+@@ -184,10 +185,10 @@ export function describeAskUserTool(): string {
  /** Describes the secrets tool and the store semantics the model cannot observe. */
  export function describeSecretsTool(): string {
    return [
