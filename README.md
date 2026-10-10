@@ -15,19 +15,20 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current source reference is
-[`e5a517b72a078b4f43ed24c4d09703e8253f1e42`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
-Its native distribution is `6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`;
+[`b6795dac84c677af10a90706a5e286037c2a1b32`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `b6c925c4875d83abfb43b6587e7c9966b3634520`;
 the source trees differ only in the retained package YAML overlay.
-Gateway and Node now run that distribution, build 616. Native activation,
-independent same-generation loaded-source, health and protected-state checks passed.
-Both signed616 companions passed complete installed and retained rollback maps,
-live bundled-worker and native-cohort checks, selected-state preservation and
-normal paired reconnection. Credential authentication for build616 remains a
-separate acceptance check; no result is inferred from installation or reconnect.
-The complete prior614 companion and prior613 Gateway records, including their
-dated native-entry observations, older installation histories and earlier failures,
-remain intact. Independent current-source reconstruction passed; final normal
-local checks and all five hosted jobs must qualify the final public revision.
+Gateway and Node remain on accepted build 616,
+`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`; the native companion changes
+do not require another Gateway activation. Both signed 618 companions passed
+complete installed and retained rollback maps, live bundled-worker and native-cohort
+checks, selected-state preservation and normal paired reconnection. The actual 617
+installation evidence and complete prior 616/614 companion and Gateway histories
+remain separate and intact. A separate uncoached Mac saved-credential unlock completed normally;
+provider authorization remains separate. Installation does not establish provider sign-in.
+Source qualification retains 82 native cases and 200 cron fixture cases;
+prior failed public checks remain recorded. Final normal local checks and all five
+hosted jobs must qualify the final public revision.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).

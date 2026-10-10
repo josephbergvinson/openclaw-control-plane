@@ -19,30 +19,31 @@ and the boundary between source reconstruction and installation.
 ## October 10 source reference and installation boundaries
 
 The qualified canonical source reference is
-`e5a517b72a078b4f43ed24c4d09703e8253f1e42`, tree
-`bdfe7c102316c56f1245e4397063d530fb3bc716`. Native distribution
-`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`, tree
-`4505070ece7fad73d623f4736388a29823a52dd0`, retains the same two-YAML
+`b6795dac84c677af10a90706a5e286037c2a1b32`, tree
+`71a5c386bdd9711bd6c21080ddeaa30ff8107e7e`. Native distribution
+`b6c925c4875d83abfb43b6587e7c9966b3634520`, tree
+`b0c68dc6a016338df1dd660a21c4aa77a9f1521d`, retains the same two-YAML
 native dependency overlay. The exported patch and normalized trees are bound
-in the manifest. Source qualification includes the strict AuthenticationServices
-hosted passkey form and parent-window recognition, plus scoped-resume guidance.
-Focused guidance passed; its separate pre-existing whole-file failure remains
-recorded. Source qualification and ordinary credential use are separate.
+in the manifest. The latest source adds the trusted local account short/full-name
+mapping while preserving principal, form, expiry and one-use guards. The native
+82-case qualification and separate 200-case cron fixture qualification are reused;
+the earlier failed public jobs remain historical failures, not passing evidence.
 
-Gateway and Node now run that native distribution, build 616. Actual activation
-and independent same-generation loaded-source, health and protected-state
-preservation passed. Both signed616 companions passed complete signed installed
-and retained rollback/protected maps, live bundled-worker identity and full native
-cohorts, selected-state preservation and normal paired reconnection. MacBook's
-normal executable lookup also resolved its bundled Node.
+Gateway and Node remain on accepted distribution
+`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`, build 616. Its actual activation,
+independent same-generation loaded-source, health and protected-state receipts
+remain unchanged. Both signed 618 companions passed complete installed and retained
+rollback/protected maps, live bundled-worker identity, full native cohorts,
+selected-state preservation and normal paired reconnection.
 
-Credential authentication for build616 remains separately unverified. Earlier614
-Mini native-entry and provider-navigation observations remain dated614 evidence;
-they are not relabeled as current616 acceptance. The entire prior614 companion
-and prior613 Gateway history, October9 signed606 record, complete607 predecessors,
-earlier failures and rollback descriptors remain intact. Independent source
-reconstruction passed. Final normal local checks and all five exact-head hosted
-jobs are separate public qualification steps.
+A separate uncoached Mac saved-credential unlock completed normally; provider
+authorization remains separate. Actual 617
+installation proof and readbacks are retained separately, with the complete 616
+companion history underneath. The earlier 614 native-entry observations, prior 613
+Gateway history, October 9 signed 606 records and complete 607 predecessors retain
+their original scope and dates. Installation does not prove provider authentication.
+Final normal local checks and all five exact-head hosted jobs remain separate
+public qualification steps.
 
 ## October 9 source reference and native distribution
 
