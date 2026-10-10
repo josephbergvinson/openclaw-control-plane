@@ -19,31 +19,43 @@ and the boundary between source reconstruction and installation.
 ## October 10 source reference and installation boundaries
 
 The qualified canonical source reference is
-`b6795dac84c677af10a90706a5e286037c2a1b32`, tree
-`71a5c386bdd9711bd6c21080ddeaa30ff8107e7e`. Native distribution
+`c9263ab4b8976df7160ca192a39c15fdb0144322`, tree
+`5dc1abc7f89292c965a3f10a21f4403272ea80e4`. Native distribution
+`36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`, tree
+`15c5466f208b4740d8129f02be6b0f65f7e8ba6b`, retains the same two-YAML
+native dependency overlay. The exported patch and normalized trees are bound in
+the manifest. The latest source corrects the canonical image expectation in the
+steering fixture and refreshes retained MCP catalogs on OAuth grant-revision changes.
+The normal 17 steering and four image-integrity cases and 50 cache-owner cases passed,
+along with their required changed checks. The earlier 82 native and separate 200
+cron cases remain bound to their original qualifications; failed public jobs retain
+their original failure status.
+
+Gateway and Node now run distribution
+`36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`. Its normal first activation,
+independent same-generation loaded-source, health and protected-state preservation
+passed at `2026-10-10T15:36:44.874457Z`. The activation receipt is
+`cae9114e29572e7ef0342d1096d400a1d0c45676d8b7c522549320f3f401ee5e` and the loaded-source receipt is
+`b89fb51324dd9972d5e73b9e302eca11dee9b39aa6081d7290e647f1c0ee9760`. The exact old Gateway 616
+metadata and complete predecessor chain are retained separately.
+
+Both signed 618 companions retain installed source
 `b6c925c4875d83abfb43b6587e7c9966b3634520`, tree
-`b0c68dc6a016338df1dd660a21c4aa77a9f1521d`, retains the same two-YAML
-native dependency overlay. The exported patch and normalized trees are bound
-in the manifest. The latest source adds the trusted local account short/full-name
-mapping while preserving principal, form, expiry and one-use guards. The native
-82-case qualification and separate 200-case cron fixture qualification are reused;
-the earlier failed public jobs remain historical failures, not passing evidence.
+`b0c68dc6a016338df1dd660a21c4aa77a9f1521d`. Their complete signed installed and retained
+rollback maps, live bundled-worker identity, native cohorts, selected-state
+preservation and paired-reconnection proofs remain unchanged. Actual 617 and complete
+616/614 companion history, prior Gateway 613 history, October 9 signed 606 records and
+complete 607 predecessors retain their original scope and dates.
 
-Gateway and Node remain on accepted distribution
-`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`, build 616. Its actual activation,
-independent same-generation loaded-source, health and protected-state receipts
-remain unchanged. Both signed 618 companions passed complete installed and retained
-rollback/protected maps, live bundled-worker identity, full native cohorts,
-selected-state preservation and normal paired reconnection.
-
-A separate uncoached Mac saved-credential unlock completed normally; provider
-authorization remains separate. Actual 617
-installation proof and readbacks are retained separately, with the complete 616
-companion history underneath. The earlier 614 native-entry observations, prior 613
-Gateway history, October 9 signed 606 records and complete 607 predecessors retain
-their original scope and dates. Installation does not prove provider authentication.
-Final normal local checks and all five exact-head hosted jobs remain separate
-public qualification steps.
+The separate uncoached Mac saved-credential unlock remains native acceptance;
+provider authorization is separately scoped. An ordinary continuation in the same
+conversation passed discovery and reuse of the unchanged saved grant. Its seven
+calls, two searches and five descriptions, exposed all five requested tools and their
+input schemas without tool errors. Independent full-profile readback found 44 entries:
+42 provider tools and two resource utilities. The run finished in 77.411 seconds with
+no active runs or pending inputs. These results establish discovery and saved-grant
+reuse; provider writes and broader goal completion remain separate. Final normal
+local checks and all five exact-head hosted jobs remain separate acceptance steps.
 
 ## October 9 source reference and native distribution
 

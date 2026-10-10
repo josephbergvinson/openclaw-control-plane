@@ -15,20 +15,30 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current source reference is
-[`b6795dac84c677af10a90706a5e286037c2a1b32`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
-Its native distribution is `b6c925c4875d83abfb43b6587e7c9966b3634520`;
+[`c9263ab4b8976df7160ca192a39c15fdb0144322`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `36f2be1a45f11c6ffbf82ba3ccc93eafa0a0ca1a`;
 the source trees differ only in the retained package YAML overlay.
-Gateway and Node remain on accepted build 616,
-`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`; the native companion changes
-do not require another Gateway activation. Both signed 618 companions passed
-complete installed and retained rollback maps, live bundled-worker and native-cohort
-checks, selected-state preservation and normal paired reconnection. The actual 617
-installation evidence and complete prior 616/614 companion and Gateway histories
-remain separate and intact. A separate uncoached Mac saved-credential unlock completed normally;
-provider authorization remains separate. Installation does not establish provider sign-in.
-Source qualification retains 82 native cases and 200 cron fixture cases;
-prior failed public checks remain recorded. Final normal local checks and all five
-hosted jobs must qualify the final public revision.
+The latest source corrects the canonical image expectation in the steering fixture
+and invalidates retained MCP catalogs when an OAuth grant revision changes. The
+normal 17 steering and four image-integrity cases and 50 cache-owner cases passed;
+the required changed checks passed separately. The earlier 82 native and 200 cron
+cases retain their original qualification records.
+
+Gateway and Node now run that native distribution. The normal first activation and
+independent loaded-source check passed at `2026-10-10T15:36:44.874457Z`, with
+same-generation, health and protected-state preservation verified. Both signed 618
+companions retain source `b6c925c4875d83abfb43b6587e7c9966b3634520` and their original
+complete installed/rollback maps, worker/cohort, preservation and paired-reconnection
+evidence. Complete prior companion and Gateway 616 histories remain intact.
+A separate uncoached Mac saved-credential unlock remains its own native acceptance;
+provider authorization is separate. An ordinary continuation in the same conversation
+passed discovery and reuse of the unchanged saved grant: two searches and five tool
+descriptions exposed all five requested tools and their input schemas, with no tool
+errors. Independent full-profile readback found 44 entries: 42 provider tools and two
+resource utilities. The run finished in 77.411 seconds with no active runs or pending
+inputs. Provider writes and broader goal completion remain separate. Final normal
+local checks and all five exact-head public hosted jobs remain separate acceptance
+steps; prior failed public checks remain recorded.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
