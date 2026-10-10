@@ -19,33 +19,30 @@ and the boundary between source reconstruction and installation.
 ## October 10 source reference and installation boundaries
 
 The qualified canonical source reference is
-`d71e963cbb70227d1174c9358b597b14a8cc9dfa`, tree
-`4e1776756f61d84a96672f354fddde86740ff16e`. Native distribution
-`cbfe84261b67e63909f3b302308d5a1fc9732373`, tree
-`5f246574ea66e16c112aeae82c5ab0c8aece410a`, retains the same two-YAML
+`e5a517b72a078b4f43ed24c4d09703e8253f1e42`, tree
+`bdfe7c102316c56f1245e4397063d530fb3bc716`. Native distribution
+`6a87999a6d276296aaf7e6d7a467ed58eb2b17fb`, tree
+`4505070ece7fad73d623f4736388a29823a52dd0`, retains the same two-YAML
 native dependency overlay. The exported patch and normalized trees are bound
-in the manifest. Source qualification includes the native Safari Passwords
-Unlock/Cancel form detection and purpose binding; it is separate from installation.
+in the manifest. Source qualification includes the strict AuthenticationServices
+hosted passkey form and parent-window recognition, plus scoped-resume guidance.
+Focused guidance passed; its separate pre-existing whole-file failure remains
+recorded. Source qualification and ordinary credential use are separate.
 
-Gateway and Node retain distribution
-`798bbc585215b68e9fd10a2f921fc2f3498e7847`, build 613. The native-only614
-change keeps the accepted Gateway activation and independent loaded-source,
-health and protected-state receipts unchanged.
-Both signed614 companions passed complete installed inventories, live bundled-worker and native-cohort checks, protected-state preservation and normal paired reconnection.
+Gateway and Node now run that native distribution, build 616. Actual activation
+and independent same-generation loaded-source, health and protected-state
+preservation passed. Both signed616 companions passed complete signed installed
+and retained rollback/protected maps, live bundled-worker identity and full native
+cohorts, selected-state preservation and normal paired reconnection. MacBook's
+normal executable lookup also resolved its bundled Node.
 
-The Mini's own-agent run entered the existing enrolled credential through the
-opaque native route and pressed Unlock once. Fresh native accessible observations
-showed the Passwords picker controls and no locked marker.
-The own agent used the configured primary model with maximum reasoning and Fast disabled, without a fallback.
-A separate fresh read-only continuation confirmed provider Home navigation with no login form. The own agent observed the company in its screenshot; independent review checked accessibility navigation, not omitted pixels.
-The earlier613 Safari timeout and separate model-reported standalone unlock
-retain their original scope; neither is relabeled as the614 acceptance proof.
-MacBook credential use remains separately unverified.
-
-The October9 signed606 installation record and complete607/613 predecessors,
-earlier deployments, qualifications, failures and rollback descriptors remain
-unchanged. Independent current-source reconstruction passed. Final normal local
-checks and all five exact-head hosted jobs are separate public qualification steps.
+Credential authentication for build616 remains separately unverified. Earlier614
+Mini native-entry and provider-navigation observations remain dated614 evidence;
+they are not relabeled as current616 acceptance. The entire prior614 companion
+and prior613 Gateway history, October9 signed606 record, complete607 predecessors,
+earlier failures and rollback descriptors remain intact. Independent source
+reconstruction passed. Final normal local checks and all five exact-head hosted
+jobs are separate public qualification steps.
 
 ## October 9 source reference and native distribution
 
