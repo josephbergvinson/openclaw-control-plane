@@ -15,18 +15,17 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The current source reference is
-[`4aaf24a7177397c9e80a3b8fa32b74cb06a0b983`](runtime/README.md#october-9-source-reference-and-native-distribution).
-The installed Gateway, Node and both signed companions, build 606, use native
-distribution `356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`. Its source differs
-from the reference only in two package YAML files. Native activation, independent
-loaded-source preservation, both whole installed inventories and post-install
-commands passed. The manifest preserves earlier failures and qualifications. The native Mac catalog
-now has direct qualified-consumer and successful list evidence, followed by a
-membership-bound turns read; its earlier TypeScript failure and remaining
-ordinary-use gaps stay explicit.
-Four normal local checks and independent native reconstruction, frozen
-installation, build and consumer readback passed. All five hosted jobs must still
-qualify the final public revision.
+[`d71e963cbb70227d1174c9358b597b14a8cc9dfa`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `cbfe84261b67e63909f3b302308d5a1fc9732373`;
+the source trees differ only in the retained package YAML overlay.
+Gateway and Node retain distribution `798bbc585215b68e9fd10a2f921fc2f3498e7847`,
+build 613. Both signed614 companions passed complete installed inventories, live bundled-worker and native-cohort checks, protected-state preservation and normal paired reconnection.
+The Mini's own-agent run entered the existing enrolled credential through the
+opaque native route, pressed Unlock once and observed the unlocked Passwords
+picker. A separate fresh read-only continuation confirmed provider Home navigation with no login form. The own agent observed the company in its screenshot; independent review checked accessibility navigation, not omitted pixels.
+Historical606,607,613 installation records and earlier failures remain intact.
+Independent source reconstruction passed; final normal local checks and all five
+hosted jobs must qualify the final public revision.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).

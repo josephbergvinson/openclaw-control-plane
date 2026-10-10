@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 9 source reference and native distribution](#october-9-source-reference-and-native-distribution)
-identifies the current Gateway installation.
+[October 10 source reference and installation boundaries](#october-10-source-reference-and-installation-boundaries)
+separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
@@ -15,6 +15,37 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 10 source reference and installation boundaries
+
+The qualified canonical source reference is
+`d71e963cbb70227d1174c9358b597b14a8cc9dfa`, tree
+`4e1776756f61d84a96672f354fddde86740ff16e`. Native distribution
+`cbfe84261b67e63909f3b302308d5a1fc9732373`, tree
+`5f246574ea66e16c112aeae82c5ab0c8aece410a`, retains the same two-YAML
+native dependency overlay. The exported patch and normalized trees are bound
+in the manifest. Source qualification includes the native Safari Passwords
+Unlock/Cancel form detection and purpose binding; it is separate from installation.
+
+Gateway and Node retain distribution
+`798bbc585215b68e9fd10a2f921fc2f3498e7847`, build 613. The native-only614
+change keeps the accepted Gateway activation and independent loaded-source,
+health and protected-state receipts unchanged.
+Both signed614 companions passed complete installed inventories, live bundled-worker and native-cohort checks, protected-state preservation and normal paired reconnection.
+
+The Mini's own-agent run entered the existing enrolled credential through the
+opaque native route and pressed Unlock once. Fresh native accessible observations
+showed the Passwords picker controls and no locked marker.
+The own agent used the configured primary model with maximum reasoning and Fast disabled, without a fallback.
+A separate fresh read-only continuation confirmed provider Home navigation with no login form. The own agent observed the company in its screenshot; independent review checked accessibility navigation, not omitted pixels.
+The earlier613 Safari timeout and separate model-reported standalone unlock
+retain their original scope; neither is relabeled as the614 acceptance proof.
+MacBook credential use remains separately unverified.
+
+The October9 signed606 installation record and complete607/613 predecessors,
+earlier deployments, qualifications, failures and rollback descriptors remain
+unchanged. Independent current-source reconstruction passed. Final normal local
+checks and all five exact-head hosted jobs are separate public qualification steps.
 
 ## October 9 source reference and native distribution
 
