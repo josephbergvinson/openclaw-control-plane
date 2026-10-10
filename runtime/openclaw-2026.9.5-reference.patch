@@ -7386,6 +7386,20 @@ index 27483ef39eff3a468fc425d2695607b053af468d..fa02d488ed14a0beadce495ac8da44d7
  Private per-job scratch (heartbeat checklists and similar monitor context):
  
  ```bash
+diff --git a/docs/cli/mcp/registry.md b/docs/cli/mcp/registry.md
+index aec704d68bb9f9038cbf5e3230c5a37f7c8d27c2..b01605f4c6c850317bc6118482531af86a644504 100644
+--- a/docs/cli/mcp/registry.md
++++ b/docs/cli/mcp/registry.md
+@@ -85,7 +85,8 @@ Notes:
+ - `tools` updates per-server tool filters. Include/exclude entries are MCP tool names and simple `*` globs.
+ - `login` runs the OAuth flow for HTTP servers configured with `auth: "oauth"`. For a loopback redirect, OpenClaw listens for the browser callback and completes login automatically. The printed `--code` command remains the fallback for remote, headless, or unreachable callbacks.
+ - `logout` clears stored OAuth credentials for the named server without removing the saved server definition.
+-- `reload` disposes cached in-process MCP runtimes for the current CLI process only. Gateway or agent processes in another process still need their own reload or restart path.
++- OpenClaw session MCP runtimes refresh an operator OAuth server’s catalog at the next runtime admission after its saved OAuth state changes, including login or logout from another process. Unchanged servers retain their cached catalogs and connections; requester-scoped OAuth remains isolated from operator credentials.
++- `reload` disposes cached in-process MCP runtimes for the current CLI process only. It does not send a Gateway reload request; saved operator OAuth changes are picked up at the next OpenClaw session MCP runtime admission.
+ - Use `transport: "streamable-http"` for Streamable HTTP MCP servers. `openclaw mcp set` also normalizes CLI-native `type: "http"` to the same canonical config shape for compatibility.
+ - `unset` fails if the named server does not exist.
+ 
 diff --git a/docs/cli/mcp/transports.md b/docs/cli/mcp/transports.md
 index f597ab4f1d034b4127edcc1f0d9777541b4149d4..aa871514e1f7e8d1b113b1fef7ac5cbfe35f760f 100644
 --- a/docs/cli/mcp/transports.md
@@ -30455,16 +30469,18 @@ index 0000000000000000000000000000000000000000..800550f593c2ac7e5d0c0e9f07c53658
 +  },
 +);
 diff --git a/extensions/codex/src/app-server/run-attempt.steering.test.ts b/extensions/codex/src/app-server/run-attempt.steering.test.ts
-index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52b1e49ab2 100644
+index 0f2a52a34aba8092ecb359ab119b886fe8be2216..6aa3795b3a3b783ba6b8b7bdaed486f10e4a75c3 100644
 --- a/extensions/codex/src/app-server/run-attempt.steering.test.ts
 +++ b/extensions/codex/src/app-server/run-attempt.steering.test.ts
-@@ -1,4 +1,5 @@
+@@ -1,5 +1,7 @@
  // Codex tests cover run attempt.steering plugin behavior.
 +import assert from "node:assert/strict";
  import path from "node:path";
++import { crc32, inflateSync } from "node:zlib";
  import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
  import { GPT5_BEHAVIOR_CONTRACT as CODEX_GPT5_BEHAVIOR_CONTRACT } from "openclaw/plugin-sdk/provider-model-shared";
-@@ -7,6 +8,7 @@ import {
+ import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
+@@ -7,6 +9,7 @@ import {
    appendSessionTranscriptMessageByIdentity,
    readSessionTranscriptEvents,
  } from "openclaw/plugin-sdk/session-transcript-runtime";
@@ -30472,7 +30488,7 @@ index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52
  import { describe, expect, it, vi } from "vitest";
  import type { CodexSteeringQueueOptions } from "./attempt-steering.js";
  import { readAttemptTerminal } from "./attempt-terminal.test-helper.js";
-@@ -431,6 +433,7 @@ describe("runCodexAppServerAttempt steering", () => {
+@@ -431,6 +434,7 @@ describe("runCodexAppServerAttempt steering", () => {
          waitForTranscriptCommit: true,
          onQueueAccepted,
          userTurnTranscriptRecorder,
@@ -30480,7 +30496,7 @@ index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52
        });
        await vi.waitFor(
          () => expect(requests.map((entry) => entry.method)).toContain("turn/steer"),
-@@ -509,6 +512,11 @@ describe("runCodexAppServerAttempt steering", () => {
+@@ -509,6 +513,11 @@ describe("runCodexAppServerAttempt steering", () => {
          expectedTurnId: "turn-1",
          input: [{ type: "text", text: "steer this active turn" }],
        });
@@ -30492,7 +30508,7 @@ index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52
        expect(prefix).toEqual([
          { role: "user", text: params.prompt, mirrorIdentity: "turn-1:prompt" },
          {
-@@ -557,6 +565,16 @@ describe("runCodexAppServerAttempt steering", () => {
+@@ -557,6 +566,16 @@ describe("runCodexAppServerAttempt steering", () => {
      }, fastWait);
      const delivered = handle!.queueMessage("more context", {
        debounceMs: 0,
@@ -30509,7 +30525,7 @@ index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52
        images: [{ type: "image", data: PNG_1X1, mimeType: "image/png" }],
      });
      let deliverySettled = false;
-@@ -620,7 +638,17 @@ describe("runCodexAppServerAttempt steering", () => {
+@@ -620,15 +639,44 @@ describe("runCodexAppServerAttempt steering", () => {
      expect(threadStartParams?.sandbox).toBe("danger-full-access");
      expect(threadStartParams?.approvalsReviewer).toBe("user");
      expect(threadStartParams?.developerInstructions).not.toContain(CODEX_GPT5_BEHAVIOR_CONTRACT);
@@ -30527,6 +30543,34 @@ index 0f2a52a34aba8092ecb359ab119b886fe8be2216..b3140d76090aa0aaf89400d10f19bd52
        threadId: "thread-1",
        expectedTurnId: "turn-1",
        input: [
+         { type: "text", text: "more context", text_elements: [] },
+-        { type: "image", url: `data:image/png;base64,${PNG_1X1}` },
++        {
++          type: "image",
++          url: expect.stringMatching(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/),
++        },
+       ],
+       clientUserMessageId: "openclaw:turn-1:steer:1",
+     });
++    assert(Array.isArray(steerParams.input));
++    const imageInput = steerParams.input[1];
++    assert(isRecord(imageInput) && typeof imageInput.url === "string");
++    const image = Buffer.from(imageInput.url.slice("data:image/png;base64,".length), "base64");
++    expect(image.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
++    expect([image.readUInt32BE(16), image.readUInt32BE(20), image[24], image[25]]).toEqual([
++      1, 1, 8, 6,
++    ]);
++    const idatOffset = image.indexOf("IDAT");
++    expect(idatOffset).toBeGreaterThan(0);
++    const idatEnd = idatOffset + 4 + image.readUInt32BE(idatOffset - 4);
++    expect(image.readUInt32BE(idatEnd)).toBe(crc32(image.subarray(idatOffset, idatEnd)));
++    // Canonical encoding changes container bytes while preserving the opaque white source pixel.
++    expect(inflateSync(image.subarray(idatOffset + 4, idatEnd))).toEqual(
++      Buffer.from([0, 255, 255, 255, 255]),
++    );
+   });
+ 
+   it("still steers an image when gateway question cancellation fails", async () => {
 diff --git a/extensions/codex/src/app-server/shared-client-home.test-support.ts b/extensions/codex/src/app-server/shared-client-home.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..71e3f52cf4d6f551f98301df4daf4d116ec893e8
@@ -63676,6 +63720,262 @@ index 7b616c45500101bfda8ba9f7650f63ee88531664..2619f05521a885d04bfc5a833ad81897
      ].toSorted(
        (left, right) =>
          left.safeServerName.localeCompare(right.safeServerName) ||
+diff --git a/src/agents/agent-bundle-mcp-retirement-boundaries.test.ts b/src/agents/agent-bundle-mcp-retirement-boundaries.test.ts
+index 532f46682d3b8e1c0b1451fe77656ae540f22f29..48faf821716e62b3ccab1c04094b5d93ae886f6d 100644
+--- a/src/agents/agent-bundle-mcp-retirement-boundaries.test.ts
++++ b/src/agents/agent-bundle-mcp-retirement-boundaries.test.ts
+@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
+ import { createDeferred } from "../../test/helpers/promise.js";
+ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+ import { withEnvAsync } from "../test-utils/env.js";
+ import {
+   acquireSessionMcpRuntime,
+@@ -16,11 +17,20 @@ import {
+   retireSessionMcpRuntime,
+ } from "./agent-bundle-mcp-manager-api.js";
+ import { materializeBundleMcpToolsForRun } from "./agent-bundle-mcp-materialize.js";
++import { loadSessionMcpConfig } from "./agent-bundle-mcp-runtime-config.js";
+ import { prepareCliBundleMcpConfig } from "./cli-runner/bundle-mcp.js";
+ import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
++import { operatorMcpOAuthIdentity } from "./mcp-oauth-identity.js";
++import { updateMcpOAuthStore } from "./mcp-oauth-store.js";
+ 
+ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+ const emptyConfig: OpenClawConfig = { plugins: { enabled: false }, mcp: { servers: {} } };
++type FixtureTool = { name: string; inputSchema: { type: "object" } };
++type FixtureHooks = {
++  onDelete?: (url: string) => Promise<void>;
++  onInitialize?: (url: string) => void;
++  onList?: (url: string, authorization?: string) => Promise<FixtureTool[] | void>;
++};
+ 
+ async function withMcpFixture(
+   run: (fixture: {
+@@ -30,15 +40,12 @@ async function withMcpFixture(
+       entered: ReturnType<typeof createDeferred<void>>;
+       release: ReturnType<typeof createDeferred<void>>;
+     };
+-    hooks: { onDelete?: (url: string) => Promise<void>; onList?: (url: string) => Promise<void> };
++    hooks: FixtureHooks;
+   }) => Promise<void>,
+ ) {
+   const workspaceDir = tempDirs.make("mcp-retirement-boundary-");
+   const releases: Array<() => void> = [];
+-  const hooks: {
+-    onDelete?: (url: string) => Promise<void>;
+-    onList?: (url: string) => Promise<void>;
+-  } = {};
++  const hooks: FixtureHooks = {};
+   const server = http.createServer((request, response) => {
+     void (async () => {
+       const endpoint = request.url ?? "/";
+@@ -62,6 +69,7 @@ async function withMcpFixture(
+       };
+       let result;
+       if (message.method === "initialize") {
++        hooks.onInitialize?.(endpoint);
+         response.setHeader("mcp-session-id", randomUUID());
+         result = {
+           protocolVersion: message.params?.protocolVersion,
+@@ -69,8 +77,8 @@ async function withMcpFixture(
+           serverInfo: { name: "retirement-proof", version: "1" },
+         };
+       } else if (message.method === "tools/list") {
+-        await hooks.onList?.(endpoint);
+-        result = { tools: [{ name: "read", inputSchema: { type: "object" } }] };
++        const tools = await hooks.onList?.(endpoint, request.headers.authorization);
++        result = { tools: tools ?? [{ name: "read", inputSchema: { type: "object" } }] };
+       } else if (message.method === "tools/call") {
+         result = { content: [{ type: "text", text: endpoint }] };
+       }
+@@ -114,6 +122,7 @@ async function withMcpFixture(
+         release();
+       }
+       await disposeAllSessionMcpRuntimes();
++      closeOpenClawStateDatabaseForTest();
+       server.closeAllConnections();
+       await new Promise<void>((resolve, reject) => {
+         server.close((error) => (error ? reject(error) : resolve()));
+@@ -260,3 +269,94 @@ it("preserves the runtime admitted by an in-flight static native preflight", asy
+     }
+   });
+ });
++
++it("refreshes a warm operator OAuth catalog at the next admission without rebuilding unchanged peers", async () => {
++  await withMcpFixture(async ({ workspaceDir, config, hooks }) => {
++    const cfg = config("/grant");
++    const servers = expectDefined(cfg.mcp?.servers, "configured MCP servers");
++    const grantServer = expectDefined(servers.probe, "grant server");
++    const url = expectDefined(grantServer.url, "grant endpoint");
++    servers.probe = { ...grantServer, auth: "oauth" };
++    servers.peer = expectDefined(config("/peer").mcp?.servers?.probe, "unchanged peer");
++    const identity = operatorMcpOAuthIdentity("probe", url);
++    const writeGrant = (accessToken: string) =>
++      updateMcpOAuthStore(identity.storeKey, () => ({
++        tokens: { access_token: accessToken, token_type: "Bearer" },
++      }));
++    const initialized: string[] = [];
++    const listed: string[] = [];
++    hooks.onInitialize = (endpoint) => initialized.push(endpoint);
++    hooks.onList = async (endpoint, authorization) => {
++      listed.push(endpoint);
++      const names =
++        endpoint === "/grant" && authorization === "Bearer test-write-grant"
++          ? ["listCategories", "editCategory"]
++          : ["listCategories"];
++      return names.map((name) => ({ name, inputSchema: { type: "object" } }));
++    };
++    writeGrant("test-read-grant");
++    const requesterParams = {
++      workspaceDir,
++      cfg: {
++        ...cfg,
++        mcp: {
++          servers: { probe: { ...servers.probe, oauth: { identity: "per-requester" as const } } },
++        },
++      },
++      logDiagnostics: false,
++    };
++    const requesterFingerprint = loadSessionMcpConfig(requesterParams).fingerprint;
++    const peerParams = {
++      workspaceDir,
++      cfg,
++      includeServerNames: new Set(["peer"]),
++      logDiagnostics: false,
++    };
++    const peerFingerprint = loadSessionMcpConfig(peerParams).fingerprint;
++    const params = {
++      sessionId: "renewed-grant",
++      sessionKey: "agent:main:renewed-grant",
++      workspaceDir,
++      cfg,
++    };
++    const previous = await acquireSessionMcpRuntime(params);
++    const original = await previous.runtime.getCatalog();
++    expect(
++      original.tools.filter((tool) => tool.serverName === "probe").map((tool) => tool.toolName),
++    ).toEqual(["listCategories"]);
++    writeGrant("test-read-grant");
++    const reused = await acquireSessionMcpRuntime(params);
++    expect(reused.runtime).toBe(previous.runtime);
++    expect(await reused.runtime.getCatalog()).toBe(original);
++    expect(initialized.toSorted()).toEqual(["/grant", "/peer"]);
++    expect(listed.toSorted()).toEqual(["/grant", "/peer"]);
++    await releaseSessionMcpRuntime(reused);
++
++    // A canonical replacement outside the manager sends no tools/list_changed notification.
++    writeGrant("test-write-grant");
++    expect(loadSessionMcpConfig(requesterParams).fingerprint).toBe(requesterFingerprint);
++    expect(loadSessionMcpConfig(peerParams).fingerprint).toBe(peerFingerprint);
++    const next = await acquireSessionMcpRuntime(params);
++    try {
++      const refreshed = await next.runtime.getCatalog();
++      expect(next.runtime).not.toBe(previous.runtime);
++      expect(
++        refreshed.tools.filter((tool) => tool.serverName === "probe").map((tool) => tool.toolName),
++      ).toEqual(["editCategory", "listCategories"]);
++      expect(refreshed.servers.peer).toBe(original.servers.peer);
++      expect(initialized.filter((endpoint) => endpoint === "/grant")).toHaveLength(2);
++      expect(listed.filter((endpoint) => endpoint === "/grant")).toHaveLength(2);
++      expect(initialized.filter((endpoint) => endpoint === "/peer")).toHaveLength(1);
++      expect(listed.filter((endpoint) => endpoint === "/peer")).toHaveLength(1);
++      await expect(previous.runtime.callTool("peer", "listCategories", {})).resolves.toMatchObject({
++        content: [{ text: "/peer" }],
++      });
++      await expect(next.runtime.callTool("probe", "editCategory", {})).resolves.toMatchObject({
++        content: [{ text: "/grant" }],
++      });
++    } finally {
++      await releaseSessionMcpRuntime(previous);
++      await releaseSessionMcpRuntime(next);
++    }
++  });
++});
+diff --git a/src/agents/agent-bundle-mcp-runtime-config.ts b/src/agents/agent-bundle-mcp-runtime-config.ts
+index d8c875a8c495033a615151788a446cfcabedbd98..7522a6d001d8f75857083ead0bac443f2b3edc62 100644
+--- a/src/agents/agent-bundle-mcp-runtime-config.ts
++++ b/src/agents/agent-bundle-mcp-runtime-config.ts
+@@ -10,6 +10,9 @@ import {
+   partitionMcpServersByConnectionScope,
+   redactMcpServersForFingerprint,
+ } from "./mcp-connection-resolver.js";
++import { operatorMcpOAuthIdentity } from "./mcp-oauth-identity.js";
++import { readMcpOAuthStoreRevision } from "./mcp-oauth-store.js";
++import { resolveMcpTransportConfig } from "./mcp-transport-config.js";
+ import { createMcpServerToolDenyMatcher } from "./tool-policy-match.js";
+ 
+ type LoadedMcpConfig = ReturnType<typeof loadEmbeddedAgentMcpConfig>;
+@@ -47,6 +50,7 @@ function createCatalogFingerprint(params: {
+   /** Full-set server→safeName map; assignment changes must invalidate all partitions. */
+   safeServerNames?: Record<string, string>;
+   mcpToolsDeny?: Record<string, string[]>;
++  operatorOAuthStoreRevisions?: Record<string, number | null>;
+ }): string {
+   // Session MCP fingerprints only invalidate in-memory runtime catalogs.
+   // Algorithm changes can cause one cache miss, but no persisted state migration.
+@@ -134,6 +138,24 @@ export function loadSessionMcpConfig(params: {
+   const fingerprintServers = params.redactConnectionServerNames?.size
+     ? redactMcpServersForFingerprint(mcpServers, params.redactConnectionServerNames)
+     : mcpServers;
++  const operatorOAuthRevisionEntries: Array<[string, number | null]> = [];
++  for (const [serverName, rawServer] of Object.entries(mcpServers)) {
++    if (params.redactConnectionServerNames?.has(serverName)) {
++      continue;
++    }
++    const transport = resolveMcpTransportConfig(serverName, rawServer, { logWarnings: false });
++    if (
++      transport?.kind === "http" &&
++      transport.auth === "oauth" &&
++      transport.oauth?.identity !== "per-requester"
++    ) {
++      const identity = operatorMcpOAuthIdentity(serverName, transport.url);
++      operatorOAuthRevisionEntries.push([
++        serverName,
++        readMcpOAuthStoreRevision(identity.storeKey) ?? null,
++      ]);
++    }
++  }
+   const result = {
+     safeServerNamesByServer,
+     loaded: {
+@@ -148,6 +170,9 @@ export function loadSessionMcpConfig(params: {
+       mcpAppsEnabled,
+       ...(safeServerNames ? { safeServerNames } : {}),
+       mcpToolsDeny,
++      ...(operatorOAuthRevisionEntries.length > 0
++        ? { operatorOAuthStoreRevisions: Object.fromEntries(operatorOAuthRevisionEntries) }
++        : {}),
+     }),
+   };
+   // Launch normalization is session-owned; never expose cached package facts or user config.
+@@ -175,7 +200,7 @@ export function resolveSessionMcpConfigSummary(params: {
+   // its fingerprint and excludes requester-scoped servers from its partition.
+   // Compare apples-to-apples or tools.effective reports stale-config forever.
+   const { requesterScopedServerNames } = partitionMcpServersByConnectionScope(loaded.mcpServers);
+-  const { fingerprint } = loadSessionMcpConfig({
++  const fingerprintParams = {
+     ...params,
+     loaded,
+     logDiagnostics: false,
+@@ -183,8 +208,14 @@ export function resolveSessionMcpConfigSummary(params: {
+       ? { excludeServerNames: new Set(requesterScopedServerNames) }
+       : {}),
+     safeServerNamesByServer,
+-  });
+-  return { fingerprint, serverNames };
++  };
++  return {
++    // Cache prepared config facts, while saved OAuth revisions remain current.
++    get fingerprint() {
++      return loadSessionMcpConfig(fingerprintParams).fingerprint;
++    },
++    serverNames,
++  };
+ }
+ 
+ /** Reads the enabled static MCP server set without opening transports or listing tools. */
 diff --git a/src/agents/agent-bundle-mcp-runtime-owner.steering.test.ts b/src/agents/agent-bundle-mcp-runtime-owner.steering.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..e0d8c282255f59ad86b99105ef53544400463706
@@ -95791,24 +96091,68 @@ index 6af3cc157b7de0b8c49e05ed2b34ad64c338cbd5..9afd1e58557250115ed5744cff1adb11
      await withTempHome(
        async () => {
 diff --git a/src/agents/mcp-oauth-store.test.ts b/src/agents/mcp-oauth-store.test.ts
-index 6e4ec110cd6f5257175a68a52d068f7b08b3e711..87dd5e2eb652c3c7fee927e25841879a4e710019 100644
+index 6e4ec110cd6f5257175a68a52d068f7b08b3e711..7c6d0abd92672b783ac1f577f00efaa8c0e9d326 100644
 --- a/src/agents/mcp-oauth-store.test.ts
 +++ b/src/agents/mcp-oauth-store.test.ts
-@@ -10,7 +10,10 @@ import {
+@@ -1,6 +1,8 @@
++import { expectDefined } from "@openclaw/normalization-core";
+ import { withTempHome as withBaseTempHome } from "openclaw/plugin-sdk/test-env";
+-import { describe, expect, it } from "vitest";
++import { describe, expect, it, vi } from "vitest";
+ import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db-contract.js";
++import { withOpenClawStateDatabaseReadSnapshot } from "../state/openclaw-state-db-readonly.js";
+ import {
+   closeOpenClawStateDatabaseForTest,
+   openOpenClawStateDatabase,
+@@ -10,7 +12,12 @@ import {
    clearMcpOAuthStore,
    consumeOAuthState,
    deleteMcpOAuthPendingAuthorizationsByPrefix,
 +  parseMcpOAuthStoreJson,
    readMcpOAuthPendingAuthorization,
 +  readMcpOAuthStore,
++  readMcpOAuthStoreReadOnly,
++  readMcpOAuthStoreRevision,
 +  updateMcpOAuthStore,
    writeMcpOAuthPendingAuthorization,
  } from "./mcp-oauth-store.js";
  
-@@ -25,6 +28,46 @@ async function withTempHome(run: () => Promise<void>): Promise<void> {
+@@ -25,6 +32,78 @@ async function withTempHome(run: () => Promise<void>): Promise<void> {
  }
  
  describe("MCP OAuth pending authorization store", () => {
++  it("advances the metadata revision for same-clock canonical grant replacements", async () => {
++    await withTempHome(async () => {
++      const storeKey = operatorMcpOAuthIdentity(
++        "revision",
++        "https://revision.example.test/mcp",
++      ).storeKey;
++      expect(readMcpOAuthStoreRevision(storeKey)).toBeUndefined();
++      updateMcpOAuthStore(storeKey, () => ({
++        tokens: { access_token: "test-old-grant", token_type: "Bearer" },
++      }));
++      const first = expectDefined(readMcpOAuthStoreRevision(storeKey), "first store revision");
++      await withOpenClawStateDatabaseReadSnapshot(async () => {
++        const clock = vi.spyOn(Date, "now").mockReturnValue(first);
++        try {
++          updateMcpOAuthStore(storeKey, (current) => current);
++          expect(readMcpOAuthStoreRevision(storeKey)).toBe(first);
++          updateMcpOAuthStore(storeKey, () => ({
++            tokens: { access_token: "test-replaced-grant", token_type: "Bearer" },
++          }));
++          expect(readMcpOAuthStoreReadOnly(storeKey).tokens?.access_token).toBe("test-old-grant");
++          expect(readMcpOAuthStoreRevision(storeKey)).toBe(first + 1);
++          clearMcpOAuthStore(storeKey);
++          expect(readMcpOAuthStoreRevision(storeKey)).toBe(first + 2);
++        } finally {
++          clock.mockRestore();
++        }
++      });
++      closeOpenClawStateDatabaseForTest();
++      expect(readMcpOAuthStoreRevision(storeKey)).toBe(first + 2);
++    });
++  });
++
 +  it("persists one validated replacement registration beside the current grant", async () => {
 +    await withTempHome(async () => {
 +      const identity = operatorMcpOAuthIdentity(
@@ -95853,10 +96197,22 @@ index 6e4ec110cd6f5257175a68a52d068f7b08b3e711..87dd5e2eb652c3c7fee927e25841879a
      await withTempHome(async () => {
        const database = openOpenClawStateDatabase().db;
 diff --git a/src/agents/mcp-oauth-store.ts b/src/agents/mcp-oauth-store.ts
-index 47f5c3bd0e9ab7616d1e94aaf2ebe86ca32221f5..2be11ba714cdafaf54b804afc6b5c2157c338dcd 100644
+index 47f5c3bd0e9ab7616d1e94aaf2ebe86ca32221f5..aaadfe1935bec2c65d64cd860ccfccdc4c372bd2 100644
 --- a/src/agents/mcp-oauth-store.ts
 +++ b/src/agents/mcp-oauth-store.ts
-@@ -44,6 +44,8 @@ export type McpOAuthStore = {
+@@ -16,7 +16,10 @@ import {
+   executeSqliteQueryTakeFirstSync,
+   getNodeSqliteKysely,
+ } from "../infra/kysely-sync.js";
+-import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
++import {
++  withExistingOpenClawStateDatabaseCurrentReadOnly,
++  withExistingOpenClawStateDatabaseReadOnly,
++} from "../state/openclaw-state-db-readonly.js";
+ import { ensureMcpOAuthPendingSchema } from "../state/openclaw-state-db-schema-additive.js";
+ import { tableExists } from "../state/openclaw-state-db-schema-helpers.js";
+ import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
+@@ -44,6 +47,8 @@ export type McpOAuthStore = {
    /** Provenance for token-less rows that Doctor must interpret during legacy import. */
    credentialState?: "uninitialized" | "cleared";
    clientInformation?: OAuthClientInformationMixed;
@@ -95865,7 +96221,7 @@ index 47f5c3bd0e9ab7616d1e94aaf2ebe86ca32221f5..2be11ba714cdafaf54b804afc6b5c215
    tokens?: OAuthTokens;
    tokenExpiresAt?: number;
    tokensAuthorizationServerUrl?: string;
-@@ -157,6 +159,13 @@ export function parseMcpOAuthStoreJson(storeKey: string, raw: string): McpOAuthS
+@@ -157,6 +162,13 @@ export function parseMcpOAuthStoreJson(storeKey: string, raw: string): McpOAuthS
    ) {
      throw new McpOAuthStoreCorruptionError(storeKey, "clientInformation is invalid");
    }
@@ -95879,6 +96235,52 @@ index 47f5c3bd0e9ab7616d1e94aaf2ebe86ca32221f5..2be11ba714cdafaf54b804afc6b5c215
    if (value.tokens !== undefined && !OAuthTokensSchema.safeParse(value.tokens).success) {
      throw new McpOAuthStoreCorruptionError(storeKey, "tokens are invalid");
    }
+@@ -253,6 +265,22 @@ export function readMcpOAuthStoreReadOnly(storeKey: string): McpOAuthStore {
+   );
+ }
+ 
++/** Read the current committed revision without loading credential JSON or creating state. */
++export function readMcpOAuthStoreRevision(storeKey: string): number | undefined {
++  return withExistingOpenClawStateDatabaseCurrentReadOnly(({ db }) => {
++    if (!tableExists(db, "mcp_oauth_stores")) {
++      return undefined;
++    }
++    return executeSqliteQueryTakeFirstSync(
++      db,
++      getNodeSqliteKysely<McpOAuthDatabase>(db)
++        .selectFrom("mcp_oauth_stores")
++        .select("updated_at")
++        .where("store_key", "=", storeKey),
++    )?.updated_at;
++  });
++}
++
+ /** List canonical store keys matching one server/principal prefix without creating state. */
+ export function listMcpOAuthStoreKeysByPrefix(prefix: string): string[] {
+   return (
+@@ -417,11 +445,19 @@ function replaceMcpOAuthStore(
+         updated_at: updatedAt,
+       })
+       .onConflict((conflict) =>
+-        conflict.column("store_key").doUpdateSet({
++        conflict.column("store_key").doUpdateSet((eb) => ({
+           format_version: MCP_OAUTH_STORE_FORMAT_VERSION,
+           store_json: storeJson,
+-          updated_at: updatedAt,
+-        }),
++          // Identical metadata retains healthy clients; replacements advance even in one clock tick.
++          updated_at: eb
++            .case()
++            .when("mcp_oauth_stores.store_json", "=", storeJson)
++            .then(eb.ref("mcp_oauth_stores.updated_at"))
++            .else(
++              eb.fn<number>("max", [eb.val(updatedAt), eb("mcp_oauth_stores.updated_at", "+", 1)]),
++            )
++            .end(),
++        })),
+       ),
+   );
+   return next;
 diff --git a/src/agents/mcp-oauth.requester-recovery.test.ts b/src/agents/mcp-oauth.requester-recovery.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..1a3cf940de60e340d2cde9396b8138a5dfffc034
@@ -182442,6 +182844,100 @@ index c08066eeb55d00f08f8c2238f196099bcdce62c0..6f4fc1d13b4c1ffadea7b6007abbe6b7
    "tasks.cancel": async ({ params, respond, context, client }) => {
      if (!assertValidParams(params, validateTasksCancelParams, "tasks.cancel", respond)) {
        return;
+diff --git a/src/gateway/server-methods/tools-effective.test.ts b/src/gateway/server-methods/tools-effective.test.ts
+index 1f3d89d34f831235ccbbc76e0347e9cd75a1bd2b..da7f8a6c1f9937e653057a22dcd06410059d64f0 100644
+--- a/src/gateway/server-methods/tools-effective.test.ts
++++ b/src/gateway/server-methods/tools-effective.test.ts
+@@ -2,11 +2,16 @@
+ // caching behavior, delivery context, and policy filtering.
+ 
+ import { expectDefined } from "@openclaw/normalization-core";
++import { withTempHome } from "openclaw/plugin-sdk/test-env";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
++import { resolveSessionMcpConfigSummary } from "../../agents/agent-bundle-mcp-runtime-config.js";
+ import type { McpToolCatalog } from "../../agents/agent-bundle-mcp-types.js";
++import { operatorMcpOAuthIdentity } from "../../agents/mcp-oauth-identity.js";
++import { updateMcpOAuthStore } from "../../agents/mcp-oauth-store.js";
+ import { makeProviderModelFixture } from "../../agents/test-helpers/provider-model-fixture.js";
+ import { setPluginToolMeta } from "../../plugins/tool-metadata.js";
++import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
+ import { createToolsEffectiveHandlers, testing } from "./tools-effective.js";
+ 
+ type ToolsEffectiveDependencies = NonNullable<Parameters<typeof createToolsEffectiveHandlers>[0]>;
+@@ -824,6 +829,72 @@ describe("tools.effective handler", () => {
+     expectPayloadNotice(respond, "unsupported-tool-schema:reproProbe__probe_tool");
+   });
+ 
++  it("refreshes cached MCP summary revisions without discarding prepared config or base inventory", async () => {
++    testing.setToolsEffectiveNowForTest(() => 1_000);
++    await withTempHome(async () => {
++      try {
++        const url = "https://summary-revision.example.test/mcp";
++        const cfg = {
++          plugins: { enabled: false },
++          mcp: {
++            servers: {
++              reproProbe: { transport: "streamable-http" as const, url, auth: "oauth" as const },
++              requester: {
++                transport: "streamable-http" as const,
++                url,
++                auth: "oauth" as const,
++                oauth: { identity: "per-requester" as const },
++              },
++            },
++          },
++        };
++        const identity = operatorMcpOAuthIdentity("reproProbe", url);
++        const writeGrant = (accessToken: string) =>
++          updateMcpOAuthStore(identity.storeKey, () => ({
++            tokens: { access_token: accessToken, token_type: "Bearer" },
++          }));
++        writeGrant("test-read-grant");
++        const params = { workspaceDir: "/tmp/workspace-main", cfg };
++        const cachedSummary = resolveSessionMcpConfigSummary(params);
++        const previousFingerprint = cachedSummary.fingerprint;
++        runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce(cachedSummary);
++        const catalog = makeMcpCatalog();
++        mockWarmMcpRuntime(catalog, { configFingerprint: previousFingerprint });
++        runtimeMocks.buildBundleMcpToolsFromCatalog.mockReturnValueOnce([makeMcpTool()]);
++        const first = createInvokeParams({ sessionKey: "main:abc" });
++        await first.invoke();
++        expectPayloadGroupIds(first.respond, ["core", "mcp"]);
++
++        writeGrant("test-write-grant");
++        const currentFingerprint = resolveSessionMcpConfigSummary(params).fingerprint;
++        expect(currentFingerprint).not.toBe(previousFingerprint);
++        mockWarmMcpRuntime(catalog, { configFingerprint: previousFingerprint });
++        const stale = createInvokeParams({ sessionKey: "main:abc" });
++        await stale.invoke();
++        expectPayloadNotice(stale.respond, "mcp-stale-catalog");
++        expect(runtimeMocks.buildBundleMcpToolsFromCatalog).toHaveBeenCalledOnce();
++
++        mockWarmMcpRuntime(catalog, { configFingerprint: currentFingerprint });
++        runtimeMocks.buildBundleMcpToolsFromCatalog.mockReturnValueOnce([makeMcpTool()]);
++        const refreshed = createInvokeParams({ sessionKey: "main:abc" });
++        await refreshed.invoke();
++        expectPayloadGroupIds(refreshed.respond, ["core", "mcp"]);
++        expect(firstRespondCall(refreshed.respond)?.[1]).not.toHaveProperty("notices");
++        writeGrant("test-write-grant");
++        const requesterIdentity = operatorMcpOAuthIdentity("requester", url);
++        updateMcpOAuthStore(requesterIdentity.storeKey, () => ({
++          tokens: { access_token: "test-unrelated-operator-grant", token_type: "Bearer" },
++        }));
++        expect(cachedSummary.fingerprint).toBe(currentFingerprint);
++        expect(cachedSummary.serverNames).toEqual(["reproProbe", "requester"]);
++        expect(runtimeMocks.resolveSessionMcpConfigSummary).toHaveBeenCalledOnce();
++        expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledOnce();
++      } finally {
++        closeOpenClawStateDatabaseForTest();
++      }
++    });
++  });
++
+   it("does not project stale MCP catalogs after config changes", async () => {
+     mockMcpConfigSummary({ fingerprint: "mcp:2:test" });
+     mockWarmMcpRuntime(makeMcpCatalog(), {
 diff --git a/src/gateway/server-methods/update-owner.test.ts b/src/gateway/server-methods/update-owner.test.ts
 index 5a66eb8d7f80938f817867db843ee0763560c26c..a4f316424fb26407fada1665a5369624549cd266 100644
 --- a/src/gateway/server-methods/update-owner.test.ts
