@@ -30,6 +30,8 @@ Use Trello for personal projects and maintain it within the authenticated task's
 
 This standing grant is disabled until the operator explicitly enables it for one registered deployment target in `AGENTS.md`. Once enabled, after a verified DigitalOcean-backed Personal Data Project source slice reaches its deploy-tracked `main`, deploy it and report live health proof unless the operator opts out or a safety/rollback blocker remains. Include a forced rebuild only when needed for that verified slice. Every other infrastructure mutation requires an instruction naming or plainly implying it.
 
+Reuse the operator's actual roles; administrative access means equal access. In this fictional example, Company Alpha allows repository read/write and Riley owns production deployment; Company Beta grants administration. Use the registered portfolio credential stores in TOOLS. Keep acceptance-test traffic out of quality-control; prefer a personal destination or an authorized company admin channel. Ordinary replies stay in their conversation.
+
 ## Source pointers
 
 Use `registry/project_topology.json` for source roots, `registry/integration_routes.json` for provider/account routes, and deliberately loaded private records for context relevant to the task. Keep detailed private records out of this default preference layer.

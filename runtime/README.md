@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
-identifies the current Gateway installation.
+[October 10 source reference and installation boundaries](#october-10-source-reference-and-installation-boundaries)
+separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
@@ -15,6 +15,90 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 10 source reference and installation boundaries
+
+The qualified canonical source reference is
+`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`, tree
+`2c7fc60f1d2d755e2a05720974f91d9c0103b2a0`. Native distribution
+`4f73fbf792a915051eb6895f8472e8c055f756eb`, tree
+`bf7b98f8f17f6341e2b60baf4624202a8feb42ca`, retains the same two-YAML native
+dependency overlay. The exported patch and normalized trees are bound in the
+manifest. The saved-call owner and the readable, dated-context prompt retain their
+separate source qualifications. The existing summary-model owner passed 30 cases
+and the required changed checks passed. Earlier requester, routing, catalog, native
+and fixture qualifications retain their original receipts; failed public jobs keep
+their original failure status.
+
+Gateway and Node now run distribution
+`4f73fbf792a915051eb6895f8472e8c055f756eb`. Normal build, stage, seal, first activation and
+fresh independent same-generation loaded-source, health and protected-state
+preservation passed at `2026-10-10T22:50:31.752423Z`. The activation receipt is
+`a7c27c99956347b2b63c50cb4ffe52d0806fbe5751f6a16e8a79d6246924034e` and the loaded-source receipt is
+`e16343f45fea5d55e9e98a86528b4082f0c5baae6be696f6af3645ed911bee40`.
+The first independent loaded observation failed its second approvals inspection;
+its original failure remains recorded. A later exact-inspector diagnostic and
+fresh unchanged-reader observation passed separately. The original failure's
+cause was not captured. The exact preceding public Gateway 496 metadata and
+complete 9fe/36f/616 chain are retained. The intervening 6f installation keeps its
+separate dated private activation and loaded-source receipts.
+
+Both signed 618 companions retain installed source
+`b6c925c4875d83abfb43b6587e7c9966b3634520`, tree
+`b0c68dc6a016338df1dd660a21c4aa77a9f1521d`. Their complete signed installed and retained
+rollback maps, bundled-worker identity, native cohorts, selected-state preservation
+and paired-reconnection proofs remain unchanged. Actual 617 and complete 616/614
+companion history, prior Gateway 613 history, October 9 signed 606 records and
+complete 607 predecessors retain their original scope and dates.
+
+The separate uncoached Mac saved-credential unlock remains native acceptance;
+provider authorization is separately scoped. Earlier catalog discovery and
+unchanged-grant reuse retain their dated acceptance. An ordinary model run on
+October 10 used existing records and all 70 genuine utterances in order; raw capture
+and metadata were unchanged. Independent readback accepted the saved notes and
+normal exports, including four readable overview paragraphs and dated historical
+context. The two original minutes posts were corrected in place, and the useful
+completion was independently read back in the originating conversation. Future
+voice follow, move and leave behavior remains unverified. Source qualification and
+runtime installation alone do not establish ordinary-use acceptance, provider
+writes, broader goal completion or exact-head hosted qualification. All five
+exact-head hosted checks remain required. Prior failed public checks stay recorded.
+
+## October 9 source reference and native distribution
+
+The canonical source reference is `4aaf24a7177397c9e80a3b8fa32b74cb06a0b983`,
+tree `fd234ef53ef06aa4aeb056d3d180a461de810934`. The installed Gateway, Node
+and both signed606 companions use native distribution
+`356d759eebd10fd64d4b0a8a28e9f1a96cc7a26a`, tree
+`35cf4f47fbb63c79855f704e8b588a6b40f080cc`. Its two-YAML delta binds the
+qualified native Codex archive while retaining the patched Playwright dependency.
+The public patches normalize only the same two test-fixture labels; their full
+normalized trees are separately pinned in the manifest.
+
+One normal package, Gateway activation and independent loaded preservation passed.
+Both hosts passed complete signed606 installed inventories, live bundled-worker
+source readbacks, fresh native cohorts, reconnection, executable lookup and
+protected-state preservation. Complete605 rollback inventories remain retained.
+The package's original unjoined endpoint stays false; later complete observations
+separately proved natural retirement of its captured process cohort.
+
+The actual Gateway dependencies resolve the qualified native Codex, ACP1.10.0 and
+patched Playwright1.63.0. A fresh ordinary node-host catalog read succeeded after
+an earlier timeout. The separate native host passed normal managed adoption and
+registered-root qualified resolution. Supported native Swift catalog enablement
+then produced a successful normal list with a concurrent app-owned executable
+chain selecting the qualified native Codex. A later fresh eligible list and
+membership-bound turns read also passed. The earlier TypeScript catalog failure
+remains unresolved; native owner selection does not claim to fix it. Source, installed bundles and catalog reads
+do not close remaining connected-account, continuation or spoken-call outcomes.
+The manifest's current record states these limits without replacing individual
+accepted outcomes with the historical all-nineteen-open matrix.
+
+The [native reconstruction procedure](../docs/21-native-runtime-reconstruction.md)
+applies both bound patches and verifies the published archive. Independent public
+reconstruction, frozen installation, build and consumer readback passed, along
+with four normal local checks. All five hosted jobs must still qualify the final
+public revision. All dated predecessor records below remain unchanged.
 
 ## October 8 checkpoint admission and owned browser migration
 
