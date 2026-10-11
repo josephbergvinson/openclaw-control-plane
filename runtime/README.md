@@ -53,11 +53,16 @@ complete 607 predecessors retain their original scope and dates.
 
 The separate uncoached Mac saved-credential unlock remains native acceptance;
 provider authorization is separately scoped. Earlier catalog discovery and
-unchanged-grant reuse retain their dated acceptance. Fresh ordinary minutes
-readability and factual acceptance remain pending. Source qualification and runtime
-installation do not establish that acceptance, provider writes, broader goal
-completion or exact-head hosted qualification. Prior failed public checks stay
-recorded.
+unchanged-grant reuse retain their dated acceptance. An ordinary model run on
+October 10 used existing records and all 70 genuine utterances in order; raw capture
+and metadata were unchanged. Independent readback accepted the saved notes and
+normal exports, including four readable overview paragraphs and dated historical
+context. The two original minutes posts were corrected in place, and the useful
+completion was independently read back in the originating conversation. Future
+voice follow, move and leave behavior remains unverified. Source qualification and
+runtime installation alone do not establish ordinary-use acceptance, provider
+writes, broader goal completion or exact-head hosted qualification. All five
+exact-head hosted checks remain required. Prior failed public checks stay recorded.
 
 ## October 9 source reference and native distribution
 
