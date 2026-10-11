@@ -36,10 +36,15 @@ public Gateway chain, including 496, 9fe, 36f and 616, remains intact. The inter
 
 The separate uncoached Mac saved-credential unlock remains native acceptance;
 provider authorization is separate. Earlier catalog discovery and unchanged-grant
-reuse retain their dated acceptance. Fresh ordinary minutes readability and factual
-acceptance remain pending, as do the separate exact-head hosted checks. Installation
-and source qualification do not establish those outcomes. Prior failed public checks
-remain recorded.
+reuse retain their dated acceptance. An ordinary model run on October 10 used
+existing records and all 70 genuine utterances in order, preserving raw capture and
+metadata. The saved notes and normal exports passed independent readback, with four
+readable overview paragraphs and dated historical context. The two original minutes
+posts were corrected in place, and a useful completion reached the originating
+conversation. Future voice follow, move and leave behavior remains unverified.
+Provider writes and broader goal completion remain separate; installation and source
+qualification alone do not establish ordinary-use acceptance. All five exact-head
+hosted checks remain required, and prior failed public checks remain recorded.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
