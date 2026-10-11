@@ -14,13 +14,37 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The installed Gateway and Node source reference is
-[`29cd18badf11734051eb12e5dde8bc0cc655e4e4`](runtime/README.md#october-8-checkpoint-admission-and-owned-browser-migration).
-The source reference and installed runtime have the same commit and tree.
-Normal native activation and independent loaded-source, health and protected-state
-checks passed. Both signed companions, build 605, retain their 4ce source and
-dated installation evidence. All 19 ordinary-use outcomes remain open; fresh
-local and all five required hosted public checks remain separate gates.
+The current source reference is
+[`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
+Its native distribution is `4f73fbf792a915051eb6895f8472e8c055f756eb`;
+the source trees differ only in the retained package YAML overlay.
+The saved-call owner and the readable, dated-context prompt retain their separate
+source qualifications. The existing summary-model owner passed 30 cases and the
+required changed checks passed. Earlier requester, routing, catalog, native and
+fixture qualifications retain their original dated receipts.
+
+Gateway and Node now run that native distribution. Normal build, stage, seal,
+first activation and the fresh independent loaded-source observation passed at
+`2026-10-10T22:50:31.752423Z`, with same-generation, health and protected-state
+preservation verified. The original loaded001 approvals-inspection failure stays
+recorded; the later unchanged reader passed separately, without establishing the
+original failure's cause. Both signed 618 companions retain source
+`b6c925c4875d83abfb43b6587e7c9966b3634520` and their complete installed/rollback maps,
+worker/cohort, preservation and paired-reconnection evidence. The complete prior
+public Gateway chain, including 496, 9fe, 36f and 616, remains intact. The intervening
+6f installation retains its separate dated private receipts.
+
+The separate uncoached Mac saved-credential unlock remains native acceptance;
+provider authorization is separate. Earlier catalog discovery and unchanged-grant
+reuse retain their dated acceptance. An ordinary model run on October 10 used
+existing records and all 70 genuine utterances in order, preserving raw capture and
+metadata. The saved notes and normal exports passed independent readback, with four
+readable overview paragraphs and dated historical context. The two original minutes
+posts were corrected in place, and a useful completion reached the originating
+conversation. Future voice follow, move and leave behavior remains unverified.
+Provider writes and broader goal completion remain separate; installation and source
+qualification alone do not establish ordinary-use acceptance. All five exact-head
+hosted checks remain required, and prior failed public checks remain recorded.
 
 The dated October 7 qualified runtime source reference was
 [`1f9e9a4caf2525d4aaf41fa2cd3bffe4744bf1eb`](runtime/README.md#october-7-native-child-status-and-cron-fixture-qualification).
@@ -263,6 +287,7 @@ helpers and adoption acceptance are separate evidence.
 | [18 Architecture evolution](docs/18-architecture-evolution.md) | Understand the direction and tradeoffs. |
 | [19 Host operations and backups](docs/19-host-operations-and-backups.md) | Cover maintenance, optional historical Backblaze templates, Docker/OrbStack and adjacent software. |
 | [20 Runtime source changes](docs/20-runtime-source-changes.md) | Inspect the complete patch and source map. |
+| [21 Native runtime reconstruction](docs/21-native-runtime-reconstruction.md) | Verify the separately bound native distribution source and archive. |
 
 ## Scope and evidence
 

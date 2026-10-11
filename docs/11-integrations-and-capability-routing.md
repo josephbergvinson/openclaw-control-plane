@@ -60,6 +60,14 @@ An existing signed-in browser can be the correct route. Inspect its actual accou
 
 Source-only Discord routes are a useful case. A registered company guild may be readable through the existing account-bound CLI while remaining outside the assistant's inbound bindings. A delegated message-tool rejection does not prove that supported source route is unavailable. Use the exact registered guild/channel bounds; do not add inbound bindings or post there merely to make a read easier.
 
+## Actual roles, credential coverage and acceptance destinations
+
+An operator's request for administrative access can mean equality with their current provider roles. Verify the intended meaning and actual account once through the registered source; do not infer a grant of organization ownership or another person's production credentials. In the fictional Company Alpha example, repository read/write supports source and pull-request work while Riley owns production deployment. Company Beta's registered admin route has a different scope. A role the operator does not hold is an actual access limit; repeatedly attempting that unavailable account does not repair authentication.
+
+Credential coverage belongs to the selected portfolio. A company Bitwarden vault can contain passwords absent from Apple Passwords; a personal account may instead use its existing Google or Apple sign-in session. Use registered opaque bindings and the supported credential mechanism, keeping account choice and resulting access explicit. The [host UI mechanics](../templates/TOOLS.example.md#browser-and-host-ui) already cover normal Apple passkey prompts, observed password fallbacks, host-local secure entry and actual human-presence boundaries. A recognized device is useful context, not proof that a particular challenge succeeded or requires a person.
+
+Place diagnostic acceptance traffic in a quiet authorized destination. Prefer a personal test destination; when company-specific behavior needs its server, use a verified admin channel allowed by the task. Keep ordinary business replies in their originating conversation. A quiet-channel preference never grants a new recipient or creates unsolicited monitoring.
+
 ## Exact objects and current content
 
 When the operator supplies a URL or identifier, bind that object first. Check its selected account, owner/sender, title/subject and date where available. Related discovery can help locate it but cannot silently substitute another object. This rule applies before drafting as well as before a final write: the wrong source can produce a confidently wrong draft.
