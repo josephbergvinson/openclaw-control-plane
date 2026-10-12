@@ -14,7 +14,41 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current source reference is
+The latest source reference is
+[`24a128f31bc538dae046419201cd6f8bbbe68f2f`](runtime/README.md#october-12-native-fixture-contracts).
+Gateway and Node run native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3`.
+Two recovery/native fixtures now satisfy their existing required-message and
+persisted canonical parent-envelope contracts. Owning fixture qualification,
+the matching build and actual installation have separate receipts. Both earlier
+dated qualifications, production console files, native archive and Signed618
+companions remain intact. All five hosted jobs are required on the updated head.
+
+The dated October 12 metadata and continuation source reference is
+[`a7531113eb22e82cd2fb3e94457e8707de07b2ad`](runtime/README.md#october-12-mac-metadata-and-native-resume-continuation).
+Gateway and Node run native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4`.
+Requester-source validation now precedes resume adoption, preserving the paused
+read transfer until it is validated. Approved Mac CLI/TUI platform pins and existing
+spawn owners retain their ordinary behavior. Owning source checks, built-runtime
+native continuation and normal installation have separate receipts. The October11
+console repair and installed measurements remain dated, with production console
+source unchanged. Signed618 companions and prior records remain intact. Fresh
+public checks and all five existing hosted jobs remain required.
+
+The dated October 11 source reference is
+[`11f85c78fc5b7e978261de3e41aeb189a3d53113`](runtime/README.md#october-11-recent-context-tool-authority-and-console-ownership).
+Gateway and Node run native distribution `d3e26bf98ca679d8cd76a604bf57115242d361ff`.
+The new source retains recent compaction inputs, explicit full child tool policy,
+native worker authority, source-bound completion recovery, full-profile system
+review tools and peer-owned console-object cleanup. The guarded core check,
+combined build, first activation and independent loaded-state preservation passed.
+Installed isolated Chromium measurement released 2,000 console objects and kept
+500 text messages; one ordinary native child retained its parent's available
+Computer authority and returned its completion to the original parent. These observations
+have separate scopes. Signed618 companions and all earlier records are unchanged.
+Fresh public checks and all five existing hosted jobs remain required for this
+reference; source and installation alone do not close broader ordinary-use work.
+
+The dated October 10 source reference is
 [`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
 Its native distribution is `4f73fbf792a915051eb6895f8472e8c055f756eb`;
 the source trees differ only in the retained package YAML overlay.
