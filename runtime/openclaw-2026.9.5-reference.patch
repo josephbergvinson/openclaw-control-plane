@@ -21351,7 +21351,7 @@ index eaf713629b833ff24e9aa450446195f79735d238..a0d4756196c2483e1d942ab9ca7b0c2b
  export const MAX_CONSOLE_MESSAGES = 500;
 diff --git a/extensions/browser/src/browser/pw-session-state.console.chromium.test.ts b/extensions/browser/src/browser/pw-session-state.console.chromium.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..95465091c12cd4c634b13ad58f43458684fbd165
+index 0000000000000000000000000000000000000000..810d41730d5559746e1c603a0ac1bebea730bd0f
 --- /dev/null
 +++ b/extensions/browser/src/browser/pw-session-state.console.chromium.test.ts
 @@ -0,0 +1,113 @@
@@ -21393,7 +21393,7 @@ index 0000000000000000000000000000000000000000..95465091c12cd4c634b13ad58f434586
 +              };
 +            };
 +          }
-+        )._connection // oxlint-disable-next-line eslint/no-underscore-dangle -- Read the dependency-owned inspector session for native traffic measurement.
++        )._connection // oxlint-disable-line eslint/no-underscore-dangle -- Read the dependency-owned inspector session for native traffic measurement.
 +          .toImpl(page);
 +        // oxlint-disable-next-line eslint/no-underscore-dangle -- Another CDP session would have a different console object registry.
 +        const native = implementation.delegate._mainFrameSession._client;
@@ -69795,59 +69795,198 @@ index b291ab3afa571292bd50ecc10c5704f548436e96..d999a22a0647a5f6759bb57358da90e0
  }
  
 diff --git a/src/agents/agent-tools.create-openclaw-coding-tools.test.ts b/src/agents/agent-tools.create-openclaw-coding-tools.test.ts
-index 24ef1e7d7d6ec0893a7b6657eb23b65799942870..14f8efb6be27e13b8047784e14993b45ad8ee321 100644
+index 24ef1e7d7d6ec0893a7b6657eb23b65799942870..42ec806ed89b882ca6f8cd98ccdf1fc0340d2554 100644
 --- a/src/agents/agent-tools.create-openclaw-coding-tools.test.ts
 +++ b/src/agents/agent-tools.create-openclaw-coding-tools.test.ts
-@@ -186,6 +186,17 @@ function cronCreatorToolNames(
+@@ -29,6 +29,11 @@ import "./test-helpers/fast-coding-tools.js";
+ import "./test-helpers/fast-openclaw-tools.js";
+ import { createPluginToolAllowlist } from "../plugins/tool-grant-allowlist.js";
+ import { wrapToolWithBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
++import {
++  expectListIncludes,
++  latestCreateOpenClawToolsOptions,
++  toolNameList,
++} from "./agent-tools.inventory.test-support.js";
+ import { createOpenClawCodingTools } from "./agent-tools.js";
+ import { filterToolsByMessageProvider } from "./agent-tools.message-provider-policy.js";
+ import {
+@@ -55,11 +60,7 @@ import {
+   createSandboxFsBridgeFromResolver,
+ } from "./test-helpers/host-sandbox-fs-bridge.js";
+ import { buildEmptyExplicitToolAllowlistError } from "./tool-allowlist-guard.js";
+-import {
+-  attachToolAllowlistIntersection,
+-  DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY,
+-  normalizeToolPolicyName,
+-} from "./tool-policy.js";
++import { DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY, normalizeToolPolicyName } from "./tool-policy.js";
+ import { replaceWithEffectiveCronCreatorToolAllowlist } from "./tools/cron-tool.js";
+ import { getGatewayToolCallerIdentity } from "./tools/gateway-caller-context.js";
+ 
+@@ -138,10 +139,6 @@ function applyRuntimeToolsAllow<T extends { name: string }>(tools: T[], toolsAll
+ type OpenClawCodingTool = ReturnType<typeof createOpenClawCodingTools>[number];
+ type OpenClawToolsOptions = NonNullable<Parameters<typeof createOpenClawTools>[0]>;
+ 
+-function toolNameList(tools: readonly { name: string }[]): string[] {
+-  return tools.map((tool) => tool.name);
+-}
+-
+ function requireTool(tools: OpenClawCodingTool[], name: string): OpenClawCodingTool {
+   const tool = tools.find((candidate) => candidate.name === name);
+   if (!tool) {
+@@ -157,28 +154,6 @@ function requireToolExecute(tool: OpenClawCodingTool): NonNullable<OpenClawCodin
+   return tool.execute;
  }
  
- describe("createOpenClawCodingTools", () => {
-+  it("captures the exact full-policy parent tool surface for native child admission", () => {
-+    const inheritedToolAllowlistRef: string[] = [];
-+    const tools = createOpenClawCodingTools({
-+      senderIsOwner: true,
-+      config: { tools: { profile: "full" } },
-+      inheritedToolAllowlistRef,
-+    });
-+    expect(toolNameList(tools)).toContain("nodes");
-+    expect(inheritedToolAllowlistRef.toSorted()).toEqual(toolNameList(tools).toSorted());
-+  });
-+
-   it("forwards the session web-search gate to core tool materialization", () => {
-     vi.mocked(createOpenClawTools).mockClear();
-     createOpenClawCodingTools({ webSearchEnabled: false });
-@@ -678,7 +689,11 @@ describe("createOpenClawCodingTools", () => {
-       "sessions_spawn",
-       "memory_search",
-     ]);
+-function latestCreateOpenClawToolsOptions(): OpenClawToolsOptions {
+-  const calls = vi.mocked(createOpenClawTools).mock.calls;
+-  const lastCall = calls.at(-1);
+-  const options = lastCall?.[0];
+-  if (!options) {
+-    throw new Error("expected createOpenClawTools call");
+-  }
+-  return options;
+-}
+-
+-function expectListIncludes(
+-  list: readonly string[] | undefined,
+-  expected: readonly string[],
+-): void {
+-  if (!list) {
+-    throw new Error("expected string list");
+-  }
+-  for (const value of expected) {
+-    expect(list.includes(value)).toBe(true);
+-  }
+-}
+-
+ function cronCreatorToolNames(
+   list: OpenClawToolsOptions["cronCreatorToolAllowlist"] | undefined,
+ ): string[] | undefined {
+@@ -664,101 +639,6 @@ describe("createOpenClawCodingTools", () => {
+     expectListIncludes(options.pluginToolAllowlist, ["memory_search", "memory_get"]);
+   });
+ 
+-  it("does not inherit native-harness bridge runtime allowlists", () => {
+-    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+-    createOpenClawToolsMock.mockClear();
+-
+-    createOpenClawCodingTools({
+-      config: testConfig,
+-      runtimeToolAllowlist: ["sessions_spawn", "memory_search"],
+-    });
+-
+-    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+-    expect(latestCreateOpenClawToolsOptions().pluginToolAllowlist).toEqual([
+-      "sessions_spawn",
+-      "memory_search",
+-    ]);
 -    expect(latestCreateOpenClawToolsOptions().inheritedToolAllowlist).toEqual([]);
-+    expectListIncludes(latestCreateOpenClawToolsOptions().inheritedToolAllowlist, [
-+      "read",
-+      "exec",
-+      "sessions_spawn",
-+    ]);
-   });
- 
-   it("inherits embedded runtime toolsAllow when explicitly marked as parent capability", () => {
-@@ -747,7 +762,7 @@ describe("createOpenClawCodingTools", () => {
-     expect(inheritedToolAllowlistRef).not.toContain("exec");
-   });
- 
+-  });
+-
+-  it("inherits embedded runtime toolsAllow when explicitly marked as parent capability", () => {
+-    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+-    createOpenClawToolsMock.mockClear();
+-    const runtimeToolAllowlist = ["sessions_spawn", "memory_search"];
+-
+-    createOpenClawCodingTools({
+-      config: testConfig,
+-      runtimeToolAllowlist,
+-      conversationCapabilityProfile: resolveConversationCapabilityProfile({
+-        config: testConfig,
+-        runtimeToolAllowlist,
+-        inheritRuntimeToolAllowlist: true,
+-      }),
+-    });
+-
+-    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+-    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
+-    expectListIncludes(inheritedAllow, ["sessions_spawn"]);
+-    expect(inheritedAllow?.includes("read")).toBe(false);
+-    expect(inheritedAllow?.includes("exec")).toBe(false);
+-  });
+-
+-  it.each([
+-    {
+-      label: "explicit tools",
+-      toolsAllow: ["sessions_spawn", "read"],
+-      expected: ["sessions_spawn", "read"],
+-    },
+-    {
+-      label: "overlapping globs",
+-      toolsAllow: attachToolAllowlistIntersection([], [["sessions_*"], ["*_spawn"]]),
+-      expected: ["sessions_spawn"],
+-    },
+-  ])("lets direct callers inherit $label into subagent spawns", ({ toolsAllow, expected }) => {
+-    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+-    createOpenClawToolsMock.mockClear();
+-
+-    createOpenClawCodingTools({
+-      config: testConfig,
+-      runtimeToolAllowlist: toolsAllow,
+-      inheritRuntimeToolAllowlist: true,
+-    });
+-
+-    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+-    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
+-    expectListIncludes(inheritedAllow, expected);
+-    expect(inheritedAllow?.includes("exec")).toBe(false);
+-  });
+-
+-  it("keeps restricted spawn inheritance in the caller-owned runtime snapshot", () => {
+-    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+-    createOpenClawToolsMock.mockClear();
+-    const inheritedToolAllowlistRef: string[] = [];
+-
+-    createOpenClawCodingTools({
+-      config: { tools: { allow: ["read", "sessions_spawn"] } },
+-      inheritedToolAllowlistRef,
+-    });
+-
+-    expect(latestCreateOpenClawToolsOptions().inheritedToolAllowlist).toBe(
+-      inheritedToolAllowlistRef,
+-    );
+-    expectListIncludes(inheritedToolAllowlistRef, ["read", "sessions_spawn"]);
+-    expect(inheritedToolAllowlistRef).not.toContain("exec");
+-  });
+-
 -  it("does not snapshot additive alsoAllow policies for spawn inheritance", () => {
-+  it("captures the actual surface for additive policy without losing its deny", () => {
-     const inheritedToolAllowlistRef: string[] = [];
- 
-     createOpenClawCodingTools({
-@@ -755,7 +770,8 @@ describe("createOpenClawCodingTools", () => {
-       inheritedToolAllowlistRef,
-     });
- 
+-    const inheritedToolAllowlistRef: string[] = [];
+-
+-    createOpenClawCodingTools({
+-      config: { tools: { alsoAllow: ["read"], deny: ["exec"] } },
+-      inheritedToolAllowlistRef,
+-    });
+-
 -    expect(inheritedToolAllowlistRef).toEqual([]);
-+    expectListIncludes(inheritedToolAllowlistRef, ["read", "sessions_spawn"]);
-+    expect(inheritedToolAllowlistRef).not.toContain("exec");
-     expect(latestCreateOpenClawToolsOptions().inheritedToolDenylist).toContain("exec");
+-    expect(latestCreateOpenClawToolsOptions().inheritedToolDenylist).toContain("exec");
+-  });
+-
+   it("preserves runtime-allowed message through restrictive profiles", () => {
+     const tools = createOpenClawCodingTools({
+       config: { tools: { profile: "minimal" } },
+@@ -1803,21 +1683,6 @@ describe("createOpenClawCodingTools", () => {
+     ]);
    });
  
+-  it("passes effective allow-list-restricted tool surface to spawned sessions", () => {
+-    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+-    createOpenClawToolsMock.mockClear();
+-
+-    createOpenClawCodingTools({
+-      config: { tools: { allow: ["read", "sessions_spawn"] } },
+-    });
+-
+-    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+-    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
+-    expectListIncludes(inheritedAllow, ["read", "sessions_spawn"]);
+-    expect(inheritedAllow?.includes("exec")).toBe(false);
+-    expect(inheritedAllow?.includes("process")).toBe(false);
+-  });
+-
+   it("passes group-restricted tool surface to cron-created agent turns", () => {
+     const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+     createOpenClawToolsMock.mockClear();
 diff --git a/src/agents/agent-tools.deferred-followup-guidance.test.ts b/src/agents/agent-tools.deferred-followup-guidance.test.ts
 index 1669ef327d9fc7136d9b25171c2c540d9274319d..5859cb6d8e730c24991c04952dd19d2fb3d14e43 100644
 --- a/src/agents/agent-tools.deferred-followup-guidance.test.ts
@@ -69998,6 +70137,43 @@ index 0000000000000000000000000000000000000000..2aa1cf2853024eb1dbc50d41845169c4
 +    sessionCoreToolPolicy,
 +    readOnly: sessionCoreToolPolicy?.readOnly ?? false,
 +  };
++}
+diff --git a/src/agents/agent-tools.inventory.test-support.ts b/src/agents/agent-tools.inventory.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1a0932c9ccf310364431e9d95166b9221806987e
+--- /dev/null
++++ b/src/agents/agent-tools.inventory.test-support.ts
+@@ -0,0 +1,31 @@
++// Shared inventory assertions for the fast assembled factory tests.
++import { expect, vi } from "vitest";
++import { createOpenClawTools } from "./openclaw-tools.js";
++
++type OpenClawToolsOptions = NonNullable<Parameters<typeof createOpenClawTools>[0]>;
++
++export function toolNameList(tools: readonly { name: string }[]): string[] {
++  return tools.map((tool) => tool.name);
++}
++
++export function latestCreateOpenClawToolsOptions(): OpenClawToolsOptions {
++  const calls = vi.mocked(createOpenClawTools).mock.calls;
++  const lastCall = calls.at(-1);
++  const options = lastCall?.[0];
++  if (!options) {
++    throw new Error("expected createOpenClawTools call");
++  }
++  return options;
++}
++
++export function expectListIncludes(
++  list: readonly string[] | undefined,
++  expected: readonly string[],
++): void {
++  if (!list) {
++    throw new Error("expected string list");
++  }
++  for (const value of expected) {
++    expect(list.includes(value)).toBe(true);
++  }
 +}
 diff --git a/src/agents/agent-tools.media-read-authority.test.ts b/src/agents/agent-tools.media-read-authority.test.ts
 new file mode 100644
@@ -70757,6 +70933,162 @@ index bd53e03ee7411603f7e3b0807c34130e049c6997..dbe912aa1db56e42bd87de0208726b5f
      ...(Array.isArray(configured?.deny) ? configured.deny : []),
    ];
    const mergedAllow = mergeConfiguredSubagentAllow(allow, alsoAllow);
+diff --git a/src/agents/agent-tools.spawn-inheritance.test.ts b/src/agents/agent-tools.spawn-inheritance.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d7edfdfe17a8701ec84e10de65bd18697ef96cbe
+--- /dev/null
++++ b/src/agents/agent-tools.spawn-inheritance.test.ts
+@@ -0,0 +1,150 @@
++// Verifies the exact parent tool surface inherited by native child admission.
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { resetGlobalHookRunner } from "../plugins/hook-runner-global.js";
++import "./test-helpers/fast-bash-tools.js";
++import "./test-helpers/fast-coding-tools.js";
++import "./test-helpers/fast-openclaw-tools.js";
++import {
++  expectListIncludes,
++  latestCreateOpenClawToolsOptions,
++  toolNameList,
++} from "./agent-tools.inventory.test-support.js";
++import { createOpenClawCodingTools } from "./agent-tools.js";
++import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
++import { createOpenClawTools } from "./openclaw-tools.js";
++import { attachToolAllowlistIntersection } from "./tool-policy.js";
++
++const testConfig: OpenClawConfig = {};
++
++afterEach(() => {
++  resetGlobalHookRunner();
++});
++
++describe("createOpenClawCodingTools spawn inheritance", () => {
++  it("captures the exact full-policy parent tool surface for native child admission", () => {
++    const inheritedToolAllowlistRef: string[] = [];
++    const tools = createOpenClawCodingTools({
++      senderIsOwner: true,
++      config: { tools: { profile: "full" } },
++      inheritedToolAllowlistRef,
++    });
++    expect(toolNameList(tools)).toContain("nodes");
++    expect(inheritedToolAllowlistRef.toSorted()).toEqual(toolNameList(tools).toSorted());
++  });
++
++  it("does not inherit native-harness bridge runtime allowlists", () => {
++    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
++    createOpenClawToolsMock.mockClear();
++
++    createOpenClawCodingTools({
++      config: testConfig,
++      runtimeToolAllowlist: ["sessions_spawn", "memory_search"],
++    });
++
++    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
++    expect(latestCreateOpenClawToolsOptions().pluginToolAllowlist).toEqual([
++      "sessions_spawn",
++      "memory_search",
++    ]);
++    expectListIncludes(latestCreateOpenClawToolsOptions().inheritedToolAllowlist, [
++      "read",
++      "exec",
++      "sessions_spawn",
++    ]);
++  });
++
++  it("inherits embedded runtime toolsAllow when explicitly marked as parent capability", () => {
++    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
++    createOpenClawToolsMock.mockClear();
++    const runtimeToolAllowlist = ["sessions_spawn", "memory_search"];
++
++    createOpenClawCodingTools({
++      config: testConfig,
++      runtimeToolAllowlist,
++      conversationCapabilityProfile: resolveConversationCapabilityProfile({
++        config: testConfig,
++        runtimeToolAllowlist,
++        inheritRuntimeToolAllowlist: true,
++      }),
++    });
++
++    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
++    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
++    expectListIncludes(inheritedAllow, ["sessions_spawn"]);
++    expect(inheritedAllow?.includes("read")).toBe(false);
++    expect(inheritedAllow?.includes("exec")).toBe(false);
++  });
++
++  it.each([
++    {
++      label: "explicit tools",
++      toolsAllow: ["sessions_spawn", "read"],
++      expected: ["sessions_spawn", "read"],
++    },
++    {
++      label: "overlapping globs",
++      toolsAllow: attachToolAllowlistIntersection([], [["sessions_*"], ["*_spawn"]]),
++      expected: ["sessions_spawn"],
++    },
++  ])("lets direct callers inherit $label into subagent spawns", ({ toolsAllow, expected }) => {
++    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
++    createOpenClawToolsMock.mockClear();
++
++    createOpenClawCodingTools({
++      config: testConfig,
++      runtimeToolAllowlist: toolsAllow,
++      inheritRuntimeToolAllowlist: true,
++    });
++
++    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
++    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
++    expectListIncludes(inheritedAllow, expected);
++    expect(inheritedAllow?.includes("exec")).toBe(false);
++  });
++
++  it("keeps restricted spawn inheritance in the caller-owned runtime snapshot", () => {
++    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
++    createOpenClawToolsMock.mockClear();
++    const inheritedToolAllowlistRef: string[] = [];
++
++    createOpenClawCodingTools({
++      config: { tools: { allow: ["read", "sessions_spawn"] } },
++      inheritedToolAllowlistRef,
++    });
++
++    expect(latestCreateOpenClawToolsOptions().inheritedToolAllowlist).toBe(
++      inheritedToolAllowlistRef,
++    );
++    expectListIncludes(inheritedToolAllowlistRef, ["read", "sessions_spawn"]);
++    expect(inheritedToolAllowlistRef).not.toContain("exec");
++  });
++
++  it("captures the actual surface for additive policy without losing its deny", () => {
++    const inheritedToolAllowlistRef: string[] = [];
++
++    createOpenClawCodingTools({
++      config: { tools: { alsoAllow: ["read"], deny: ["exec"] } },
++      inheritedToolAllowlistRef,
++    });
++
++    expectListIncludes(inheritedToolAllowlistRef, ["read", "sessions_spawn"]);
++    expect(inheritedToolAllowlistRef).not.toContain("exec");
++    expect(latestCreateOpenClawToolsOptions().inheritedToolDenylist).toContain("exec");
++  });
++
++  it("passes effective allow-list-restricted tool surface to spawned sessions", () => {
++    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
++    createOpenClawToolsMock.mockClear();
++
++    createOpenClawCodingTools({
++      config: { tools: { allow: ["read", "sessions_spawn"] } },
++    });
++
++    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
++    const inheritedAllow = latestCreateOpenClawToolsOptions().inheritedToolAllowlist;
++    expectListIncludes(inheritedAllow, ["read", "sessions_spawn"]);
++    expect(inheritedAllow?.includes("exec")).toBe(false);
++    expect(inheritedAllow?.includes("process")).toBe(false);
++  });
++});
 diff --git a/src/agents/agent-tools.subagent-session-status.test.ts b/src/agents/agent-tools.subagent-session-status.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..ac823cafd0fbea72396cddefb14c2363ae4a9a88
@@ -100001,15 +100333,122 @@ index b514a8967b09a7fcf5eebf62ea158bcdc10ce07e..5495d94bf29d5a3f2d8a924cfa2bea1f
        });
        expect(
          (await yieldTool.execute("yield-collected-message", { waitFor: "message" })).details,
+diff --git a/src/agents/openclaw-tools.session-context.test.ts b/src/agents/openclaw-tools.session-context.test.ts
+index c632cd41d1c1f8d29d260fed5c72efb3f5587080..c890546ceae82a4e2537335a8db9bfe89b11c1d3 100644
+--- a/src/agents/openclaw-tools.session-context.test.ts
++++ b/src/agents/openclaw-tools.session-context.test.ts
+@@ -4,6 +4,7 @@ import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../config/
+ import { setEmbeddedMode } from "../infra/embedded-mode.js";
+ import { createOpenClawTools } from "./openclaw-tools.js";
+ import * as inProcessGateway from "./tools/in-process-gateway.js";
++import * as sessionsSpawnTool from "./tools/sessions-spawn-tool.js";
+ 
+ type GatewayRequest = { method: string; params?: Record<string, unknown> };
+ type OpenClawToolsOptions = NonNullable<Parameters<typeof createOpenClawTools>[0]>;
+@@ -70,6 +71,50 @@ afterEach(() => {
+ });
+ 
+ describe("openclaw session lookup context", () => {
++  it("preserves the admitted parent identity and live scope callback for sessions_spawn", () => {
++    const spawn = vi.spyOn(sessionsSpawnTool, "createSessionsSpawnTool");
++    const mcpRequesterScope = {
++      requesterSenderId: "requester",
++      agentAccountId: "work",
++      messageChannel: "discord",
++    };
++    const assertCurrent = vi.fn();
++    const inheritedToolAllowlist = ["read", "sessions_spawn"];
++    const inheritedToolDenylist = ["exec"];
++    try {
++      createOpenClawTools({
++        config: { agents: { entries: { main: { default: true } } } },
++        agentSessionKey: "agent:main:discord:channel:controller",
++        runSessionKey: "agent:main:main",
++        sessionId: "parent-incarnation",
++        runId: "parent-turn",
++        messageActionTurnCapability: "admitted-turn-capability",
++        mcpRequesterScope,
++        mcpRequesterScopeAssertCurrent: assertCurrent,
++        inheritedToolAllowlist,
++        inheritedToolDenylist,
++      });
++
++      expect(spawn).toHaveBeenCalledWith(
++        expect.objectContaining({
++          agentSessionKey: "agent:main:main",
++          completionOwnerKey: "agent:main:main",
++          requesterSessionId: "parent-incarnation",
++          requesterTurnRunId: "parent-turn",
++          requesterRunId: "parent-turn",
++          messageActionTurnCapability: "admitted-turn-capability",
++        }),
++      );
++      const options = spawn.mock.calls.at(-1)?.[0];
++      expect(options?.mcpRequesterScope).toBe(mcpRequesterScope);
++      expect(options?.mcpRequesterScopeAssertCurrent).toBe(assertCurrent);
++      expect(options?.inheritedToolAllowlist).toBe(inheritedToolAllowlist);
++      expect(options?.inheritedToolDenylist).toBe(inheritedToolDenylist);
++    } finally {
++      spawn.mockRestore();
++    }
++  });
++
+   it.each([
+     { scope: "global", mainKey: "main", runSessionKey: "global" },
+     {
 diff --git a/src/agents/openclaw-tools.session-options.ts b/src/agents/openclaw-tools.session-options.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..7e81d95d9c0c17edb0ebb8f8544e63330ec11d38
+index 0000000000000000000000000000000000000000..a2cdb3bec73e5e48ed9861e43cbcac4c977a2142
 --- /dev/null
 +++ b/src/agents/openclaw-tools.session-options.ts
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,71 @@
 +import type { OpenClawConfig } from "../config/types.openclaw.js";
 +import type { OpenClawToolsOptions } from "./openclaw-tools.types.js";
 +import type { createSessionsSendTool } from "./tools/sessions-send-tool.js";
++import type { createSessionsSpawnTool } from "./tools/sessions-spawn-tool.js";
++
++/** Projects admitted parent identity and tool authority into sessions_spawn. */
++export function resolveSessionsSpawnToolOptionsForRun(params: {
++  options?: OpenClawToolsOptions;
++  sessionAgentId: string;
++  sessionConfig?: OpenClawConfig;
++  spawnWorkspaceDir?: string;
++}): NonNullable<Parameters<typeof createSessionsSpawnTool>[0]> {
++  const { options, sessionAgentId, sessionConfig, spawnWorkspaceDir } = params;
++  return {
++    requesterSenderId: options?.requesterSenderId,
++    messageActionTurnCapability: options?.messageActionTurnCapability,
++    requesterSessionId: options?.sessionId,
++    mcpRequesterScope: options?.mcpRequesterScope,
++    mcpRequesterScopeAssertCurrent: options?.mcpRequesterScopeAssertCurrent,
++    agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
++    requesterTurnRunId: options?.runId,
++    requesterThinkingLevel: options?.requesterThinkingLevel,
++    requesterModel: options?.requesterModel,
++    completionOwnerKey: options?.runSessionKey,
++    agentChannel: options?.agentChannel,
++    agentAccountId: options?.agentAccountId,
++    agentTo: options?.agentTo,
++    agentThreadId: options?.agentThreadId,
++    currentMessagingTarget: options?.currentMessagingTarget ?? options?.currentChannelId,
++    currentChannelId: options?.nativeChannelId ?? options?.currentChannelId,
++    currentThreadTs: options?.currentThreadTs,
++    currentMessageId: options?.currentMessageId,
++    agentGroupId: options?.agentGroupId,
++    agentGroupChannel: options?.agentGroupChannel,
++    agentGroupSpace: options?.agentGroupSpace,
++    agentMemberRoleIds: options?.agentMemberRoleIds,
++    sandboxed: options?.sandboxed,
++    config: sessionConfig,
++    requesterAgentIdOverride: sessionAgentId,
++    requesterRunId: options?.runId,
++    swarmCollector: options?.swarmCollector,
++    workspaceDir: spawnWorkspaceDir,
++    sessionPermissionPolicy: options?.sessionPermissionPolicy,
++    inheritedToolAllowlist: options?.inheritedToolAllowlist,
++    inheritedToolDenylist: options?.inheritedToolDenylist,
++  };
++}
 +
 +/** Projects admitted run identity into the existing sessions_send factory. */
 +export function resolveSessionsSendToolOptionsForRun(params: {
@@ -100154,18 +100593,21 @@ index 05bc80da5525fb1fdbf6e5997900dd4ab01182f3..1961a6b8998f739c3da06bf8d3183477
 +  },
 +);
 diff --git a/src/agents/openclaw-tools.ts b/src/agents/openclaw-tools.ts
-index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d83aa0716 100644
+index 265a4ce046e8c440d97e866201c868795447828b..2a65f662bd20dcedf8f99bc6fdc6523c69867eaa 100644
 --- a/src/agents/openclaw-tools.ts
 +++ b/src/agents/openclaw-tools.ts
-@@ -32,6 +32,7 @@ import {
+@@ -32,6 +32,10 @@ import {
    shouldIncludeSecretsToolForOpenClawTools,
  } from "./openclaw-tools.registration.js";
  import { createRequesterYieldCallback } from "./openclaw-tools.requester-yield.js";
-+import { resolveSessionsSendToolOptionsForRun } from "./openclaw-tools.session-options.js";
++import {
++  resolveSessionsSendToolOptionsForRun,
++  resolveSessionsSpawnToolOptionsForRun,
++} from "./openclaw-tools.session-options.js";
  import { createOpenClawSwarmToolGroups } from "./openclaw-tools.swarm.js";
  import { resolveTranscriptsTool } from "./openclaw-tools.transcripts.js";
  import type { OpenClawToolsOptions } from "./openclaw-tools.types.js";
-@@ -53,11 +54,7 @@ import { createGatewayToolCallerWrapper } from "./tools/gateway-caller-context.j
+@@ -53,11 +57,7 @@ import { createGatewayToolCallerWrapper } from "./tools/gateway-caller-context.j
  import { createGatewayTool } from "./tools/gateway-tool.js";
  import { createGitHubIdentityStatusTool } from "./tools/github-identity-status-tool.js";
  import { createGitHubPublishTool } from "./tools/github-publish-tool.js";
@@ -100178,7 +100620,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
  import { createHeartbeatResponseTool } from "./tools/heartbeat-response-tool.js";
  import { createImageGenerateTool } from "./tools/image-generate-tool.js";
  import { createImageTool } from "./tools/image-tool.js";
-@@ -92,6 +89,10 @@ import { resolveWorkspaceRoot } from "./workspace-dir.js";
+@@ -92,6 +92,10 @@ import { resolveWorkspaceRoot } from "./workspace-dir.js";
  
  export { filterToolsByClientCaps } from "./openclaw-tools.client-caps.js";
  export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentTool[] {
@@ -100189,7 +100631,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
    const resolvedConfig = options?.config;
    const sessionConfig = options?.sessionConfigSource === "runtime" ? undefined : resolvedConfig;
    const activeProjectKeys = options?.preparedModelRuntime?.activeProjectKeys ?? [];
-@@ -232,6 +233,10 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -232,6 +236,10 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
    const webFetchTool = createWebFetchTool({
      config: options?.config,
      sandboxed: options?.sandboxed,
@@ -100200,7 +100642,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
      runtimeWebFetch: runtimeWebTools?.fetch,
      lateBindRuntimeConfig: true,
      hostnameAllowlistRef: options?.webFetchHostnameAllowlistRef,
-@@ -462,7 +467,7 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -462,7 +470,7 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
        : [
            createGatewayTool({
              allowConfigReads: options?.gatewayConfigReadAllowed === true,
@@ -100209,7 +100651,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
              requesterSenderId: options?.requesterSenderId,
            }),
            createPluginsTool(),
-@@ -472,19 +477,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -472,19 +480,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
        agentSessionKey: options?.agentSessionKey,
        requesterAgentIdOverride: sessionAgentId,
      }),
@@ -100231,7 +100673,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
        agentSessionKey: options?.agentSessionKey,
        runSessionKey: options?.runSessionKey,
        sessionAgentId,
-@@ -534,6 +528,11 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -534,6 +531,11 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
              agentId: sessionAgentId,
              sessionKey: options?.runSessionKey ?? options?.agentSessionKey,
              runId: options?.runId,
@@ -100243,7 +100685,7 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
              ...(options?.questionPrompt ? { questionPrompt: options.questionPrompt } : {}),
            }),
          ]
-@@ -562,36 +561,40 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+@@ -562,63 +564,42 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
              agentSessionId: options?.sessionId,
              agentSessionKey: options?.agentSessionKey,
              config: resolvedConfig,
@@ -100287,16 +100729,46 @@ index 265a4ce046e8c440d97e866201c868795447828b..f5922d6720a02f48c52d45b4ca329c5d
          ]),
      ...(!embedded || options?.allowGatewaySubagentBinding === true
        ? [
-           createSessionsSpawnTool({
-+            requesterSenderId: options?.requesterSenderId,
-+            messageActionTurnCapability: options?.messageActionTurnCapability,
-+            requesterSessionId: options?.sessionId,
-+            mcpRequesterScope: options?.mcpRequesterScope,
-+            mcpRequesterScopeAssertCurrent: options?.mcpRequesterScopeAssertCurrent,
-             agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
-             requesterTurnRunId: options?.runId,
-             requesterThinkingLevel: options?.requesterThinkingLevel,
-@@ -635,6 +638,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
+-          createSessionsSpawnTool({
+-            agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
+-            requesterTurnRunId: options?.runId,
+-            requesterThinkingLevel: options?.requesterThinkingLevel,
+-            requesterModel: options?.requesterModel,
+-            completionOwnerKey: options?.runSessionKey,
+-            agentChannel: options?.agentChannel,
+-            agentAccountId: options?.agentAccountId,
+-            agentTo: options?.agentTo,
+-            agentThreadId: options?.agentThreadId,
+-            currentMessagingTarget: options?.currentMessagingTarget ?? options?.currentChannelId,
+-            currentChannelId: options?.nativeChannelId ?? options?.currentChannelId,
+-            currentThreadTs: options?.currentThreadTs,
+-            currentMessageId: options?.currentMessageId,
+-            agentGroupId: options?.agentGroupId,
+-            agentGroupChannel: options?.agentGroupChannel,
+-            agentGroupSpace: options?.agentGroupSpace,
+-            agentMemberRoleIds: options?.agentMemberRoleIds,
+-            sandboxed: options?.sandboxed,
+-            config: sessionConfig,
+-            requesterAgentIdOverride: sessionAgentId,
+-            requesterRunId: options?.runId,
+-            swarmCollector: options?.swarmCollector,
+-            workspaceDir: spawnWorkspaceDir,
+-            sessionPermissionPolicy: options?.sessionPermissionPolicy,
+-            inheritedToolAllowlist: options?.inheritedToolAllowlist,
+-            inheritedToolDenylist: options?.inheritedToolDenylist,
+-          }),
++          createSessionsSpawnTool(
++            resolveSessionsSpawnToolOptionsForRun({
++              options,
++              sessionAgentId,
++              sessionConfig,
++              spawnWorkspaceDir,
++            }),
++          ),
+         ]
+       : []),
+     ...swarmToolGroups.agentsWait,
+@@ -635,6 +616,8 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
        onYield: options?.onYield,
      }),
      createSubagentsTool({
@@ -102212,6 +102684,42 @@ index 250e73f229eaf44cc88b027c305a65fa2661b845..ea6699e513e934a66098fef339a4c6c5
    const persistedRuntime =
      params.entry?.modelSelectionLocked === true
        ? resolvePersistedSessionRuntimeId(params.entry)
+diff --git a/src/agents/sessions-spawn-hooks.test.ts b/src/agents/sessions-spawn-hooks.test.ts
+index 67f85d6a00a2e4e42bbcf6c34424ada88eec1c1e..c35b292b1e4aaadd48efee3eddfcb741706be3ce 100644
+--- a/src/agents/sessions-spawn-hooks.test.ts
++++ b/src/agents/sessions-spawn-hooks.test.ts
+@@ -561,6 +561,31 @@ describe("sessions_spawn subagent lifecycle hooks", () => {
+     );
+   });
+ 
++  it("keeps session deletion as the lifecycle fallback when the ended hook throws", async () => {
++    hookRunnerMocks.runSubagentEnded.mockRejectedValueOnce(new Error("presentation failed"));
++    mockAgentStartFailure();
++    const result = await spawn({
++      thread: true,
++      mode: "session",
++      agentAccountId: "work",
++      agentTo: "channel:123",
++      agentThreadId: "456",
++      context: "isolated",
++    });
++
++    expect(result.status).toBe("error");
++    expect(hookRunnerMocks.runSubagentEnded).toHaveBeenCalledTimes(1);
++    const deleteCall = findGatewayRequest("sessions.delete");
++    expectFields(
++      deleteCall?.params,
++      {
++        deleteTranscript: true,
++        emitLifecycleHooks: true,
++      },
++      "delete params",
++    );
++  });
++
+   it("falls back to sessions.delete cleanup when subagent_ended hook is unavailable", async () => {
+     hookRunnerMocks.hasSubagentEndedHook = false;
+     mockAgentStartFailure();
 diff --git a/src/agents/sessions/agent-session-checkpoint-admission.test.ts b/src/agents/sessions/agent-session-checkpoint-admission.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..03c9ef9e8db1ef647f40ac62199d7f7614be21c3
@@ -116943,6 +117451,53 @@ index 5e97ecdb5374f054c335ec8f49919f054cd43188..7c30ce6a27167cba1858640f8daac646
            schedulerGroupKey: params.swarmSchedulerGroupKey,
            maxConcurrent: params.swarmMaxConcurrent,
          }
+diff --git a/src/agents/subagents/spawn/subagent-spawn-lifecycle.ts b/src/agents/subagents/spawn/subagent-spawn-lifecycle.ts
+index c04303150eb1d59cfa1e004ad7aa27490104f67b..450bed511a451d87337b43105c27c9ae0dcfd902 100644
+--- a/src/agents/subagents/spawn/subagent-spawn-lifecycle.ts
++++ b/src/agents/subagents/spawn/subagent-spawn-lifecycle.ts
+@@ -2,6 +2,42 @@ import type { SubagentLifecycleHookRunner } from "../../../plugins/hooks.js";
+ import type { DeliveryContext } from "../../../utils/delivery-context.types.js";
+ import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
+ 
++/** Reports whether presentation handled the failure before session deletion. */
++export async function emitSubagentSpawnFailedEndedHook(params: {
++  hookRunner: SubagentLifecycleHookRunner | null;
++  childSessionKey: string;
++  requesterInternalKey: string;
++  runId: string;
++  accountId?: string;
++}): Promise<boolean> {
++  if (!params.hookRunner?.hasHooks("subagent_ended")) {
++    return false;
++  }
++  try {
++    await params.hookRunner.runSubagentEnded(
++      {
++        targetSessionKey: params.childSessionKey,
++        targetKind: "subagent",
++        reason: "spawn-failed",
++        sendFarewell: true,
++        accountId: params.accountId,
++        runId: params.runId,
++        outcome: "error",
++        error: "Session failed to start",
++      },
++      {
++        runId: params.runId,
++        childSessionKey: params.childSessionKey,
++        requesterSessionKey: params.requesterInternalKey,
++      },
++    );
++    return true;
++  } catch {
++    // Spawn cleanup continues even when presentation hooks fail.
++    return false;
++  }
++}
++
+ export function createSubagentSpawnLifecycleEmitter(params: {
+   hookRunner: SubagentLifecycleHookRunner | null;
+   childSessionKey: string;
 diff --git a/src/agents/subagents/spawn/subagent-spawn-request.ts b/src/agents/subagents/spawn/subagent-spawn-request.ts
 index 5093984bda075b22cd0e343a22deaba5a3f4def1..eee9c438cf4f71ddc210ce8a49f23a1d4f463a54 100644
 --- a/src/agents/subagents/spawn/subagent-spawn-request.ts
@@ -117655,7 +118210,7 @@ index 171da8806552f90eddc37f8ec32f5d984f94cf20..2b3ff111e65b5662ef38393c150fbba0
      { label: "guarded", mode: "guarded" },
      { label: "workspace", mode: "workspace" },
 diff --git a/src/agents/subagents/spawn/subagent-spawn.ts b/src/agents/subagents/spawn/subagent-spawn.ts
-index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65779a6f5b 100644
+index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..57eb43e47f19d53550acc9776ae1428e7dd6f2e2 100644
 --- a/src/agents/subagents/spawn/subagent-spawn.ts
 +++ b/src/agents/subagents/spawn/subagent-spawn.ts
 @@ -3,7 +3,6 @@
@@ -117692,7 +118247,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
  import { resolveSubagentChildPlan } from "./subagent-spawn-child-plan.js";
  import {
    cleanupFailedSpawnBeforeAgentStart,
-@@ -55,10 +54,10 @@ import type {
+@@ -55,12 +54,15 @@ import type {
  } from "./subagent-spawn-contract.js";
  import { setSubagentSpawnDepsForTest } from "./subagent-spawn-deps.js";
  import {
@@ -117705,9 +118260,15 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
 +  readGatewayRunId,
 +} from "./subagent-spawn-gateway.js";
  import { buildSubagentLaunchRequest } from "./subagent-spawn-launch-request.js";
- import { createSubagentSpawnLifecycleEmitter } from "./subagent-spawn-lifecycle.js";
+-import { createSubagentSpawnLifecycleEmitter } from "./subagent-spawn-lifecycle.js";
++import {
++  createSubagentSpawnLifecycleEmitter,
++  emitSubagentSpawnFailedEndedHook,
++} from "./subagent-spawn-lifecycle.js";
  import { resolveSubagentSpawnRequest } from "./subagent-spawn-request.js";
-@@ -69,23 +68,12 @@ import { buildSubagentSpawnEnvelope } from "./subagent-system-prompt.js";
+ import { createInitialSubagentSession } from "./subagent-spawn-session-patch.js";
+ import { bindThreadForSubagentSpawn } from "./subagent-spawn-thread-binding.js";
+@@ -69,23 +71,12 @@ import { buildSubagentSpawnEnvelope } from "./subagent-system-prompt.js";
  
  export { SUBAGENT_SPAWN_CONTEXT_MODES, SUBAGENT_SPAWN_MODES } from "./subagent-spawn.types.js";
  
@@ -117732,7 +118293,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
    const promptedAt = Date.now();
    const task = params.task;
    const label = params.label?.trim() || "";
-@@ -334,6 +322,8 @@ export async function spawnSubagentDirect(
+@@ -334,6 +325,8 @@ export async function spawnSubagentDirect(
          toolSpawnMetadata,
          spawnedWorkspaceDir,
          childSessionKey,
@@ -117741,7 +118302,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
          childSessionOrigin,
          childIdem,
          outputSchema: params.outputSchema,
-@@ -362,35 +352,26 @@ export async function spawnSubagentDirect(
+@@ -362,35 +355,26 @@ export async function spawnSubagentDirect(
        requesterSessionKey: requesterInternalKey,
        agentId: targetAgentId,
      });
@@ -117797,7 +118358,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
  
      const emitSpawnLifecycleHooks = createSubagentSpawnLifecycleEmitter({
        hookRunner,
-@@ -442,7 +423,9 @@ export async function spawnSubagentDirect(
+@@ -442,7 +426,9 @@ export async function spawnSubagentDirect(
            return { runId: childIdem };
          }
          const launch = await launchChildRun(assertActive);
@@ -117808,7 +118369,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
          acceptedChildRunId = readGatewayRunId(launch.response) ?? childIdem;
          recordSessionParticipantBestEffort({
            promptedAt,
-@@ -458,10 +441,9 @@ export async function spawnSubagentDirect(
+@@ -458,10 +444,9 @@ export async function spawnSubagentDirect(
            await cleanupFailedSpawn();
            return;
          }
@@ -117822,7 +118383,46 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
          if (phase === "register" && acceptedChildRunId && taskRowOwnership === "required") {
            await terminateAcceptedCollectorRun({
              childSessionKey,
-@@ -530,6 +512,13 @@ export async function spawnSubagentDirect(
+@@ -482,31 +467,13 @@ export async function spawnSubagentDirect(
+         }
+         let emitLifecycleHooks = threadBindingReady;
+         if (phase === "dispatch" && threadBindingReady) {
+-          let endedHookEmitted = false;
+-          if (hookRunner?.hasHooks("subagent_ended")) {
+-            try {
+-              await hookRunner.runSubagentEnded(
+-                {
+-                  targetSessionKey: childSessionKey,
+-                  targetKind: "subagent",
+-                  reason: "spawn-failed",
+-                  sendFarewell: true,
+-                  accountId: childSessionOrigin?.accountId,
+-                  runId: childIdem,
+-                  outcome: "error",
+-                  error: "Session failed to start",
+-                },
+-                {
+-                  runId: childIdem,
+-                  childSessionKey,
+-                  requesterSessionKey: requesterInternalKey,
+-                },
+-              );
+-              endedHookEmitted = true;
+-            } catch {
+-              // Spawn cleanup continues even when presentation hooks fail.
+-            }
+-          }
++          const endedHookEmitted = await emitSubagentSpawnFailedEndedHook({
++            hookRunner,
++            childSessionKey,
++            requesterInternalKey,
++            accountId: childSessionOrigin?.accountId,
++            runId: childIdem,
++          });
+           emitLifecycleHooks = !endedHookEmitted;
+         }
+         await cleanupCreatedSession(emitLifecycleHooks);
+@@ -530,6 +497,13 @@ export async function spawnSubagentDirect(
          return {
            runId,
            requesterTurnRunId: ctx.requesterTurnRunId,
@@ -117836,7 +118436,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
            childSessionKey,
            controllerSessionKey: ownership.controllerSessionKey,
            requesterSessionKey: ownership.completionRequesterSessionKey,
-@@ -587,6 +576,7 @@ export async function spawnSubagentDirect(
+@@ -587,6 +561,7 @@ export async function spawnSubagentDirect(
      childRunId = pipelineResult.runId;
      let collectorSessionKey: string | undefined;
      if (params.collect && swarmGroupId && swarmSchedulerGroupKey) {
@@ -117844,7 +118444,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
        let launchTerminationConfirmed = false;
        activateSwarmRun({
          groupId: swarmSchedulerGroupKey,
-@@ -596,7 +586,19 @@ export async function spawnSubagentDirect(
+@@ -596,7 +571,19 @@ export async function spawnSubagentDirect(
            : undefined,
          start: async () => {
            await runWithGatewayIndependentRootWorkContinuation(async () => {
@@ -117865,7 +118465,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
              // Queued registration already owns the task row before either dispatch route starts.
              // Out-of-process Gateway tracking finds that exact runId and suppresses its CLI row.
              const gatewayRunId = readGatewayRunId(launch.response) ?? childRunId;
-@@ -699,6 +701,7 @@ export async function spawnSubagentDirect(
+@@ -699,6 +686,7 @@ export async function spawnSubagentDirect(
        ...(collectorSessionKey ? { sessionKey: collectorSessionKey } : {}),
        runId: childRunId,
        mode: spawnMode,
@@ -117873,7 +118473,7 @@ index 66623d6c13a3f6a8fbb7316ae78fedfe036390d9..db6044954aa6955ccf7d55891f5fdb65
        expectsCompletionMessage: completionMode === "announce",
        completionTarget: params.completionTarget,
        context: preparedSpawnContext.mode,
-@@ -724,9 +727,7 @@ export async function spawnSubagentDirect(
+@@ -724,9 +712,7 @@ export async function spawnSubagentDirect(
  }
  
  const testing = {
@@ -171328,7 +171928,7 @@ index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874
 +  });
 +});
 diff --git a/src/gateway/agent-turn/agent-run-admission-phase.ts b/src/gateway/agent-turn/agent-run-admission-phase.ts
-index 964026f7483b39473c3e5acccea7f3403ab00aa0..08bb5d3cda0afc8ecd070865482923026b3c1670 100644
+index 964026f7483b39473c3e5acccea7f3403ab00aa0..770f7e236649277b143ba7aef8f3a2b2234a3824 100644
 --- a/src/gateway/agent-turn/agent-run-admission-phase.ts
 +++ b/src/gateway/agent-turn/agent-run-admission-phase.ts
 @@ -21,16 +21,12 @@ import {
@@ -171622,7 +172222,29 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..08bb5d3cda0afc8ecd07086548292302
    const accepted = {
      runId: params.runId,
      sessionKey: params.resolvedSessionKey,
-@@ -635,11 +594,47 @@ export async function prepareAgentRunDispatch(params: {
+@@ -629,17 +588,53 @@ export async function prepareAgentRunDispatch(params: {
+     return rejectPreaccept(errorShapeFromError(ErrorCodes.INVALID_REQUEST, failure));
+   }
+   try {
++    // Source records may retire as soon as acceptance reaches their caller. Transfer
++    // the credential partition synchronously while this admission still owns them.
++    let requesterSources: ReturnType<typeof resolveAgentRunRequesterSources>;
++    try {
++      requesterSources = resolveAgentRunRequesterSources({
++        source: params,
++        activeModel,
++        completionHandoff,
++        activeRunAbort,
++        assertInputOwnerCurrent,
++        assertInputAdmissionCurrent,
++      });
++    } catch (error) {
++      const failure = releasePreparedAgentRunUserTurnAfterFailure(userTurn, error);
++      return rejectPreaccept(errorShapeFromError(ErrorCodes.INVALID_REQUEST, failure));
++    }
+     if (adoptParentResume) {
+       try {
+         // All awaited preparation has succeeded. Transfer task ownership before
          // acceptance or dispatch; failed preparation must leave the paused owner intact.
          adoptParentResume();
          resumedTaskAdopted = true;
@@ -171640,22 +172262,6 @@ index 964026f7483b39473c3e5acccea7f3403ab00aa0..08bb5d3cda0afc8ecd07086548292302
          return rejectPreaccept(errorShapeFromError(ErrorCodes.UNAVAILABLE, failure));
        }
      }
-+    // Source records may retire as soon as acceptance reaches their caller. Transfer
-+    // the credential partition synchronously while this admission still owns them.
-+    let requesterSources: ReturnType<typeof resolveAgentRunRequesterSources>;
-+    try {
-+      requesterSources = resolveAgentRunRequesterSources({
-+        source: params,
-+        activeModel,
-+        completionHandoff,
-+        activeRunAbort,
-+        assertInputOwnerCurrent,
-+        assertInputAdmissionCurrent,
-+      });
-+    } catch (error) {
-+      const failure = releasePreparedAgentRunUserTurnAfterFailure(userTurn, error);
-+      return rejectPreaccept(errorShapeFromError(ErrorCodes.INVALID_REQUEST, failure));
-+    }
 +    const operatorAuthority = resolveAgentRunOperatorMessageAuthority(params, {
 +      existingCapability: operatorMessageActionCapability,
 +      hasMessageActionSource: Boolean(requesterSources.admittedMessageActionSource),
@@ -187716,6 +188322,161 @@ index fd0c60c3e9b761dd86f0ab71314af4694bfdb0bc..a11def300c7be08c37bdafb2da450153
  test("sessions.create can start the first agent turn from an initial task", async () => {
    const { storePath } = await createSessionStoreDir();
    // Register "ops" so the deleted-agent guard added in #65986 does not
+diff --git a/src/gateway/server/ws-connection/connect-device-metadata.test.ts b/src/gateway/server/ws-connection/connect-device-metadata.test.ts
+index dbda1a4c2369f5a151d6368bf1a8ce042539e835..2ad1531e59182a52cb1c4dbba2000c2b2ed32440 100644
+--- a/src/gateway/server/ws-connection/connect-device-metadata.test.ts
++++ b/src/gateway/server/ws-connection/connect-device-metadata.test.ts
+@@ -205,22 +205,100 @@ describe("resolvePinnedClientMetadata", () => {
+     });
+   });
+ 
+-  it("accepts a node-host macOS alias against the shared Mac app platform pin", () => {
++  it.each([
++    ["node-host", "node"],
++    ["cli", "cli"],
++    ["openclaw-tui", "ui"],
++  ])(
++    "accepts the %s/%s macOS alias against the shared Mac app platform pin",
++    (clientId, clientMode) => {
++      expect(
++        resolvePinnedClientMetadata({
++          clientId,
++          clientMode,
++          claimedPlatform: "macos",
++          claimedDeviceFamily: "Mac",
++          pairedPlatform: "macOS 26.5.2",
++          pairedDeviceFamily: "Mac",
++        }),
++      ).toEqual({
++        platformMismatch: false,
++        deviceFamilyMismatch: false,
++        pinnedPlatform: "macOS 26.5.2",
++        pinnedDeviceFamily: "Mac",
++      });
++    },
++  );
++
++  it("keeps a TUI reconnect approved after the shared Mac companion refreshes its platform", () => {
++    const paired = { pairedPlatform: "macos", pairedDeviceFamily: "Mac" };
++    const tui = {
++      clientId: "openclaw-tui",
++      clientMode: "ui",
++      claimedPlatform: "macos",
++      claimedDeviceFamily: "Mac",
++    };
++    expect(resolvePinnedClientMetadata({ ...tui, ...paired })).toMatchObject({
++      platformMismatch: false,
++      deviceFamilyMismatch: false,
++    });
++
++    const companion = resolvePinnedClientMetadata({
++      ...paired,
++      clientId: "openclaw-macos",
++      clientMode: "ui",
++      claimedPlatform: "macOS 27.0.1",
++      claimedDeviceFamily: "Mac",
++    });
++    expect(companion).toMatchObject({
++      platformMismatch: false,
++      deviceFamilyMismatch: false,
++      refreshPairedPlatform: "macOS 27.0.1",
++    });
++    paired.pairedPlatform = companion.refreshPairedPlatform ?? paired.pairedPlatform;
++
++    expect(resolvePinnedClientMetadata({ ...tui, ...paired })).toEqual({
++      platformMismatch: false,
++      deviceFamilyMismatch: false,
++      pinnedPlatform: "macOS 27.0.1",
++      pinnedDeviceFamily: "Mac",
++    });
++  });
++
++  it.each([
++    ["linux", "Mac", true, false],
++    ["macOS 27.0.1", "VirtualMac", false, true],
++  ])(
++    "keeps a TUI reconnect with paired platform %s and claimed family %s approval-bound",
++    (pairedPlatform, claimedDeviceFamily, platformMismatch, deviceFamilyMismatch) => {
++      expect(
++        resolvePinnedClientMetadata({
++          clientId: "openclaw-tui",
++          clientMode: "ui",
++          claimedPlatform: "macos",
++          claimedDeviceFamily,
++          pairedPlatform,
++          pairedDeviceFamily: "Mac",
++        }),
++      ).toMatchObject({ platformMismatch, deviceFamilyMismatch });
++    },
++  );
++
++  it.each([
++    ["openclaw-control-ui", "webchat"],
++    ["openclaw-browser-copilot", "ui"],
++    ["openclaw-tui", "cli"],
++  ])("keeps the macOS platform alias approval-bound for %s/%s", (clientId, clientMode) => {
+     expect(
+       resolvePinnedClientMetadata({
+-        clientId: "node-host",
+-        clientMode: "node",
++        clientId,
++        clientMode,
+         claimedPlatform: "macos",
+         claimedDeviceFamily: "Mac",
+-        pairedPlatform: "macOS 26.5.2",
++        pairedPlatform: "macOS 27.0.1",
+         pairedDeviceFamily: "Mac",
+       }),
+-    ).toEqual({
+-      platformMismatch: false,
+-      deviceFamilyMismatch: false,
+-      pinnedPlatform: "macOS 26.5.2",
+-      pinnedDeviceFamily: "Mac",
+-    });
++    ).toMatchObject({ platformMismatch: true, deviceFamilyMismatch: false });
+   });
+ 
+   it("refreshes a shared node-host macOS pin from the native Mac app", () => {
+diff --git a/src/gateway/server/ws-connection/connect-device-metadata.ts b/src/gateway/server/ws-connection/connect-device-metadata.ts
+index 15da227b83912a6f747abb792c721bea39e54004..8bd862779741351828b55e7b9db572f25937c514 100644
+--- a/src/gateway/server/ws-connection/connect-device-metadata.ts
++++ b/src/gateway/server/ws-connection/connect-device-metadata.ts
+@@ -243,9 +243,15 @@ export function resolvePinnedClientMetadata(params: {
+       pairedRuntimeIdentity.platform !== pairedPlatform &&
+       claimedPlatform === pairedRuntimeIdentity.platform &&
+       claimedDeviceFamily === normalizeDeviceMetadataForAuth(pairedRuntimeIdentity.deviceFamily));
+-  const isNodeHostUsingMacAppPlatformPin =
+-    params.clientId === GATEWAY_CLIENT_IDS.NODE_HOST &&
+-    params.clientMode === GATEWAY_CLIENT_MODES.NODE &&
++  // Runtime clients sharing the Mac app's device key retain its approved OS-version
++  // pin; their generic OS label does not change the platform or the family check.
++  const isRuntimeClientUsingMacAppPlatformPin =
++    ((params.clientId === GATEWAY_CLIENT_IDS.NODE_HOST &&
++      params.clientMode === GATEWAY_CLIENT_MODES.NODE) ||
++      (params.clientId === GATEWAY_CLIENT_IDS.CLI &&
++        params.clientMode === GATEWAY_CLIENT_MODES.CLI) ||
++      (params.clientId === GATEWAY_CLIENT_IDS.TUI &&
++        params.clientMode === GATEWAY_CLIENT_MODES.UI)) &&
+     (claimedPlatform === "darwin" || claimedPlatform === "macos") &&
+     /^macos \d+(?:\.\d+){0,2}$/.test(pairedPlatform);
+   const claimedNativeAppPlatformFamily = resolveNativeAppPlatformFamily(
+@@ -269,14 +275,14 @@ export function resolvePinnedClientMetadata(params: {
+     hasPinnedPlatform &&
+     claimedPlatform !== pairedPlatform &&
+     !isRuntimePlatformPin &&
+-    !isNodeHostUsingMacAppPlatformPin &&
++    !isRuntimeClientUsingMacAppPlatformPin &&
+     !isNativeAppPlatformVersionRefresh;
+   const deviceFamilyMismatch = hasPinnedDeviceFamily && claimedDeviceFamily !== pairedDeviceFamily;
+   const pinnedPlatform = isRuntimePlatformPin
+     ? pairedRuntimeIdentity.platform
+     : claimedPlatform === pairedPlatform
+       ? params.pairedPlatform
+-      : isNodeHostUsingMacAppPlatformPin
++      : isRuntimeClientUsingMacAppPlatformPin
+         ? params.pairedPlatform
+         : isNativeAppPlatformVersionRefresh
+           ? params.claimedPlatform
 diff --git a/src/gateway/session-activity-summaries.retry.test.ts b/src/gateway/session-activity-summaries.retry.test.ts
 index b2b9197f1390d51730e418eae56f10a34a70707c..27bba2fd41283d2cff2e3626fa1de050c7da64ff 100644
 --- a/src/gateway/session-activity-summaries.retry.test.ts
@@ -214799,7 +215560,7 @@ index 16edd322a78b78fef1899a0fc1918f8d0c0d421c..f6896cd207495e4d660cae089d346966
          startTranscriptsCapture: join,
          stopTranscriptsCapture: async () => {},
 diff --git a/test/vitest/vitest.database-worker-core-paths.mjs b/test/vitest/vitest.database-worker-core-paths.mjs
-index f9cc80f569660e331dcfdd388ba47adef176b312..afdcf048c117c30ca0e161fef9b2adcf3d07ba48 100644
+index f9cc80f569660e331dcfdd388ba47adef176b312..72a7ab6bca4f04b3e37f60c6db0fab183f7ead46 100644
 --- a/test/vitest/vitest.database-worker-core-paths.mjs
 +++ b/test/vitest/vitest.database-worker-core-paths.mjs
 @@ -1,5 +1,8 @@
@@ -214819,11 +215580,12 @@ index f9cc80f569660e331dcfdd388ba47adef176b312..afdcf048c117c30ca0e161fef9b2adcf
    "src/agents/subagents/registry/subagent-registry-recovery-acceptance.test.ts",
    "src/agents/subagents/registry/subagent-registry-task-replacement.test.ts",
    "src/tasks/task-registry-session-index.test.ts",
-@@ -85,6 +89,7 @@ export const databaseWorkerCoreTestFiles = [
+@@ -85,6 +89,8 @@ export const databaseWorkerCoreTestFiles = [
    "src/acp/runtime/session-meta-doctor.test.ts",
    "src/agents/agent-tools.at-prefixed-remote-paths.test.ts",
    "src/agents/agent-tools.create-openclaw-coding-tools.test.ts",
 +  "src/agents/agent-tools.native-child-authority.test.ts",
++  "src/agents/agent-tools.spawn-inheritance.test.ts",
    "src/agents/bash-tools.notify-on-exit-ack.test.ts",
    "src/agents/memory-write-provenance.test.ts",
    "src/agents/prepared-model-runtime.run-resources.test.ts",
