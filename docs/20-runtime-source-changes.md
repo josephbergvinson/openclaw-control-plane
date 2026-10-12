@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 Mac metadata and native resume continuation](#october-12-mac-metadata-and-native-resume-continuation)
+[October 12 native fixture contracts](#october-12-native-fixture-contracts)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,26 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 12 native fixture contracts
+
+The canonical reference is `24a128f31bc538dae046419201cd6f8bbbe68f2f`. Gateway and Node loaded
+native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3` with the exact retained native
+archive and package overlay. This update changes two test fixtures to satisfy
+existing required-message, persisted child-envelope and canonical parent-key
+contracts. Production behavior and guards remain unchanged.
+
+The [dated fixture record](../runtime/README.md#october-12-native-fixture-contracts)
+separates 29 recovery cases and the earlier complete types/lint checks from the
+later complete 95-case native group and scoped types/lint/format. It records the
+matching build and installation separately. Earlier dependency-boundary, V2 and
+hosted failures remain failures; three baseline factory failures remain retained.
+
+The earlier October12 controlled native integration and October11 installed
+console measurement retain their actual source and installation scope. Their
+entire dated records, corrected success-before-yield text, native archive and
+Signed618 companions remain below. All five hosted jobs are required on the
+updated public head; fresh ordinary provider-task acceptance remains separate.
 
 ## October 12 Mac metadata and native resume continuation
 

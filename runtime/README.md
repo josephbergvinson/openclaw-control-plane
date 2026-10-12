@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 Mac metadata and native resume continuation](#october-12-mac-metadata-and-native-resume-continuation)
+[October 12 native fixture contracts](#october-12-native-fixture-contracts)
 separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,45 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 12 native fixture contracts
+
+Canonical source `24a128f31bc538dae046419201cd6f8bbbe68f2f`, tree
+`0e4299c09a0b16c62f0449e016d6b57a2bf6db97`, changes exactly two test fixtures since Ca753.
+Native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3`, tree
+`4bfb5aba3de170bc5e60550db89c83f1795de9ba`, preserves the exact native archive and
+two-YAML package overlay. The export retains complete normalized tree parity.
+
+Three recovery fixture calls now supply the existing required message field.
+The 29 recovery cases, guarded owner types and scoped lint/format passed. Complete
+normal command29 types and command33 lint passed at this earlier one-fixture
+candidate, retaining three warnings. These broad checks were not replayed after
+the subsequent native fixture change.
+
+The native requester fixture persists its exact child envelope and policy in the
+standard test-owned session store. Native setup is awaited and cleanup uses the
+existing stateDir owner. Persisted spawnedBy and the presented native parent
+identity now share the canonical `agent:main:parent-session` key. The complete
+five-path 95-case group, including both native cases, and scoped types/lint/format
+passed. Existing assertions, negative controls and production guards remain.
+These 29 and 95 groups are not summed as unique coverage.
+
+The initial dependency-boundary rejection and V2's 93 passes/two fixture-setup
+failures remain failures in their retained receipts. The three earlier factory
+failures remain retained. On the preceding public head, complete native command29
+and credential-continuity step15 failed on these fixture contracts. Its production
+build and 234-path follow-up group passed. Fresh exact-head hosted qualification
+remains required.
+
+The matching newD normal build, first activation and independent loaded Gateway/
+Node generation, health and protected-state preservation passed at
+`2026-10-12T04:58:09.956282Z`. Activation receipt `98ef29aae18c51019cf61cf4d5e06fe725228fa81e90c220ed288b66f7a0df54`
+and loaded receipt `7dcdc1c72f5763a286e39d31efc59cbef580ebac5de5ef937e93caf406a9f3cb` have separate bindings. The earlier
+controlled built-runtime native integration remains dated to D3dfd; it is not a
+newD replay or live provider-task acceptance. All four production console files,
+the native archive, Signed618 companions and both dated records below remain
+unchanged. All five hosted jobs and the original ordinary-use outcomes retain
+their separate acceptance requirements.
 
 ## October 12 Mac metadata and native resume continuation
 

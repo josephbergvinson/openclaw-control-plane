@@ -15,6 +15,15 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest source reference is
+[`24a128f31bc538dae046419201cd6f8bbbe68f2f`](runtime/README.md#october-12-native-fixture-contracts).
+Gateway and Node run native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3`.
+Two recovery/native fixtures now satisfy their existing required-message and
+persisted canonical parent-envelope contracts. Owning fixture qualification,
+the matching build and actual installation have separate receipts. Both earlier
+dated qualifications, production console files, native archive and Signed618
+companions remain intact. All five hosted jobs are required on the updated head.
+
+The dated October 12 metadata and continuation source reference is
 [`a7531113eb22e82cd2fb3e94457e8707de07b2ad`](runtime/README.md#october-12-mac-metadata-and-native-resume-continuation).
 Gateway and Node run native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4`.
 Requester-source validation now precedes resume adoption, preserving the paused

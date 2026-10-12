@@ -66290,10 +66290,10 @@ index 8b72604ad6ecc7db15c520c9d2f87a219f55da78..f0d1c11b159baa03705a360ece6feb51
          await racePromiseWithAbortSignal(pendingOwner, params.opts.abortSignal);
          params.opts.abortSignal?.throwIfAborted();
 diff --git a/src/agents/agent-command-restart-recovery.test.ts b/src/agents/agent-command-restart-recovery.test.ts
-index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2544bea3277b4af4544c9a08fc606626204f6db9 100644
+index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..0efb011a4b0cb7c0222c2f4a47b81834980863b8 100644
 --- a/src/agents/agent-command-restart-recovery.test.ts
 +++ b/src/agents/agent-command-restart-recovery.test.ts
-@@ -4,9 +4,93 @@ import {
+@@ -4,9 +4,96 @@ import {
    buildCurrentRunRestartRecoveryClaim,
    buildRestartRecoveryTerminalDeliveryEvidence,
    constrainRestartRecoveryDeliveryPayloads,
@@ -66314,6 +66314,7 @@ index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2544bea3277b4af4544c9a08fc606626
 +        agentId: "main",
 +        hasDeliveryContext: true,
 +        opts: {
++          message: "Report the child completion.",
 +          inputProvenance: {
 +            kind: "inter_session",
 +            sourceSessionKey: "agent:main:subagent:child",
@@ -66349,6 +66350,7 @@ index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2544bea3277b4af4544c9a08fc606626
 +      agentId: "main",
 +      hasDeliveryContext: input.hasDeliveryContext,
 +      opts: {
++        message: "Report the child completion.",
 +        internalDeliveryMediaUrls: input.media,
 +        inputProvenance: {
 +          kind: "inter_session",
@@ -66371,6 +66373,7 @@ index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2544bea3277b4af4544c9a08fc606626
 +      agentId: "main",
 +      hasDeliveryContext: false,
 +      opts: {
++        message: "Report the generated media.",
 +        internalDeliveryMediaUrls: [],
 +        inputProvenance: {
 +          kind: "inter_session",
@@ -66387,7 +66390,7 @@ index 1b2f65d3dba4d85ae4c6ac6c9af070ebe8d591dc..2544bea3277b4af4544c9a08fc606626
  describe("buildCurrentRunRestartRecoveryClaim", () => {
    it("persists the complete generated-media policy, including an empty allowlist", () => {
      expect(
-@@ -267,6 +351,19 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
+@@ -267,6 +354,19 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
      },
    );
  
@@ -171362,18 +171365,23 @@ index 5777d9d397ac79f206ce9e9d978db7a70438840e..c6fd5593400b62b958a0e74423cc8128
                ? String(authority.deliveryContext.threadId)
 diff --git a/src/gateway/agent-turn/agent-run-admission-phase.requester-scope.test.ts b/src/gateway/agent-turn/agent-run-admission-phase.requester-scope.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874f26179ca
+index 0000000000000000000000000000000000000000..fac42278d1c64c6fb9bf3116d46bef7c15305fd9
 --- /dev/null
 +++ b/src/gateway/agent-turn/agent-run-admission-phase.requester-scope.test.ts
-@@ -0,0 +1,561 @@
-+import { beforeEach, describe, expect, it, vi } from "vitest";
+@@ -0,0 +1,588 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { buildAgentAttemptToolContext } from "../../agents/command/run-context.js";
 +import { AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION } from "../../agents/internal-event-contract.js";
 +import { createMessageToolTurnAuthority } from "../../agents/tools/message-tool-turn-authority.js";
++import { replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 +import {
 +  getAgentEventLifecycleGeneration,
 +  resetAgentEventsForTest,
 +} from "../../infra/agent-events.js";
++import {
++  createOpenClawTestState,
++  type OpenClawTestState,
++} from "../../test-utils/openclaw-test-state.js";
 +import {
 +  captureGatewayDeviceRevocation,
 +  invalidateGatewayDeviceRevocation,
@@ -171592,12 +171600,29 @@ index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874
 +  });
 +}
 +
-+function useNative(admission: ReturnType<typeof createAdmission>) {
++let nativeTestState: OpenClawTestState | undefined;
++
++async function useNative(admission: ReturnType<typeof createAdmission>) {
++  nativeTestState = await createOpenClawTestState({ prefix: "native-credential-scope-" });
++  const storePath = nativeTestState.statePath("agents", "main", "sessions", "sessions.json");
++  admission.params.cfg.session = { store: storePath };
++  await replaceSessionEntry(
++    { sessionKey: "agent:main:subagent:child", storePath },
++    {
++      sessionId: admission.params.getAdmittedSessionId(),
++      updatedAt: 1,
++      spawnedBy: "agent:main:parent-session",
++      spawnDepth: 1,
++      inheritedToolPolicyVersion: 1,
++      inheritedToolAllow: ["read"],
++      inheritedToolDeny: ["exec"],
++    },
++  );
 +  admission.params.client = createTestPrincipal({
 +    agentRuntimeIdentity: {
 +      kind: "agentRuntime",
 +      agentId: "main",
-+      sessionKey: "parent-session",
++      sessionKey: "agent:main:parent-session",
 +      operationalRunInstance: { instanceId: "parent-instance", runId: "parent-run" },
 +      delegatedAuthority: {
 +        kind: "local",
@@ -171615,6 +171640,11 @@ index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874
 +}
 +
 +describe("credential scope transfer at Gateway acceptance", () => {
++  afterEach(async () => {
++    await nativeTestState?.cleanup();
++    nativeTestState = undefined;
++  });
++
 +  beforeEach(() => {
 +    resetAgentEventsForTest();
 +    seams.dispatch.mockReset();
@@ -171628,7 +171658,7 @@ index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874
 +    async (route) => {
 +      const admission = createAdmission();
 +      if (route === "native") {
-+        useNative(admission);
++        await useNative(admission);
 +      }
 +      if (route === "completion" || route === "one-way return") {
 +        useCompletion(admission, route === "one-way return");
@@ -171750,7 +171780,7 @@ index 0000000000000000000000000000000000000000..9ca498205fa1fcf9c078fbdf6ab97874
 +
 +  it("refuses native scope whose exact parent retires during preparation", async () => {
 +    const admission = createAdmission();
-+    useNative(admission);
++    await useNative(admission);
 +    seams.tracking.mockImplementationOnce(async () => {
 +      admission.retireSource();
 +      return { taskTrackingMode: "none" };
