@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 10 source reference and installation boundaries](#october-10-source-reference-and-installation-boundaries)
+[October 11 recent context, tool authority and console ownership](#october-11-recent-context-tool-authority-and-console-ownership)
 separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,66 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 11 recent context, tool authority and console ownership
+
+Canonical source `11f85c78fc5b7e978261de3e41aeb189a3d53113`, tree
+`96eb35d32ab6ca4dd5ce39b9ac2aae7c18a714b5`, adds seven commits across 55 paths
+since the October10 reference. Native distribution
+`d3e26bf98ca679d8cd76a604bf57115242d361ff` retains the exact accepted native
+archive and the same two-YAML package overlay. The manifest binds both complete
+normalized trees and patch checksums. Existing export-owner reconstruction checks
+verified complete blob/mode parity and preserved the two fixture-label replacements.
+
+Safeguard compaction now summarizes prepared recent messages even when its bounded
+verbatim excerpt is trimmed. Explicit child allow/alsoAllow entries override matching
+default role restrictions; configured denies, account policy, parent inheritance
+and execution authority still apply. Native children redeem their actual parent's
+tool authority while retaining their non-owner sender identity. Construction,
+preparation, awaited hooks and retirement each preserve the existing source fence.
+Delivered settle/announce recovery claims now name their source run. This producer
+repair does not backfill historic source-less claims or establish active steering.
+System review declarations use wildcard tools under the effective explicit full
+profile, with per-agent precedence and no changes to job enablement or scheduling.
+
+The Browser observer releases its console argument handles after reading text.
+The relay registers peer ownership before delivery and releases native console
+objects after their final owner, including release, unsubscribe, close, failure,
+context clearing and physical retirement. Native typechecks use the established
+guarded scoped wrapper; this validation guidance changes no tool or account rights.
+
+The owning component receipts retain 200 compaction cases, 53 and 86 child-policy
+cases, 294 selected native-authority passes with three pre-existing broad factory
+failures retained, 29 completion-producer cases, 13 system-review cases and 98
+console cases plus one actual Chromium test. These groups are not summed as unique
+coverage. Component formatting and type-aware lint, the guarded core lane and the
+combined normal build passed. The gated Chromium fixture's tested pre-format hash
+and canonical hash differ only in a retained formatter move of a suppression
+comment; the manifest names both. Its four production files exactly match their
+qualified hashes. No old single full changed-check receipt or formatted-fixture
+rerun is claimed.
+
+Normal stage, seal and first activation selected distribution Dd3e26. Independent
+same-generation Gateway/Node, health and protected-state preservation passed at
+`2026-10-11T23:28:04.175236Z`. Activation receipt
+`5c20e0b93316ed17ed5e22dc5689cc2183e1e33dd31010b358166e47f9d1d0e2`
+and loaded receipt
+`fa46a1c0b02e23c152723718d7da01e80fd79496461090f79aa78becf61f8694`
+remain separate from source qualification. Signed618 companions retain their
+previous source, installed inventories and rollback lineage.
+
+An installed isolated Chromium measurement observed 2,000 distinct console objects,
+2,000 successful native releases and 500 retained text messages. Second-half heap
+change was -1,048,384 bytes, versus +16,409,728 on the baseline. The temporary profile
+and owned processes were retired. An earlier launcher-observer failure remains
+recorded; the controlled leak does not explain an entire historical process total.
+One normal local-owner parent used its native child, whose sender remained false,
+to call Computer successfully. Child success preceded the yield acknowledgment;
+completion was read back in the original parent. This is scoped ordinary-use
+acceptance, not exhaustive queued/scheduled/
+resumed behavior or provider/task completion. Original outcomes, genuine voice and
+eligible wallet cancellation keep their separate acceptance requirements. Fresh
+local public checks and all five existing hosted jobs are required on this update.
 
 ## October 10 source reference and installation boundaries
 
