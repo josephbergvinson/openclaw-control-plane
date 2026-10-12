@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
-separates the latest source from actual Gateway and companion installation.
+[October 12 Discord own-channel route](#october-12-discord-own-channel-route)
+separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
@@ -15,6 +15,45 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 12 Discord own-channel route
+
+Canonical source `24218cc58e388c932e6a6420568ce2c86ab9a653`, tree
+`bfe42cefd8ddaf7f4afdb29d04850635adcf05fc`, changes one production normalizer and
+three test owners since C1258. Native distribution
+`b91ea6fd08bab3d57aebbd7a37d251cd68823931`, tree
+`ee7e9a51e16782c0747471b3fb4a0a7cb8c34add`, preserves the exact two-YAML overlay,
+native archive and complete normalized source/native tree parity.
+
+Discord threads are themselves channels. A retained route containing
+`channel:123` and thread `123` identifies the same destination as the unthreaded
+route `channel:123`. The route normalizer removes only that redundant component
+for explicit Discord `channel:` or `discord:channel:` targets. Distinct threads,
+user targets, bare IDs and other providers retain their existing semantics. The
+strict production Gateway requester guard is unchanged; session incarnation,
+active run, source message, account and request generation remain required.
+
+The focused qualification passed 35 route cases, seven requester-presentation
+cases and 20 actual Gateway execution-owner cases. It exercises the exact retained
+origin against the original admitted request, rejects a different thread and rejects
+the delegation after owner cleanup. Scoped lint and format checks passed. The three
+before-fix alias failures, initial missing-source-turn fixture failure and three
+unmatched requester test selections remain separate dated attempts; they are not
+credited as passing validation.
+
+The matching Db91 normal build, stage, seal and isolated compiled route SDK
+parity passed. First activation and independent same-generation Gateway/Node
+loaded-source, health and protected-state preservation passed at `2026-10-12T23:44:06.829046Z`.
+Activation receipt `b3ef612229eb24083172a591eab2ee181144cfa25ecdedb47103a9667e861945` and loaded receipt
+`cc2498bf4dea9738996a1f0877acdea5b68b36381f4816852c141653a9896bc9` have separate bindings.
+The normal canonical/native source-history publication readback is bound to this
+installed pair. The earlier conversation completion was recovered separately before
+installation; pure SDK parity and installation do not prove future provider-task
+nonrecurrence. The preceding Dce47 deployment, native continuation, console, fixture
+and timeout qualifications retain their original dates and scope. PR18 passed its
+five established publication checks before normal merge; those same five checks are
+required on this changed public input. Native artifacts and signed companions
+remain unchanged.
 
 ## October 12 normal agent CLI timeout
 

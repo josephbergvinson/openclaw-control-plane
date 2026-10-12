@@ -75319,12 +75319,16 @@ index 6a648d332ae33a1a835e0b47e3bddfa67d8dc296..5c9f75afbdd21f43d714b0af5d9a0321
      lifecycle.emitPostTurnError(error, terminal);
 diff --git a/src/agents/command/requester-presentation.test.ts b/src/agents/command/requester-presentation.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a78f306adabfe10b74d39931db4d115cc63c5b47
+index 0000000000000000000000000000000000000000..84bb1e133e8ad5e6945b08f1faf8552301e1c6f9
 --- /dev/null
 +++ b/src/agents/command/requester-presentation.test.ts
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,81 @@
 +import { describe, expect, it } from "vitest";
-+import { resolveRequesterProgressRequest } from "./requester-presentation.js";
++import { deliveryContextKey } from "../../utils/delivery-context.shared.js";
++import {
++  createRequesterPresentation,
++  resolveRequesterProgressRequest,
++} from "./requester-presentation.js";
 +const source = { channel: "discord", to: "channel:123", accountId: "default", threadId: "456" };
 +function row() {
 +  return {
@@ -75334,6 +75338,33 @@ index 0000000000000000000000000000000000000000..a78f306adabfe10b74d39931db4d115c
 +}
 +const params = { sessionKey: "agent:main:discord:channel:123", sessionId: "incarnation", source };
 +describe("settled wave original progress facts", () => {
++  it("binds retained Discord own-channel origins to the original unthreaded request", () => {
++    const originalSource = { channel: "discord", to: "channel:123", accountId: "default" };
++    const presentation = createRequesterPresentation({
++      runId: "settle",
++      sessionKey: params.sessionKey,
++      sessionId: params.sessionId,
++      source: { ...originalSource, threadId: "123" },
++      assertCurrent: () => {},
++      progressRows: [
++        {
++          completionRequesterSessionId: params.sessionId,
++          progressOrigin: { ...originalSource, threadId: "123", messageId: "900" },
++        },
++        {
++          completionRequesterSessionId: params.sessionId,
++          progressOrigin: { ...originalSource, messageId: "900" },
++        },
++      ],
++    });
++    expect(presentation.progressRequest).toEqual({
++      sessionKey: params.sessionKey,
++      sessionId: params.sessionId,
++      sourceMessageId: "900",
++      requestGeneration: "900",
++    });
++    expect(deliveryContextKey(presentation.source)).toBe(deliveryContextKey(originalSource));
++  });
 +  it("binds all completed and paused children to their exact common original request", () => {
 +    const paused = { ...row(), pauseReason: "sessions_yield" };
 +    expect(resolveRequesterProgressRequest({ ...params, rows: [row(), paused] })).toEqual({
@@ -172850,10 +172881,28 @@ index 7ff5729b09288cf3f1c6db19eac2963a5254a360..de58bc813582558edbf2bad57848b53c
        return { terminalOutcome, settled };
      })
 diff --git a/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts b/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
-index 67adf8ef368523eeebe478a4774d1558b970590b..2f19713b73b9e43ad5982fc5c4c827d15e96e2a6 100644
+index 67adf8ef368523eeebe478a4774d1558b970590b..91b0ef1e99bc50944f0ee3ef2dd89b319eccf8b0 100644
 --- a/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
 +++ b/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
-@@ -18,6 +18,19 @@ vi.mock("./agent-run-dispatch.js", () => ({
+@@ -1,5 +1,6 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
++import { createRequesterPresentation } from "../../agents/command/requester-presentation.js";
+ import { resolveAgentRunContext } from "../../agents/command/run-context.js";
+ import {
+   getPreparedModelRuntimeBorrowedSnapshot,
+@@ -12,12 +13,30 @@ import { startAgentRunExecution } from "./agent-run-execution-phase.js";
+ import type { AgentTurnPrincipal } from "./types.js";
+ 
+ const dispatchAgentRunFromGateway = vi.hoisted(() => vi.fn());
++const assertMessageActionSourceSessionCurrent = vi.hoisted(() => vi.fn());
++
++vi.mock("../../agents/subagents/subagent-message-action-source.js", () => ({
++  assertMessageActionSourceSessionCurrent,
++}));
+ 
+ vi.mock("./agent-run-dispatch.js", () => ({
+   dispatchAgentRunFromGateway,
    resolveAbortedAgentStopReason: () => "rpc",
  }));
  
@@ -172873,10 +172922,76 @@ index 67adf8ef368523eeebe478a4774d1558b970590b..2f19713b73b9e43ad5982fc5c4c827d1
  function createExecution(options: { aborted?: boolean; assertContextCurrent?: () => void } = {}) {
    const abortCleanup = vi.fn();
    const gatewayRelease = vi.fn();
-@@ -102,6 +115,100 @@ function createExecution(options: { aborted?: boolean; assertContextCurrent?: ()
- describe("startAgentRunExecution Gateway ownership", () => {
-   beforeEach(() => dispatchAgentRunFromGateway.mockReset());
+@@ -100,7 +119,164 @@ function createExecution(options: { aborted?: boolean; assertContextCurrent?: ()
+ }
  
+ describe("startAgentRunExecution Gateway ownership", () => {
+-  beforeEach(() => dispatchAgentRunFromGateway.mockReset());
++  beforeEach(() => {
++    dispatchAgentRunFromGateway.mockReset();
++    assertMessageActionSourceSessionCurrent.mockReset();
++  });
++
++  it.each([undefined, "123", "456"])(
++    "validates an original Discord requester presentation with retained thread %s",
++    async (threadId) => {
++      const execution = createExecution();
++      const sessionKey = "agent:main:discord:channel:123";
++      const sessionId = "original-incarnation";
++      const originalSource = { channel: "discord", accountId: "default", to: "channel:123" };
++      execution.params.resolvedSessionKey = sessionKey;
++      execution.params.resolvedSessionId = sessionId;
++      execution.params.prepared.admittedMessageActionSource = {
++        sourceRequest: { sessionKey, sessionId, sourceMessageId: "900", requestGeneration: "900" },
++        sourceLifecycleRevision: "original-lifecycle",
++        requesterAccountId: "default",
++        requesterSenderId: "original-user",
++        toolContext: {
++          currentChannelProvider: "discord",
++          currentChannelId: "channel:123",
++          currentMessagingTarget: "channel:123",
++          currentChatType: "channel",
++          currentMessageId: "900",
++          currentSourceTurnId: "original-source-turn",
++        },
++      };
++      const source = { ...originalSource, ...(threadId ? { threadId } : {}) };
++      const assertPresentationCurrent = vi.fn();
++      execution.params.requesterPresentation = createRequesterPresentation({
++        runId: execution.params.runId,
++        sessionKey,
++        sessionId,
++        source,
++        assertCurrent: assertPresentationCurrent,
++        progressRows: [
++          {
++            completionRequesterSessionId: sessionId,
++            progressOrigin: { ...source, messageId: "900" },
++          },
++        ],
++      });
++      dispatchAgentRunFromGateway.mockImplementationOnce(async (dispatch) => {
++        const delegation = dispatch.ingressOpts.runContext.messageActionDelegation;
++        if (threadId === "456") {
++          expect(delegation.assertCurrent).toThrow(
++            "Message action requester presentation source differs from its admitted task",
++          );
++        } else {
++          delegation.assertCurrent();
++        }
++        expect(assertMessageActionSourceSessionCurrent).toHaveBeenCalledWith(
++          execution.params.prepared.admittedMessageActionSource,
++          execution.params.cfg,
++        );
++        expect(assertPresentationCurrent).toHaveBeenCalledOnce();
++        dispatch.cleanupAbortController();
++        expect(delegation.assertCurrent).toThrow("task run is no longer active");
++      });
++      await startAgentRunExecution(execution.params);
++      expect(dispatchAgentRunFromGateway).toHaveBeenCalledOnce();
++    },
++  );
++
 +  it("admits the exact child credential partition without attributing automated input to its owner", async () => {
 +    const execution = createExecution();
 +    const scope = {
@@ -172970,10 +173085,9 @@ index 67adf8ef368523eeebe478a4774d1558b970590b..2f19713b73b9e43ad5982fc5c4c827d1
 +    await startAgentRunExecution(execution.params);
 +    expect(dispatchAgentRunFromGateway).toHaveBeenCalledOnce();
 +  });
-+
+ 
    it.each<{
      name: string;
-     webchat?: boolean;
 diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
 index f8b96bf1a289089982b7f32b5dee3de6354023a7..c2fcac72c017ea1162e0750b7784875111b24b3f 100644
 --- a/src/gateway/agent-turn/agent-run-execution-phase.ts
@@ -198562,6 +198676,74 @@ index 872d5591ef8d7a67f79f9d7225862b5760302ad8..bf9c8b3ceb20e80d5f3047faf73db763
  
  /** @deprecated The streaming.progress.render key was retired (#122927). */
  export type ChannelProgressDraftRenderMode = "rich" | "text";
+diff --git a/src/plugin-sdk/channel-route.test.ts b/src/plugin-sdk/channel-route.test.ts
+index c3eac219af8519b764690c44a74ea7beca17cd22..aa9eb611c8a07f1cbe661d1b7ca6a4ad0f1b6030 100644
+--- a/src/plugin-sdk/channel-route.test.ts
++++ b/src/plugin-sdk/channel-route.test.ts
+@@ -47,6 +47,41 @@ describe("plugin-sdk channel-route", () => {
+     expect(channelRouteCompactKey(route)).toBe("telegram|-100123||42");
+   });
+ 
++  it.each(["channel:123456", "discord:channel:123456", " CHANNEL:123456 "])(
++    "canonicalizes a Discord channel's redundant own-thread route for %s",
++    (to) => {
++      const route = normalizeChannelRouteRef({
++        channel: " Discord ",
++        accountId: " Work ",
++        to,
++        threadId: " 123456 ",
++        threadKind: "thread",
++        threadSource: "session",
++      });
++      expect(route?.thread).toBeUndefined();
++      expect(route?.accountId).toBe("work");
++      expect(
++        channelRouteTargetsMatchExact({
++          left: { channel: "discord", accountId: "work", to, threadId: "123456" },
++          right: { channel: "discord", accountId: "work", to },
++        }),
++      ).toBe(true);
++    },
++  );
++
++  it.each([
++    { channel: "discord", to: "channel:123456", threadId: "654321" },
++    { channel: "discord", to: "user:123456", threadId: "123456" },
++    { channel: "discord", to: "discord:123456", threadId: "123456" },
++    { channel: "discord", to: "123456", threadId: "123456" },
++    { channel: "slack", to: "channel:123456", threadId: "123456" },
++  ])("preserves a distinct or unproven thread in $channel/$to", (input) => {
++    expect(normalizeChannelRouteRef(input)?.thread?.id).toBe(input.threadId);
++    expect(
++      channelRouteTargetsMatchExact({ left: input, right: { ...input, threadId: undefined } }),
++    ).toBe(false);
++  });
++
+   it("builds compact route keys from raw route-like input", () => {
+     expect(
+       channelRouteCompactKey({
+diff --git a/src/plugin-sdk/channel-route.ts b/src/plugin-sdk/channel-route.ts
+index 43bf9bdcb91de72583dfed83f2ebfcff9f25db19..5b2df90f4d9852519f00269aaf7a3fccb8412ca0 100644
+--- a/src/plugin-sdk/channel-route.ts
++++ b/src/plugin-sdk/channel-route.ts
+@@ -91,7 +91,16 @@ export function normalizeChannelRouteRef(
+     typeof input.accountId === "string" ? normalizeOptionalAccountId(input.accountId) : undefined;
+   const to = normalizeOptionalString(input.to);
+   const rawTo = normalizeOptionalString(input.rawTo);
+-  const threadId = normalizeRouteThreadId(input.threadId);
++  let threadId = normalizeRouteThreadId(input.threadId);
++  // Discord threads are themselves channels. An own-channel thread component
++  // repeats the destination rather than selecting a different reply route.
++  if (
++    channel === "discord" &&
++    threadId != null &&
++    to?.match(/^(?:discord:)?channel:(.+)$/i)?.[1]?.trim() === String(threadId)
++  ) {
++    threadId = undefined;
++  }
+   if (!channel && !to && !accountId && threadId == null) {
+     return undefined;
+   }
 diff --git a/src/plugin-sdk/runtime-store.test.ts b/src/plugin-sdk/runtime-store.test.ts
 index 3a854aa1bf4f4a56ce3b532990183ce520a4a93a..85541b961f723b2e91ba424be10c7c3a44a81ff8 100644
 --- a/src/plugin-sdk/runtime-store.test.ts

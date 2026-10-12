@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
-identifies the current Gateway installation.
+[October 12 Discord own-channel route](#october-12-discord-own-channel-route)
+separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
 manifest. Reproducing its behavior requires both the runtime source changes and
@@ -17,6 +17,26 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 12 Discord own-channel route
+
+The canonical reference is `24218cc58e388c932e6a6420568ce2c86ab9a653`, with native
+distribution `b91ea6fd08bab3d57aebbd7a37d251cd68823931`. A Discord thread component equal
+to its explicit channel destination now identifies the same route as that channel.
+This prevents completed child work from being rejected solely because a retained
+origin repeats the destination as its thread. Distinct threads and all existing
+requester authority checks remain enforced.
+
+The [dated route qualification](../runtime/README.md#october-12-discord-own-channel-route)
+records the one production owner, three regression owners, 62 passing cases and
+retained unsuccessful attempts. Gateway and Node now run Db91. Matching normal
+build/stage/seal, first activation and independent loaded-generation, health and
+protected-state preservation passed with separate receipts. Pure compiled SDK
+parity and installation remain separate from future provider-task nonrecurrence.
+The full source export retains exact normalized tree parity, the native package
+overlay and archive, signed companions and all prior dated qualification and
+deployment records. The changed public head must pass the five established
+publication checks before normal merge.
 
 ## October 12 normal agent CLI timeout
 
