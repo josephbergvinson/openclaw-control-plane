@@ -7370,6 +7370,19 @@ index 1d36817cd710a6c46f2d3e8bf6a87503de3a6ec7..934838f10a5e94e762e70b36f5c76365
  
  ```text
  Mini App needs an HTTPS gateway URL. Set `gateway.tailscale.mode: serve` or `funnel`, then retry.
+diff --git a/docs/cli/agent.md b/docs/cli/agent.md
+index 1ae30779d5cdea6f3dff78a3403b1c950b06fafe..4e27336ae880b9c48d641878f6b435b031d232e3 100644
+--- a/docs/cli/agent.md
++++ b/docs/cli/agent.md
+@@ -261,7 +261,7 @@ measurements because model latency and worker-pool routing obscure cache hits.
+ - `--reply-account <id>`: delivery account override
+ - `--local`: run the embedded agent directly (after plugin registry preload)
+ - `--deliver`: send the reply back to the selected channel/target
+-- `--timeout <seconds>`: override this command's agent-turn deadline (default 600, or `agents.defaults.timeoutSeconds`); `0` disables the overall deadline. The 600-second fallback belongs to this CLI command, not ordinary Gateway turns, whose default is 48 hours.
++- `--timeout <seconds>`: override this command's agent-turn deadline (`agents.defaults.timeoutSeconds`, or the shared 48-hour default); `0` disables the overall deadline. Gateway-backed and embedded agent turns use the same default. `agent exec` retains its separate 600-second default.
+ - `--json`: output JSON
+ 
+ Gateway commands using OpenClaw's managed agent loop return their completed reply before optional memory
 diff --git a/docs/cli/cron.md b/docs/cli/cron.md
 index 27483ef39eff3a468fc425d2695607b053af468d..fa02d488ed14a0beadce495ac8da44d77bd336bf 100644
 --- a/docs/cli/cron.md
@@ -158219,6 +158232,19 @@ index 03b579973d987eac1e12808dd1c7ccfe652e74e2..9408e34a28dcafec908ce64526ee19ac
    it("keeps remote gateway call config reads non-observing", async () => {
      await runEnsureConfigReady(["gateway", "call"]);
  
+diff --git a/src/cli/program/register.agent-turn.ts b/src/cli/program/register.agent-turn.ts
+index a1c98c732b470845cfa73c7c27cb0d5d72b0ddef..d4970635cff97259e9c8219736a10d58511db4ca 100644
+--- a/src/cli/program/register.agent-turn.ts
++++ b/src/cli/program/register.agent-turn.ts
+@@ -48,7 +48,7 @@ export function registerAgentTurnCommand(
+     .option("--json", "Output result as JSON", false)
+     .option(
+       "--timeout <seconds>",
+-      "Override agent command timeout (seconds, default 600 or config value)",
++      "Override agent turn timeout (seconds, default 48 hours or config value)",
+     )
+     .addHelpText(
+       "after",
 diff --git a/src/commands/agent-command-attempt.test-mocks.ts b/src/commands/agent-command-attempt.test-mocks.ts
 index 42fb6aca25c5dd027920ee23350105793358e963..123e12ac22463398a8f6dffb98f6d7ee1a86518c 100644
 --- a/src/commands/agent-command-attempt.test-mocks.ts
@@ -158261,6 +158287,205 @@ index d7587206a32917d080207f3ea2abb0c8de0c2846..75daf6d8a4623f446120dc3cb17aa882
        return { registry, primaryRegistry: registry };
      },
    };
+diff --git a/src/commands/agent-via-gateway-timeout.ts b/src/commands/agent-via-gateway-timeout.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d140c5c0f05e048eebe2c357e27c60c3863ff9c1
+--- /dev/null
++++ b/src/commands/agent-via-gateway-timeout.ts
+@@ -0,0 +1,29 @@
++// Parses the agent CLI deadline and projects its Gateway request wait.
++import {
++  parseStrictNonNegativeInteger,
++  resolveTimerTimeoutMs,
++} from "@openclaw/normalization-core/number-coercion";
++import { DEFAULT_AGENT_TIMEOUT_MS } from "../agents/timeout.js";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++
++const NO_GATEWAY_TIMEOUT_MS = 2_147_000_000;
++
++export function parseTimeoutSeconds(opts: { cfg: OpenClawConfig; timeout?: string }) {
++  const raw =
++    opts.timeout !== undefined
++      ? parseStrictNonNegativeInteger(opts.timeout)
++      : (opts.cfg.agents?.defaults?.timeoutSeconds ?? DEFAULT_AGENT_TIMEOUT_MS / 1000);
++  if (raw === undefined) {
++    throw new Error(
++      `Invalid --timeout. Use seconds as a non-negative integer, for example --timeout 600. Use --timeout 0 to disable the timeout.`,
++    );
++  }
++  return raw;
++}
++
++export function resolveGatewayAgentTimeoutMs(timeoutSeconds: number): number {
++  if (timeoutSeconds === 0) {
++    return NO_GATEWAY_TIMEOUT_MS;
++  }
++  return resolveTimerTimeoutMs((timeoutSeconds + 30) * 1000, 10_000, 10_000);
++}
+diff --git a/src/commands/agent-via-gateway.timeout.test.ts b/src/commands/agent-via-gateway.timeout.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..693f0017756c9a0b9fa1cacad226d64fca3e106a
+--- /dev/null
++++ b/src/commands/agent-via-gateway.timeout.test.ts
+@@ -0,0 +1,100 @@
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { DEFAULT_AGENT_TIMEOUT_MS } from "../agents/timeout.js";
++import type { RuntimeEnv } from "../runtime.js";
++import { agentCliCommand, agentViaGatewayTesting } from "./agent-via-gateway.js";
++
++const configReaders = vi.hoisted(() => ({ read: vi.fn(), readWithEnv: vi.fn() }));
++const callGateway = vi.hoisted(() => vi.fn());
++
++vi.mock("../config/gateway-dispatch-config.js", () => ({
++  readGatewayDispatchConfig: configReaders.read,
++  readGatewayDispatchConfigWithShellEnvFallback: configReaders.readWithEnv,
++}));
++vi.mock("../config/io.js", () => ({
++  getRuntimeConfig: configReaders.read,
++  loadConfig: configReaders.read,
++}));
++vi.mock("../gateway/call.js", () => ({
++  callGateway,
++  isGatewayCredentialsRequiredError: () => false,
++  isGatewayExplicitAuthRequiredError: () => false,
++  isGatewayTransportError: () => false,
++  randomIdempotencyKey: () => "timeout-test-run",
++}));
++
++const runtime: RuntimeEnv = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
++let directory: string;
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  vi.stubEnv("OPENCLAW_GATEWAY_URL", "");
++  agentViaGatewayTesting.resetLazyImportsForTests();
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-timeout-"));
++  callGateway.mockResolvedValue({
++    runId: "timeout-test-run",
++    status: "ok",
++    result: { payloads: [{ text: "complete" }] },
++  });
++});
++
++afterEach(() => {
++  vi.unstubAllEnvs();
++  fs.rmSync(directory, { recursive: true, force: true });
++});
++
++describe("Gateway agent command timeout policy", () => {
++  it.each([
++    {
++      name: "shared default when config and CLI omit the timeout",
++      configured: undefined,
++      override: undefined,
++      seconds: DEFAULT_AGENT_TIMEOUT_MS / 1000,
++      waitMs: DEFAULT_AGENT_TIMEOUT_MS + 30_000,
++    },
++    {
++      name: "configured finite timeout",
++      configured: 75,
++      override: undefined,
++      seconds: 75,
++      waitMs: 105_000,
++    },
++    {
++      name: "configured unlimited timeout",
++      configured: 0,
++      override: undefined,
++      seconds: 0,
++      waitMs: 2_147_000_000,
++    },
++    {
++      name: "explicit finite override",
++      configured: 75,
++      override: "90",
++      seconds: 90,
++      waitMs: 120_000,
++    },
++    {
++      name: "explicit unlimited override",
++      configured: 75,
++      override: "0",
++      seconds: 0,
++      waitMs: 2_147_000_000,
++    },
++  ])("dispatches the $name to the Gateway", async ({ configured, override, seconds, waitMs }) => {
++    const config = {
++      agents: { defaults: { timeoutSeconds: configured } },
++      session: { store: path.join(directory, "sessions.json"), mainKey: "main" },
++    };
++    configReaders.read.mockReturnValue(config);
++    configReaders.readWithEnv.mockResolvedValue(config);
++    await agentCliCommand({ message: "hi", to: "+1555", timeout: override }, runtime);
++    expect(callGateway).toHaveBeenCalledExactlyOnceWith(
++      expect.objectContaining({
++        params: expect.objectContaining({ timeout: seconds }),
++        timeoutMs: waitMs,
++      }),
++    );
++  });
++});
+diff --git a/src/commands/agent-via-gateway.ts b/src/commands/agent-via-gateway.ts
+index 32db0f4b05b017b05e0d5b31ba038cc2bc58f45a..6b09c95a4fa5ea313b51dddb888760d5c5e11909 100644
+--- a/src/commands/agent-via-gateway.ts
++++ b/src/commands/agent-via-gateway.ts
+@@ -1,10 +1,6 @@
+ // Gateway-first agent CLI implementation with explicit --local embedded execution.
+ import fs from "node:fs/promises";
+ import { TextDecoder } from "node:util";
+-import {
+-  parseStrictNonNegativeInteger,
+-  resolveTimerTimeoutMs,
+-} from "@openclaw/normalization-core/number-coercion";
+ import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { GatewayProtocolRequestError } from "../../packages/gateway-client/src/protocol-request.js";
+@@ -75,6 +71,7 @@ import {
+ import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+ import { createLazyPromiseLoader } from "../shared/lazy-runtime.js";
+ import { normalizeMessageChannel } from "../utils/message-channel-normalize.js";
++import { parseTimeoutSeconds, resolveGatewayAgentTimeoutMs } from "./agent-via-gateway-timeout.js";
+ 
+ type AgentGatewayResult = {
+   payloads?: Array<{
+@@ -94,7 +91,6 @@ type GatewayAgentResponse = {
+   deliveryStatus?: unknown;
+ };
+ 
+-const NO_GATEWAY_TIMEOUT_MS = 2_147_000_000;
+ const GATEWAY_TRANSIENT_CONNECT_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 15_000] as const;
+ 
+ type AgentCliOpts = {
+@@ -449,26 +445,6 @@ async function resolveAgentMessageOpts(opts: AgentCliOpts): Promise<AgentDispatc
+   return { ...rest, message };
+ }
+ 
+-function parseTimeoutSeconds(opts: { cfg: OpenClawConfig; timeout?: string }) {
+-  const raw =
+-    opts.timeout !== undefined
+-      ? parseStrictNonNegativeInteger(opts.timeout)
+-      : (opts.cfg.agents?.defaults?.timeoutSeconds ?? 600);
+-  if (raw === undefined) {
+-    throw new Error(
+-      `Invalid --timeout. Use seconds as a non-negative integer, for example --timeout 600. Use --timeout 0 to disable the timeout.`,
+-    );
+-  }
+-  return raw;
+-}
+-
+-function resolveGatewayAgentTimeoutMs(timeoutSeconds: number): number {
+-  if (timeoutSeconds === 0) {
+-    return NO_GATEWAY_TIMEOUT_MS;
+-  }
+-  return resolveTimerTimeoutMs((timeoutSeconds + 30) * 1000, 10_000, 10_000);
+-}
+-
+ async function formatPayloadForLog(payload: {
+   text?: string;
+   mediaUrls?: string[];
 diff --git a/src/commands/agent.continuation-presentation.test-harness.ts b/src/commands/agent.continuation-presentation.test-harness.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..5f19009219204114549784655c60bab275757805
