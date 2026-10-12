@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 11 recent context, tool authority and console ownership](#october-11-recent-context-tool-authority-and-console-ownership)
+[October 12 Mac metadata and native resume continuation](#october-12-mac-metadata-and-native-resume-continuation)
 separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,49 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 12 Mac metadata and native resume continuation
+
+Canonical source `a7531113eb22e82cd2fb3e94457e8707de07b2ad`, tree
+`ef524caab08b7e47c195653f8c1ef3d83ddff0ad`, changes fourteen paths since C11f85.
+Native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4`, tree
+`8f0b6c0a0741717ca12711ca94c274f7e8c6f883`, preserves the exact native archive and
+two-YAML package overlay. The export retains complete normalized tree parity.
+
+Native continuation now validates the still-paused requester source before adoption
+settles its operator read transfer. Existing source-generation, authority, stale,
+duplicate and post-adoption guards remain. Generic Mac CLI/TUI aliases preserve the
+approved companion platform pin without changing device, family, role or scope
+checks. Spawn option projection and dispatch-ended behavior use their existing
+owners; seven inheritance declarations/eight cases retain their ordinary worker.
+
+Owning metadata suites passed 42 cases. The extraction suites passed 224 selected
+cases with three unchanged broad factory failures retained; one selected worker
+inventory case passed separately. Admission source owners passed 56 cases. Scoped
+lint, formatting and existing ratchets passed. These groups are not summed as
+unique coverage, and historical checks are not current reruns.
+
+The unchanged normal built-runtime native integration passed one case, observing
+five original, one paused-child, eight resumed-child and three successor model
+rounds, four native positives, one original capture and one original-parent wake.
+Two scoped compiled Discord reads succeeded and three forbidden action/account
+controls denied access. Model-provider and HTTP fixtures are controlled; this is
+separate from live Mephisto/provider-task acceptance and hosted qualification.
+
+One existing console-test suppression directive now applies to its own line.
+Fresh scoped lint and formatting passed. Its pre-format behavior-qualified hash,
+historical formatter transition and current directive hash remain distinct. All
+four production console files are unchanged. The October11 installed measurement
+of 2,000 native releases remains dated to Dd3e26; no new-runtime Chrome replay ran.
+
+Normal build, stage, seal and first activation selected D3dfd. Independent loaded
+Gateway/Node generation, health and protected-state preservation passed at
+`2026-10-12T01:43:16.991700Z`. Activation receipt `574b55c7040b8e32abac76fe9a21e39306eda2f72fb233cbb2cada3c1f18487e`
+and loaded receipt `602daf69994e9cf5ae55ced7504ce8eab4ea3f004873f8c0fa004beb1e9318c6` remain separate from source qualification.
+Signed618 companion source, inventories and rollback lineage remain unchanged.
+All five hosted jobs are required on the updated public head. Original task/provider
+outcomes, genuine voice behavior and eligible wallet cancellation retain their
+separate actual-use requirements.
 
 ## October 11 recent context, tool authority and console ownership
 

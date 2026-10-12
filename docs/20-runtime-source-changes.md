@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 11 recent context, tool authority and console ownership](#october-11-recent-context-tool-authority-and-console-ownership)
+[October 12 Mac metadata and native resume continuation](#october-12-mac-metadata-and-native-resume-continuation)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,26 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 12 Mac metadata and native resume continuation
+
+The canonical reference is `a7531113eb22e82cd2fb3e94457e8707de07b2ad`. Gateway and Node loaded
+native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4` with the exact retained native
+archive and package overlay. The fourteen-path update resolves requester-source
+validation before resume adoption settles its read transfer, preserves approved
+Mac CLI/TUI metadata pins and places spawn behavior in its existing owners.
+
+The [dated runtime record](../runtime/README.md#october-12-mac-metadata-and-native-resume-continuation)
+separates current source checks, the unchanged built-runtime native integration,
+normal build, first activation and independent loaded-state verification. Three
+broad factory failures remain failures. The native integration uses controlled
+model-provider/HTTP fixtures and does not establish live provider-task acceptance.
+
+The console fixture has a separately qualified one-token directive correction;
+its four production files remain unchanged. The entire October11 qualification,
+installed console/native-worker observations and corrected success-before-yield
+record remain dated below. Signed618 companions and previous installation chains
+remain intact. Fresh public checks and all five hosted jobs remain required.
 
 ## October 11 recent context, tool authority and console ownership
 
