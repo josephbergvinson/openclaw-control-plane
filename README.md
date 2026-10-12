@@ -14,7 +14,21 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The current source reference is
+The latest source reference is
+[`11f85c78fc5b7e978261de3e41aeb189a3d53113`](runtime/README.md#october-11-recent-context-tool-authority-and-console-ownership).
+Gateway and Node run native distribution `d3e26bf98ca679d8cd76a604bf57115242d361ff`.
+The new source retains recent compaction inputs, explicit full child tool policy,
+native worker authority, source-bound completion recovery, full-profile system
+review tools and peer-owned console-object cleanup. The guarded core check,
+combined build, first activation and independent loaded-state preservation passed.
+Installed isolated Chromium measurement released 2,000 console objects and kept
+500 text messages; one ordinary native child retained its parent's available
+Computer authority and returned its completion to the original parent. These observations
+have separate scopes. Signed618 companions and all earlier records are unchanged.
+Fresh public checks and all five existing hosted jobs remain required for this
+reference; source and installation alone do not close broader ordinary-use work.
+
+The dated October 10 source reference is
 [`47d8345038628f1a6cb20a64ba3cba16d5f3efc2`](runtime/README.md#october-10-source-reference-and-installation-boundaries).
 Its native distribution is `4f73fbf792a915051eb6895f8472e8c055f756eb`;
 the source trees differ only in the retained package YAML overlay.

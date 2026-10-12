@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
+[October 11 recent context, tool authority and console ownership](#october-11-recent-context-tool-authority-and-console-ownership)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,42 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 11 recent context, tool authority and console ownership
+
+The canonical reference is `11f85c78fc5b7e978261de3e41aeb189a3d53113`.
+Gateway and Node actually loaded native distribution
+`d3e26bf98ca679d8cd76a604bf57115242d361ff`; its exact native archive and two-YAML
+package overlay are unchanged. The source export adds seven commits across 55
+paths and preserves the complete previous qualification and installation lineage.
+
+The changes address six execution mechanisms and the existing validation workflow:
+
+- Compaction includes prepared recent messages in summarizer input when a verbatim
+  excerpt is later trimmed, preserving successful recent tool results for summarization.
+- Explicit full child policy overrides default role restrictions while configured,
+  account, inherited and execution restrictions remain effective.
+- Native workers receive their parent's actual tool authority without becoming owner
+  senders; exact source guards remain valid through preparation, awaited hooks and retirement.
+- Delivered inter-session completion recovery names the source run. Historic
+  source-less claims are not repaired by this producer change.
+- System collection reviews use all available tools for the effective explicit full
+  profile, honoring agent precedence and retaining schedules, prompts, delivery and enablement.
+- The sole Browser console observer disposes argument handles after text capture;
+  relay peers retain shared objects until the final owner retires them.
+- Native checks use the existing guarded scoped wrapper, including its resource
+  admission and process cleanup. Tool access and account rights are unaffected.
+
+The [dated runtime record](../runtime/README.md#october-11-recent-context-tool-authority-and-console-ownership)
+and manifest distinguish owning source checks, the selected distribution's build,
+actual first activation, independent loaded-state preservation and scoped installed
+Chromium/parent-worker acceptance. The native Chromium test was qualified before a
+formatter moved one lint comment; both hashes and that limit remain recorded.
+All production console files match their qualified source. Three baseline factory
+failures remain failures. Source checks do not stand for ordinary provider effects,
+voice follow/move/leave, eligible wallet cancellation or overall task completion.
+Signed618 companion lineage and all dated records below remain unchanged. Fresh
+public local checks and all five existing hosted jobs remain required.
 
 ## October 8 checkpoint admission and owned browser migration
 
