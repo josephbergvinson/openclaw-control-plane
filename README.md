@@ -14,7 +14,21 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The latest source reference is
+The latest qualified source reference is
+[`24218cc58e388c932e6a6420568ce2c86ab9a653`](runtime/README.md#october-12-discord-own-channel-route).
+The route normalizer now recognizes a Discord thread component that repeats its
+explicit channel destination. This allows a retained child completion to match its
+original unthreaded conversation while preserving distinct threads and the existing
+session, run, source, account and generation checks. The four changed source/test
+paths passed 62 focused cases. Gateway and Node now run native distribution
+`b91ea6fd08bab3d57aebbd7a37d251cd68823931`. The matching normal build, stage, seal,
+first activation and independent loaded-source, health and protected-state readback
+passed with separate receipts. The native archive, package overlay, prior
+qualification records and signed companions are retained. The five established
+public hosted checks remain required on the changed head; installed source identity
+does not establish future provider-task nonrecurrence.
+
+The dated October 12 timeout source reference is
 [`1258a28376a4c6fd22f69746abd98e8f97eba146`](runtime/README.md#october-12-normal-agent-cli-timeout).
 Gateway and Node run native distribution `ce47d1a7963b6405abbc17d54f843c6a2aa63838`.
 Normal agent CLI omission now uses the shared 48-hour timeout default. Configured
