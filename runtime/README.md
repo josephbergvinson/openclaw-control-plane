@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 10 source reference and installation boundaries](#october-10-source-reference-and-installation-boundaries)
+[October 12 native fixture contracts](#october-12-native-fixture-contracts)
 separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,148 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 12 native fixture contracts
+
+Canonical source `24a128f31bc538dae046419201cd6f8bbbe68f2f`, tree
+`0e4299c09a0b16c62f0449e016d6b57a2bf6db97`, changes exactly two test fixtures since Ca753.
+Native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3`, tree
+`4bfb5aba3de170bc5e60550db89c83f1795de9ba`, preserves the exact native archive and
+two-YAML package overlay. The export retains complete normalized tree parity.
+
+Three recovery fixture calls now supply the existing required message field.
+The 29 recovery cases, guarded owner types and scoped lint/format passed. Complete
+normal command29 types and command33 lint passed at this earlier one-fixture
+candidate, retaining three warnings. These broad checks were not replayed after
+the subsequent native fixture change.
+
+The native requester fixture persists its exact child envelope and policy in the
+standard test-owned session store. Native setup is awaited and cleanup uses the
+existing stateDir owner. Persisted spawnedBy and the presented native parent
+identity now share the canonical `agent:main:parent-session` key. The complete
+five-path 95-case group, including both native cases, and scoped types/lint/format
+passed. Existing assertions, negative controls and production guards remain.
+These 29 and 95 groups are not summed as unique coverage.
+
+The initial dependency-boundary rejection and V2's 93 passes/two fixture-setup
+failures remain failures in their retained receipts. The three earlier factory
+failures remain retained. On the preceding public head, complete native command29
+and credential-continuity step15 failed on these fixture contracts. Its production
+build and 234-path follow-up group passed. Fresh exact-head hosted qualification
+remains required.
+
+The matching newD normal build, first activation and independent loaded Gateway/
+Node generation, health and protected-state preservation passed at
+`2026-10-12T04:58:09.956282Z`. Activation receipt `98ef29aae18c51019cf61cf4d5e06fe725228fa81e90c220ed288b66f7a0df54`
+and loaded receipt `7dcdc1c72f5763a286e39d31efc59cbef580ebac5de5ef937e93caf406a9f3cb` have separate bindings. The earlier
+controlled built-runtime native integration remains dated to D3dfd; it is not a
+newD replay or live provider-task acceptance. All four production console files,
+the native archive, Signed618 companions and both dated records below remain
+unchanged. All five hosted jobs and the original ordinary-use outcomes retain
+their separate acceptance requirements.
+
+## October 12 Mac metadata and native resume continuation
+
+Canonical source `a7531113eb22e82cd2fb3e94457e8707de07b2ad`, tree
+`ef524caab08b7e47c195653f8c1ef3d83ddff0ad`, changes fourteen paths since C11f85.
+Native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4`, tree
+`8f0b6c0a0741717ca12711ca94c274f7e8c6f883`, preserves the exact native archive and
+two-YAML package overlay. The export retains complete normalized tree parity.
+
+Native continuation now validates the still-paused requester source before adoption
+settles its operator read transfer. Existing source-generation, authority, stale,
+duplicate and post-adoption guards remain. Generic Mac CLI/TUI aliases preserve the
+approved companion platform pin without changing device, family, role or scope
+checks. Spawn option projection and dispatch-ended behavior use their existing
+owners; seven inheritance declarations/eight cases retain their ordinary worker.
+
+Owning metadata suites passed 42 cases. The extraction suites passed 224 selected
+cases with three unchanged broad factory failures retained; one selected worker
+inventory case passed separately. Admission source owners passed 56 cases. Scoped
+lint, formatting and existing ratchets passed. These groups are not summed as
+unique coverage, and historical checks are not current reruns.
+
+The unchanged normal built-runtime native integration passed one case, observing
+five original, one paused-child, eight resumed-child and three successor model
+rounds, four native positives, one original capture and one original-parent wake.
+Two scoped compiled Discord reads succeeded and three forbidden action/account
+controls denied access. Model-provider and HTTP fixtures are controlled; this is
+separate from live Mephisto/provider-task acceptance and hosted qualification.
+
+One existing console-test suppression directive now applies to its own line.
+Fresh scoped lint and formatting passed. Its pre-format behavior-qualified hash,
+historical formatter transition and current directive hash remain distinct. All
+four production console files are unchanged. The October11 installed measurement
+of 2,000 native releases remains dated to Dd3e26; no new-runtime Chrome replay ran.
+
+Normal build, stage, seal and first activation selected D3dfd. Independent loaded
+Gateway/Node generation, health and protected-state preservation passed at
+`2026-10-12T01:43:16.991700Z`. Activation receipt `574b55c7040b8e32abac76fe9a21e39306eda2f72fb233cbb2cada3c1f18487e`
+and loaded receipt `602daf69994e9cf5ae55ced7504ce8eab4ea3f004873f8c0fa004beb1e9318c6` remain separate from source qualification.
+Signed618 companion source, inventories and rollback lineage remain unchanged.
+All five hosted jobs are required on the updated public head. Original task/provider
+outcomes, genuine voice behavior and eligible wallet cancellation retain their
+separate actual-use requirements.
+
+## October 11 recent context, tool authority and console ownership
+
+Canonical source `11f85c78fc5b7e978261de3e41aeb189a3d53113`, tree
+`96eb35d32ab6ca4dd5ce39b9ac2aae7c18a714b5`, adds seven commits across 55 paths
+since the October10 reference. Native distribution
+`d3e26bf98ca679d8cd76a604bf57115242d361ff` retains the exact accepted native
+archive and the same two-YAML package overlay. The manifest binds both complete
+normalized trees and patch checksums. Existing export-owner reconstruction checks
+verified complete blob/mode parity and preserved the two fixture-label replacements.
+
+Safeguard compaction now summarizes prepared recent messages even when its bounded
+verbatim excerpt is trimmed. Explicit child allow/alsoAllow entries override matching
+default role restrictions; configured denies, account policy, parent inheritance
+and execution authority still apply. Native children redeem their actual parent's
+tool authority while retaining their non-owner sender identity. Construction,
+preparation, awaited hooks and retirement each preserve the existing source fence.
+Delivered settle/announce recovery claims now name their source run. This producer
+repair does not backfill historic source-less claims or establish active steering.
+System review declarations use wildcard tools under the effective explicit full
+profile, with per-agent precedence and no changes to job enablement or scheduling.
+
+The Browser observer releases its console argument handles after reading text.
+The relay registers peer ownership before delivery and releases native console
+objects after their final owner, including release, unsubscribe, close, failure,
+context clearing and physical retirement. Native typechecks use the established
+guarded scoped wrapper; this validation guidance changes no tool or account rights.
+
+The owning component receipts retain 200 compaction cases, 53 and 86 child-policy
+cases, 294 selected native-authority passes with three pre-existing broad factory
+failures retained, 29 completion-producer cases, 13 system-review cases and 98
+console cases plus one actual Chromium test. These groups are not summed as unique
+coverage. Component formatting and type-aware lint, the guarded core lane and the
+combined normal build passed. The gated Chromium fixture's tested pre-format hash
+and canonical hash differ only in a retained formatter move of a suppression
+comment; the manifest names both. Its four production files exactly match their
+qualified hashes. No old single full changed-check receipt or formatted-fixture
+rerun is claimed.
+
+Normal stage, seal and first activation selected distribution Dd3e26. Independent
+same-generation Gateway/Node, health and protected-state preservation passed at
+`2026-10-11T23:28:04.175236Z`. Activation receipt
+`5c20e0b93316ed17ed5e22dc5689cc2183e1e33dd31010b358166e47f9d1d0e2`
+and loaded receipt
+`fa46a1c0b02e23c152723718d7da01e80fd79496461090f79aa78becf61f8694`
+remain separate from source qualification. Signed618 companions retain their
+previous source, installed inventories and rollback lineage.
+
+An installed isolated Chromium measurement observed 2,000 distinct console objects,
+2,000 successful native releases and 500 retained text messages. Second-half heap
+change was -1,048,384 bytes, versus +16,409,728 on the baseline. The temporary profile
+and owned processes were retired. An earlier launcher-observer failure remains
+recorded; the controlled leak does not explain an entire historical process total.
+One normal local-owner parent used its native child, whose sender remained false,
+to call Computer successfully. Child success preceded the yield acknowledgment;
+completion was read back in the original parent. This is scoped ordinary-use
+acceptance, not exhaustive queued/scheduled/
+resumed behavior or provider/task completion. Original outcomes, genuine voice and
+eligible wallet cancellation keep their separate acceptance requirements. Fresh
+local public checks and all five existing hosted jobs are required on this update.
 
 ## October 10 source reference and installation boundaries
 

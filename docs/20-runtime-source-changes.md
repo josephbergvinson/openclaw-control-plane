@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 8 checkpoint admission and owned browser migration](#october-8-checkpoint-admission-and-owned-browser-migration)
+[October 12 native fixture contracts](#october-12-native-fixture-contracts)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,82 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 12 native fixture contracts
+
+The canonical reference is `24a128f31bc538dae046419201cd6f8bbbe68f2f`. Gateway and Node loaded
+native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3` with the exact retained native
+archive and package overlay. This update changes two test fixtures to satisfy
+existing required-message, persisted child-envelope and canonical parent-key
+contracts. Production behavior and guards remain unchanged.
+
+The [dated fixture record](../runtime/README.md#october-12-native-fixture-contracts)
+separates 29 recovery cases and the earlier complete types/lint checks from the
+later complete 95-case native group and scoped types/lint/format. It records the
+matching build and installation separately. Earlier dependency-boundary, V2 and
+hosted failures remain failures; three baseline factory failures remain retained.
+
+The earlier October12 controlled native integration and October11 installed
+console measurement retain their actual source and installation scope. Their
+entire dated records, corrected success-before-yield text, native archive and
+Signed618 companions remain below. All five hosted jobs are required on the
+updated public head; fresh ordinary provider-task acceptance remains separate.
+
+## October 12 Mac metadata and native resume continuation
+
+The canonical reference is `a7531113eb22e82cd2fb3e94457e8707de07b2ad`. Gateway and Node loaded
+native distribution `3dfd9f4453e791a0c2dfa3d7ee47caadac2b29f4` with the exact retained native
+archive and package overlay. The fourteen-path update resolves requester-source
+validation before resume adoption settles its read transfer, preserves approved
+Mac CLI/TUI metadata pins and places spawn behavior in its existing owners.
+
+The [dated runtime record](../runtime/README.md#october-12-mac-metadata-and-native-resume-continuation)
+separates current source checks, the unchanged built-runtime native integration,
+normal build, first activation and independent loaded-state verification. Three
+broad factory failures remain failures. The native integration uses controlled
+model-provider/HTTP fixtures and does not establish live provider-task acceptance.
+
+The console fixture has a separately qualified one-token directive correction;
+its four production files remain unchanged. The entire October11 qualification,
+installed console/native-worker observations and corrected success-before-yield
+record remain dated below. Signed618 companions and previous installation chains
+remain intact. Fresh public checks and all five hosted jobs remain required.
+
+## October 11 recent context, tool authority and console ownership
+
+The canonical reference is `11f85c78fc5b7e978261de3e41aeb189a3d53113`.
+Gateway and Node actually loaded native distribution
+`d3e26bf98ca679d8cd76a604bf57115242d361ff`; its exact native archive and two-YAML
+package overlay are unchanged. The source export adds seven commits across 55
+paths and preserves the complete previous qualification and installation lineage.
+
+The changes address six execution mechanisms and the existing validation workflow:
+
+- Compaction includes prepared recent messages in summarizer input when a verbatim
+  excerpt is later trimmed, preserving successful recent tool results for summarization.
+- Explicit full child policy overrides default role restrictions while configured,
+  account, inherited and execution restrictions remain effective.
+- Native workers receive their parent's actual tool authority without becoming owner
+  senders; exact source guards remain valid through preparation, awaited hooks and retirement.
+- Delivered inter-session completion recovery names the source run. Historic
+  source-less claims are not repaired by this producer change.
+- System collection reviews use all available tools for the effective explicit full
+  profile, honoring agent precedence and retaining schedules, prompts, delivery and enablement.
+- The sole Browser console observer disposes argument handles after text capture;
+  relay peers retain shared objects until the final owner retires them.
+- Native checks use the existing guarded scoped wrapper, including its resource
+  admission and process cleanup. Tool access and account rights are unaffected.
+
+The [dated runtime record](../runtime/README.md#october-11-recent-context-tool-authority-and-console-ownership)
+and manifest distinguish owning source checks, the selected distribution's build,
+actual first activation, independent loaded-state preservation and scoped installed
+Chromium/parent-worker acceptance. The native Chromium test was qualified before a
+formatter moved one lint comment; both hashes and that limit remain recorded.
+All production console files match their qualified source. Three baseline factory
+failures remain failures. Source checks do not stand for ordinary provider effects,
+voice follow/move/leave, eligible wallet cancellation or overall task completion.
+Signed618 companion lineage and all dated records below remain unchanged. Fresh
+public local checks and all five existing hosted jobs remain required.
 
 ## October 8 checkpoint admission and owned browser migration
 
