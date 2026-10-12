@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 native fixture contracts](#october-12-native-fixture-contracts)
+[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
 identifies the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,27 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 12 normal agent CLI timeout
+
+The canonical reference is `1258a28376a4c6fd22f69746abd98e8f97eba146`. Gateway and Node loaded
+native distribution `ce47d1a7963b6405abbc17d54f843c6a2aa63838` with the retained native archive
+and package overlay. Normal agent CLI omission now uses the shared 48-hour default
+instead of a separate 600-second fallback. Configured and explicit finite or zero
+timeouts keep their behavior, and `agent exec` retains its 600-second default.
+
+The [dated timeout record](../runtime/README.md#october-12-normal-agent-cli-timeout)
+records the coherent helper extraction and real-command fixture scope: a mocked
+Gateway with synthetic configuration/temp store, 133 passes and one existing skip,
+and guarded/scoped owner checks. The original large test is unchanged. Earlier
+counterfactual and line-cap failures remain failed receipts. Matching build and
+actual installation have separate evidence; source checks do not establish live
+provider-task acceptance.
+
+All earlier fixture, native continuation and installed console records retain their
+actual dates, source identities and qualification scope. Production console files,
+the native archive, Signed618 companions and the full historical chain remain
+unchanged below. Five fresh hosted jobs are required for the updated public head.
 
 ## October 12 native fixture contracts
 

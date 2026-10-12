@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 native fixture contracts](#october-12-native-fixture-contracts)
+[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
 separates the latest source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,42 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 12 normal agent CLI timeout
+
+Canonical source `1258a28376a4c6fd22f69746abd98e8f97eba146`, tree
+`da2d9d42e60f6d1286f079e0ad0e3a578c0f9657`, changes five CLI, documentation and test paths since C24a.
+Native distribution `ce47d1a7963b6405abbc17d54f843c6a2aa63838`, tree
+`3ef8b003459ba86033100447f921b7cc8e427eea`, preserves the exact native archive and
+two-YAML package overlay. The export retains complete normalized tree parity.
+
+An ordinary `openclaw agent` command with no explicit timeout or configured agent
+default now uses the shared 48-hour default. This prevents the separate CLI fallback
+from ending a healthy long turn at ten minutes. Configured and explicit finite or
+zero values keep their existing behavior. Strict option parsing, the Gateway wait
+cushion and timer clamp remain unchanged; `agent exec` keeps its separate 600-second
+default. The existing timeout functions and private zero sentinel move into a
+small coherent sibling. Tool, model, approval, cancellation and request forwarding
+behavior remain unchanged.
+
+The original large command test is unchanged. A focused sibling exercises the
+real `agentCliCommand` entrypoint using a mocked Gateway, synthetic configuration
+and a temporary session store. It covers the missing default, configured finite/
+zero and explicit finite/zero cases. The original suite and focused fixture passed
+133 cases with one existing skip. Guarded owner types, scoped lint/format, existing
+line-cap/assertion ratchets and whitespace checks passed. The before-fix default
+failure and initial large-module line-cap rejection retain their separate failed
+receipts. This scoped source qualification is separate from live provider work.
+
+The matching final-distribution normal build, first activation and independent
+loaded Gateway/Node generation, health and protected-state preservation passed at
+`2026-10-12T10:07:18.653985Z`. Activation receipt `bee97f58a819631dd509f037abeae8c6772f94be03be9e50381104d238505cfc`
+and loaded receipt `c9444bc3eff71e4bc5dcf349dc4add864f3dca7d77087a196a6b1a168459b2cb` have separate bindings. All prior fixture,
+controlled native continuation and installed console observations retain their
+original source and installation scope. The four production console files, native
+archive and Signed618 companions remain unchanged. The preceding public head
+passed its five required jobs before merge; all five remain required on this changed
+public head. Ordinary provider-task acceptance remains separate.
 
 ## October 12 native fixture contracts
 

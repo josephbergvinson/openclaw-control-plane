@@ -15,6 +15,16 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest source reference is
+[`1258a28376a4c6fd22f69746abd98e8f97eba146`](runtime/README.md#october-12-normal-agent-cli-timeout).
+Gateway and Node run native distribution `ce47d1a7963b6405abbc17d54f843c6a2aa63838`.
+Normal agent CLI omission now uses the shared 48-hour timeout default. Configured
+and explicit finite or zero values keep their behavior, while `agent exec` retains
+its separate 600-second default. Scoped source qualification, the matching build
+and actual installation have separate receipts. Earlier fixture/native/console
+records, production console files, native archive and Signed618 companions remain
+intact. All five hosted jobs are required on the updated head.
+
+The dated October 12 fixture source reference is
 [`24a128f31bc538dae046419201cd6f8bbbe68f2f`](runtime/README.md#october-12-native-fixture-contracts).
 Gateway and Node run native distribution `6acbdd077d19fc9ca39854152a72ce15079554f3`.
 Two recovery/native fixtures now satisfy their existing required-message and
