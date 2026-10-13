@@ -15,6 +15,15 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`a11e067ec72a5b9a8ff545842cb0d9758df8ae16`](runtime/README.md#october-13-discord-line-cap-layout).
+The existing realtime agent-turn and connection helpers now live in coherent
+sibling modules. The unchanged line-limit guard, 87 existing voice cases and
+scoped guarded types/lint pass. This is a source-layout successor; the accepted
+R7 installation remains native `7f24ca48066872381f1b50bdcc592cdc599b3cff`.
+Genuine-call audible behavior remains pending. Prior source qualifications,
+installed-state receipts, native archive and overlay are retained.
+
+The dated October 13 generated-metadata source reference is
 [`d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`](runtime/README.md#october-13-generated-discord-voice-metadata).
 Generated plugin metadata now accepts the configured global voice policy and a
 narrow guild override, while rejecting provider selection inside that override.
