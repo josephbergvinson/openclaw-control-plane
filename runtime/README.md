@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 generated Discord voice metadata](#october-13-generated-discord-voice-metadata)
+[October 13 Discord line-cap layout](#october-13-discord-line-cap-layout)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,35 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 Discord line-cap layout
+
+Canonical `a11e067ec72a5b9a8ff545842cb0d9758df8ae16` and native source `1233e98bc6a1425a5d8313583ad287f309ef6034`
+are a mechanical source-layout successor to the accepted R7 source. The hosted
+native plan rejected 828 counted lines in realtime-consults and 708 in
+voice-session against the unchanged 700-line cap. Existing realtime agent-turn,
+requester-final and fallback-talkback ownership now live together in a coherent
+sibling; connection lifecycle and readiness helpers live in another sibling.
+Final bindings, delivery bounds, original parameter identity, live delivery
+state, cancellation timing, session-stop ownership and existing exports are
+preserved.
+
+The unchanged ratchet passes against pinned upstream across 1,728 changed source
+files. Four existing voice suites pass all 87 cases; guarded Discord production
+types, scoped typed lint, formatting and whitespace pass. The maintained changed
+command plan was inspected in dry-run mode; its complete execution remains with
+the hosted native plan. Earlier 428 and 46 case qualifications retain their dated
+scope. Fresh standalone reconstruction matches all 45,182 mode/blob/path
+entries after only the two approved fixture substitutions; pinned native archive
+custody and the exact overlay are unchanged.
+
+This successor has no private native build, restart, activation or preference
+change. Actual Gateway and Node installation remains native R7 `7f24ca48066872381f1b50bdcc592cdc599b3cff`
+from canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`, with its accepted activation,
+loaded-source and preservation receipts intact. Current reference/source trees
+are distinct from those installed fields. Genuine-call audible behavior remains
+pending. The native archive, exact two-YAML overlay and both approved fixture
+normalizations are unchanged.
 
 ## October 13 generated Discord voice metadata
 

@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 generated Discord voice metadata](#october-13-generated-discord-voice-metadata)
+[October 13 Discord line-cap layout](#october-13-discord-line-cap-layout)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,20 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 Discord line-cap layout
+
+The [source-layout successor](../runtime/README.md#october-13-discord-line-cap-layout)
+extracts the existing realtime agent-turn/requester-final/talkback owner and
+voice-connection helpers into coherent siblings. It preserves delivery bounds,
+authority, cancellation and cleanup timing, original parameter identity, session
+lifecycle and existing exports. The unchanged pinned-base line-limit guard,
+87 existing voice cases and scoped guarded type/lint checks pass.
+
+This is a source-only qualification. Installed Gateway and Node remain the
+accepted native R7 source with its original loaded-state and preservation
+receipts. Prior source qualifications and deployment history are retained;
+genuine-call audible behavior remains pending.
 
 ## October 13 generated Discord voice metadata
 
