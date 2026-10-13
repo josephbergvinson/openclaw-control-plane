@@ -15,6 +15,33 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`](runtime/README.md#october-13-generated-discord-voice-metadata).
+Generated plugin metadata now accepts the configured global voice policy and a
+narrow guild override, while rejecting provider selection inside that override.
+The two-file successor passed all 46 metadata validation cases and normal
+generator/type/lint checks. The matching native R7 build, stage and seal passed.
+Gateway and Node now load native `7f24ca48066872381f1b50bdcc592cdc599b3cff` following
+one preserving activation and independent loaded-source, health and protected-state
+readback. Genuine-call audible behavior remains
+separate pending work. Every prior dated record and all five required hosted
+checks are retained.
+
+The dated October 13 voice qualification source reference is
+[`206539510310836f6a8f1d18867423f73fac43a6`](runtime/README.md#october-13-discord-voice-yield-and-guild-policy).
+Yielded voice work stays pending until its original requester receives the resumed
+final. Independent overlapping work retains its own delivery owner through later
+turns and speaker replacements. Guild voice policy separates conversational replies
+from action handoff, while new rooms inherit the routed profile context. The
+combined qualification passed 428 focused cases and affected guarded type/lint
+checks. Gateway and Node now run the matching native R6 distribution
+`975df1fbb861664c075ed31a18394b173da666f9`. Normal build/stage/seal, single
+preserving activation and independent loaded-source, health and protected-state
+readback passed. New voice settings and actual audible call acceptance remain
+separate pending work.
+The native archive, two-file overlay and every prior dated record are retained.
+All five established public checks are required on the final changed head.
+
+The dated October 13 npm qualification source reference is
 [`cef94b88fa6f8a828c8544b401dd5484e878a40f`](runtime/README.md#october-13-frozen-npm-override-contexts).
 It is a test/build-tool successor to the installed Discord route repair. npm lock
 generation now repairs a demonstrated lost override context only when every raw

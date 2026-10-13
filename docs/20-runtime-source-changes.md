@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 Discord own-channel route](#october-12-discord-own-channel-route)
+[October 13 generated Discord voice metadata](#october-13-generated-discord-voice-metadata)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,37 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 generated Discord voice metadata
+
+The [generated voice metadata successor](../runtime/README.md#october-13-generated-discord-voice-metadata)
+publishes the qualified Discord guild policy and action-handoff schema through the
+normal generated plugin metadata. All 46 metadata validation cases and normal
+generator/type/lint checks pass. The matching native R7 build, stage and seal
+passed, with the exact packaged schema verified. Gateway and Node now run the
+matching native R7 source after one preserving activation and independent loaded
+health/state verification. The prior R6 records retain their scope and deployment
+history. Genuine-call audible behavior remains pending. Only the private guild fixture literals are normalized
+for public export, with production schema and assertions unchanged.
+
+## October 13 Discord voice yield and guild policy
+
+The [voice and guild-policy qualification](../runtime/README.md#october-13-discord-voice-yield-and-guild-policy)
+keeps yielded work pending and returns each exact resumed final to its original
+requester once, including overlapping work and speaker replacement. Guild voice
+policy separates conversation from action handoff while preserving recording,
+minutes and text permissions. New rooms load routed profile context. The 428
+focused cases and affected guarded type/lint checks passed. Gateway and Node now
+run D975df1 after matching normal build/stage/seal, one preserving activation and
+independent loaded-source, health and protected-state readback. Fresh standalone
+canonical/native inventory parity passed. New voice settings and genuine audible
+call acceptance remain pending.
+
+The source also preserves the original compatibility removal date and APIs until
+their existing published-plugin prerequisites are proved, and corrects the
+cancellation route fixture without changing production routing. Native archive,
+overlay and all earlier dated records remain intact. The final public head still
+requires all five established hosted checks before normal merge.
 
 ## October 13 frozen npm override contexts
 
