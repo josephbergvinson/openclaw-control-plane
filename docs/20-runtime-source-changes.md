@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 authenticated-speaker test fixtures](#october-13-authenticated-speaker-test-fixtures)
+[October 13 browser and deferred voice recovery](#october-13-browser-and-deferred-voice-recovery)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,24 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 browser and deferred voice recovery
+
+The [combined successor](../runtime/README.md#october-13-browser-and-deferred-voice-recovery)
+records a fatal first-speaker provider error in the current auto-join owner before
+retiring the room, preventing repeated physical rejoining. Successful explicit
+recovery and nonfatal retries retain existing behavior; stale callbacks remain
+isolated. Browser cache acknowledgments tolerate allowed navigation, and bounded
+interaction diagnostics distinguish targeting, post-action uncertainty and closed
+targets without automatic retries.
+
+The eleven-file successor passes 131 current voice cases, retains 118 unchanged
+Browser cache/policy cases, and passes 21 current diagnostics/abort cases plus
+proportional guarded checks. Matching R10 is installed after one preserving
+activation and independent loaded-source, health/ready and protected-state
+verification. Native Chrome reload and Browser navigation/readback/owned-tab
+cleanup pass; final hosted qualification remains pending. Earlier human R9 voice
+acceptance is retained as separate evidence.
 
 ## October 13 authenticated-speaker test fixtures
 

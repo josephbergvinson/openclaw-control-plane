@@ -14,7 +14,20 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The latest qualified source reference is
+The latest qualified and installed source reference is
+[`9e6b7524b6eaf0e10700715c62b3fd71c659c582`](runtime/README.md#october-13-browser-and-deferred-voice-recovery),
+with matching native `1ec7fe1273609ef5b774a304dfb07460ae57cd22`.
+Fatal errors after the first authenticated speaker now reach the current auto-join
+owner before room retirement, preventing repeated physical rejoins while retaining
+explicit recovery and transient retries. Browser cache setup tolerates allowed
+navigation; bounded diagnostics distinguish targeting, post-action uncertainty
+and closed targets without automatic action retries. Source checks, one preserving
+R10 activation and independent loaded-source, health and protected-state readback
+pass. Native Chrome reload and Browser navigation/readback/owned-tab cleanup also
+pass; final hosted checks remain pending. Earlier human
+voice acceptance is retained separately.
+
+The dated October 13 authenticated-speaker test reference is
 [`b62983e9d2a1b15a1b6a04fba20d428c9ba29700`](runtime/README.md#october-13-authenticated-speaker-test-fixtures).
 It corrects three stale voice test fixtures to admit authenticated speakers and
 inspect their actual connections. All 86 affected cases pass with cancellation,
