@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 authenticated-speaker test fixtures](#october-13-authenticated-speaker-test-fixtures)
+[October 13 browser and deferred voice recovery](#october-13-browser-and-deferred-voice-recovery)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,36 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 browser and deferred voice recovery
+
+Canonical `9e6b7524b6eaf0e10700715c62b3fd71c659c582` and native `1ec7fe1273609ef5b774a304dfb07460ae57cd22` repair fatal provider recovery after the first authenticated speaker.
+Previously that deferred error retired an auto-joined room before the auto-join
+owner recorded its cause, allowing repeated physical rejoins. The current room
+now records the native fatal cause before retirement. Successful explicit
+recovery clears existing suppression; transient failures remain retryable,
+and stale callbacks cannot suppress a replacement room.
+
+Browser cache setup can finish across an allowed document navigation while
+existing access and policy checks stay active. Interaction diagnostics distinguish
+unresolved targeting, uncertain post-action waits and closed targets, using
+bounded sanitized guidance without automatic action retries. The obsolete
+Browser SDK path override is removed in favor of the existing canonical facade.
+
+All 131 current voice cases across seven files pass. The exact unchanged Browser
+cache/policy qualification retains 118 passing cases; current diagnostics and
+abort checks pass 21 cases. Combined guarded Browser/Discord types, SDK consistency,
+the unchanged line-limit guard and whitespace checks pass. These scopes are
+recorded separately from repeated and predecessor runs.
+
+The matching R10 runtime passed its normal build, compiled SDK and current Browser
+asset checks, stage and seal. One preserving activation completed at
+`2026-10-13T21:45:39.699113Z`; independent same-generation Gateway/Node
+loaded-source, health/ready and protected-state verification followed at
+`2026-10-13T21:47:34.372487Z`. Native Chrome reload and ordinary Browser navigation/readback/owned-tab cleanup
+also pass; final public hosted checks remain pending. Earlier human R9 voice acceptance is retained
+separately, without a new R10 hearing or measured latency claim. The native archive,
+two YAML overlays, two fixture privacy substitutions and all dated records remain.
 
 ## October 13 authenticated-speaker test fixtures
 

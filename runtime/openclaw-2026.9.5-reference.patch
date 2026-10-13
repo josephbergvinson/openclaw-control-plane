@@ -10714,6 +10714,135 @@ index 0000000000000000000000000000000000000000..467eeedbc04c0f1c7b20fa87f87c9c90
 +    expect(f.h.debuggerAttach.mock.calls.filter(([source]) => source.tabId === 1)).toHaveLength(2);
 +  });
 +});
+diff --git a/extensions/browser/chrome-extension/background.navigation.test.ts b/extensions/browser/chrome-extension/background.navigation.test.ts
+index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..387904f579d779dbac672ddf931a12664fee95f6 100644
+--- a/extensions/browser/chrome-extension/background.navigation.test.ts
++++ b/extensions/browser/chrome-extension/background.navigation.test.ts
+@@ -84,6 +84,53 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
+     },
+   );
+ 
++  it.each(
++    [true, false].flatMap((cacheDisabled) =>
++      ["URL commit", "same-URL reload"].map((documentChange) => ({
++        cacheDisabled,
++        documentChange,
++      })),
++    ),
++  )(
++    "acknowledges cacheDisabled=$cacheDisabled after $documentChange without repeating the command",
++    async ({ cacheDisabled, documentChange }) => {
++      const harness = await createHarness(mode);
++      await harness.command({ type: "createTab", url: "https://example.com/start" });
++      harness.debuggerSendCommand.mockClear();
++      const completed = deferred({});
++      harness.debuggerSendCommand.mockImplementationOnce(async () => await completed.promise);
++      const configuring = harness.command({
++        type: "cdp",
++        tabId: 101,
++        method: "Network.setCacheDisabled",
++        params: { cacheDisabled },
++      });
++      await vi.waitFor(() =>
++        expect(harness.debuggerSendCommand).toHaveBeenCalledExactlyOnceWith(
++          { tabId: 101 },
++          "Network.setCacheDisabled",
++          { cacheDisabled },
++        ),
++      );
++      harness.updateTab(
++        101,
++        documentChange === "same-URL reload"
++          ? { status: "loading" }
++          : { url: "https://example.com/next", pendingUrl: undefined },
++      );
++      completed.resolve();
++
++      expect(await configuring).toEqual({ type: "result", seq: expect.any(Number), result: {} });
++      expect(harness.debuggerSendCommand).toHaveBeenCalledExactlyOnceWith(
++        { tabId: 101 },
++        "Network.setCacheDisabled",
++        { cacheDisabled },
++      );
++      expect(harness.debuggerDetach).not.toHaveBeenCalled();
++      expect(harness.tabsRemove).not.toHaveBeenCalled();
++    },
++  );
++
+   it("retires stale page data across a reload without a URL change", async () => {
+     const harness = await createHarness(mode);
+     await harness.command({ type: "createTab", url: "https://example.com/same" });
+@@ -119,29 +166,44 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
+     expect(await executing).toMatchObject({ type: succeeds ? "result" : "error" });
+   });
+ 
+-  it.each([
+-    "pause",
+-    "cancel",
+-    "group",
+-    "mode",
+-    "replacement",
+-    "removal",
+-    "restricted",
+-    "pending",
+-    "file",
+-    "incognito",
+-  ])(
+-    "rejects navigation completion after %s even if an ordinary document returns",
+-    async (revocation) => {
++  it.each(
++    [
++      "pause",
++      "cancel",
++      "group",
++      "mode",
++      "replacement",
++      "removal",
++      "restricted",
++      "pending",
++      "file",
++      "incognito",
++    ].flatMap((revocation) => [
++      {
++        revocation,
++        command: "navigation",
++        method: "Page.navigate",
++        params: { url: "https://example.com/next" },
++      },
++      ...[true, false].map((cacheDisabled) => ({
++        revocation,
++        command: `cacheDisabled=${cacheDisabled}`,
++        method: "Network.setCacheDisabled",
++        params: { cacheDisabled },
++      })),
++    ]),
++  )(
++    "rejects $command completion after $revocation even if an ordinary document returns",
++    async ({ revocation, method, params }) => {
+       const harness = await createHarness(mode);
+       await harness.command({ type: "createTab", url: "about:blank" });
+       const completed = deferred({});
+       harness.debuggerSendCommand.mockImplementationOnce(async () => await completed.promise);
+-      const navigating = harness.command({
++      const executing = harness.command({
+         type: "cdp",
+         tabId: 101,
+-        method: "Page.navigate",
+-        params: { url: "https://example.com/next" },
++        method,
++        params,
+       });
+       await vi.waitFor(() => expect(harness.debuggerSendCommand).toHaveBeenCalled());
+       harness.updateTab(101, { url: "https://example.com/next" });
+@@ -194,7 +256,7 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
+         incognito: false,
+       });
+       completed.resolve();
+-      expect(await navigating).toMatchObject({ type: "error" });
++      expect(await executing).toMatchObject({ type: "error" });
+       expect(harness.tabsRemove).not.toHaveBeenCalled();
+     },
+   );
 diff --git a/extensions/browser/chrome-extension/modules/relay-command-handler.js b/extensions/browser/chrome-extension/modules/relay-command-handler.js
 index 04fa0cbe80c12f0ebcd136db03584c1b8f6b9d7b..691e25b17e7265a16aec1db5746dad3cd678efc7 100644
 --- a/extensions/browser/chrome-extension/modules/relay-command-handler.js
@@ -10801,6 +10930,18 @@ index 6b6a935a3d6ed50a075d42336b64731c3715a714..8ab4bb5caecadc85682808a9c1fa3909
          // Mint only on native success. Identity discovery is cleanup authority
          // even when access/socket closure overtakes the native callback.
          record.native = {};
+diff --git a/extensions/browser/chrome-extension/modules/tab-access-command-scope.js b/extensions/browser/chrome-extension/modules/tab-access-command-scope.js
+index 9b4982c3cb593bc35d7f670b56d679694631826a..cad9f41ad783ee0012ef1d77ecfdf0a06701358b 100644
+--- a/extensions/browser/chrome-extension/modules/tab-access-command-scope.js
++++ b/extensions/browser/chrome-extension/modules/tab-access-command-scope.js
+@@ -15,6 +15,7 @@ export const TAB_SCOPED_COMMANDS = new Set([
+   "Fetch.failRequest",
+   "Fetch.fulfillRequest",
+   "Network.enable",
++  "Network.setCacheDisabled",
+   "Network.setAttachDebugStack",
+   "Runtime.enable",
+   "Runtime.runIfWaitingForDebugger",
 diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
 index 7f43d93e16b9da4f4d8b7696eb01bdfc95e88b2b..27b2374f99ee8233ad31429f97272cfb6d049789 100644
 --- a/extensions/browser/index.test.ts
@@ -22005,6 +22146,256 @@ index 0000000000000000000000000000000000000000..80c4c743872a56f1f17a75f8f02977e9
 +    mode: "role",
 +  });
 +}
+diff --git a/extensions/browser/src/browser/pw-tools-core.clamps-timeoutms-scrollintoview.test.ts b/extensions/browser/src/browser/pw-tools-core.clamps-timeoutms-scrollintoview.test.ts
+index db8767a3d9896f517e63d19832d5d9a70c86cd06..318792c26d01cdedff066c2fe634632175f30f8c 100644
+--- a/extensions/browser/src/browser/pw-tools-core.clamps-timeoutms-scrollintoview.test.ts
++++ b/extensions/browser/src/browser/pw-tools-core.clamps-timeoutms-scrollintoview.test.ts
+@@ -102,4 +102,233 @@ describe("pw-tools-core", () => {
+       }),
+     ).rejects.toThrow(/not interactable/i);
+   });
++
++  it.each([
++    {
++      phase: "completed click waiting for navigation",
++      log: "  -   click action done\n  -   waiting for scheduled navigations to finish",
++      message: /Click completed, but waiting for navigation timed out/i,
++      cause: /click completed; navigation wait/i,
++    },
++    {
++      phase: "completed click with a later wait",
++      log: "  -   click action done",
++      message: /Click completed, but its follow-up wait timed out/i,
++      cause: /click completed; follow-up wait/i,
++    },
++    {
++      phase: "attempted click without completion",
++      log: "  -   performing click action",
++      message: /Click timed out after an attempt began.*may have taken effect/i,
++      cause: /click attempted; completion uncertain/i,
++    },
++  ])(
++    "preserves safe diagnostics for $phase without repeating input",
++    async ({ log, message, cause }) => {
++      const input = "private-form-input-should-not-appear";
++      const click = vi.fn(async () => {
++        throw new Error(
++          `locator.click: Timeout 60000ms exceeded.\nCall log:\n` +
++            `  - waiting for locator('aria-ref=e1')\n` +
++            `  - locator resolved to <input value="${input}">\n${log}`,
++        );
++      });
++      setPwToolsCoreCurrentRefLocator({ click });
++      setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++
++      const error = await mod
++        .clickViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", targetId: "T1", ref: "e1" })
++        .then(
++          () => undefined,
++          (rejection: unknown) => rejection,
++        );
++
++      expect(error).toBeInstanceOf(Error);
++      if (!(error instanceof Error)) {
++        throw new Error("click must reject with an Error");
++      }
++      expect(error.message).toMatch(message);
++      expect(error.message).toMatch(/fresh snapshot.*retry|fresh snapshot.*another click/i);
++      expect(error.message).not.toMatch(/not found or not visible/i);
++      expect(error.cause).toBeInstanceOf(Error);
++      if (!(error.cause instanceof Error)) {
++        throw new Error("click must preserve a sanitized timeout cause");
++      }
++      expect(error.cause.message).toMatch(cause);
++      expect(error.cause.message).toContain("60000ms");
++      expect(
++        `${error.message}\n${error.stack}\n${error.cause.message}\n${error.cause.stack}`,
++      ).not.toContain(input);
++      expect(error.message.length + error.cause.message.length).toBeLessThan(500);
++      expect(click).toHaveBeenCalledTimes(1);
++    },
++  );
++
++  it.each(["type", "fill"] as const)(
++    "keeps %s inputs out of timeout diagnostics",
++    async (action) => {
++      const input = "credential-input-should-not-appear";
++      const fill = vi.fn(async () => {
++        throw new Error(
++          `locator.fill: Timeout 5000ms exceeded.\nCall log:\n` +
++            `  - waiting for locator('aria-ref=e1')\n  - fill("${input}")\n` +
++            `  -   click action done\n  -   waiting for scheduled navigations to finish`,
++        );
++      });
++      setPwToolsCoreCurrentRefLocator({ fill });
++      setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++      const operation =
++        action === "type"
++          ? mod.typeViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", ref: "e1", text: input })
++          : mod.fillFormViaPlaywright({
++              cdpUrl: "http://127.0.0.1:18792",
++              fields: [{ ref: "e1", type: "text", value: input }],
++            });
++      const error = await operation.then(
++        () => undefined,
++        (rejection: unknown) => rejection,
++      );
++      expect(error).toBeInstanceOf(Error);
++      if (!(error instanceof Error)) {
++        throw new Error("fill must reject with an Error");
++      }
++      expect(error.message).toMatch(/not found or not visible/i);
++      expect(error.message).not.toMatch(/Click completed/i);
++      expect(`${error.message}\n${error.stack}\n${String(error.cause)}`).not.toContain(input);
++      expect(fill).toHaveBeenCalledTimes(1);
++    },
++  );
++
++  it.each(["\n", "\r\n"])("recognizes colored click progress with %j lines", async (newline) => {
++    const click = vi.fn(async () => {
++      throw new Error(
++        `locator.click: Timeout 60000ms exceeded.${newline}Call log:${newline}` +
++          `\u001b[2m  -   click action done${newline}` +
++          `  -   waiting for scheduled navigations to finish\u001b[22m`,
++      );
++    });
++    setPwToolsCoreCurrentRefLocator({ click });
++    setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++    await expect(
++      mod.clickViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", targetId: "T1", ref: "e1" }),
++    ).rejects.toThrow(/Click completed, but waiting for navigation timed out/);
++    expect(click).toHaveBeenCalledTimes(1);
++  });
++
++  it("reports target closure without classifying a DOM Timeout word as a timeout", async () => {
++    const original = new Error(
++      "locator.click: Target page, context or browser has been closed\nCall log:\n" +
++        '  - locator resolved to <button title="Timeout">\n  -   performing click action',
++    );
++    original.name = "TargetClosedError";
++    const click = vi.fn(async () => {
++      throw original;
++    });
++    setPwToolsCoreCurrentRefLocator({ click });
++    setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++    const error = await mod
++      .clickViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", targetId: "T1", ref: "e1" })
++      .catch((rejection: unknown) => rejection);
++    expect(error).toBeInstanceOf(Error);
++    if (!(error instanceof Error) || !(error.cause instanceof Error)) {
++      throw new Error("closure must retain a sanitized interaction cause");
++    }
++    expect(error.message).toMatch(
++      /target or session has closed.*List current tabs.*Computer if available/i,
++    );
++    expect(error.message).not.toMatch(/timed out|not found or not visible|snapshot/i);
++    expect(error.cause.name).not.toBe("TimeoutError");
++    expect(error.cause.message).toBe("Playwright interaction failed; target closed");
++    expect(click).toHaveBeenCalledTimes(1);
++  });
++
++  it("prioritizes an authoritative closure header over locator waiting guidance", async () => {
++    const click = vi.fn(async () => {
++      throw new Error(
++        "locator.click: Target page, context or browser has been closed\nCall log:\n" +
++          "  - waiting for locator('aria-ref=e1')",
++      );
++    });
++    setPwToolsCoreCurrentRefLocator({ click });
++    setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++    const error = await mod
++      .clickViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", targetId: "T1", ref: "e1" })
++      .catch((rejection: unknown) => rejection);
++    expect(error).toBeInstanceOf(Error);
++    if (!(error instanceof Error) || !(error.cause instanceof Error)) {
++      throw new Error("closure must retain a sanitized interaction cause");
++    }
++    expect(error.message).toMatch(
++      /target or session has closed.*List current tabs.*Computer if available/i,
++    );
++    expect(error.message).not.toMatch(/not found or not visible|snapshot/i);
++    expect(error.cause.name).not.toBe("TimeoutError");
++    expect(error.cause.message).toBe("Playwright interaction failed; target closed");
++    expect(click).toHaveBeenCalledTimes(1);
++  });
++
++  it("keeps non-closure waiting guidance without inventing a timeout or DOM-text closure", async () => {
++    const click = vi.fn(async () => {
++      throw new Error(
++        "locator.click: Protocol error (DOM.describeNode): Could not find node with given id\nCall log:\n" +
++          "  - waiting for locator('aria-ref=e1')\n" +
++          '  - locator resolved to <button title="Target page, context or browser has been closed">',
++      );
++    });
++    setPwToolsCoreCurrentRefLocator({ click });
++    setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++    const error = await mod
++      .clickViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", targetId: "T1", ref: "e1" })
++      .catch((rejection: unknown) => rejection);
++    expect(error).toBeInstanceOf(Error);
++    if (!(error instanceof Error) || !(error.cause instanceof Error)) {
++      throw new Error("waiting-only failure must retain a sanitized interaction cause");
++    }
++    expect(error.message).toMatch(/not found or not visible/i);
++    expect(error.message).not.toMatch(/has closed|Computer/i);
++    expect(error.cause.name).not.toBe("TimeoutError");
++    expect(error.cause.message).toBe(
++      "Playwright interaction failed; locator resolution or visibility wait",
++    );
++    expect(click).toHaveBeenCalledTimes(1);
++  });
++
++  it.each(["type", "fill"] as const)(
++    "keeps %s inputs out of target-closed diagnostics",
++    async (action) => {
++      const input = "credential-input-should-not-appear";
++      const fill = vi.fn(async () => {
++        const error = new Error(
++          `locator.fill: Transport closed with private context ${input}\nCall log:\n` +
++            `  - waiting for locator('aria-ref=e1')\n  - fill("${input}")`,
++        );
++        error.name = "TargetClosedError";
++        throw error;
++      });
++      setPwToolsCoreCurrentRefLocator({ fill });
++      setPwToolsCoreCurrentPage({ url: vi.fn(() => "https://example.com") });
++      const operation =
++        action === "type"
++          ? mod.typeViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", ref: "e1", text: input })
++          : mod.fillFormViaPlaywright({
++              cdpUrl: "http://127.0.0.1:18792",
++              fields: [{ ref: "e1", type: "text", value: input }],
++            });
++      const error = await operation.catch((rejection: unknown) => rejection);
++      expect(error).toBeInstanceOf(Error);
++      if (!(error instanceof Error) || !(error.cause instanceof Error)) {
++        throw new Error("closure must retain a sanitized interaction cause");
++      }
++      expect(error.message).toMatch(
++        /target or session has closed.*List current tabs.*Computer if available/i,
++      );
++      expect(error.message).not.toMatch(/not found or not visible|snapshot/i);
++      expect(error.cause.message).toBe("Playwright interaction failed; target closed");
++      expect(
++        `${error.message}\n${error.stack}\n${error.cause.message}\n${error.cause.stack}`,
++      ).not.toContain(input);
++      expect(error.message.length + error.cause.message.length).toBeLessThan(500);
++      expect(fill).toHaveBeenCalledTimes(1);
++    },
++  );
+ });
+diff --git a/extensions/browser/src/browser/pw-tools-core.interactions.actions.ts b/extensions/browser/src/browser/pw-tools-core.interactions.actions.ts
+index 9a0e4be032216719ea21092f0ea71755e5e064bb..f04216c86e8ba4b7542bbb1962da88b025c10cd4 100644
+--- a/extensions/browser/src/browser/pw-tools-core.interactions.actions.ts
++++ b/extensions/browser/src/browser/pw-tools-core.interactions.actions.ts
+@@ -80,6 +80,7 @@ export async function clickViaPlaywright(
+       await (opts.doubleClick ? locator.dblclick(clickOptions) : locator.click(clickOptions));
+     },
+     label,
++    opts.doubleClick ? "dblclick" : "click",
+   );
+ }
+ 
 diff --git a/extensions/browser/src/browser/pw-tools-core.interactions.batch.test.ts b/extensions/browser/src/browser/pw-tools-core.interactions.batch.test.ts
 index 14d20de961362bc1abd42abb0745589168ea734c..90aee37cc65235ccf0c1f20e74e982794fa28f1b 100644
 --- a/extensions/browser/src/browser/pw-tools-core.interactions.batch.test.ts
@@ -22748,6 +23139,55 @@ index 7ffe6c87f622eb9e7eaef2ea4a6ae4e3cc761399..e5404886687a1d6516ef2c04d77b8320
        } catch (err) {
          if (
            isBrowserObservedDialogBlockedError(err) ||
+diff --git a/extensions/browser/src/browser/pw-tools-core.interactions.navigation.ts b/extensions/browser/src/browser/pw-tools-core.interactions.navigation.ts
+index ac5ab400e02e135713738cafada0172b445199a2..5dab238f07bbd6151c964d4210a77c06123401b5 100644
+--- a/extensions/browser/src/browser/pw-tools-core.interactions.navigation.ts
++++ b/extensions/browser/src/browser/pw-tools-core.interactions.navigation.ts
+@@ -18,7 +18,7 @@ import {
+   wasBrowserNavigationSourcePreservedAfterPolicyDenial,
+   withPageNavigationRequestGuard,
+ } from "./pw-session.js";
+-import { toAIFriendlyError } from "./pw-tools-core.shared.js";
++import { toAIFriendlyError, type BrowserClickErrorAction } from "./pw-tools-core.shared.js";
+ 
+ export type InteractionTargetOptions = {
+   cdpUrl: string;
+@@ -96,10 +96,14 @@ export async function getRestoredPageForTarget(opts: InteractionTargetOptions) {
+   return page;
+ }
+ 
+-export function toFriendlyInteractionError(err: unknown, label: string): Error {
++export function toFriendlyInteractionError(
++  err: unknown,
++  label: string,
++  clickAction?: BrowserClickErrorAction,
++): Error {
+   return isBrowserObservedDialogBlockedError(err) || err instanceof BrowserInteractionAuthorityError
+     ? err
+-    : toAIFriendlyError(err, label);
++    : toAIFriendlyError(err, label, clickAction);
+ }
+ 
+ export function reconcileRemoteDialogAfterActionSettled(page: Page, signal?: AbortSignal): void {
+@@ -119,6 +123,7 @@ export async function runCancellablePageInteraction<T>(
+   opts: GuardedInteractionOptions,
+   action: (signal: AbortSignal) => Promise<T>,
+   errorLabel?: string,
++  clickAction?: BrowserClickErrorAction,
+ ): Promise<T> {
+   const cancellation = new AbortController();
+   const interruption = new AbortController();
+@@ -159,7 +164,9 @@ export async function runCancellablePageInteraction<T>(
+     ) {
+       throwIfInteractionAborted(cancellation.signal);
+     }
+-    throw errorLabel === undefined ? error : toFriendlyInteractionError(error, errorLabel);
++    throw errorLabel === undefined
++      ? error
++      : toFriendlyInteractionError(error, errorLabel, clickAction);
+   } finally {
+     opts.signal?.removeEventListener("abort", onAbort);
+     cleanup();
 diff --git a/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts b/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts
 index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..25a243ddb3a4f8d050861c4667a467f45140a827 100644
 --- a/extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts
@@ -22914,6 +23354,115 @@ index cc7c440997b49660bb3fee7e522ba75bb2c23ee0..25a243ddb3a4f8d050861c4667a467f4
    it("rejects fullPage for element or ref screenshots", async () => {
      setPwToolsCoreCurrentRefLocator({ screenshot: vi.fn(async () => Buffer.from("R")) });
      setPwToolsCoreCurrentPage({
+diff --git a/extensions/browser/src/browser/pw-tools-core.shared.ts b/extensions/browser/src/browser/pw-tools-core.shared.ts
+index 9584eafab629a286aefaad8ccca3aaef464fd369..68dca59b6f12e07f3990149a2e9ecb48bbd1ec1d 100644
+--- a/extensions/browser/src/browser/pw-tools-core.shared.ts
++++ b/extensions/browser/src/browser/pw-tools-core.shared.ts
+@@ -2,6 +2,7 @@
+  * Shared validation and normalization helpers for Playwright-backed browser
+  * tool implementations.
+  */
++import { stripVTControlCharacters } from "node:util";
+ import { parseFiniteNumber } from "openclaw/plugin-sdk/number-runtime";
+ import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+ import { formatErrorMessage } from "../infra/errors.js";
+@@ -55,9 +56,50 @@ export function normalizeTimeoutMs(timeoutMs: number | undefined, fallback: numb
+   return Math.max(500, Math.min(120_000, Math.floor(parsed ?? fallback)));
+ }
+ 
++export type BrowserClickErrorAction = "click" | "dblclick";
++
++function friendlyInteractionError(
++  text: string,
++  phase: string,
++  timeout?: { durationMs?: string },
++): Error {
++  // Raw call logs can contain fill/type values and DOM previews. Preserve only
++  // the timeout and fixed progress phase, including in the exception cause.
++  const cause = new Error(
++    timeout
++      ? `Playwright timeout${timeout.durationMs ? ` after ${timeout.durationMs}ms` : ""}; ${phase}`
++      : `Playwright interaction failed; ${phase}`,
++  );
++  if (timeout) {
++    cause.name = "TimeoutError";
++  }
++  return new Error(text, { cause });
++}
++
+ /** Converts common Playwright locator failures into model-actionable messages. */
+-export function toAIFriendlyError(error: unknown, selector: string): Error {
++export function toAIFriendlyError(
++  error: unknown,
++  selector: string,
++  clickAction?: BrowserClickErrorAction,
++): Error {
+   const message = formatErrorMessage(error);
++  const timeoutHeader = message.match(/^(?:[\w.]+: )?Timeout (\d{1,8})ms exceeded\b/);
++  const timeout =
++    timeoutHeader || (error instanceof Error && error.name === "TimeoutError")
++      ? { durationMs: timeoutHeader?.[1] }
++      : undefined;
++
++  // Use the error identity or authoritative header; DOM previews can quote closure text.
++  if (
++    (error instanceof Error && error.name === "TargetClosedError") ||
++    /^(?:[\w.]+: )?Target page, context or browser has been closed\b/.test(message)
++  ) {
++    return friendlyInteractionError(
++      "The browser target or session has closed. List current tabs, or use Computer if available " +
++        "to inspect the browser before choosing how to recover.",
++      "target closed",
++    );
++  }
+ 
+   if (message.includes("strict mode violation")) {
+     const countMatch = message.match(/resolved to (\d+) elements/);
+@@ -68,15 +110,43 @@ export function toAIFriendlyError(error: unknown, selector: string): Error {
+     );
+   }
+ 
++  if (clickAction && timeout) {
++    const callLog = stripVTControlCharacters(
++      message.match(/\r?\nCall log:\r?\n([\s\S]*)$/)?.[1] ?? "",
++    );
++    const hasProgress = (step: string) =>
++      new RegExp(`^[ \\t]*-[ \\t]+${step}[ \\t]*$`, "m").test(callLog);
++    const actionLabel = clickAction === "dblclick" ? "Double click" : "Click";
++    if (hasProgress(`${clickAction} action done`)) {
++      const navigationWait = hasProgress("waiting for scheduled navigations to finish");
++      return friendlyInteractionError(
++        `${actionLabel} completed, but ${navigationWait ? "waiting for navigation" : "its follow-up wait"} timed out. ` +
++          "Take a fresh snapshot before deciding whether another click is needed.",
++        `${clickAction} completed; ${navigationWait ? "navigation wait" : "follow-up wait"}`,
++        timeout,
++      );
++    }
++    if (hasProgress(`performing ${clickAction} action`)) {
++      return friendlyInteractionError(
++        `${actionLabel} timed out after an attempt began and may have taken effect. ` +
++          "Take a fresh snapshot before deciding whether to retry.",
++        `${clickAction} attempted; completion uncertain`,
++        timeout,
++      );
++    }
++  }
++
+   if (
+     (message.includes("Timeout") || message.includes("waiting for")) &&
+     (message.includes("to be visible") ||
+       message.includes("not visible") ||
+       message.includes("waiting for locator("))
+   ) {
+-    return new Error(
++    return friendlyInteractionError(
+       `Element "${selector}" not found or not visible. ` +
+         `Run a new snapshot to see current page elements.`,
++      "locator resolution or visibility wait",
++      timeout,
+     );
+   }
+ 
 diff --git a/extensions/browser/src/browser/pw-tools-core.snapshot.test.ts b/extensions/browser/src/browser/pw-tools-core.snapshot.test.ts
 index 5ece5711535a2378e7ee448c3fbf4fbf2f21f488..d126fd6c3a31a80e79a4f2b640ec3b38ffa47e13 100644
 --- a/extensions/browser/src/browser/pw-tools-core.snapshot.test.ts
@@ -52737,13 +53286,146 @@ index 2f46cd5c5c39213cdf5c2a05ec811e3e1b63a901..e9852b930ed3e481b1297a56de22ca58
      processing: result.decision?.attachmentProcessing?.[0],
      unavailable:
        result.decision?.outcome === "skipped" &&
+diff --git a/extensions/discord/src/voice/voice-auto-join.test.ts b/extensions/discord/src/voice/voice-auto-join.test.ts
+index 3b4032634944f22ba021df50e8eed4f990b1c760..288195968e55d74056a27ee99e130cd54657a314 100644
+--- a/extensions/discord/src/voice/voice-auto-join.test.ts
++++ b/extensions/discord/src/voice/voice-auto-join.test.ts
+@@ -314,14 +314,23 @@ defineDiscordVoiceTests(
+           realtime: { provider: "openai" },
+         }),
+         undefined,
+-        { agents: { list: [{ id: "helper" }, { id: "molty" }] } },
++        {
++          agents: {
++            ownership: "explicit",
++            defaults: { systemAgent: { agentId: "helper" } },
++            entries: { helper: {}, molty: {} },
++          },
++        },
+       );
+ 
+       await manager.autoJoin();
+ 
+-      expect(resolveConfiguredRealtimeVoiceProviderMock).toHaveBeenCalledTimes(1);
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
++      await vi.waitFor(() => expect(realtimeSessionMock.connect).toHaveBeenCalledTimes(1));
++      expect(resolveConfiguredRealtimeVoiceProviderMock).toHaveBeenCalledTimes(2);
+       expect(createRealtimeVoiceBridgeSessionMock).toHaveBeenCalledTimes(1);
+       expect(realtimeSessionMock.connect).toHaveBeenCalledTimes(1);
++      expect(lastRealtimeBridgeParams()).toMatchObject({ agentId: "molty" });
+       expectConnectedStatus(manager, "1001");
+     });
+ 
+@@ -330,16 +339,100 @@ defineDiscordVoiceTests(
+       const manager = createManager(
+         makeVoiceConfig({
+           mode: "agent-proxy",
+-          autoJoin: [{ guildId: "g1", channelId: "1001" }],
++          autoJoin: [
++            { guildId: "g1", channelId: "1002" },
++            { guildId: "g1", channelId: "1001" },
++          ],
+         }),
+       );
+ 
++      await manager.autoJoin();
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
++      await vi.waitFor(() => expect(manager.status()).toStrictEqual([]));
+       await manager.autoJoin();
+       await manager.autoJoin();
+ 
+       expect(joinVoiceChannelMock).toHaveBeenCalledTimes(1);
+       expect(realtimeSessionMock.connect).toHaveBeenCalledTimes(1);
+       expect(manager.status()).toStrictEqual([]);
++
++      expect(await manager.join({ guildId: "g1", channelId: "1001" })).toMatchObject({
++        ok: true,
++      });
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
++      await vi.waitFor(() => expect(createRealtimeVoiceBridgeSessionMock).toHaveBeenCalledTimes(2));
++      expect(joinVoiceChannelMock).toHaveBeenCalledTimes(2);
++      expectConnectedStatus(manager, "1001");
++    });
++
++    it("suppresses repeated autoJoin after fatal room configuration validation", async () => {
++      resolveConfiguredRealtimeVoiceProviderMock.mockImplementationOnce(() => {
++        throw new Error("Invalid API key for the realtime catalog");
++      });
++      const manager = createManager(
++        makeVoiceConfig({
++          mode: "agent-proxy",
++          autoJoin: [{ guildId: "g1", channelId: "1001" }],
++        }),
++      );
++
++      await manager.autoJoin();
++      await manager.autoJoin();
++
++      expect(joinVoiceChannelMock).toHaveBeenCalledTimes(1);
++      expect(createRealtimeVoiceBridgeSessionMock).not.toHaveBeenCalled();
++      expect(realtimeSessionMock.connect).not.toHaveBeenCalled();
++      expect(manager.status()).toStrictEqual([]);
++    });
++
++    it("retries autoJoin after a nonfatal first-speaker connection failure", async () => {
++      realtimeSessionMock.connect.mockRejectedValueOnce(new Error("provider unavailable"));
++      const manager = createManager(
++        makeVoiceConfig({
++          mode: "agent-proxy",
++          autoJoin: [{ guildId: "g1", channelId: "1001" }],
++        }),
++      );
++
++      await manager.autoJoin();
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
++      await vi.waitFor(() => expect(manager.status()).toStrictEqual([]));
++      await manager.autoJoin();
++
++      expect(joinVoiceChannelMock).toHaveBeenCalledTimes(2);
++      expectConnectedStatus(manager, "1001");
++    });
++
++    it("does not let a retired speaker's fatal connection failure suppress autoJoin", async () => {
++      let rejectConnect!: (error: Error) => void;
++      realtimeSessionMock.connect.mockImplementationOnce(
++        () =>
++          new Promise((_, reject) => {
++            rejectConnect = reject;
++          }),
++      );
++      const manager = createManager(
++        makeVoiceConfig({
++          mode: "agent-proxy",
++          autoJoin: [{ guildId: "g1", channelId: "1001" }],
++        }),
++      );
++
++      await manager.autoJoin();
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
++      await vi.waitFor(() => expect(realtimeSessionMock.connect).toHaveBeenCalledTimes(1));
++      await manager.leave({ guildId: "g1" });
++      await manager.join({ guildId: "g1", channelId: "1001" });
++      const replacement = getSessionEntry(manager);
++      rejectConnect(new Error("Incorrect API key provided"));
++      await vi.waitFor(() => expect(realtimeSessionMock.close).toHaveBeenCalled());
++
++      expect(getSessionEntry(manager)).toBe(replacement);
++      expectConnectedStatus(manager, "1001");
++      await manager.leave({ guildId: "g1" });
++      await manager.autoJoin();
++      expect(joinVoiceChannelMock).toHaveBeenCalledTimes(3);
++      expectConnectedStatus(manager, "1001");
+     });
+ 
+     it("rejects joins outside configured allowed voice channels", async () => {
 diff --git a/extensions/discord/src/voice/voice-auto-join.ts b/extensions/discord/src/voice/voice-auto-join.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6fe2d518b50529442be82915b554644c2308bbc6
+index 0000000000000000000000000000000000000000..debb9e721d2d140c8efd908ebfa2ad2139a53974
 --- /dev/null
 +++ b/extensions/discord/src/voice/voice-auto-join.ts
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,218 @@
 +// Configured auto-join reconciliation retains the manager's live lifecycle callbacks.
++import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 +import type { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 +import {
 +  logVoiceVerbose,
@@ -52806,6 +53488,34 @@ index 0000000000000000000000000000000000000000..6fe2d518b50529442be82915b554644c
 +
 +  clearFailure(target: { guildId: string; channelId: string }): void {
 +    this.fatalAutoJoinFailures.delete(formatAutoJoinFailureKey(target));
++  }
++
++  resolveTarget(guildId: string): VoiceChannelResidency | undefined {
++    return this.params.entries.toReversed().find((entry) => entry.guildId === guildId.trim());
++  }
++
++  recordSessionFailure(entry: VoiceSessionEntry, error: Error): void {
++    if (
++      this.params.destroyed() ||
++      this.params.getSession(entry.guildId) !== entry ||
++      entry.sessionLifecycle.status !== "active" ||
++      this.resolveTarget(entry.guildId)?.channelId !== entry.channelId
++    ) {
++      return;
++    }
++    this.recordFatalFailure(entry, formatErrorMessage(error));
++  }
++
++  private recordFatalFailure(
++    target: { guildId: string; channelId: string },
++    message: string,
++  ): void {
++    if (isFatalAutoJoinFailure(message)) {
++      this.fatalAutoJoinFailures.set(formatAutoJoinFailureKey(target), {
++        message,
++        skipLogged: false,
++      });
++    }
 +  }
 +
 +  async reconcileAll(): Promise<void> {
@@ -52927,12 +53637,7 @@ index 0000000000000000000000000000000000000000..6fe2d518b50529442be82915b554644c
 +      this.params.logger.warn(
 +        `discord voice: autoJoin skipped guild=${entry.guildId} channel=${entry.channelId}: ${result.message}`,
 +      );
-+      if (isFatalAutoJoinFailure(result.message)) {
-+        this.fatalAutoJoinFailures.set(failureKey, {
-+          message: result.message,
-+          skipLogged: false,
-+        });
-+      }
++      this.recordFatalFailure(entry, result.message);
 +    }
 +    return result;
 +  }
@@ -53476,7 +54181,7 @@ index 2b8471137b550e5feb1b7af6c5c60d607086fd3b..7443db26df9d2ac2805e6eea98337b3f
  
    private startDecryptRecovery(entry: VoiceSessionEntry, force = false): void {
 diff --git a/extensions/discord/src/voice/voice-runtime.ts b/extensions/discord/src/voice/voice-runtime.ts
-index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272090a71af 100644
+index a336864d8e392b71164414199ac7737071f39f57..afddc58c4267e390ad39e5fff470f44b4cb1b511 100644
 --- a/extensions/discord/src/voice/voice-runtime.ts
 +++ b/extensions/discord/src/voice/voice-runtime.ts
 @@ -4,7 +4,10 @@ import { createSubsystemLogger, type RuntimeEnv } from "openclaw/plugin-sdk/runt
@@ -53637,7 +54342,16 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
        voiceEnabled: this.voiceEnabled,
      });
      this.voiceSessions = new DiscordVoiceSessions({
-@@ -221,30 +227,7 @@ export class DiscordVoiceManager {
+@@ -181,6 +187,8 @@ export class DiscordVoiceManager {
+           });
+         }
+       },
++      onRealtimeTerminalError: (entry, error) =>
++        this.autoJoinController.recordSessionFailure(entry, error),
+       receive: this.receive,
+       sessions: this.sessions,
+     });
+@@ -221,40 +229,102 @@ export class DiscordVoiceManager {
        return;
      }
      this.reconcileChannelOccupancy();
@@ -53669,7 +54383,10 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
      await this.following.startReconciliation();
    }
  
-@@ -254,7 +237,92 @@ export class DiscordVoiceManager {
+   async reconcileAutoJoinGuild(guildId: string): Promise<void> {
+     this.reconcileChannelOccupancy(guildId);
+-    const entry = this.resolveAutoJoinTarget(guildId);
++    const entry = this.autoJoinController.resolveTarget(guildId);
      if (!entry?.whenOccupied || !this.voiceEnabled || this.destroyed) {
        return;
      }
@@ -53763,7 +54480,7 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
    }
  
    status(): VoiceOperationResult[] {
-@@ -295,17 +363,19 @@ export class DiscordVoiceManager {
+@@ -295,17 +365,19 @@ export class DiscordVoiceManager {
    }
  
    startTranscriptsCapture(target: { guildId: string; channelId: string }) {
@@ -53791,7 +54508,7 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
    }
  
    join(
-@@ -364,7 +434,8 @@ export class DiscordVoiceManager {
+@@ -364,7 +436,8 @@ export class DiscordVoiceManager {
        };
      }
      logVoiceVerbose(`join requested: guild ${guildId} channel ${channelId}`);
@@ -53801,7 +54518,25 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
      let deferredTargetValidated = false;
      while (true) {
        const activeJoinTask = this.joinTasks.get(guildId);
-@@ -427,7 +498,7 @@ export class DiscordVoiceManager {
+@@ -385,7 +458,7 @@ export class DiscordVoiceManager {
+       if (options?.captureOnly && !deferredTargetValidated) {
+         const entry = this.sessions.get(guildId);
+         const liveTarget = entry?.channelId === channelId && this.isEntryCurrent(entry);
+-        if (!liveTarget && (entry || this.resolveAutoJoinTarget(guildId))) {
++        if (!liveTarget && (entry || this.autoJoinController.resolveTarget(guildId))) {
+           const resolved = await this.voiceSessions.resolveChannel({ guildId, channelId });
+           if (this.destroyed || !captureIsCurrent()) {
+             return { ok: false, message: "Discord voice join was cancelled.", guildId, channelId };
+@@ -403,7 +476,7 @@ export class DiscordVoiceManager {
+     }
+     if (captureOrigin) {
+       const entry = this.sessions.get(guildId);
+-      const autoJoin = this.resolveAutoJoinTarget(guildId);
++      const autoJoin = this.autoJoinController.resolveTarget(guildId);
+       // Recheck after queued joins, before claiming a generation: a valid capture
+       // never displaces existing or configured residency, including during recovery.
+       // A transport left during validation does not turn a dormant start into a join.
+@@ -427,7 +500,7 @@ export class DiscordVoiceManager {
        }
        if (options?.captureOnly && autoJoin?.channelId === channelId) {
          return (
@@ -53810,7 +54545,7 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
              ok: true,
              message: "Capture waiting for the configured voice channel.",
              guildId,
-@@ -502,10 +573,10 @@ export class DiscordVoiceManager {
+@@ -502,10 +575,10 @@ export class DiscordVoiceManager {
        }
        this.guildLifecycles.set(guildId, { status: "active", generation, instance: entry });
        if (result.ok) {
@@ -53823,7 +54558,7 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
            return waitingResult;
          }
          // Speech can begin before readiness installs listeners; continuous packets emit no new start.
-@@ -529,6 +600,28 @@ export class DiscordVoiceManager {
+@@ -529,6 +602,28 @@ export class DiscordVoiceManager {
    ): Promise<VoiceOperationResult> {
      const guildId = params.guildId.trim();
      const lifecycle = this.guildLifecycles.get(guildId);
@@ -53852,9 +54587,12 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
      if (lifecycle?.status === "starting") {
        // Queued initial captures retain this join owner after cleanup. Explicit
        // leave cancels that intent; retiring another capture does not cancel it.
-@@ -590,26 +683,30 @@ export class DiscordVoiceManager {
+@@ -588,28 +683,32 @@ export class DiscordVoiceManager {
+     if (this.following.isFollowedUser(userId)) {
+       await this.following.handleFollowedUserVoiceStateUpdate({ guildId, channelId, userId });
      }
-     const autoJoinTarget = this.resolveAutoJoinTarget(guildId);
+-    const autoJoinTarget = this.resolveAutoJoinTarget(guildId);
++    const autoJoinTarget = this.autoJoinController.resolveTarget(guildId);
      if (autoJoinTarget?.whenOccupied) {
 -      await this.enqueueAutoJoin(autoJoinTarget);
 +      await this.autoJoinController.enqueue(autoJoinTarget);
@@ -53897,7 +54635,17 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
    }
  
    private isEntryCurrent(entry: VoiceSessionEntry): boolean {
-@@ -640,105 +737,6 @@ export class DiscordVoiceManager {
+@@ -630,115 +729,12 @@ export class DiscordVoiceManager {
+           this.sessions.get(entry.guildId) === entry;
+   }
+ 
+-  private resolveAutoJoinTarget(guildId: string): VoiceChannelResidency | undefined {
+-    return this.autoJoinChannels.toReversed().find((entry) => entry.guildId === guildId.trim());
+-  }
+-
+   private countHumanParticipants(target: { guildId: string; channelId: string }): number | null {
+     const states = listDiscordVoiceParticipantStates({ client: this.client, ...target });
+     return states === null
        ? null
        : countDiscordVoiceHumanParticipants({ states, botUserId: this.botUserId });
    }
@@ -54591,7 +55339,7 @@ index 733e157b61480630554eca14b301192f77880dcf..55fffad491f1e673f0abc0332de939f5
            await manager.destroy();
          }
 diff --git a/extensions/discord/src/voice/voice-session.ts b/extensions/discord/src/voice/voice-session.ts
-index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3038ef4fc 100644
+index edf0c25258262032f59c56d05f2a6cf0c451b734..cb16ea1a996ce07e99d94971c11794f50cfa6f92 100644
 --- a/extensions/discord/src/voice/voice-session.ts
 +++ b/extensions/discord/src/voice/voice-session.ts
 @@ -6,6 +6,7 @@ import type { VoicePlugin } from "../internal/voice.js";
@@ -54667,7 +55415,15 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
  export class DiscordVoiceSessions {
    private readonly pendingStops = new Set<Promise<void>>();
  
-@@ -156,7 +125,10 @@ export class DiscordVoiceSessions {
+@@ -96,6 +65,7 @@ export class DiscordVoiceSessions {
+       membership: DiscordVoiceMembershipTracker;
+       onLeaveFollowState: (guildId: string) => void;
+       onSessionStopped: (entry: VoiceSessionEntry, reason: string) => void;
++      onRealtimeTerminalError: (entry: VoiceSessionEntry, error: Error) => void;
+       receive: DiscordVoiceReceive;
+       sessions: Map<string, VoiceSessionEntry>;
+     },
+@@ -156,7 +126,10 @@ export class DiscordVoiceSessions {
      authority?: VoiceSessionGeneration,
    ): Promise<VoiceOperationResult> {
      const { guildId, channelId } = params;
@@ -54679,7 +55435,7 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
      const voiceMode = resolveDiscordVoiceMode(voiceConfig);
      const cancelledJoinResult = (): VoiceOperationResult => ({
        ok: false,
-@@ -256,6 +228,9 @@ export class DiscordVoiceSessions {
+@@ -256,6 +229,9 @@ export class DiscordVoiceSessions {
      let connection: DiscordVoiceConnection | undefined;
      const connectReadyDeadlineMs = Date.now() + connectReadyTimeoutMs;
      for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -54689,7 +55445,7 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
        const joinedConnection = voiceSdk.joinVoiceChannel({
          channelId,
          guildId,
-@@ -437,6 +412,7 @@ export class DiscordVoiceSessions {
+@@ -437,6 +413,7 @@ export class DiscordVoiceSessions {
  
      const getTranscripts = this.params.getTranscripts;
      const entry: VoiceSessionEntry = {
@@ -54697,7 +55453,7 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
        generation: authority?.generation ?? 0,
        captureOnly: options?.captureOnly === true,
        autoJoinWhenOccupied: options?.autoJoinWhenOccupied === true,
-@@ -620,11 +596,30 @@ export class DiscordVoiceSessions {
+@@ -620,16 +597,35 @@ export class DiscordVoiceSessions {
      voiceMode: Exclude<DiscordVoiceMode, "stt-tts">,
      options?: { requireLiveEntry?: boolean; isCurrent?: () => boolean },
    ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -54706,6 +55462,15 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
 -      cfg: this.params.cfg,
 -      discordConfig: this.params.discordConfig,
 -    });
+-    if (
+-      entry.sessionLifecycle.status === "stopped" ||
+-      options?.isCurrent?.() === false ||
+-      (options?.requireLiveEntry === true && this.params.sessions.get(entry.guildId) !== entry)
+-    ) {
++    const startupIsCurrent = () =>
++      !isVoiceSessionStopped(entry) &&
++      options?.isCurrent?.() !== false &&
++      (options?.requireLiveEntry !== true || this.params.sessions.get(entry.guildId) === entry);
 +    const discordConfig = resolveDiscordGuildVoiceAccountConfig(
 +      this.params.discordConfig,
 +      entry.guildId,
@@ -54730,10 +55495,11 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
 +        message: `Failed to start Discord realtime voice: ${formatErrorMessage(error)}`,
 +      };
 +    }
-     if (
-       entry.sessionLifecycle.status === "stopped" ||
-       options?.isCurrent?.() === false ||
-@@ -639,8 +634,9 @@ export class DiscordVoiceSessions {
++    if (!startupIsCurrent()) {
+       return {
+         ok: false,
+         message: "Discord realtime voice session stopped before startup completed.",
+@@ -639,22 +635,26 @@ export class DiscordVoiceSessions {
      const realtime = new DiscordRealtimeVoiceSession({
        accountId: this.params.accountId,
        bootstrapContextInstructions,
@@ -54744,7 +55510,34 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
        entry,
        getHumanParticipantCount: () =>
          this.params.membership.countHumanParticipants(entry, this.params.botUserId()),
-@@ -667,7 +663,16 @@ export class DiscordVoiceSessions {
+       mode: voiceMode,
+       onTerminalError: (error) => {
+-        logger.error(
+-          `discord voice: realtime session failed terminally guild=${entry.guildId} channel=${entry.channelId}: ${formatErrorMessage(error)}`,
+-        );
+         const lifecycle = entry.realtimeLifecycle;
+         if (
+-          options?.requireLiveEntry &&
+-          lifecycle.status === "starting" &&
+-          lifecycle.instance === realtime
++          entry.sessionLifecycle.status === "stopped" ||
++          (lifecycle.status !== "starting" && lifecycle.status !== "active") ||
++          lifecycle.instance !== realtime
+         ) {
++          return;
++        }
++        logger.error(
++          `discord voice: realtime session failed terminally guild=${entry.guildId} channel=${entry.channelId}: ${formatErrorMessage(error)}`,
++        );
++        if (options?.requireLiveEntry && lifecycle.status === "starting") {
+           // Failed promotion retires only its realtime attempt. The already-ready
+           // receiver still belongs to the previous capture or conversation owner.
+           entry.realtimeLifecycle = {
+@@ -664,10 +664,20 @@ export class DiscordVoiceSessions {
+           };
+           void realtime.close();
+         } else {
++          this.params.onRealtimeTerminalError(entry, error);
            void entry.stop("realtime terminal error");
          }
        },
@@ -54762,7 +55555,7 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
          this.params.receive.runDiscordRealtimeAgentTurn({
            context,
            entry,
-@@ -677,9 +682,12 @@ export class DiscordVoiceSessions {
+@@ -677,9 +687,12 @@ export class DiscordVoiceSessions {
            isCurrent,
            ...(signal ? { signal } : {}),
            voiceSelection,
@@ -54777,6 +55570,17 @@ index edf0c25258262032f59c56d05f2a6cf0c451b734..3b2a6d84bb489a44e33aeda940cfbde3
      });
      const generation = entry.realtimeLifecycle.generation + 1;
      entry.realtimeLifecycle = { status: "starting", generation, instance: realtime };
+@@ -689,9 +702,7 @@ export class DiscordVoiceSessions {
+         entry.realtimeLifecycle.status !== "starting" ||
+         entry.realtimeLifecycle.generation !== generation ||
+         entry.realtimeLifecycle.instance !== realtime ||
+-        isVoiceSessionStopped(entry) ||
+-        options?.isCurrent?.() === false ||
+-        (options?.requireLiveEntry === true && this.params.sessions.get(entry.guildId) !== entry)
++        !startupIsCurrent()
+       ) {
+         await realtime.close();
+         return {
 diff --git a/extensions/discord/src/voice/voice-test-harness.test-support.ts b/extensions/discord/src/voice/voice-test-harness.test-support.ts
 index 886dfe2b118cb1de54efaaedadca45cfe0d469fd..15bc3ce03f089effe9341583a90bd186f3e26ec5 100644
 --- a/extensions/discord/src/voice/voice-test-harness.test-support.ts
@@ -61121,6 +61925,20 @@ index 531816dbf78dd78fa6c645bc4d9959b0bf8a2bf7..9965b2eb38ea5f4b880e2a89fc80f873
    };
  }
  
+diff --git a/extensions/tsconfig.package-boundary.paths.json b/extensions/tsconfig.package-boundary.paths.json
+index 117f839dad747e462db40de9a472048b4b6c2077..c5569a036e14f1010ba0f79d5f1eb526287168ca 100644
+--- a/extensions/tsconfig.package-boundary.paths.json
++++ b/extensions/tsconfig.package-boundary.paths.json
+@@ -566,9 +566,6 @@
+       "openclaw/plugin-sdk/llm": [
+         "../packages/plugin-sdk/dist/src/plugin-sdk/llm.d.ts"
+       ],
+-      "openclaw/plugin-sdk/browser-maintenance": [
+-        "../packages/plugin-sdk/dist/extensions/browser/browser-maintenance.d.ts"
+-      ],
+       "@openclaw/qa-channel/api.js": [
+         "../.artifacts/extension-package-boundary/plugins/qa-channel/api.d.ts"
+       ],
 diff --git a/extensions/workboard/openclaw.plugin.json b/extensions/workboard/openclaw.plugin.json
 index 07d6ecc5a8c01eeb1ae155a4c349f0e56dc9e58b..61dabfb566c1f28b3b1aaa8310d8970c2a334966 100644
 --- a/extensions/workboard/openclaw.plugin.json
