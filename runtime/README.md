@@ -16,6 +16,38 @@ source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
 
+## October 13 frozen npm override contexts
+
+Canonical source `cef94b88fa6f8a828c8544b401dd5484e878a40f` and native source successor
+`f42d3704cf511039c1a0e1c58d552055664700ea` change only npm lock tooling and two regression owners.
+The new logger 2.1.0 registry version exposed npm 11.13's loss of an otherwise
+compatible parent override context. The actual `anthropic-vertex` package reproduced
+that frozen-graph escape under both hoisted and nested strategies. Nested mode
+was not a correction and is not added to CI.
+
+The generator inspects the actual failing lock. It recalculates once only when
+every dependency, optional or peer request admits exactly one frozen version and
+that version agrees with the actual frozen parent's policy. The regenerated graph
+must retain the qualified parent identities and physical dependency resolutions.
+Wildcard, cross-major or same-major ambiguity, missing/aliased parents, conflicting
+peer contexts and wrong resolved package identities remain rejected. Existing
+parent scopes and the final frozen membership/integrity guard are unchanged.
+
+The normal first manifest and failing lock reproduce the original bytes; the
+qualified recalculation retains logger 2.0.1 and its frozen integrity. The legacy
+1.1.3 no-escape manifest, raw lock and returned lock are byte identical to baseline.
+Source qualification passed 56 generator and 69 progress cases, affected guarded
+types, scoped typed lint and formatting. The progress fixture retains all original
+notification policies and tests both redundant-channel normalization and distinct
+thread preservation.
+
+This source-only successor does not claim a new runtime build or installation.
+Gateway and Node remain R5 C24218/Db91 with the preceding exact activation and
+loaded-state receipts. The original route qualification, native archive/overlay,
+companions and every prior dated record remain unchanged. The failed public head
+`e2dd3dd45ac6c234950d0d2c9136808b98604f28` is retained; all five established publication
+checks are required on this changed public head before normal merge.
+
 ## October 12 Discord own-channel route
 
 Canonical source `24218cc58e388c932e6a6420568ce2c86ab9a653`, tree

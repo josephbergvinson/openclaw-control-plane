@@ -59797,6 +59797,158 @@ index e540661f50c7f9aafecdb7ce97d5a264e1e35d56..8c352002e6ee511c2f3e37af7dbfdd76
        bin: tsgoPath,
        args: ["-p", config, "--pretty", "false", query],
        cwd: repoRoot,
+diff --git a/scripts/generate-npm-package-lock.mts b/scripts/generate-npm-package-lock.mts
+index c09be8ef0dda01978fdf58edf2e5f2a34d1bc2f2..201012d64ac312f25665dfd462740e43851ce7a5 100644
+--- a/scripts/generate-npm-package-lock.mts
++++ b/scripts/generate-npm-package-lock.mts
+@@ -1040,6 +1040,131 @@ function normalizeNpmLockOverrides(
+   }
+ }
+ 
++function npmLockContextFallbackOverrides(
++  npmLock: unknown,
++  pnpmLock: unknown,
++  repairedPackages?: ReadonlySet<string>,
++): OverrideMap {
++  const packages = recordAt(npmLock, "packages") ?? {};
++  const overrides: OverrideMap = {};
++  const plan = resolvePnpmLockOverridePlan(pnpmLock);
++  const conflicts = new Set(plan.conflictingPackageNames);
++  for (const [name, versions] of collectPnpmLockPackageVersions(pnpmLock)) {
++    if (
++      versions.size < 2 ||
++      conflicts.has(name) ||
++      (repairedPackages
++        ? !repairedPackages.has(name)
++        : !Object.entries(packages).some(
++            ([lockPath, metadata]) =>
++              parseLockPackagePath(lockPath).at(-1)?.name === name &&
++              isRecord(metadata) &&
++              typeof metadata.version === "string" &&
++              !versions.has(metadata.version),
++          ))
++    ) {
++      continue;
++    }
++    const rawSpecs = Object.entries(packages).flatMap(([lockPath, metadata]) =>
++      ["dependencies", "optionalDependencies", "peerDependencies"].flatMap((field) => {
++        const spec = recordAt(metadata, field)?.[name];
++        return spec === undefined ? [] : [{ spec, lockPath, metadata }];
++      }),
++    );
++    if (
++      rawSpecs.length === 0 ||
++      rawSpecs.some(({ spec, lockPath, metadata }) => {
++        if (
++          typeof spec !== "string" ||
++          !semver.validRange(spec) ||
++          !isRecord(metadata) ||
++          typeof metadata.version !== "string"
++        ) {
++          return true;
++        }
++        const candidates = [...versions].filter((version) => semver.satisfies(version, spec));
++        const parentName = parseLockPackagePath(lockPath).at(-1)?.name;
++        if (!parentName || (metadata.name !== undefined && metadata.name !== parentName)) {
++          return true;
++        }
++        const parentPolicy = recordAt(
++          plan.scopedVersionOverrides,
++          `${parentName}@${metadata.version}`,
++        )?.[name];
++        const expected = exactVersionFromOverrideSpec(
++          isRecord(parentPolicy) ? parentPolicy["."] : parentPolicy,
++        );
++        if (candidates.length !== 1 || candidates[0] !== expected) {
++          return true;
++        }
++        if (repairedPackages) {
++          const ancestors = [
++            ...parseLockPackagePath(lockPath)
++              .map((entry) => entry.path)
++              .toReversed(),
++            "",
++          ];
++          const resolved = ancestors
++            .map((ancestor) =>
++              recordAt(packages, `${ancestor ? `${ancestor}/` : ""}node_modules/${name}`),
++            )
++            .find((resolvedPackage) => resolvedPackage !== undefined);
++          return (
++            resolved?.version !== expected ||
++            (resolved.name !== undefined && resolved.name !== name)
++          );
++        }
++        return false;
++      })
++    ) {
++      continue;
++    }
++    for (const version of versions) {
++      overrides[`${name}@${version}`] = version;
++    }
++  }
++  return overrides;
++}
++
++function normalizeNpmLockOverrideContexts(
++  tempDir: string,
++  npmInstallArgs: string[],
++  env: NodeJS.ProcessEnv,
++) {
++  const lockPath = path.join(tempDir, "package-lock.json");
++  const pnpmLock = readPnpmLock();
++  const fallbacks = npmLockContextFallbackOverrides(
++    parseJsonObject(readFileSync(lockPath, "utf8")),
++    pnpmLock,
++  );
++  if (Object.keys(fallbacks).length === 0) {
++    return;
++  }
++  // npm can merge compatible sibling override contexts back to their root.
++  // Recalculate only demonstrated escapes with unambiguous original raw specs;
++  // retained parent scopes and the final version/integrity guard remain authoritative.
++  const manifestPath = path.join(tempDir, "package.json");
++  const manifest = parseJsonObject(readFileSync(manifestPath, "utf8"));
++  manifest.overrides = mergeOverrides(manifest.overrides, fallbacks, {});
++  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
++  rmSync(lockPath);
++  runNpm(npmInstallArgs, tempDir, env);
++  normalizeNpmLockOverrides(tempDir, readNpmLockOverrides(), npmInstallArgs, env);
++  const repairedPackages = new Set(
++    Object.keys(fallbacks).map((selector) => selector.slice(0, selector.lastIndexOf("@"))),
++  );
++  const verified = npmLockContextFallbackOverrides(
++    parseJsonObject(readFileSync(lockPath, "utf8")),
++    pnpmLock,
++    repairedPackages,
++  );
++  if (JSON.stringify(verified) !== JSON.stringify(fallbacks)) {
++    throw new Error(
++      "generated package-lock.json violates frozen parent policy after override context normalization",
++    );
++  }
++}
++
+ function normalizeNpmVersionDrift<T>(lockfile: T): T {
+   const packages = recordAt(lockfile, "packages");
+   if (!packages) {
+@@ -1107,6 +1232,7 @@ export function generateNpmPackageLock(packageDir: string, options: NpmLockOptio
+     copyLocalFileDependencies(normalizedPackageJson, packageDir, tempDir);
+     runNpm(npmInstallArgs, tempDir, env);
+     normalizeNpmLockOverrides(tempDir, npmLockOverrides, npmInstallArgs, env);
++    normalizeNpmLockOverrideContexts(tempDir, npmInstallArgs, env);
+     const generated = normalizeNpmVersionDrift(
+       applyPackageExtensionPeerMetadata(
+         parseJsonObject(readFileSync(path.join(tempDir, "package-lock.json"), "utf8")),
+@@ -1506,6 +1632,7 @@ export {
+   // changed-package detection without invoking npm.
+   collectOverrideViolations,
+   collectPnpmLockViolations,
++  npmLockContextFallbackOverrides,
+   disableDependencyShrinkwrapOverrideConflictSources,
+   exactOverrideRulesFromOverrides,
+   exactVersionFromOverrideSpec,
 diff --git a/scripts/install-swift-tools.sh b/scripts/install-swift-tools.sh
 index 9b86e602af073623c62836c1cb8609e934c3af9b..10cfdd96c612186ce15ea5ceb3c5b23082e24a25 100755
 --- a/scripts/install-swift-tools.sh
@@ -203650,7 +203802,7 @@ index 0000000000000000000000000000000000000000..f1339fe7a6dbf67285f7c64eb8886a40
 +  );
 +});
 diff --git a/src/tasks/task-registry-progress.test.ts b/src/tasks/task-registry-progress.test.ts
-index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb5299ede2756 100644
+index 0f622c3b149f0783124a3ce8dc7f978584d25937..7321d9dbf61eb5319edef9a8cc4c3905d810dc81 100644
 --- a/src/tasks/task-registry-progress.test.ts
 +++ b/src/tasks/task-registry-progress.test.ts
 @@ -1,10 +1,22 @@
@@ -203878,7 +204030,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
    });
    setTaskRegistryDeliveryRuntimeForTests({ sendMessage });
  });
-@@ -152,10 +277,450 @@ afterEach(() => {
+@@ -152,10 +277,452 @@ afterEach(() => {
    subagentRuns.clear();
    resetGatewayWorkAdmission();
    vi.restoreAllMocks();
@@ -204078,16 +204230,17 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
 +
  describe("yielded subagent progress delivery", () => {
 +  it.each([
-+    { heartbeat: false, override: undefined, expected: "state_changes" },
-+    { heartbeat: true, override: undefined, expected: "done_only" },
-+    { heartbeat: false, override: "done_only", expected: "done_only" },
-+    { heartbeat: false, override: "silent", expected: "silent" },
++    [false, undefined, "state_changes", "source"],
++    [false, undefined, "state_changes", "source-thread"],
++    [true, undefined, "done_only", "source"],
++    [false, "done_only", "done_only", "source"],
++    [false, "silent", "silent", "source"],
 +  ] as const)(
-+    "preserves command-settle progress policy (heartbeat=$heartbeat, override=$override)",
-+    async ({ heartbeat, override, expected }) => {
++    "preserves command-settle progress policy (heartbeat=%s, override=%s, expected=%s, thread=%s)",
++    async (heartbeat, override, expected, threadId) => {
 +      const requesterSessionKey = "agent:main:discord:channel:source";
 +      const requesterTurnRunId = "announce:requester-settle:synthetic";
-+      const requesterOrigin = { channel: "discord", to: "channel:source", threadId: "source" };
++      const requesterOrigin = { channel: "discord", to: "channel:source", threadId };
 +      try {
 +        await prepareEmbeddedSessionState({
 +          cfg: {},
@@ -204128,6 +204281,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
 +          for (const [message] of sendMessage.mock.calls) {
 +            expect(message).toMatchObject({
 +              ...requesterOrigin,
++              threadId: threadId === "source" ? undefined : threadId,
 +              content:
 +                "Background work is still in progress:\n- Prepare the document: still working.",
 +            });
@@ -204329,7 +204483,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
    it("coalesces the yield handoff and child activity at the original audience without completing or waking the parent", async () => {
      const first = child("First");
      vi.setSystemTime(Date.now() + 1);
-@@ -184,7 +749,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -184,7 +751,7 @@ describe("yielded subagent progress delivery", () => {
        mirror: { sessionKey: PARENT, agentId: "main" },
      });
      expect(message.content).toBe(
@@ -204338,7 +204492,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
      );
      expect(message.content).not.toMatch(/Quiet|private-/);
      expect(getTaskById(first.task.taskId)).toMatchObject({
-@@ -280,7 +845,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -280,7 +847,7 @@ describe("yielded subagent progress delivery", () => {
      expect(getTaskById(second.task.taskId)?.deliveryStatus).toBe("pending");
    });
  
@@ -204347,7 +204501,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
      const items = Array.from({ length: 35 }, (_, index) => {
        vi.setSystemTime(Date.now() + 1);
        return child(`Worker ${index + 1}`);
-@@ -290,7 +855,7 @@ describe("yielded subagent progress delivery", () => {
+@@ -290,7 +857,7 @@ describe("yielded subagent progress delivery", () => {
      sendMessage.mockImplementationOnce(async (params) => {
        tool(first.entry);
        params.assertDirectAdapterHandoff?.();
@@ -204356,7 +204510,7 @@ index 0f622c3b149f0783124a3ce8dc7f978584d25937..7a4614313b20f97ef795d9124ecdb529
      });
      await vi.advanceTimersByTimeAsync(15_000);
      expect(sendMessage).toHaveBeenCalledOnce();
-@@ -298,10 +863,177 @@ describe("yielded subagent progress delivery", () => {
+@@ -298,10 +865,177 @@ describe("yielded subagent progress delivery", () => {
      expect(sendMessage.mock.calls[0]![0].content).toContain(
        "More task activity is available in Tasks.",
      );
@@ -213053,6 +213207,214 @@ index 0016d1ebe6b05321ed9d8b989e91bd08bc150d36..9d177e7b94eb8e2a36edbfe906cb7b54
              ...(resourceOwner
                ? { TMPDIR: resourceOwner.root, TMP: resourceOwner.root, TEMP: resourceOwner.root }
                : {}),
+diff --git a/test/scripts/generate-npm-package-lock.test.ts b/test/scripts/generate-npm-package-lock.test.ts
+index 8723e8965bb5609a23073d81c26a50a26c5143d1..d73e85b5cda6c7d11401b5c28fc8795b6d058c6c 100644
+--- a/test/scripts/generate-npm-package-lock.test.ts
++++ b/test/scripts/generate-npm-package-lock.test.ts
+@@ -8,6 +8,7 @@ import {
+   applyPackageExtensionPeerMetadata,
+   collectOverrideViolations,
+   collectPnpmLockViolations,
++  npmLockContextFallbackOverrides,
+   createNpmPackageLockInstallStrategyArgs,
+   createNpmLockExecOptions,
+   createNpmLockCommand,
+@@ -293,6 +294,195 @@ describe("generate-npm-package-lock", () => {
+     });
+   });
+ 
++  it("keeps frozen logger major branches pinned when npm loses their parent context", () => {
++    const frozen = {
++      packages: { "google-logging-utils@1.1.3": {}, "google-logging-utils@2.0.1": {} },
++      snapshots: {
++        "google-auth-library@10.9.1": { dependencies: { "google-logging-utils": "1.1.3" } },
++        "google-auth-library@11.0.2": { dependencies: { "google-logging-utils": "2.0.1" } },
++        "gcp-metadata@8.1.2": { dependencies: { "google-logging-utils": "1.1.3" } },
++        "gcp-metadata@9.0.3": { dependencies: { "google-logging-utils": "2.0.1" } },
++      },
++    };
++    const plan = resolvePnpmLockOverridePlan(frozen);
++    expect(plan.versionOverrides).toEqual({});
++    expect(plan.scopedVersionOverrides).toEqual({
++      "google-auth-library@10.9.1": { "google-logging-utils": "1.1.3" },
++      "google-auth-library@11.0.2": { "google-logging-utils": "2.0.1" },
++      "gcp-metadata@8.1.2": { "google-logging-utils": "1.1.3" },
++      "gcp-metadata@9.0.3": { "google-logging-utils": "2.0.1" },
++    });
++    const frozenPackages = new Set([
++      "google-logging-utils@1.1.3",
++      "google-logging-utils@2.0.1",
++      "google-auth-library@10.9.1",
++      "google-auth-library@11.0.2",
++    ]);
++    const frozenIntegrities = new Map([
++      ["google-logging-utils@1.1.3", new Set(["sha512-frozen-v1"])],
++      ["google-logging-utils@2.0.1", new Set(["sha512-frozen-v2"])],
++    ]);
++    const lock = {
++      packages: {
++        "node_modules/google-auth-library": {
++          version: "11.0.2",
++          dependencies: { "google-logging-utils": "^2.0.0" },
++        },
++        "node_modules/legacy/node_modules/google-auth-library": {
++          version: "10.9.1",
++          dependencies: { "google-logging-utils": "1.1.3" },
++        },
++        "node_modules/google-logging-utils": { version: "2.0.1", integrity: "sha512-frozen-v2" },
++        "node_modules/legacy/node_modules/google-auth-library/node_modules/google-logging-utils": {
++          version: "1.1.3",
++          integrity: "sha512-frozen-v1",
++        },
++      },
++    };
++    expect(collectPnpmLockViolations(lock, frozenPackages, frozenIntegrities)).toEqual([]);
++    expect(npmLockContextFallbackOverrides(lock, frozen)).toEqual({});
++    const repaired = new Set(["google-logging-utils"]);
++    expect(npmLockContextFallbackOverrides(lock, frozen, repaired)).toEqual({
++      "google-logging-utils@1.1.3": "1.1.3",
++      "google-logging-utils@2.0.1": "2.0.1",
++    });
++    expect(
++      npmLockContextFallbackOverrides(
++        {
++          packages: {
++            ...lock.packages,
++            "node_modules/google-logging-utils": {
++              ...lock.packages["node_modules/google-logging-utils"],
++              name: "different-logger",
++            },
++          },
++        },
++        frozen,
++        repaired,
++      ),
++    ).toEqual({});
++    expect(
++      npmLockContextFallbackOverrides(
++        {
++          packages: {
++            ...lock.packages,
++            "node_modules/new-parent": {
++              version: "11.0.2",
++              dependencies: { "google-logging-utils": "*" },
++            },
++          },
++        },
++        frozen,
++        repaired,
++      ),
++    ).toEqual({});
++    lock.packages["node_modules/google-logging-utils"].version = "1.1.3";
++    expect(npmLockContextFallbackOverrides(lock, frozen, repaired)).toEqual({});
++    lock.packages["node_modules/google-logging-utils"].version = "2.1.0";
++    expect(npmLockContextFallbackOverrides(lock, frozen)).toEqual({
++      "google-logging-utils@1.1.3": "1.1.3",
++      "google-logging-utils@2.0.1": "2.0.1",
++    });
++    expect(collectPnpmLockViolations(lock, frozenPackages, frozenIntegrities)).toEqual([
++      { packageKey: "google-logging-utils@2.1.0", path: "node_modules/google-logging-utils" },
++    ]);
++    lock.packages["node_modules/google-logging-utils"].version = "2.0.1";
++    lock.packages["node_modules/google-logging-utils"].integrity = "sha512-unreviewed";
++    expect(npmLockContextFallbackOverrides(lock, frozen)).toEqual({});
++    expect(collectPnpmLockViolations(lock, frozenPackages, frozenIntegrities)).toEqual([
++      {
++        packageKey: "google-logging-utils@2.0.1",
++        path: "node_modules/google-logging-utils",
++        actualIntegrity: "sha512-unreviewed",
++        expectedIntegrities: ["sha512-frozen-v2"],
++      },
++    ]);
++  });
++
++  it.each(["*", ">=1", "^1 || ^2", "latest", "file:./logger.tgz"])(
++    "does not normalize an ambiguous or unsupported raw spec %s",
++    (spec) => {
++      const frozen = {
++        packages: { "logger@1.1.3": {}, "logger@2.0.1": {} },
++        snapshots: {
++          "parent@1.0.0": { dependencies: { logger: "2.0.1" } },
++        },
++      };
++      for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
++        expect(
++          npmLockContextFallbackOverrides(
++            {
++              packages: {
++                "node_modules/parent": { version: "1.0.0", [field]: { logger: spec } },
++                "node_modules/logger": { version: "2.1.0" },
++              },
++            },
++            frozen,
++          ),
++        ).toEqual({});
++      }
++    },
++  );
++
++  it("does not normalize overlapping same-major or conflicting-parent branches", () => {
++    const lock = {
++      packages: {
++        "node_modules/parent": { version: "1.0.0", dependencies: { logger: "^1.0.0" } },
++        "node_modules/logger": { version: "1.3.0" },
++      },
++    };
++    expect(
++      npmLockContextFallbackOverrides(lock, {
++        packages: { "logger@1.1.3": {}, "logger@1.2.0": {} },
++        snapshots: { "parent@1.0.0": { dependencies: { logger: "1.1.3" } } },
++      }),
++    ).toEqual({});
++    expect(
++      npmLockContextFallbackOverrides(lock, {
++        packages: { "logger@1.1.3": {}, "logger@2.0.1": {} },
++        snapshots: {
++          "parent@1.0.0": { dependencies: { logger: "1.1.3" } },
++          "parent@1.0.0(peer@2.0.0)": { dependencies: { logger: "2.0.1" } },
++        },
++      }),
++    ).toEqual({});
++  });
++
++  it("rejects a unique raw version that disagrees with the frozen parent or lacks its identity", () => {
++    const frozen = {
++      packages: { "logger@1.1.3": {}, "logger@2.0.1": {} },
++      snapshots: { "parent@1.0.0": { dependencies: { logger: "1.1.3" } } },
++    };
++    for (const parent of [
++      { version: "1.0.0", dependencies: { logger: "^2.0.0" } },
++      { version: "9.0.0", dependencies: { logger: "^1.0.0" } },
++      { name: "unbound-alias", version: "1.0.0", dependencies: { logger: "^1.0.0" } },
++    ]) {
++      expect(
++        npmLockContextFallbackOverrides(
++          {
++            packages: {
++              "node_modules/parent": parent,
++              "node_modules/logger": { version: "2.1.0" },
++            },
++          },
++          frozen,
++        ),
++      ).toEqual({});
++    }
++    expect(
++      npmLockContextFallbackOverrides(
++        {
++          packages: {
++            "": { dependencies: { logger: "^1.0.0" } },
++            "node_modules/logger": { version: "2.1.0" },
++          },
++        },
++        frozen,
++      ),
++    ).toEqual({});
++  });
++
+   it("parses nested scoped package paths", () => {
+     expect(
+       parseLockPackagePath("node_modules/@openclaw/codex/node_modules/@anthropic-ai/sdk"),
 diff --git a/test/scripts/local-check-runtime.test.ts b/test/scripts/local-check-runtime.test.ts
 index 4120e7189d0751357c88fe3be30261ca139a5a37..488f281e73937c90285df81f061b7212bacdd2a0 100644
 --- a/test/scripts/local-check-runtime.test.ts
