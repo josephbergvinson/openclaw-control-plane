@@ -7093,7 +7093,7 @@ index 12f8459a9729f1aa2c139b02ac9ef92b89c2f655..f8bb20470025cc3668733f58393fab57
  src/cron/service/ops.test.ts
  src/cron/service/timer.regression.test.ts
 diff --git a/docs/.generated/config-baseline.counts.json b/docs/.generated/config-baseline.counts.json
-index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..380f032cccff89a464f1490a9cb9a87d8ee0d546 100644
+index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..44c3c973159f5a1fb81a1935b7e1365c7897fb52 100644
 --- a/docs/.generated/config-baseline.counts.json
 +++ b/docs/.generated/config-baseline.counts.json
 @@ -1,5 +1,5 @@
@@ -7102,11 +7102,11 @@ index 41b6f1fbfbb6813940a60fccc36ed43f6403be1e..380f032cccff89a464f1490a9cb9a87d
 -  "channel": 3740,
 -  "plugin": 4215
 +  "core": 2447,
-+  "channel": 3744,
++  "channel": 3762,
 +  "plugin": 4241
  }
 diff --git a/docs/.generated/config-baseline.sha256 b/docs/.generated/config-baseline.sha256
-index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..1e9c4d713f060a0f476f614210bfe13e33ee1a54 100644
+index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..e5621773f931693315a67bcd0c3f7dc246e49880 100644
 --- a/docs/.generated/config-baseline.sha256
 +++ b/docs/.generated/config-baseline.sha256
 @@ -1,4 +1,4 @@
@@ -7114,9 +7114,9 @@ index 21b55d943d4ee318ab9e32a8038f0839bf9394f6..1e9c4d713f060a0f476f614210bfe13e
 -58ecbfff559bdeb12c9c6d3459ccb009106e13d736383319074c84a7675df425  config-baseline.core.json
 -51c84b118b136dfff84993e3cee0ff76ee06b614842b125d0fde110635fc10b8  config-baseline.channel.json
 -77b840d74238b0d797785d7575fd155629a2aa27213f33a3bd9eb6fa22537aed  config-baseline.plugin.json
-+204c85f5ba9b49a1c1e83333d44c03339c4325df1f79df4bc0ed2d9f176ff669  config-baseline.json
++6586ce1969a4f02b9ec5379a7dfa67e5e637144aa9301643ca4984009dd47dae  config-baseline.json
 +53dda6657e6951fbbabe014c59b7a6c7706be44228bc36b73a23528b0ec44a72  config-baseline.core.json
-+ac52ea55f4391d98abced35ec09c4ddb4711ce25c803fa00269a92bc28448844  config-baseline.channel.json
++aa2eb0d3cf67087ccaf6818d83df5ff9c478b194d4da1e0f34e388904a9a53ef  config-baseline.channel.json
 +14242d051ba0e9367cfcf2b4ce3e600b6502e3c4f30b4e32aeb4f3d75c15d7ab  config-baseline.plugin.json
 diff --git a/docs/automation/cron-jobs/managing-jobs.md b/docs/automation/cron-jobs/managing-jobs.md
 index 8fadee4b5cf5e340bc76e1355b2396c1e2b265df..5c718e63db00731d17a373c4663592a9d980fd8f 100644
@@ -203800,15 +203800,21 @@ index 41c6afe85125522eb9ffea91a46ead79bf88c030..3e8ef138c08967bb6a5d7f752a6004c4
      /**
       * @deprecated Prefer `openclaw/plugin-sdk/channel-outbound` adapters plus
 diff --git a/src/plugins/runtime/types-core.ts b/src/plugins/runtime/types-core.ts
-index a1a9aab34c33842a18d1ef085f3f58399f9f238a..b289078de4b5cc5a6fc2af37e3325fc1b2d954f6 100644
+index a1a9aab34c33842a18d1ef085f3f58399f9f238a..dc02618c4d19e73031b10bf4b6ba9dab90c6c233 100644
 --- a/src/plugins/runtime/types-core.ts
 +++ b/src/plugins/runtime/types-core.ts
-@@ -371,6 +371,9 @@ export type PluginRuntimeCore = {
+@@ -1,4 +1,5 @@
+ // Core runtime types define system, config, and task helper contracts for plugins.
++import type { AgentCommandRequesterFinalBinding } from "../../agents/command/types.js";
+ import type { CreateChannelIngressDrainOptions } from "../../channels/message/ingress-drain.js";
+ import type { CreateChannelIngressQueueOptions } from "../../channels/message/ingress-queue.js";
+ import type { ConfigMutationBase } from "../../config/mutation-types.js";
+@@ -371,6 +372,9 @@ export type PluginRuntimeCore = {
      runCommandFromIngress: (
        opts: import("../../agents/command/types.js").AgentCommandIngressOpts,
        runtime: import("../../runtime.js").RuntimeEnv,
 +      host?: {
-+        requesterFinal?: import("../../agents/command/types.js").AgentCommandRequesterFinalBinding;
++        requesterFinal?: AgentCommandRequesterFinalBinding;
 +      },
      ) => ReturnType<typeof import("../../agents/agent-command.js").agentCommandFromIngress>;
      runEmbeddedAgent: RuntimeRunEmbeddedAgent;

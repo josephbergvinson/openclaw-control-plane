@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 Discord line-cap layout](#october-13-discord-line-cap-layout)
+[October 13 Discord config documentation](#october-13-discord-config-documentation)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,20 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 Discord config documentation
+
+The [generated documentation successor](../runtime/README.md#october-13-discord-config-documentation)
+synchronizes the ordinary baseline with the 18 entries expanded from the four
+previously approved Discord voice schema paths. Channel count moves 3744 to 3762;
+core/plugin counts and hashes remain unchanged. The unchanged strict guards,
+all 11 existing baseline cases and the remaining native-plan command coverage
+are qualified. The existing requester-final host type uses a normal type import
+to expose its real production consumer to the unchanged unused-export scan. No extra config surface, budget headroom or private runtime change is added.
+
+Installed Gateway and Node retain accepted R7 and current preferences. Prior
+qualification and deployment nodes remain dated; genuine-call audible behavior
+remains pending.
 
 ## October 13 Discord line-cap layout
 

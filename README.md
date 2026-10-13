@@ -15,6 +15,16 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3`](runtime/README.md#october-13-discord-config-documentation).
+The ordinary configuration documentation generator now records exactly the 18
+expanded entries from the previously approved Discord voice schema. Channel
+count is 3762; core/plugin counts and strict hash/count guards are unchanged.
+The 11 baseline cases pass; the remaining native-plan commands are qualified
+through their actual owners after correcting one existing type-consumer edge.
+This generated documentation successor keeps the accepted R7 installation and
+preferences intact. Genuine-call audible behavior remains pending.
+
+The dated October 13 source-layout reference is
 [`a11e067ec72a5b9a8ff545842cb0d9758df8ae16`](runtime/README.md#october-13-discord-line-cap-layout).
 The existing realtime agent-turn and connection helpers now live in coherent
 sibling modules. The unchanged line-limit guard, 87 existing voice cases and
