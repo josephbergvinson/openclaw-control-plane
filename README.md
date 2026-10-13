@@ -15,6 +15,17 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`cef94b88fa6f8a828c8544b401dd5484e878a40f`](runtime/README.md#october-13-frozen-npm-override-contexts).
+It is a test/build-tool successor to the installed Discord route repair. npm lock
+generation now repairs a demonstrated lost override context only when every raw
+request agrees with its frozen parent branch, then verifies the actual resolved
+branch and unchanged version/integrity guard. The source qualification passed
+125 focused cases, affected guarded types and scoped lint. Gateway and Node remain
+on installed R5 `b91ea6fd08bab3d57aebbd7a37d251cd68823931`; no new runtime build or activation is claimed.
+The native archive, two-file overlay and every prior qualification remain intact.
+All five established public checks are required on this successor's exact head.
+
+The dated October 12 installed route source reference is
 [`24218cc58e388c932e6a6420568ce2c86ab9a653`](runtime/README.md#october-12-discord-own-channel-route).
 The route normalizer now recognizes a Discord thread component that repeats its
 explicit channel destination. This allows a retained child completion to match its

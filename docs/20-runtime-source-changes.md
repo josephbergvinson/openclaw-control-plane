@@ -18,6 +18,15 @@ official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
 
+## October 13 frozen npm override contexts
+
+The [source-only tooling qualification](../runtime/README.md#october-13-frozen-npm-override-contexts)
+corrects a demonstrated npm override-context escape while preserving both frozen
+logger branches, package integrity, the existing installed R5 and every prior
+qualification. It also updates the progress-policy fixture to test both accepted
+Discord route forms. Guarded types, scoped lint and 125 focused cases passed; the
+changed public head still requires all five established hosted checks.
+
 ## October 12 Discord own-channel route
 
 The canonical reference is `24218cc58e388c932e6a6420568ce2c86ab9a653`, with native

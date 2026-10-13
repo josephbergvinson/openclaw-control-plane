@@ -118,6 +118,13 @@ jobs:
             src/utils/delivery-context.test.ts \
             src/agents/command/requester-presentation.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-discord-own-channel-route.log"
+      - name: Verify frozen npm lock override contexts
+        id: npm-override-contexts
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run test/scripts/generate-npm-package-lock.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-npm-override-contexts.log"
       - name: Verify focused progress, steering and workspace read regressions
         id: focused-reliability
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -604,6 +611,7 @@ jobs:
             ${{ runner.temp }}/reference-build-source.txt
             ${{ runner.temp }}/reference-build.log
             ${{ runner.temp }}/reference-discord-own-channel-route.log
+            ${{ runner.temp }}/reference-npm-override-contexts.log
           if-no-files-found: error
           retention-days: 7
 
