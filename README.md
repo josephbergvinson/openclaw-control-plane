@@ -15,6 +15,40 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`a33002ebbb05dd80895740550c0eceb4c85da8cd`](runtime/README.md#october-13-explicit-owner-agent-resolution).
+The corrected explicit-owner resolver preserves primary voice context and
+permitted factual consultation for keyed agent rosters, while retaining speaker
+isolation and the existing response queue. All 71 scoped correction cases pass;
+earlier source coverage remains dated. Gateway and Node now load matching native
+`87ec8a444396313d90d00022cc2ed1dfa511adab` after one preserving activation and
+independent loaded-source, health and protected-state verification. The first
+genuine call failed at required primary context startup. One reviewed native
+profile-provenance reconciliation restored complete primary and room context
+without changing source, configuration or workspace files. A new genuine call
+and audible acceptance remain pending.
+
+The dated October 13 authenticated owner voice reference is
+[`e92f9a192ba16647bc2fe3e43c290d63c3606c18`](runtime/README.md#october-13-authenticated-owner-voice-context).
+Authenticated realtime voice preserves speaker-scoped primary and room policy,
+uses permitted records consultation for factual checks, and retains queued
+microphone replies and playback ownership. All 376 affected cases passed on
+that dated predecessor source, which was never installed. Before building, the
+actual keyed roster with an explicit system owner exposed a resolver error. The
+latest `a33002ebbb05dd80895740550c0eceb4c85da8cd` /
+`87ec8a444396313d90d00022cc2ed1dfa511adab` source corrects it and passed 71 focused
+cases. Installation and genuine-call acceptance retain separate proof boundaries.
+
+The dated October 13 realtime voice reference is
+[`55ffb6953eb7179233a45aa942966769b6efcdd5`](runtime/README.md#october-13-realtime-voice-reliability).
+Realtime voice retains whole selected policy/profile context, uses the normal
+response queue for microphone replies when interruption is disabled, and checks
+records through the agent consult for missing or fresh facts and actions.
+All 289 affected cases pass. The one-file documentation hash successor preserves
+entry counts, core/plugin output and the frozen 27 voice files.
+Current source references are distinct from the frozen R8 build/seal and the
+retained dated installation; real-call and screenshot acceptance remain separate.
+
+The dated October 13 configuration documentation reference is
 [`c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3`](runtime/README.md#october-13-discord-config-documentation).
 The ordinary configuration documentation generator now records exactly the 18
 expanded entries from the previously approved Discord voice schema. Channel

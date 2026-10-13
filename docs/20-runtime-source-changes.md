@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 Discord config documentation](#october-13-discord-config-documentation)
+[October 13 explicit owner-agent resolution](#october-13-explicit-owner-agent-resolution)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,62 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 explicit owner-agent resolution
+
+The [explicit owner-agent correction](../runtime/README.md#october-13-explicit-owner-agent-resolution)
+uses the existing ambient owner resolver for authenticated primary context and
+permitted factual records consultation. It supports keyed agent rosters with an
+explicit system agent and retains guest isolation. The actual-configuration
+regression fails on the prior source; all 71 focused cases pass after correction.
+Earlier voice coverage remains dated rather than counted as additional disjoint
+cases. The resolver uses the private bootstrap facade and preserves the public
+SDK surface. The matching native R9 runtime is now installed after one preserving
+activation and independent loaded-source, health and protected-state verification.
+Fresh reconstruction matches every one of the 45,185 source entries. The first
+genuine call failed at required primary context startup. One reviewed native
+profile-provenance reconciliation restored the complete primary and room files
+without source, configuration, workspace or release changes. Context readback
+passed; a new genuine call and audible acceptance remain pending.
+
+The actual native Control UI help images show R7 before and installed R8 after;
+that help is unchanged in R9. The images document the UI help delta, with
+installation and voice-call acceptance supported by their separate evidence.
+
+![Native bootstrap context help before](assets/discord-voice-bootstrap-context-20261013/before.png)
+
+![Native bootstrap context help after](assets/discord-voice-bootstrap-context-20261013/after.jpg)
+
+## October 13 authenticated owner voice context
+
+The [owner-context successor](../runtime/README.md#october-13-authenticated-owner-voice-context)
+binds the first provider connection to its authenticated speaker before audio,
+retains the owner's primary policy/profile alongside room context through
+replacement, and keeps required-context failures recoverable. Conversation-only
+factual checks use the permitted records consultation, with spoken acknowledgement
+and a verified final. The 376 cases across 21 files and the owning guarded
+checks passed on that dated predecessor source, which was never installed. An
+actual keyed roster with an explicit system owner exposed a resolver error
+before building. The latest explicit owner-agent source corrects it and passed
+71 focused cases; installation, UI help rendering and live voice acceptance
+retain their separate proof boundaries.
+
+## October 13 realtime voice reliability
+
+The [realtime voice source](../runtime/README.md#october-13-realtime-voice-reliability)
+retains whole selected policy/profile files, uses records for missing or fresh
+facts, and keeps microphone-triggered replies moving through the normal response
+owner when interruption is disabled. Required context over 96,000 characters
+fails recoverably instead of truncating policy. Direct greeting wake recognition
+and preserved listening, promotion, reconnect and terminal ownership are covered
+by 289 affected cases across 14 files.
+
+The generated documentation hash-only successor reflects exactly two existing
+enum entries and one help entry. Counts, core/plugin output, strict guards and
+all 27 qualified voice files are unchanged. Current source references remain
+distinct from the frozen built/sealed R8 runtime and retained installation
+history. Fresh reconstruction, actual loaded mapping, real-call acceptance and
+sanitized before/after screenshots keep their separate proof boundaries.
 
 ## October 13 Discord config documentation
 

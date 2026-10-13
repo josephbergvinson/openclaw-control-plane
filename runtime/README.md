@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 Discord config documentation](#october-13-discord-config-documentation)
+[October 13 explicit owner-agent resolution](#october-13-explicit-owner-agent-resolution)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,102 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 explicit owner-agent resolution
+
+Canonical `a33002ebbb05dd80895740550c0eceb4c85da8cd` and native `87ec8a444396313d90d00022cc2ed1dfa511adab` carry the corrected
+28-file combined voice source. The existing ambient owner resolver supports
+keyed agent rosters and defaults.systemAgent, so authenticated owners select the
+configured primary agent for realtime bootstrap and permitted factual records
+consultation. Guest room isolation and trusted Discord origin remain intact.
+The existing resolver is exported through the private realtime-bootstrap facade;
+the broad public agent-runtime barrel and SDK surface limits are unchanged.
+
+The actual explicit-owner configuration regression fails three cases on the
+prior source and passes after correction. All 71 scoped cases across five files
+and three owning shards pass, alongside the existing guarded checks. The earlier
+376-case/21-file voice qualification remains dated at its predecessor; these
+scopes overlap and are not added as disjoint coverage. Fresh ordinary canonical
+reconstruction and the unchanged native overlay match all 45,185 mode/blob/path
+entries after only the two existing fixture substitutions. Matching native R9
+build/stage/seal, one preserving activation and independent same-generation
+Gateway/Node loaded-source, health/ready and protected-state verification passed.
+The accepted activation completed at `2026-10-13T17:32:07.822892Z`; the independent
+loaded-preservation reader followed at `2026-10-13T17:32:59.032080Z`.
+
+The subsequent genuine call failed at required primary context startup. One
+reviewed native profile-provenance reconciliation restored all four whole primary
+files (57,822 characters) and the combined primary-plus-room context (eight whole
+files, 68,966 characters) within the unchanged 96,000-character budget. Eleven
+protected files and 87 unrelated provenance records are unchanged; no source,
+configuration, workspace or release edit was needed. This readback resolves the
+required-context exclusion; a new genuine call and audible acceptance remain
+pending. The earlier failed call remains recorded, and context readback does not
+establish a working voice call.
+Prior R8 and R7 installation history and all dated qualifications remain intact.
+
+## October 13 authenticated owner voice context
+
+Canonical `e92f9a192ba16647bc2fe3e43c290d63c3606c18` and native `0a35ef1f3fcd67d2d3a1943c968356e60529193e` are the qualified
+27-file successor to the earlier realtime voice and documentation references.
+Joining validates provider configuration and the voice catalog without opening
+an anonymous connection. The first authenticated speaker supplies immutable
+identity and context before the provider connection receives audio.
+
+Owner connections inherit the default agent's whole selected policy/profile
+alongside room context; other speakers retain room context. Profiles are read by
+reference, remain speaker-scoped through replacement, and are not copied into
+room workspaces. The combined 96,000-character budget and recoverable errors
+prevent missing, unreadable or oversized required primary context from silently
+admitting partial policy. In conversation-only rooms, permitted factual checks
+can consult the owner's default-agent records, acknowledge the check and speak
+the verified final while retaining real Discord origin and authorization.
+
+All 376 affected cases across 21 files and three owning shards passed on
+that dated predecessor source, alongside scoped guarded types, typed lint and
+unchanged SDK, boundary, line-cap and assertion checks. That `e92f9a192ba16647bc2fe3e43c290d63c3606c18` /
+`0a35ef1f3fcd67d2d3a1943c968356e60529193e` predecessor was never installed. Before
+building, the actual keyed roster with an explicit system owner exposed a
+resolver error. The latest `a33002ebbb05dd80895740550c0eceb4c85da8cd` /
+`87ec8a444396313d90d00022cc2ed1dfa511adab` source corrects it and passed 71 focused
+cases. Existing response queue, wake-name, requester-final, cancellation,
+promotion and recording behavior retain their source qualification. Installation,
+sanitized UI help rendering and genuine-call acceptance have separate evidence.
+The earlier R8 qualification and standalone reconstruction remain dated and are
+not credited for this successor.
+
+## October 13 realtime voice reliability
+
+Canonical source `55ffb6953eb7179233a45aa942966769b6efcdd5` and native source `0d8bfa9ad64a82e7aa8faf442eb42df01f0ddb48`
+include the qualified 27-file voice repair and one generated hash-file successor.
+Realtime sessions include whole selected AGENTS.md, IDENTITY.md, USER.md and
+SOUL.md policy/profile files within a deterministic 96,000-character budget.
+Oversized required context reports a typed recoverable startup error rather than
+truncating policy. Known profile facts can be answered from that context; missing
+or fresh facts and actions use the existing agent consult and records first.
+
+The native OpenAI response owner queues microphone-triggered replies when
+interruption is disabled, preserving listening and existing response ownership.
+Wake-name gating recognizes the direct greeting transcript without treating
+ordinary mentions or introductions as activation. Existing call promotion,
+requester-final, cancellation, reconnect and recording behavior is retained.
+All 289 affected cases across 14 files pass on the frozen voice source, alongside
+the guarded owning checks and compiled SDK budget-error export contract.
+
+The ordinary documentation generator updates only two hash rows for two existing
+enum entries and one help entry. Counts stay core 2447, channel 3762 and plugin
+4241, and core/plugin whole bytes and strict guards are unchanged. Reverting only
+those three fields reproduces every original artifact byte and hash. The initial
+drift failure remains recorded; normal generation, final check and whitespace pass.
+
+The frozen R8 build, stage and seal remain canonical `dd339e51bf04ac3da3c3e72dd5c72695c70cea52` / native
+`56a3cf38edb06c8ea7b8e4f364ecc13dd29ccd51`. The newer documentation commits are source-only and do not relabel
+that candidate, build-info, seal or any installation receipt. Prior deployment
+history is retained unchanged. Actual R8 installation, genuine-call acceptance
+and sanitized before/after screenshot delivery remain separate held evidence.
+Fresh standalone source reconstruction and final-head hosted checks are recorded
+separately before publication; existing archive custody and exact native overlay
+are reused without a payload download or rehash.
 
 ## October 13 Discord config documentation
 
