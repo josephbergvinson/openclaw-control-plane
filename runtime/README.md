@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 Discord own-channel route](#october-12-discord-own-channel-route)
+[October 13 generated Discord voice metadata](#october-13-generated-discord-voice-metadata)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,92 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 generated Discord voice metadata
+
+Canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f` and native `7f24ca48066872381f1b50bdcc592cdc599b3cff`
+are the two-file successor to the voice policy and yielded-final qualification.
+The normal generator publishes four additive Discord schema paths: guild voice
+policy and voice action handoff at global and account scope. The other 26 channel
+entries are unchanged. The normal plugin-manifest copy and npm publication paths
+read that generated metadata, preserving strict guild policy and keeping provider
+selection at global/account scope.
+
+All 46 existing metadata validation cases pass, including the new accepted global
+voice/guild policy and rejected guild provider cases. The normal generator check,
+affected guarded type graph and typed lint pass. The previous 428 focused cases
+retain their exact R6 qualification scope. Public fixtures replace only a private
+guild identifier with a generic label; assertions and production schema remain
+unchanged, and the older detached-lane fixture normalization is preserved.
+
+The matching native R7 build, stage and seal passed. Its sealed plugin schema
+matches generated source and adds only the four qualified paths. Gateway and Node
+now select and load native `7f24ca48066872381f1b50bdcc592cdc599b3cff` after one preserving
+activation and independent same-generation loaded-source, health/ready and
+protected-state/TOOLS verification at `2026-10-13T03:58:17.620624+00:00`. The R6 installation
+remains in the dated deployment history. Fresh standalone source reconstruction
+matches all 45,180 mode/blob/path entries after only the approved fixture
+substitutions; the accepted native archive custody and exact two-YAML overlay are
+unchanged. Source/schema tests and installation do not establish new voice settings
+acceptance or genuine-call audible behavior. The exact
+native archive and two-YAML overlay, all earlier dated records, prior failed
+public head and all five final-head hosted checks remain retained.
+
+## October 13 Discord voice yield and guild policy
+
+Canonical source `206539510310836f6a8f1d18867423f73fac43a6` and native source
+`975df1fbb861664c075ed31a18394b173da666f9` retain a yielded consult as pending rather than
+reporting an empty completed answer. A host-owned final attachment binds the
+original requester session, batch and rearm generation, accepts the resumed final
+once, and rereads speaker/call authority before playback. Independent promoted
+cohorts survive unrelated foreground turns; a duplicate exact turn supersedes
+only its own registration. Speaker replacement carries accepted work to the new
+connection, while call end revokes it.
+
+Exact guild voice settings override the wildcard policy independently of text
+permissions and recording. An owner-enabled room can delegate with its normal
+tools without a wake gate. Conversation-only rooms use the configured wake name
+and expose no agent or active-run control tools. Direct, legacy proxy, STT and
+late-final paths enforce the same action-handoff boundary; addressed native
+conversation uses bidirectional mode. Recording, transcription and post-call
+minutes retain their existing owners. The voice policy does not restrict general
+Computer or Browser tools in authorized agent work.
+
+Each fresh room loads bounded identity, user and persona files using its routed
+agent and session. Fresh and replacement speaker connections share the saved
+room instructions, provider, voice policy and interruption settings; a new room
+reloads the current profile. Delegated turns carry the trusted speaker, guild,
+channel and inbound-audio context to normal agent ingress. Owner instructions
+request a brief spoken acknowledgment before delegation and verified agent
+results for durable facts and actions.
+
+The combined qualification passed 304 Discord cases, 55 requester-final overlap
+cases, 22 execution-identity cases, 16 shared wake-policy cases, four runtime
+ingress authority cases, 18 compatibility registry/report cases and nine private
+cancellation cases. Affected guarded type graphs, scoped typed lint and formatting
+passed. The compatibility bridge retains its original October 12 removal date and
+all six APIs as removal-pending until the existing published-plugin floor and
+artifact-sweep prerequisites are proved. Unrelated eligible deprecations remain
+strict failures. The cancellation fixture now propagates its actual task origin
+and covers both redundant-channel normalization and distinct-thread retention.
+
+The matching native R6 distribution `975df1fbb861664c075ed31a18394b173da666f9` is now
+selected and loaded by Gateway and Node. Normal build, stage, seal and single
+preserving activation passed, followed by independent same-generation loaded
+source, health/ready and protected-state/TOOLS preservation at `2026-10-13T02:47:14.137455Z`.
+Activation receipt `9edb55ed66f22479e416c0b9e2420255c4807c0970c7728655951130cd43cfe8` and loaded
+receipt `2342ba84b3acd5311c856d198d123e273bb48813899bff6146847944d62c5c03` bind that installation.
+Fresh standalone canonical `--apply` plus the unchanged native overlay matches all
+45,180 final-source mode/blob/path entries. The native archive uses its
+already accepted unchanged custody receipt; its payload was not opened, downloaded
+or rehashed for this source-only reconstruction. New voice settings and genuine
+audible call acceptance remain separate pending work. Source tests and queue
+acceptance do not prove audible acknowledgment, playback or genuine-call completion. The failed public
+head `15c73f4c7bd2257ad5ec763053c4a374dbfb2d8d` remains failed, including its lifecycle
+and cancellation-fixture causes; its 99 successful npm frozen-lock packages retain
+that exact scope. The native archive, exact two-YAML overlay, signed companions and
+every prior dated record remain unchanged. All five established hosted checks are
+required on the final changed public head before normal merge.
 
 ## October 13 frozen npm override contexts
 
