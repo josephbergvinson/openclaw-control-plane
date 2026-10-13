@@ -14,7 +14,78 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The latest source reference is
+The latest qualified source reference is
+[`c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3`](runtime/README.md#october-13-discord-config-documentation).
+The ordinary configuration documentation generator now records exactly the 18
+expanded entries from the previously approved Discord voice schema. Channel
+count is 3762; core/plugin counts and strict hash/count guards are unchanged.
+The 11 baseline cases pass; the remaining native-plan commands are qualified
+through their actual owners after correcting one existing type-consumer edge.
+This generated documentation successor keeps the accepted R7 installation and
+preferences intact. Genuine-call audible behavior remains pending.
+
+The dated October 13 source-layout reference is
+[`a11e067ec72a5b9a8ff545842cb0d9758df8ae16`](runtime/README.md#october-13-discord-line-cap-layout).
+The existing realtime agent-turn and connection helpers now live in coherent
+sibling modules. The unchanged line-limit guard, 87 existing voice cases and
+scoped guarded types/lint pass. This is a source-layout successor; the accepted
+R7 installation remains native `7f24ca48066872381f1b50bdcc592cdc599b3cff`.
+Genuine-call audible behavior remains pending. Prior source qualifications,
+installed-state receipts, native archive and overlay are retained.
+
+The dated October 13 generated-metadata source reference is
+[`d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`](runtime/README.md#october-13-generated-discord-voice-metadata).
+Generated plugin metadata now accepts the configured global voice policy and a
+narrow guild override, while rejecting provider selection inside that override.
+The two-file successor passed all 46 metadata validation cases and normal
+generator/type/lint checks. The matching native R7 build, stage and seal passed.
+Gateway and Node now load native `7f24ca48066872381f1b50bdcc592cdc599b3cff` following
+one preserving activation and independent loaded-source, health and protected-state
+readback. Genuine-call audible behavior remains
+separate pending work. Every prior dated record and all five required hosted
+checks are retained.
+
+The dated October 13 voice qualification source reference is
+[`206539510310836f6a8f1d18867423f73fac43a6`](runtime/README.md#october-13-discord-voice-yield-and-guild-policy).
+Yielded voice work stays pending until its original requester receives the resumed
+final. Independent overlapping work retains its own delivery owner through later
+turns and speaker replacements. Guild voice policy separates conversational replies
+from action handoff, while new rooms inherit the routed profile context. The
+combined qualification passed 428 focused cases and affected guarded type/lint
+checks. Gateway and Node now run the matching native R6 distribution
+`975df1fbb861664c075ed31a18394b173da666f9`. Normal build/stage/seal, single
+preserving activation and independent loaded-source, health and protected-state
+readback passed. New voice settings and actual audible call acceptance remain
+separate pending work.
+The native archive, two-file overlay and every prior dated record are retained.
+All five established public checks are required on the final changed head.
+
+The dated October 13 npm qualification source reference is
+[`cef94b88fa6f8a828c8544b401dd5484e878a40f`](runtime/README.md#october-13-frozen-npm-override-contexts).
+It is a test/build-tool successor to the installed Discord route repair. npm lock
+generation now repairs a demonstrated lost override context only when every raw
+request agrees with its frozen parent branch, then verifies the actual resolved
+branch and unchanged version/integrity guard. The source qualification passed
+125 focused cases, affected guarded types and scoped lint. Gateway and Node remain
+on installed R5 `b91ea6fd08bab3d57aebbd7a37d251cd68823931`; no new runtime build or activation is claimed.
+The native archive, two-file overlay and every prior qualification remain intact.
+All five established public checks are required on this successor's exact head.
+
+The dated October 12 installed route source reference is
+[`24218cc58e388c932e6a6420568ce2c86ab9a653`](runtime/README.md#october-12-discord-own-channel-route).
+The route normalizer now recognizes a Discord thread component that repeats its
+explicit channel destination. This allows a retained child completion to match its
+original unthreaded conversation while preserving distinct threads and the existing
+session, run, source, account and generation checks. The four changed source/test
+paths passed 62 focused cases. Gateway and Node now run native distribution
+`b91ea6fd08bab3d57aebbd7a37d251cd68823931`. The matching normal build, stage, seal,
+first activation and independent loaded-source, health and protected-state readback
+passed with separate receipts. The native archive, package overlay, prior
+qualification records and signed companions are retained. The five established
+public hosted checks remain required on the changed head; installed source identity
+does not establish future provider-task nonrecurrence.
+
+The dated October 12 timeout source reference is
 [`1258a28376a4c6fd22f69746abd98e8f97eba146`](runtime/README.md#october-12-normal-agent-cli-timeout).
 Gateway and Node run native distribution `ce47d1a7963b6405abbc17d54f843c6a2aa63838`.
 Normal agent CLI omission now uses the shared 48-hour timeout default. Configured

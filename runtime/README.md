@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
-separates the latest source from actual Gateway and companion installation.
+[October 13 Discord config documentation](#october-13-discord-config-documentation)
+separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
 reference architecture. It contains the complete patch from the official release,
@@ -15,6 +15,224 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 Discord config documentation
+
+Canonical `c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3` and native source `153d9a4bc346cad54cc0aa5b25677b3c883ce9d4`
+are a generated documentation successor to the qualified source layout. The
+normal configuration documentation generator records the 18 expanded paths from
+the four previously approved Discord global/account schema additions: two guild
+voice subtrees of 8 entries each, plus global/account actionHandoff. Channel count
+moves from 3744 to 3762. Core 2447 and plugin 4241 and their hashes remain unchanged;
+the exact-count and hash-drift guards remain unchanged, with no budget headroom.
+Removing only those 18 entries reproduces every original baseline hash exactly.
+No further configuration surface or production behavior was added.
+
+Both existing baseline suites pass all 11 cases. Commands 17 through 31 of the
+exact native plan pass on the documentation correction, including all guarded
+types. The first command 32 failure is retained: its production scan missed the
+real inline-import type consumer of AgentCommandRequesterFinalBinding. A normal
+import type now expresses that same host contract to Knip, preserving the export
+and binding shape; all three unchanged scans, affected core types and typed lint
+pass. Remaining commands 33 through 40 pass on the combined source. Commands 1
+through 16 retain their successful hosted scope without a local repeat. Fresh
+standalone reconstruction matches all 45,182 mode/blob/path entries after only
+the two approved fixture substitutions. Pinned archive custody and the exact
+overlay are retained; prior source qualifications remain dated.
+
+This generated documentation change has no private runtime build, restart,
+activation or preference mutation. Gateway and Node retain accepted native R7
+`7f24ca48066872381f1b50bdcc592cdc599b3cff` from canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`;
+its activation, loaded-source, preservation and subsequent preference/Computer
+acceptance remain separate from current source references. Genuine-call audible
+behavior remains pending. Archive custody, the two-YAML overlay and the two
+approved fixture substitutions are unchanged.
+
+## October 13 Discord line-cap layout
+
+Canonical `a11e067ec72a5b9a8ff545842cb0d9758df8ae16` and native source `1233e98bc6a1425a5d8313583ad287f309ef6034`
+are a mechanical source-layout successor to the accepted R7 source. The hosted
+native plan rejected 828 counted lines in realtime-consults and 708 in
+voice-session against the unchanged 700-line cap. Existing realtime agent-turn,
+requester-final and fallback-talkback ownership now live together in a coherent
+sibling; connection lifecycle and readiness helpers live in another sibling.
+Final bindings, delivery bounds, original parameter identity, live delivery
+state, cancellation timing, session-stop ownership and existing exports are
+preserved.
+
+The unchanged ratchet passes against pinned upstream across 1,728 changed source
+files. Four existing voice suites pass all 87 cases; guarded Discord production
+types, scoped typed lint, formatting and whitespace pass. The maintained changed
+command plan was inspected in dry-run mode; its complete execution remains with
+the hosted native plan. Earlier 428 and 46 case qualifications retain their dated
+scope. Fresh standalone reconstruction matches all 45,182 mode/blob/path
+entries after only the two approved fixture substitutions; pinned native archive
+custody and the exact overlay are unchanged.
+
+This successor has no private native build, restart, activation or preference
+change. Actual Gateway and Node installation remains native R7 `7f24ca48066872381f1b50bdcc592cdc599b3cff`
+from canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`, with its accepted activation,
+loaded-source and preservation receipts intact. Current reference/source trees
+are distinct from those installed fields. Genuine-call audible behavior remains
+pending. The native archive, exact two-YAML overlay and both approved fixture
+normalizations are unchanged.
+
+## October 13 generated Discord voice metadata
+
+Canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f` and native `7f24ca48066872381f1b50bdcc592cdc599b3cff`
+are the two-file successor to the voice policy and yielded-final qualification.
+The normal generator publishes four additive Discord schema paths: guild voice
+policy and voice action handoff at global and account scope. The other 26 channel
+entries are unchanged. The normal plugin-manifest copy and npm publication paths
+read that generated metadata, preserving strict guild policy and keeping provider
+selection at global/account scope.
+
+All 46 existing metadata validation cases pass, including the new accepted global
+voice/guild policy and rejected guild provider cases. The normal generator check,
+affected guarded type graph and typed lint pass. The previous 428 focused cases
+retain their exact R6 qualification scope. Public fixtures replace only a private
+guild identifier with a generic label; assertions and production schema remain
+unchanged, and the older detached-lane fixture normalization is preserved.
+
+The matching native R7 build, stage and seal passed. Its sealed plugin schema
+matches generated source and adds only the four qualified paths. Gateway and Node
+now select and load native `7f24ca48066872381f1b50bdcc592cdc599b3cff` after one preserving
+activation and independent same-generation loaded-source, health/ready and
+protected-state/TOOLS verification at `2026-10-13T03:58:17.620624+00:00`. The R6 installation
+remains in the dated deployment history. Fresh standalone source reconstruction
+matches all 45,180 mode/blob/path entries after only the approved fixture
+substitutions; the accepted native archive custody and exact two-YAML overlay are
+unchanged. Source/schema tests and installation do not establish new voice settings
+acceptance or genuine-call audible behavior. The exact
+native archive and two-YAML overlay, all earlier dated records, prior failed
+public head and all five final-head hosted checks remain retained.
+
+## October 13 Discord voice yield and guild policy
+
+Canonical source `206539510310836f6a8f1d18867423f73fac43a6` and native source
+`975df1fbb861664c075ed31a18394b173da666f9` retain a yielded consult as pending rather than
+reporting an empty completed answer. A host-owned final attachment binds the
+original requester session, batch and rearm generation, accepts the resumed final
+once, and rereads speaker/call authority before playback. Independent promoted
+cohorts survive unrelated foreground turns; a duplicate exact turn supersedes
+only its own registration. Speaker replacement carries accepted work to the new
+connection, while call end revokes it.
+
+Exact guild voice settings override the wildcard policy independently of text
+permissions and recording. An owner-enabled room can delegate with its normal
+tools without a wake gate. Conversation-only rooms use the configured wake name
+and expose no agent or active-run control tools. Direct, legacy proxy, STT and
+late-final paths enforce the same action-handoff boundary; addressed native
+conversation uses bidirectional mode. Recording, transcription and post-call
+minutes retain their existing owners. The voice policy does not restrict general
+Computer or Browser tools in authorized agent work.
+
+Each fresh room loads bounded identity, user and persona files using its routed
+agent and session. Fresh and replacement speaker connections share the saved
+room instructions, provider, voice policy and interruption settings; a new room
+reloads the current profile. Delegated turns carry the trusted speaker, guild,
+channel and inbound-audio context to normal agent ingress. Owner instructions
+request a brief spoken acknowledgment before delegation and verified agent
+results for durable facts and actions.
+
+The combined qualification passed 304 Discord cases, 55 requester-final overlap
+cases, 22 execution-identity cases, 16 shared wake-policy cases, four runtime
+ingress authority cases, 18 compatibility registry/report cases and nine private
+cancellation cases. Affected guarded type graphs, scoped typed lint and formatting
+passed. The compatibility bridge retains its original October 12 removal date and
+all six APIs as removal-pending until the existing published-plugin floor and
+artifact-sweep prerequisites are proved. Unrelated eligible deprecations remain
+strict failures. The cancellation fixture now propagates its actual task origin
+and covers both redundant-channel normalization and distinct-thread retention.
+
+The matching native R6 distribution `975df1fbb861664c075ed31a18394b173da666f9` is now
+selected and loaded by Gateway and Node. Normal build, stage, seal and single
+preserving activation passed, followed by independent same-generation loaded
+source, health/ready and protected-state/TOOLS preservation at `2026-10-13T02:47:14.137455Z`.
+Activation receipt `9edb55ed66f22479e416c0b9e2420255c4807c0970c7728655951130cd43cfe8` and loaded
+receipt `2342ba84b3acd5311c856d198d123e273bb48813899bff6146847944d62c5c03` bind that installation.
+Fresh standalone canonical `--apply` plus the unchanged native overlay matches all
+45,180 final-source mode/blob/path entries. The native archive uses its
+already accepted unchanged custody receipt; its payload was not opened, downloaded
+or rehashed for this source-only reconstruction. New voice settings and genuine
+audible call acceptance remain separate pending work. Source tests and queue
+acceptance do not prove audible acknowledgment, playback or genuine-call completion. The failed public
+head `15c73f4c7bd2257ad5ec763053c4a374dbfb2d8d` remains failed, including its lifecycle
+and cancellation-fixture causes; its 99 successful npm frozen-lock packages retain
+that exact scope. The native archive, exact two-YAML overlay, signed companions and
+every prior dated record remain unchanged. All five established hosted checks are
+required on the final changed public head before normal merge.
+
+## October 13 frozen npm override contexts
+
+Canonical source `cef94b88fa6f8a828c8544b401dd5484e878a40f` and native source successor
+`f42d3704cf511039c1a0e1c58d552055664700ea` change only npm lock tooling and two regression owners.
+The new logger 2.1.0 registry version exposed npm 11.13's loss of an otherwise
+compatible parent override context. The actual `anthropic-vertex` package reproduced
+that frozen-graph escape under both hoisted and nested strategies. Nested mode
+was not a correction and is not added to CI.
+
+The generator inspects the actual failing lock. It recalculates once only when
+every dependency, optional or peer request admits exactly one frozen version and
+that version agrees with the actual frozen parent's policy. The regenerated graph
+must retain the qualified parent identities and physical dependency resolutions.
+Wildcard, cross-major or same-major ambiguity, missing/aliased parents, conflicting
+peer contexts and wrong resolved package identities remain rejected. Existing
+parent scopes and the final frozen membership/integrity guard are unchanged.
+
+The normal first manifest and failing lock reproduce the original bytes; the
+qualified recalculation retains logger 2.0.1 and its frozen integrity. The legacy
+1.1.3 no-escape manifest, raw lock and returned lock are byte identical to baseline.
+Source qualification passed 56 generator and 69 progress cases, affected guarded
+types, scoped typed lint and formatting. The progress fixture retains all original
+notification policies and tests both redundant-channel normalization and distinct
+thread preservation.
+
+This source-only successor does not claim a new runtime build or installation.
+Gateway and Node remain R5 C24218/Db91 with the preceding exact activation and
+loaded-state receipts. The original route qualification, native archive/overlay,
+companions and every prior dated record remain unchanged. The failed public head
+`e2dd3dd45ac6c234950d0d2c9136808b98604f28` is retained; all five established publication
+checks are required on this changed public head before normal merge.
+
+## October 12 Discord own-channel route
+
+Canonical source `24218cc58e388c932e6a6420568ce2c86ab9a653`, tree
+`bfe42cefd8ddaf7f4afdb29d04850635adcf05fc`, changes one production normalizer and
+three test owners since C1258. Native distribution
+`b91ea6fd08bab3d57aebbd7a37d251cd68823931`, tree
+`ee7e9a51e16782c0747471b3fb4a0a7cb8c34add`, preserves the exact two-YAML overlay,
+native archive and complete normalized source/native tree parity.
+
+Discord threads are themselves channels. A retained route containing
+`channel:123` and thread `123` identifies the same destination as the unthreaded
+route `channel:123`. The route normalizer removes only that redundant component
+for explicit Discord `channel:` or `discord:channel:` targets. Distinct threads,
+user targets, bare IDs and other providers retain their existing semantics. The
+strict production Gateway requester guard is unchanged; session incarnation,
+active run, source message, account and request generation remain required.
+
+The focused qualification passed 35 route cases, seven requester-presentation
+cases and 20 actual Gateway execution-owner cases. It exercises the exact retained
+origin against the original admitted request, rejects a different thread and rejects
+the delegation after owner cleanup. Scoped lint and format checks passed. The three
+before-fix alias failures, initial missing-source-turn fixture failure and three
+unmatched requester test selections remain separate dated attempts; they are not
+credited as passing validation.
+
+The matching Db91 normal build, stage, seal and isolated compiled route SDK
+parity passed. First activation and independent same-generation Gateway/Node
+loaded-source, health and protected-state preservation passed at `2026-10-12T23:44:06.829046Z`.
+Activation receipt `b3ef612229eb24083172a591eab2ee181144cfa25ecdedb47103a9667e861945` and loaded receipt
+`cc2498bf4dea9738996a1f0877acdea5b68b36381f4816852c141653a9896bc9` have separate bindings.
+The normal canonical/native source-history publication readback is bound to this
+installed pair. The earlier conversation completion was recovered separately before
+installation; pure SDK parity and installation do not prove future provider-task
+nonrecurrence. The preceding Dce47 deployment, native continuation, console, fixture
+and timeout qualifications retain their original dates and scope. PR18 passed its
+five established publication checks before normal merge; those same five checks are
+required on this changed public input. Native artifacts and signed companions
+remain unchanged.
 
 ## October 12 normal agent CLI timeout
 

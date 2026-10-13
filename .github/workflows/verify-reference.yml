@@ -107,6 +107,101 @@ jobs:
           set -o pipefail
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/reference-build-source.txt"
           pnpm build 2>&1 | tee "$RUNNER_TEMP/reference-build.log"
+      - name: Verify overlapping requester-final delivery
+        id: requester-final-overlap
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.agents-support.config.ts \
+            src/agents/subagents/requester-final-attachment.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-final-overlap.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-requester-final-overlap.log"
+      - name: Verify Discord voice yield and guild policy
+        id: discord-voice-yield-policy
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.extension-discord.config.ts \
+            extensions/discord/src/config-schema.test.ts \
+            extensions/discord/src/voice/guild-voice-policy.test.ts \
+            extensions/discord/src/voice/realtime-consults.yielded.test.ts \
+            extensions/discord/src/voice/ingress.test.ts \
+            extensions/discord/src/voice/agent-control.test.ts \
+            extensions/discord/src/voice/access.test.ts \
+            extensions/discord/src/voice/segment.test.ts \
+            extensions/discord/src/voice/realtime-consults.test.ts \
+            extensions/discord/src/voice/realtime-consults.host-cancellation.test.ts \
+            extensions/discord/src/voice/realtime-playback.test.ts \
+            extensions/discord/src/voice/realtime-speaker-sessions.test.ts \
+            extensions/discord/src/voice/realtime-voice-selection.test.ts \
+            extensions/discord/src/voice/voice-session.lifecycle.test.ts \
+            extensions/discord/src/voice/follow-recording.test.ts \
+            extensions/discord/src/voice/follow-recording-composition.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-discord-voice-yield-policy.log"
+      - name: Verify voice execution identity and final ownership
+        id: voice-execution-identity
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.agents-core.config.ts \
+            src/agents/agent-command-execution-identity.test.ts \
+            src/agents/agent-command-execution-identity.requester-final.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-voice-execution-identity.log"
+      - name: Verify normal voice runtime ingress authority
+        id: voice-runtime-ingress
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.plugins.config.ts \
+            src/plugins/runtime/runtime-agent.ingress.integration.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-voice-runtime-ingress.log"
+      - name: Verify shared voice wake policy
+        id: voice-wake-policy
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.unit.config.ts \
+            src/talk/realtime-session-policy.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-voice-wake-policy.log"
+      - name: Verify generated Discord voice configuration metadata
+        id: discord-voice-config-metadata
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.runtime-config.config.ts \
+            src/config/validation.channel-metadata.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-discord-voice-config-metadata.log"
+      - name: Verify Discord own-channel route and requester presentation
+        id: discord-own-channel-route
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.unit-fast.config.ts \
+            src/plugin-sdk/channel-route.test.ts \
+            src/utils/delivery-context.test.ts \
+            src/agents/command/requester-presentation.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-discord-own-channel-route.log"
+      - name: Verify frozen npm lock override contexts
+        id: npm-override-contexts
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run test/scripts/generate-npm-package-lock.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-npm-override-contexts.log"
       - name: Verify focused progress, steering and workspace read regressions
         id: focused-reliability
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -592,6 +687,14 @@ jobs:
           path: |
             ${{ runner.temp }}/reference-build-source.txt
             ${{ runner.temp }}/reference-build.log
+            ${{ runner.temp }}/reference-discord-own-channel-route.log
+            ${{ runner.temp }}/reference-requester-final-overlap.log
+            ${{ runner.temp }}/reference-discord-voice-yield-policy.log
+            ${{ runner.temp }}/reference-voice-execution-identity.log
+            ${{ runner.temp }}/reference-voice-runtime-ingress.log
+            ${{ runner.temp }}/reference-voice-wake-policy.log
+            ${{ runner.temp }}/reference-discord-voice-config-metadata.log
+            ${{ runner.temp }}/reference-npm-override-contexts.log
           if-no-files-found: error
           retention-days: 7
 
