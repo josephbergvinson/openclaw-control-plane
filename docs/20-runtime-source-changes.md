@@ -2,8 +2,8 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 12 normal agent CLI timeout](#october-12-normal-agent-cli-timeout)
-identifies the current Gateway installation.
+[October 13 Discord config documentation](#october-13-discord-config-documentation)
+separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
 manifest. Reproducing its behavior requires both the runtime source changes and
@@ -17,6 +17,94 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 Discord config documentation
+
+The [generated documentation successor](../runtime/README.md#october-13-discord-config-documentation)
+synchronizes the ordinary baseline with the 18 entries expanded from the four
+previously approved Discord voice schema paths. Channel count moves 3744 to 3762;
+core/plugin counts and hashes remain unchanged. The unchanged strict guards,
+all 11 existing baseline cases and the remaining native-plan command coverage
+are qualified. The existing requester-final host type uses a normal type import
+to expose its real production consumer to the unchanged unused-export scan. No extra config surface, budget headroom or private runtime change is added.
+
+Installed Gateway and Node retain accepted R7 and current preferences. Prior
+qualification and deployment nodes remain dated; genuine-call audible behavior
+remains pending.
+
+## October 13 Discord line-cap layout
+
+The [source-layout successor](../runtime/README.md#october-13-discord-line-cap-layout)
+extracts the existing realtime agent-turn/requester-final/talkback owner and
+voice-connection helpers into coherent siblings. It preserves delivery bounds,
+authority, cancellation and cleanup timing, original parameter identity, session
+lifecycle and existing exports. The unchanged pinned-base line-limit guard,
+87 existing voice cases and scoped guarded type/lint checks pass.
+
+This is a source-only qualification. Installed Gateway and Node remain the
+accepted native R7 source with its original loaded-state and preservation
+receipts. Prior source qualifications and deployment history are retained;
+genuine-call audible behavior remains pending.
+
+## October 13 generated Discord voice metadata
+
+The [generated voice metadata successor](../runtime/README.md#october-13-generated-discord-voice-metadata)
+publishes the qualified Discord guild policy and action-handoff schema through the
+normal generated plugin metadata. All 46 metadata validation cases and normal
+generator/type/lint checks pass. The matching native R7 build, stage and seal
+passed, with the exact packaged schema verified. Gateway and Node now run the
+matching native R7 source after one preserving activation and independent loaded
+health/state verification. The prior R6 records retain their scope and deployment
+history. Genuine-call audible behavior remains pending. Only the private guild fixture literals are normalized
+for public export, with production schema and assertions unchanged.
+
+## October 13 Discord voice yield and guild policy
+
+The [voice and guild-policy qualification](../runtime/README.md#october-13-discord-voice-yield-and-guild-policy)
+keeps yielded work pending and returns each exact resumed final to its original
+requester once, including overlapping work and speaker replacement. Guild voice
+policy separates conversation from action handoff while preserving recording,
+minutes and text permissions. New rooms load routed profile context. The 428
+focused cases and affected guarded type/lint checks passed. Gateway and Node now
+run D975df1 after matching normal build/stage/seal, one preserving activation and
+independent loaded-source, health and protected-state readback. Fresh standalone
+canonical/native inventory parity passed. New voice settings and genuine audible
+call acceptance remain pending.
+
+The source also preserves the original compatibility removal date and APIs until
+their existing published-plugin prerequisites are proved, and corrects the
+cancellation route fixture without changing production routing. Native archive,
+overlay and all earlier dated records remain intact. The final public head still
+requires all five established hosted checks before normal merge.
+
+## October 13 frozen npm override contexts
+
+The [source-only tooling qualification](../runtime/README.md#october-13-frozen-npm-override-contexts)
+corrects a demonstrated npm override-context escape while preserving both frozen
+logger branches, package integrity, the existing installed R5 and every prior
+qualification. It also updates the progress-policy fixture to test both accepted
+Discord route forms. Guarded types, scoped lint and 125 focused cases passed; the
+changed public head still requires all five established hosted checks.
+
+## October 12 Discord own-channel route
+
+The canonical reference is `24218cc58e388c932e6a6420568ce2c86ab9a653`, with native
+distribution `b91ea6fd08bab3d57aebbd7a37d251cd68823931`. A Discord thread component equal
+to its explicit channel destination now identifies the same route as that channel.
+This prevents completed child work from being rejected solely because a retained
+origin repeats the destination as its thread. Distinct threads and all existing
+requester authority checks remain enforced.
+
+The [dated route qualification](../runtime/README.md#october-12-discord-own-channel-route)
+records the one production owner, three regression owners, 62 passing cases and
+retained unsuccessful attempts. Gateway and Node now run Db91. Matching normal
+build/stage/seal, first activation and independent loaded-generation, health and
+protected-state preservation passed with separate receipts. Pure compiled SDK
+parity and installation remain separate from future provider-task nonrecurrence.
+The full source export retains exact normalized tree parity, the native package
+overlay and archive, signed companions and all prior dated qualification and
+deployment records. The changed public head must pass the five established
+publication checks before normal merge.
 
 ## October 12 normal agent CLI timeout
 
