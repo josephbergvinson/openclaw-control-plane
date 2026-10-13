@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 Discord line-cap layout](#october-13-discord-line-cap-layout)
+[October 13 Discord config documentation](#october-13-discord-config-documentation)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,38 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 Discord config documentation
+
+Canonical `c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3` and native source `153d9a4bc346cad54cc0aa5b25677b3c883ce9d4`
+are a generated documentation successor to the qualified source layout. The
+normal configuration documentation generator records the 18 expanded paths from
+the four previously approved Discord global/account schema additions: two guild
+voice subtrees of 8 entries each, plus global/account actionHandoff. Channel count
+moves from 3744 to 3762. Core 2447 and plugin 4241 and their hashes remain unchanged;
+the exact-count and hash-drift guards remain unchanged, with no budget headroom.
+Removing only those 18 entries reproduces every original baseline hash exactly.
+No further configuration surface or production behavior was added.
+
+Both existing baseline suites pass all 11 cases. Commands 17 through 31 of the
+exact native plan pass on the documentation correction, including all guarded
+types. The first command 32 failure is retained: its production scan missed the
+real inline-import type consumer of AgentCommandRequesterFinalBinding. A normal
+import type now expresses that same host contract to Knip, preserving the export
+and binding shape; all three unchanged scans, affected core types and typed lint
+pass. Remaining commands 33 through 40 pass on the combined source. Commands 1
+through 16 retain their successful hosted scope without a local repeat. Fresh
+standalone reconstruction matches all 45,182 mode/blob/path entries after only
+the two approved fixture substitutions. Pinned archive custody and the exact
+overlay are retained; prior source qualifications remain dated.
+
+This generated documentation change has no private runtime build, restart,
+activation or preference mutation. Gateway and Node retain accepted native R7
+`7f24ca48066872381f1b50bdcc592cdc599b3cff` from canonical `d24b93a980874a5fd4e3de9cb6c95f0b43d5b96f`;
+its activation, loaded-source, preservation and subsequent preference/Computer
+acceptance remain separate from current source references. Genuine-call audible
+behavior remains pending. Archive custody, the two-YAML overlay and the two
+approved fixture substitutions are unchanged.
 
 ## October 13 Discord line-cap layout
 
