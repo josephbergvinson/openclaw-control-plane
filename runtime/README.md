@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 explicit owner-agent resolution](#october-13-explicit-owner-agent-resolution)
+[October 13 authenticated-speaker test fixtures](#october-13-authenticated-speaker-test-fixtures)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,25 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 13 authenticated-speaker test fixtures
+
+Canonical `b62983e9d2a1b15a1b6a04fba20d428c9ba29700` and native `d898edea4806920a1c8c1b8c3352c12340e62d00` add only three test-fixture corrections.
+Each fixture explicitly admits an authenticated synthetic speaker and uses that
+speaker's actual connection. Shutdown, queued cancellation, capacity, playback
+and speaker/owner isolation assertions are retained. All 86 unique affected
+cases pass: 42 unchanged playback/speaker cases and 44 final lifecycle cases.
+Guarded test types and targeted lint pass. Fresh standalone reconstruction matches
+all 45,185 source entries with only the two existing fixture substitutions; the
+native archive and distribution overlay are unchanged. The original hosted failure and local
+lint/spy-API failures remain recorded; repeated cases are not added to the count.
+
+Production source and the installed `a33002eb` / native `87ec8a44` release are
+unchanged. After the reviewed native profile recovery, the operator reported
+stable answers in personal and company rooms, consultation acknowledgment and a
+completed spoken reply, and the preferred voice. Exact returned company source
+values were not independently transcript-correlated, and no measured speech
+latency is claimed. This human report is separate from test-source qualification.
 
 ## October 13 explicit owner-agent resolution
 

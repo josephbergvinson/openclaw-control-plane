@@ -51659,6 +51659,45 @@ index 0000000000000000000000000000000000000000..79ef7f2c4e450dcbad6c9d4ceb05faa3
 +    );
 +  },
 +);
+diff --git a/extensions/discord/src/voice/realtime-playback.test.ts b/extensions/discord/src/voice/realtime-playback.test.ts
+index 7a180b7d321c305ed64cf48fe513a85f58d533b6..d67ec8ed12ae442283c1938df37fcff4a2d65261 100644
+--- a/extensions/discord/src/voice/realtime-playback.test.ts
++++ b/extensions/discord/src/voice/realtime-playback.test.ts
+@@ -396,6 +396,7 @@ defineDiscordVoiceTests(
+         on: ReturnType<typeof vi.fn>;
+         play: ReturnType<typeof vi.fn>;
+       };
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
+       const bridgeParams = lastRealtimeBridgeParams();
+ 
+       bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+@@ -430,6 +431,7 @@ defineDiscordVoiceTests(
+ 
+         expect(result.ok).toBe(true);
+         const player = getLastAudioPlayer();
++        beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
+         const bridgeParams = lastRealtimeBridgeParams();
+ 
+         bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+@@ -455,6 +457,7 @@ defineDiscordVoiceTests(
+         await manager.join({ guildId: "g1", channelId: "1001" });
+ 
+         const player = getLastAudioPlayer();
++        beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
+         const bridgeParams = lastRealtimeBridgeParams();
+ 
+         bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+@@ -486,9 +489,8 @@ defineDiscordVoiceTests(
+         await manager.join({ guildId: "g1", channelId: "1001" });
+         const player = getLastAudioPlayer();
+         const entry = getSessionEntry(manager);
+-        const bridgeParams = lastRealtimeBridgeParams();
+-
+         beginSpeakerTurn(entry);
++        const bridgeParams = lastRealtimeBridgeParams();
+         bridgeParams?.onTranscript?.("user", "first question", true);
+         await vi.advanceTimersByTimeAsync(260);
+         await vi.waitFor(() => expectUserMessageIncludes("first answer"));
 diff --git a/extensions/discord/src/voice/realtime-playback.ts b/extensions/discord/src/voice/realtime-playback.ts
 index b5295d836c127e6ec1bf8e7b7d3b98d22ae4dd14..70012682ba6f4a821cca79eef2ead9f45e1efe5a 100644
 --- a/extensions/discord/src/voice/realtime-playback.ts
@@ -52220,6 +52259,61 @@ index 6974e5f012ef5e96e29976bb61e1544b3a15f54c..ee8302dbf746f8d31d4c9b4b4e69f966
      return true;
    }
  
+diff --git a/extensions/discord/src/voice/realtime-speaker-sessions.test.ts b/extensions/discord/src/voice/realtime-speaker-sessions.test.ts
+index 1bf19187252c425d92b7b6429ef4caa5f40da7fc..0a367b3dda9cb56e54112197d796709356352c6a 100644
+--- a/extensions/discord/src/voice/realtime-speaker-sessions.test.ts
++++ b/extensions/discord/src/voice/realtime-speaker-sessions.test.ts
+@@ -24,6 +24,7 @@ defineDiscordVoiceTests(
+     resolveConfiguredRealtimeVoiceProviderMock,
+     resolveVoiceIngressWithParticipantsMock,
+     createAgentProxyManager,
++    getSessionEntry,
+   }) => {
+     const useNativeDelegation = () =>
+       resolveConfiguredRealtimeVoiceProviderMock.mockReturnValue({
+@@ -84,9 +85,10 @@ defineDiscordVoiceTests(
+ 
+     it("rejects native delegation when the admitted speaker loses owner authority", async () => {
+       useNativeDelegation();
+-      const { entry, manager, bridgeParams } = await createJoinedAgentProxyFixture();
++      const { entry, manager } = await createJoinedAgentProxyFixture();
+       try {
+         beginSpeakerTurn(entry, { userId: "owner", senderIsOwner: true }).close();
++        const { bridgeParams } = lastRealtimeBridge();
+         resolveVoiceIngressWithParticipantsMock.mockResolvedValue({
+           senderIsOwner: false,
+           speakerLabel: "owner",
+@@ -280,6 +282,7 @@ defineDiscordVoiceTests(
+           extraSystemPrompt: "Old roster.",
+         }).close();
+         const guest = lastRealtimeBridge();
++        const bridgeCount = createRealtimeVoiceBridgeSessionMock.mock.calls.length;
+         await emitFinalRealtimeUserTranscript(guest.bridgeParams, "First question.");
+         beginSpeakerTurn(entry, {
+           senderIsOwner: false,
+@@ -288,7 +291,7 @@ defineDiscordVoiceTests(
+         }).close();
+         await emitFinalRealtimeUserTranscript(guest.bridgeParams, "Second question.");
+         expect(guest.session.close).not.toHaveBeenCalled();
+-        expect(createRealtimeVoiceBridgeSessionMock).toHaveBeenCalledOnce();
++        expect(createRealtimeVoiceBridgeSessionMock).toHaveBeenCalledTimes(bridgeCount);
+         expect(lastAgentCommandArgs()).toMatchObject({
+           senderIsOwner: false,
+           extraSystemPrompt: "Updated roster.",
+@@ -443,9 +446,11 @@ defineDiscordVoiceTests(
+     it("reclaims expired noise-only speakers without giving late callbacks a replacement's authority", async () => {
+       const now = Date.now();
+       const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+-      const { entry, manager } = await createJoinedAgentProxyFixture({
+-        config: { voice: { realtime: { requireWakeName: false } } },
++      const manager = createAgentProxyManager(undefined, {
++        voice: { realtime: { requireWakeName: false } },
+       });
++      await manager.join({ guildId: "g1", channelId: "1001" });
++      const entry = getSessionEntry(manager);
+       try {
+         for (let index = 0; index < 8; index += 1) {
+           beginSpeakerTurn(entry, { userId: `guest-${index}`, senderIsOwner: false }).close();
 diff --git a/extensions/discord/src/voice/realtime-turns.test.ts b/extensions/discord/src/voice/realtime-turns.test.ts
 index ba18ecece6a4fb41c676fbed96e56b4d6247c1cd..f984ef4ae79e4bc45d94bd54f87dee0fd3a9f462 100644
 --- a/extensions/discord/src/voice/realtime-turns.test.ts
@@ -53909,6 +54003,199 @@ index a336864d8e392b71164414199ac7737071f39f57..9341cd1f5b325018f3986c316db18272
  }
  
  export {
+diff --git a/extensions/discord/src/voice/voice-session.lifecycle.test.ts b/extensions/discord/src/voice/voice-session.lifecycle.test.ts
+index e67f88acc89752a82d03370a78bc8d89e2f52dbd..68b9d1a60175ebdf7136aacc68eedb24cc3f2b7c 100644
+--- a/extensions/discord/src/voice/voice-session.lifecycle.test.ts
++++ b/extensions/discord/src/voice/voice-session.lifecycle.test.ts
+@@ -21,12 +21,14 @@ defineDiscordVoiceTests(
+     realtimeSessionMock,
+     logVerboseMock,
+     managerModule,
++    realtimeModule,
+     configureVoiceStateGateway,
+     createClient,
+     createManager,
+     expectConnectedStatus,
+     getSessionEntry,
+     beginSpeakerTurn,
++    lastRealtimeBridge,
+     getLastAudioPlayer,
+     expectOffEventWithFunction,
+     createJoinedAgentProxyFixture,
+@@ -329,7 +331,7 @@ defineDiscordVoiceTests(
+       async ({ amplitude, interrupts }) => {
+         const connection = createConnectionMock();
+         joinVoiceChannelMock.mockReturnValueOnce(connection);
+-        const { bridgeParams, entry, player } = await createJoinedBidiFixture({
++        const { entry, player } = await createJoinedBidiFixture({
+           allowFrom: ["discord:u1"],
+           voice: {
+             realtime: {
+@@ -343,6 +345,7 @@ defineDiscordVoiceTests(
+           },
+         });
+         const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: null });
++        const { bridgeParams, session } = lastRealtimeBridge();
+ 
+         bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+         const input = Buffer.alloc(3840);
+@@ -351,19 +354,18 @@ defineDiscordVoiceTests(
+         }
+         turn.sendInputAudio(input);
+ 
+-        expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(0);
+-        expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalledTimes(interrupts ? 1 : 0);
++        expect(session.setMediaTimestamp).toHaveBeenCalledWith(0);
++        expect(session.handleBargeIn).toHaveBeenCalledTimes(interrupts ? 1 : 0);
+         if (interrupts) {
+-          expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(10);
+-          const lastTimestampCall =
+-            realtimeSessionMock.setMediaTimestamp.mock.invocationCallOrder.at(-1);
+-          const firstBargeInCall = realtimeSessionMock.handleBargeIn.mock.invocationCallOrder[0];
++          expect(session.setMediaTimestamp).toHaveBeenCalledWith(10);
++          const lastTimestampCall = session.setMediaTimestamp.mock.invocationCallOrder.at(-1);
++          const firstBargeInCall = session.handleBargeIn.mock.invocationCallOrder[0];
+           expect(expectDefined(lastTimestampCall, "last media timestamp invocation")).toBeLessThan(
+             expectDefined(firstBargeInCall, "first barge-in invocation"),
+           );
+         }
+         expect(player.stop).not.toHaveBeenCalled();
+-        expect(realtimeSessionMock.sendAudio).toHaveBeenCalled();
++        expect(session.sendAudio).toHaveBeenCalled();
+         bridgeParams?.onEvent?.({ direction: "server", type: "response.done" });
+       },
+     );
+@@ -398,7 +400,7 @@ defineDiscordVoiceTests(
+     });
+ 
+     it("does not interrupt new playback with speech retained in the input filter", async () => {
+-      const { bridgeParams, entry } = await createJoinedBidiFixture({
++      const { entry } = await createJoinedBidiFixture({
+         allowFrom: ["discord:u1"],
+         voice: {
+           realtime: {
+@@ -408,12 +410,13 @@ defineDiscordVoiceTests(
+         },
+       });
+       const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840, 1) });
++      const { bridgeParams, session } = lastRealtimeBridge();
+       bridgeParams.audioSink?.sendAudio(Buffer.alloc(48_000));
+ 
+       turn.sendInputAudio(Buffer.alloc(3840));
+ 
+-      expect(realtimeSessionMock.handleBargeIn).not.toHaveBeenCalled();
+-      expect(realtimeSessionMock.sendAudio).toHaveBeenCalledTimes(2);
++      expect(session.handleBargeIn).not.toHaveBeenCalled();
++      expect(session.sendAudio).toHaveBeenCalledTimes(2);
+       turn.close();
+     });
+ 
+@@ -432,10 +435,11 @@ defineDiscordVoiceTests(
+         },
+       });
+       beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840) });
++      const { session } = lastRealtimeBridge();
+ 
+-      expect(realtimeSessionMock.handleBargeIn).not.toHaveBeenCalled();
++      expect(session.handleBargeIn).not.toHaveBeenCalled();
+       expect(player.stop).not.toHaveBeenCalled();
+-      expect(realtimeSessionMock.sendAudio).toHaveBeenCalled();
++      expect(session.sendAudio).toHaveBeenCalled();
+     });
+ 
+     it("sends trailing realtime silence when a speaker turn closes", async () => {
+@@ -452,11 +456,10 @@ defineDiscordVoiceTests(
+         },
+       });
+       const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840) });
++      const { session } = lastRealtimeBridge();
+       turn.close();
+ 
+-      const trailingSilence = realtimeSessionMock.sendAudio.mock.calls.at(-1)?.[0] as
+-        | Buffer
+-        | undefined;
++      const trailingSilence = session.sendAudio.mock.calls.at(-1)?.[0] as Buffer | undefined;
+       expect(trailingSilence).toBeInstanceOf(Buffer);
+       expect(trailingSilence?.length).toBe(33_600);
+       expect(trailingSilence?.equals(Buffer.alloc(33_600))).toBe(true);
+@@ -476,30 +479,35 @@ defineDiscordVoiceTests(
+         },
+       });
+       const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840) });
++      const { session } = lastRealtimeBridge();
+       turn.close();
+ 
+-      const trailingSilence = realtimeSessionMock.sendAudio.mock.calls.at(-1)?.[0] as
+-        | Buffer
+-        | undefined;
++      const trailingSilence = session.sendAudio.mock.calls.at(-1)?.[0] as Buffer | undefined;
+       expect(trailingSilence).toBeInstanceOf(Buffer);
+       expect(trailingSilence?.length).toBe(144_000);
+       expect(trailingSilence?.equals(Buffer.alloc(144_000))).toBe(true);
+     });
+ 
+-    it("ignores realtime capture during playback when barge-in is disabled", async () => {
++    it("receives realtime capture during playback without interrupting when barge-in is disabled", async () => {
+       const connection = createConnectionMock();
+       joinVoiceChannelMock.mockReturnValueOnce(connection);
+       const { entry, manager, player } = await createJoinedBidiFixture({
+         allowFrom: ["discord:u1"],
+         voice: { realtime: { bargeIn: false } },
+       });
++      beginSpeakerTurn(entry, { userId: "u1", initialAudio: null }).close();
++      await Promise.resolve();
++      const { session } = lastRealtimeBridge();
+       player.state.status = "playing";
+ 
+       await handleSpeakingStart(manager, entry, "u1");
+ 
+-      expect(realtimeSessionMock.handleBargeIn).not.toHaveBeenCalled();
++      expect(session.handleBargeIn).not.toHaveBeenCalled();
+       expect(player.stop).not.toHaveBeenCalled();
+-      expect(connection.receiver.subscribe).not.toHaveBeenCalled();
++      expect(connection.receiver.subscribe).toHaveBeenCalledExactlyOnceWith(
++        "u1",
++        expect.objectContaining({ end: expect.any(Object) }),
++      );
+     });
+ 
+     it("passes DAVE options to joinVoiceChannel", async () => {
+@@ -640,6 +648,7 @@ defineDiscordVoiceTests(
+         voice: { enabled: true, mode: "agent-proxy", realtime: { provider: "openai" } },
+       });
+       await manager.join({ guildId: "g1", channelId: "1001" });
++      beginSpeakerTurn(getSessionEntry(manager), { initialAudio: null }).close();
+       const closing = createDeferred<void>();
+       const stopped = createDeferred<void>();
+       realtimeSessionMock.close.mockImplementationOnce(() => {
+@@ -697,6 +706,19 @@ defineDiscordVoiceTests(
+           closing.resolve();
+           return stopped.promise;
+         });
++        const connectRoomSpy = vi.spyOn(
++          realtimeModule.DiscordRealtimeVoiceSession.prototype,
++          "connect",
++        );
++        connectRoomSpy.mockImplementationOnce(
++          async function (this: InstanceType<typeof realtimeModule.DiscordRealtimeVoiceSession>) {
++            connectRoomSpy.mockRestore();
++            await this.connect();
++            this.beginSpeakerTurn({ senderIsOwner: true, speakerLabel: "Human" }, "human").close();
++            // Hold the room startup owner while the explicitly admitted provider connects.
++            await ready.promise;
++          },
++        );
+         const manager = createManager(
+           { voice: { enabled: true, mode: "agent-proxy", realtime: { provider: "openai" } } },
+           client,
+@@ -743,6 +765,7 @@ defineDiscordVoiceTests(
+         } finally {
+           ready.resolve();
+           stopped.resolve();
++          connectRoomSpy.mockRestore();
+           logVerboseMock.mockReset();
+           await Promise.allSettled([first, leaving, joins]);
+         }
 diff --git a/extensions/discord/src/voice/voice-session.promotion.test.ts b/extensions/discord/src/voice/voice-session.promotion.test.ts
 index 476a6507ee72a0bd991b501d8ed8e236bd2e8b4b..c4acde971264f264e2308efc2aa2fcc27793c5b9 100644
 --- a/extensions/discord/src/voice/voice-session.promotion.test.ts

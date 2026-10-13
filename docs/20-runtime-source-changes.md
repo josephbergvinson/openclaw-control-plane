@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 explicit owner-agent resolution](#october-13-explicit-owner-agent-resolution)
+[October 13 authenticated-speaker test fixtures](#october-13-authenticated-speaker-test-fixtures)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,16 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 13 authenticated-speaker test fixtures
+
+The [test-only successor](../runtime/README.md#october-13-authenticated-speaker-test-fixtures)
+admits authenticated synthetic speakers before inspecting their actual realtime
+connections. All 86 affected cases pass with the existing cancellation, physical
+cleanup, capacity and speaker isolation assertions. Production source, workflow
+and the installed release are unchanged. The operator's accepted personal and
+company room answers, spoken consultation and preferred voice are recorded
+separately from source qualification.
 
 ## October 13 explicit owner-agent resolution
 

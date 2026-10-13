@@ -15,17 +15,15 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
-[`a33002ebbb05dd80895740550c0eceb4c85da8cd`](runtime/README.md#october-13-explicit-owner-agent-resolution).
-The corrected explicit-owner resolver preserves primary voice context and
-permitted factual consultation for keyed agent rosters, while retaining speaker
-isolation and the existing response queue. All 71 scoped correction cases pass;
-earlier source coverage remains dated. Gateway and Node now load matching native
-`87ec8a444396313d90d00022cc2ed1dfa511adab` after one preserving activation and
-independent loaded-source, health and protected-state verification. The first
-genuine call failed at required primary context startup. One reviewed native
-profile-provenance reconciliation restored complete primary and room context
-without changing source, configuration or workspace files. A new genuine call
-and audible acceptance remain pending.
+[`b62983e9d2a1b15a1b6a04fba20d428c9ba29700`](runtime/README.md#october-13-authenticated-speaker-test-fixtures).
+It corrects three stale voice test fixtures to admit authenticated speakers and
+inspect their actual connections. All 86 affected cases pass with cancellation,
+cleanup and isolation assertions intact. Production source and the installed
+`a33002eb` / native `87ec8a44` release remain unchanged. After the reviewed native
+profile recovery, the operator reported stable answers in personal and company
+rooms, consultation acknowledgment and a completed spoken reply, and the
+preferred voice. Exact company source values were not independently
+transcript-correlated; no measured speech latency is claimed.
 
 The dated October 13 authenticated owner voice reference is
 [`e92f9a192ba16647bc2fe3e43c290d63c3606c18`](runtime/README.md#october-13-authenticated-owner-voice-context).
