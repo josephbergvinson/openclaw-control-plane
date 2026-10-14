@@ -15,6 +15,59 @@ identities. Their procedures remain substantial; accounts, host paths and data a
 supplied by the adopter.
 
 The latest qualified source reference is
+[`70413d04c280cd35cd41e8eb3942d2def4c15e89`](runtime/README.md#october-14-browser-lint-style),
+with native reference `376af34f3a2cc9178b83e9e76dfcb1139ef82a7d`.
+It corrects two Browser lint forms while preserving strict cleanup semantics and
+all revocation cases. All 125 owning cases, targeted typed lint and guarded
+Browser types pass. This source-only successor preserves installed R10 and all
+of its separate activation and ordinary-use acceptance evidence.
+
+The dated October 13 installed source reference is
+[`9e6b7524b6eaf0e10700715c62b3fd71c659c582`](runtime/README.md#october-13-browser-and-deferred-voice-recovery),
+with matching native `1ec7fe1273609ef5b774a304dfb07460ae57cd22`.
+Fatal errors after the first authenticated speaker now reach the current auto-join
+owner before room retirement, preventing repeated physical rejoins while retaining
+explicit recovery and transient retries. Browser cache setup tolerates allowed
+navigation; bounded diagnostics distinguish targeting, post-action uncertainty
+and closed targets without automatic action retries. Source checks, one preserving
+R10 activation and independent loaded-source, health and protected-state readback
+pass. Native Chrome reload and Browser navigation/readback/owned-tab cleanup also
+pass; final hosted checks remain pending. Earlier human
+voice acceptance is retained separately.
+
+The dated October 13 authenticated-speaker test reference is
+[`b62983e9d2a1b15a1b6a04fba20d428c9ba29700`](runtime/README.md#october-13-authenticated-speaker-test-fixtures).
+It corrects three stale voice test fixtures to admit authenticated speakers and
+inspect their actual connections. All 86 affected cases pass with cancellation,
+cleanup and isolation assertions intact. Production source and the installed
+`a33002eb` / native `87ec8a44` release remain unchanged. After the reviewed native
+profile recovery, the operator reported stable answers in personal and company
+rooms, consultation acknowledgment and a completed spoken reply, and the
+preferred voice. Exact company source values were not independently
+transcript-correlated; no measured speech latency is claimed.
+
+The dated October 13 authenticated owner voice reference is
+[`e92f9a192ba16647bc2fe3e43c290d63c3606c18`](runtime/README.md#october-13-authenticated-owner-voice-context).
+Authenticated realtime voice preserves speaker-scoped primary and room policy,
+uses permitted records consultation for factual checks, and retains queued
+microphone replies and playback ownership. All 376 affected cases passed on
+that dated predecessor source, which was never installed. Before building, the
+actual keyed roster with an explicit system owner exposed a resolver error. The
+latest `a33002ebbb05dd80895740550c0eceb4c85da8cd` /
+`87ec8a444396313d90d00022cc2ed1dfa511adab` source corrects it and passed 71 focused
+cases. Installation and genuine-call acceptance retain separate proof boundaries.
+
+The dated October 13 realtime voice reference is
+[`55ffb6953eb7179233a45aa942966769b6efcdd5`](runtime/README.md#october-13-realtime-voice-reliability).
+Realtime voice retains whole selected policy/profile context, uses the normal
+response queue for microphone replies when interruption is disabled, and checks
+records through the agent consult for missing or fresh facts and actions.
+All 289 affected cases pass. The one-file documentation hash successor preserves
+entry counts, core/plugin output and the frozen 27 voice files.
+Current source references are distinct from the frozen R8 build/seal and the
+retained dated installation; real-call and screenshot acceptance remain separate.
+
+The dated October 13 configuration documentation reference is
 [`c3298d804165eb5ca5f41815d04dbcf4e8a7e4d3`](runtime/README.md#october-13-discord-config-documentation).
 The ordinary configuration documentation generator now records exactly the 18
 expanded entries from the previously approved Discord voice schema. Channel
