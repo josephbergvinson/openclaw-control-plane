@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 browser and deferred voice recovery](#october-13-browser-and-deferred-voice-recovery)
+[October 14 Browser lint style](#october-14-browser-lint-style)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,29 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 14 Browser lint style
+
+Canonical `70413d04c280cd35cd41e8eb3942d2def4c15e89` and native `376af34f3a2cc9178b83e9e76dfcb1139ef82a7d` correct two typed lint errors without changing Browser behavior.
+The task-completion cleanup predicate still accepts only literal true, calls the
+same receiver once and preserves short-circuit and exception handling. The
+revocation fixture uses explicit ordered rows for navigation and cache true/false,
+retaining all ten revocations in both access modes and all assertions.
+
+All 125 owning cases pass: 118 navigation/cache-policy and seven task-completion
+cleanup cases. The 60 revocation matrix rows are unchanged. Actual typed lint,
+guarded Browser types, formatting and whitespace checks pass. The first aggregate
+test invocation collected no Browser tests because that config excludes them;
+the normal file-targeted owner then passed, with the first result retained.
+
+This is a source-only successor. Installed R10 remains canonical
+`9e6b7524b6eaf0e10700715c62b3fd71c659c582` / native `1ec7fe1273609ef5b774a304dfb07460ae57cd22`
+with its actual build, activation, loaded-state and Chrome acceptance. No new
+private runtime build, snapshot, restart or human hearing is required for this
+equivalent style/test-data correction. The preceding failed public head is
+retained, and the five existing hosted checks must qualify the exact new head.
+All dated manifest/deployment records, native overlay, two fixture privacy
+substitutions, workflow and sanitized UI assets remain unchanged.
 
 ## October 13 browser and deferred voice recovery
 
