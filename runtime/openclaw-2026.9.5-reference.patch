@@ -10715,7 +10715,7 @@ index 0000000000000000000000000000000000000000..467eeedbc04c0f1c7b20fa87f87c9c90
 +  });
 +});
 diff --git a/extensions/browser/chrome-extension/background.navigation.test.ts b/extensions/browser/chrome-extension/background.navigation.test.ts
-index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..387904f579d779dbac672ddf931a12664fee95f6 100644
+index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..d2c3ad749ec90f82b5b9a0fdf4ffe10793309638 100644
 --- a/extensions/browser/chrome-extension/background.navigation.test.ts
 +++ b/extensions/browser/chrome-extension/background.navigation.test.ts
 @@ -84,6 +84,53 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
@@ -10772,7 +10772,7 @@ index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..387904f579d779dbac672ddf931a1266
    it("retires stale page data across a reload without a URL change", async () => {
      const harness = await createHarness(mode);
      await harness.command({ type: "createTab", url: "https://example.com/same" });
-@@ -119,29 +166,44 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
+@@ -119,29 +166,50 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
      expect(await executing).toMatchObject({ type: succeeds ? "result" : "error" });
    });
  
@@ -10809,12 +10809,18 @@ index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..387904f579d779dbac672ddf931a1266
 +        method: "Page.navigate",
 +        params: { url: "https://example.com/next" },
 +      },
-+      ...[true, false].map((cacheDisabled) => ({
++      {
 +        revocation,
-+        command: `cacheDisabled=${cacheDisabled}`,
++        command: "cacheDisabled=true",
 +        method: "Network.setCacheDisabled",
-+        params: { cacheDisabled },
-+      })),
++        params: { cacheDisabled: true },
++      },
++      {
++        revocation,
++        command: "cacheDisabled=false",
++        method: "Network.setCacheDisabled",
++        params: { cacheDisabled: false },
++      },
 +    ]),
 +  )(
 +    "rejects $command completion after $revocation even if an ordinary document returns",
@@ -10834,7 +10840,7 @@ index 24e476faebfd7ddcec59cd09bae57bca9a5d7a03..387904f579d779dbac672ddf931a1266
        });
        await vi.waitFor(() => expect(harness.debuggerSendCommand).toHaveBeenCalled());
        harness.updateTab(101, { url: "https://example.com/next" });
-@@ -194,7 +256,7 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
+@@ -194,7 +262,7 @@ describe.each(["all", "selected"] as const)("navigation command authority in %s
          incognito: false,
        });
        completed.resolve();
@@ -27135,7 +27141,7 @@ index 0f65c377e010dc6959af3d05f28fdad85f81d398..00b00ef397e5c1c560239eed71329d5d
 +  return Object.assign(proc, overrides);
 +}
 diff --git a/extensions/browser/src/browser/session-tab-cleanup-claim.ts b/extensions/browser/src/browser/session-tab-cleanup-claim.ts
-index 45da96d7a5aa88c330e9eeb95e5442a4919dbaad..66306227e13dc27351a58e05c4d005008448013e 100644
+index 45da96d7a5aa88c330e9eeb95e5442a4919dbaad..71798000cb69b303b296c26745778e9a6b95c4a3 100644
 --- a/extensions/browser/src/browser/session-tab-cleanup-claim.ts
 +++ b/extensions/browser/src/browser/session-tab-cleanup-claim.ts
 @@ -3,6 +3,7 @@
@@ -27176,7 +27182,7 @@ index 45da96d7a5aa88c330e9eeb95e5442a4919dbaad..66306227e13dc27351a58e05c4d00500
 +      Number.isFinite(completion.completedAt) &&
 +      completion.completedAt >= 0 &&
 +      typeof completion.isCurrent === "function" &&
-+      completion.isCurrent() === true
++      Object.is(completion.isCurrent(), true)
 +    );
 +  } catch {
 +    return false;

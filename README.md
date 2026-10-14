@@ -14,7 +14,15 @@ Company Alpha, Company Beta and the Personal Data Project are consistent example
 identities. Their procedures remain substantial; accounts, host paths and data are
 supplied by the adopter.
 
-The latest qualified and installed source reference is
+The latest qualified source reference is
+[`70413d04c280cd35cd41e8eb3942d2def4c15e89`](runtime/README.md#october-14-browser-lint-style),
+with native reference `376af34f3a2cc9178b83e9e76dfcb1139ef82a7d`.
+It corrects two Browser lint forms while preserving strict cleanup semantics and
+all revocation cases. All 125 owning cases, targeted typed lint and guarded
+Browser types pass. This source-only successor preserves installed R10 and all
+of its separate activation and ordinary-use acceptance evidence.
+
+The dated October 13 installed source reference is
 [`9e6b7524b6eaf0e10700715c62b3fd71c659c582`](runtime/README.md#october-13-browser-and-deferred-voice-recovery),
 with matching native `1ec7fe1273609ef5b774a304dfb07460ae57cd22`.
 Fatal errors after the first authenticated speaker now reach the current auto-join

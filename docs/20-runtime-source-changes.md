@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 browser and deferred voice recovery](#october-13-browser-and-deferred-voice-recovery)
+[October 14 Browser lint style](#october-14-browser-lint-style)
 separates the latest qualified source from the current Gateway installation.
 
 This architecture uses the customized OpenClaw build pinned in the runtime
@@ -17,6 +17,15 @@ manifest records the complete changed-path and commit counts from the pinned
 official release. It includes
 capabilities retained during the upgrade and subsequent repairs across several
 workstreams, rather than only the final Discord changes.
+
+## October 14 Browser lint style
+
+The [source-only successor](../runtime/README.md#october-14-browser-lint-style)
+keeps strict literal-true cleanup and every revocation fixture row while expressing
+them in the forms accepted by the existing typed lint rules. All 125 owning cases
+and proportional lint/type/format checks pass. Installed R10 remains unchanged;
+the newer canonical/native references have their separate source qualification.
+The existing final-head hosted checks remain required.
 
 ## October 13 browser and deferred voice recovery
 
