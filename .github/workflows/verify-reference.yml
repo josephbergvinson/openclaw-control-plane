@@ -135,6 +135,15 @@ jobs:
             extensions/discord/src/voice/access.test.ts \
             extensions/discord/src/voice/segment.test.ts \
             extensions/discord/src/voice/realtime-consults.test.ts \
+            extensions/discord/src/voice/voice-session.promotion.test.ts \
+            extensions/discord/src/voice/voice-receive.test.ts \
+            extensions/discord/src/voice/realtime-listening.test.ts \
+            extensions/discord/src/voice/realtime-speaker-context.test.ts \
+            extensions/discord/src/voice/voice-conversation-input.test.ts \
+            extensions/discord/src/voice/voice-session.startup.test.ts \
+            extensions/discord/src/voice/realtime-turns.test.ts \
+            extensions/discord/src/voice/transcripts-conversation.test.ts \
+            extensions/discord/src/voice/transcripts-realtime-recording.test.ts \
             extensions/discord/src/voice/realtime-consults.host-cancellation.test.ts \
             extensions/discord/src/voice/realtime-playback.test.ts \
             extensions/discord/src/voice/realtime-speaker-sessions.test.ts \
@@ -153,6 +162,7 @@ jobs:
             test/vitest/vitest.agents-core.config.ts \
             src/agents/agent-command-execution-identity.test.ts \
             src/agents/agent-command-execution-identity.requester-final.test.ts \
+            src/agents/realtime-bootstrap-context.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-voice-execution-identity.log"
       - name: Verify normal voice runtime ingress authority
         id: voice-runtime-ingress
@@ -173,7 +183,23 @@ jobs:
             --config \
             test/vitest/vitest.unit.config.ts \
             src/talk/realtime-session-policy.test.ts \
+            src/talk/activation-name.test.ts \
+            src/talk/agent-consult-tool.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-voice-wake-policy.log"
+      - name: Verify realtime provider response and listening lifecycle
+        id: realtime-provider-response-lifecycle
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config \
+            test/vitest/vitest.extension-provider-openai.config.ts \
+            extensions/openai/realtime-voice-response-control.test.ts \
+            extensions/openai/realtime-voice-terminal-outcomes.test.ts \
+            extensions/openai/realtime-voice-bridge-tools.test.ts \
+            extensions/openai/realtime-voice-bridge-events.test.ts \
+            extensions/openai/realtime-voice-bridge-reconnect.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/reference-realtime-provider-response-lifecycle.log"
       - name: Verify generated Discord voice configuration metadata
         id: discord-voice-config-metadata
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -693,6 +719,7 @@ jobs:
             ${{ runner.temp }}/reference-voice-execution-identity.log
             ${{ runner.temp }}/reference-voice-runtime-ingress.log
             ${{ runner.temp }}/reference-voice-wake-policy.log
+            ${{ runner.temp }}/reference-realtime-provider-response-lifecycle.log
             ${{ runner.temp }}/reference-discord-voice-config-metadata.log
             ${{ runner.temp }}/reference-npm-override-contexts.log
           if-no-files-found: error

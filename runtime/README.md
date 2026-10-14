@@ -2,7 +2,7 @@
 
 The sections below preserve dated qualification and deployment observations.
 References to “current” describe the state at that date. The
-[October 13 Discord config documentation](#october-13-discord-config-documentation)
+[October 14 Browser lint style](#october-14-browser-lint-style)
 separates the latest qualified source from actual Gateway and companion installation.
 
 This package reproduces the customized OpenClaw source identified by this
@@ -15,6 +15,174 @@ The [manifest](manifest.json) pins the upstream tag and commit, deployed and ref
 source, sanitized source tree, patch checksum and toolchain. The
 [source changes chapter](../docs/20-runtime-source-changes.md) explains the changes
 and the boundary between source reconstruction and installation.
+
+## October 14 Browser lint style
+
+Canonical `70413d04c280cd35cd41e8eb3942d2def4c15e89` and native `376af34f3a2cc9178b83e9e76dfcb1139ef82a7d` correct two typed lint errors without changing Browser behavior.
+The task-completion cleanup predicate still accepts only literal true, calls the
+same receiver once and preserves short-circuit and exception handling. The
+revocation fixture uses explicit ordered rows for navigation and cache true/false,
+retaining all ten revocations in both access modes and all assertions.
+
+All 125 owning cases pass: 118 navigation/cache-policy and seven task-completion
+cleanup cases. The 60 revocation matrix rows are unchanged. Actual typed lint,
+guarded Browser types, formatting and whitespace checks pass. The first aggregate
+test invocation collected no Browser tests because that config excludes them;
+the normal file-targeted owner then passed, with the first result retained.
+
+This is a source-only successor. Installed R10 remains canonical
+`9e6b7524b6eaf0e10700715c62b3fd71c659c582` / native `1ec7fe1273609ef5b774a304dfb07460ae57cd22`
+with its actual build, activation, loaded-state and Chrome acceptance. No new
+private runtime build, snapshot, restart or human hearing is required for this
+equivalent style/test-data correction. The preceding failed public head is
+retained, and the five existing hosted checks must qualify the exact new head.
+All dated manifest/deployment records, native overlay, two fixture privacy
+substitutions, workflow and sanitized UI assets remain unchanged.
+
+## October 13 browser and deferred voice recovery
+
+Canonical `9e6b7524b6eaf0e10700715c62b3fd71c659c582` and native `1ec7fe1273609ef5b774a304dfb07460ae57cd22` repair fatal provider recovery after the first authenticated speaker.
+Previously that deferred error retired an auto-joined room before the auto-join
+owner recorded its cause, allowing repeated physical rejoins. The current room
+now records the native fatal cause before retirement. Successful explicit
+recovery clears existing suppression; transient failures remain retryable,
+and stale callbacks cannot suppress a replacement room.
+
+Browser cache setup can finish across an allowed document navigation while
+existing access and policy checks stay active. Interaction diagnostics distinguish
+unresolved targeting, uncertain post-action waits and closed targets, using
+bounded sanitized guidance without automatic action retries. The obsolete
+Browser SDK path override is removed in favor of the existing canonical facade.
+
+All 131 current voice cases across seven files pass. The exact unchanged Browser
+cache/policy qualification retains 118 passing cases; current diagnostics and
+abort checks pass 21 cases. Combined guarded Browser/Discord types, SDK consistency,
+the unchanged line-limit guard and whitespace checks pass. These scopes are
+recorded separately from repeated and predecessor runs.
+
+The matching R10 runtime passed its normal build, compiled SDK and current Browser
+asset checks, stage and seal. One preserving activation completed at
+`2026-10-13T21:45:39.699113Z`; independent same-generation Gateway/Node
+loaded-source, health/ready and protected-state verification followed at
+`2026-10-13T21:47:34.372487Z`. Native Chrome reload and ordinary Browser navigation/readback/owned-tab cleanup
+also pass; final public hosted checks remain pending. Earlier human R9 voice acceptance is retained
+separately, without a new R10 hearing or measured latency claim. The native archive,
+two YAML overlays, two fixture privacy substitutions and all dated records remain.
+
+## October 13 authenticated-speaker test fixtures
+
+Canonical `b62983e9d2a1b15a1b6a04fba20d428c9ba29700` and native `d898edea4806920a1c8c1b8c3352c12340e62d00` add only three test-fixture corrections.
+Each fixture explicitly admits an authenticated synthetic speaker and uses that
+speaker's actual connection. Shutdown, queued cancellation, capacity, playback
+and speaker/owner isolation assertions are retained. All 86 unique affected
+cases pass: 42 unchanged playback/speaker cases and 44 final lifecycle cases.
+Guarded test types and targeted lint pass. Fresh standalone reconstruction matches
+all 45,185 source entries with only the two existing fixture substitutions; the
+native archive and distribution overlay are unchanged. The original hosted failure and local
+lint/spy-API failures remain recorded; repeated cases are not added to the count.
+
+Production source and the installed `a33002eb` / native `87ec8a44` release are
+unchanged. After the reviewed native profile recovery, the operator reported
+stable answers in personal and company rooms, consultation acknowledgment and a
+completed spoken reply, and the preferred voice. Exact returned company source
+values were not independently transcript-correlated, and no measured speech
+latency is claimed. This human report is separate from test-source qualification.
+
+## October 13 explicit owner-agent resolution
+
+Canonical `a33002ebbb05dd80895740550c0eceb4c85da8cd` and native `87ec8a444396313d90d00022cc2ed1dfa511adab` carry the corrected
+28-file combined voice source. The existing ambient owner resolver supports
+keyed agent rosters and defaults.systemAgent, so authenticated owners select the
+configured primary agent for realtime bootstrap and permitted factual records
+consultation. Guest room isolation and trusted Discord origin remain intact.
+The existing resolver is exported through the private realtime-bootstrap facade;
+the broad public agent-runtime barrel and SDK surface limits are unchanged.
+
+The actual explicit-owner configuration regression fails three cases on the
+prior source and passes after correction. All 71 scoped cases across five files
+and three owning shards pass, alongside the existing guarded checks. The earlier
+376-case/21-file voice qualification remains dated at its predecessor; these
+scopes overlap and are not added as disjoint coverage. Fresh ordinary canonical
+reconstruction and the unchanged native overlay match all 45,185 mode/blob/path
+entries after only the two existing fixture substitutions. Matching native R9
+build/stage/seal, one preserving activation and independent same-generation
+Gateway/Node loaded-source, health/ready and protected-state verification passed.
+The accepted activation completed at `2026-10-13T17:32:07.822892Z`; the independent
+loaded-preservation reader followed at `2026-10-13T17:32:59.032080Z`.
+
+The subsequent genuine call failed at required primary context startup. One
+reviewed native profile-provenance reconciliation restored all four whole primary
+files (57,822 characters) and the combined primary-plus-room context (eight whole
+files, 68,966 characters) within the unchanged 96,000-character budget. Eleven
+protected files and 87 unrelated provenance records are unchanged; no source,
+configuration, workspace or release edit was needed. This readback resolves the
+required-context exclusion; a new genuine call and audible acceptance remain
+pending. The earlier failed call remains recorded, and context readback does not
+establish a working voice call.
+Prior R8 and R7 installation history and all dated qualifications remain intact.
+
+## October 13 authenticated owner voice context
+
+Canonical `e92f9a192ba16647bc2fe3e43c290d63c3606c18` and native `0a35ef1f3fcd67d2d3a1943c968356e60529193e` are the qualified
+27-file successor to the earlier realtime voice and documentation references.
+Joining validates provider configuration and the voice catalog without opening
+an anonymous connection. The first authenticated speaker supplies immutable
+identity and context before the provider connection receives audio.
+
+Owner connections inherit the default agent's whole selected policy/profile
+alongside room context; other speakers retain room context. Profiles are read by
+reference, remain speaker-scoped through replacement, and are not copied into
+room workspaces. The combined 96,000-character budget and recoverable errors
+prevent missing, unreadable or oversized required primary context from silently
+admitting partial policy. In conversation-only rooms, permitted factual checks
+can consult the owner's default-agent records, acknowledge the check and speak
+the verified final while retaining real Discord origin and authorization.
+
+All 376 affected cases across 21 files and three owning shards passed on
+that dated predecessor source, alongside scoped guarded types, typed lint and
+unchanged SDK, boundary, line-cap and assertion checks. That `e92f9a192ba16647bc2fe3e43c290d63c3606c18` /
+`0a35ef1f3fcd67d2d3a1943c968356e60529193e` predecessor was never installed. Before
+building, the actual keyed roster with an explicit system owner exposed a
+resolver error. The latest `a33002ebbb05dd80895740550c0eceb4c85da8cd` /
+`87ec8a444396313d90d00022cc2ed1dfa511adab` source corrects it and passed 71 focused
+cases. Existing response queue, wake-name, requester-final, cancellation,
+promotion and recording behavior retain their source qualification. Installation,
+sanitized UI help rendering and genuine-call acceptance have separate evidence.
+The earlier R8 qualification and standalone reconstruction remain dated and are
+not credited for this successor.
+
+## October 13 realtime voice reliability
+
+Canonical source `55ffb6953eb7179233a45aa942966769b6efcdd5` and native source `0d8bfa9ad64a82e7aa8faf442eb42df01f0ddb48`
+include the qualified 27-file voice repair and one generated hash-file successor.
+Realtime sessions include whole selected AGENTS.md, IDENTITY.md, USER.md and
+SOUL.md policy/profile files within a deterministic 96,000-character budget.
+Oversized required context reports a typed recoverable startup error rather than
+truncating policy. Known profile facts can be answered from that context; missing
+or fresh facts and actions use the existing agent consult and records first.
+
+The native OpenAI response owner queues microphone-triggered replies when
+interruption is disabled, preserving listening and existing response ownership.
+Wake-name gating recognizes the direct greeting transcript without treating
+ordinary mentions or introductions as activation. Existing call promotion,
+requester-final, cancellation, reconnect and recording behavior is retained.
+All 289 affected cases across 14 files pass on the frozen voice source, alongside
+the guarded owning checks and compiled SDK budget-error export contract.
+
+The ordinary documentation generator updates only two hash rows for two existing
+enum entries and one help entry. Counts stay core 2447, channel 3762 and plugin
+4241, and core/plugin whole bytes and strict guards are unchanged. Reverting only
+those three fields reproduces every original artifact byte and hash. The initial
+drift failure remains recorded; normal generation, final check and whitespace pass.
+
+The frozen R8 build, stage and seal remain canonical `dd339e51bf04ac3da3c3e72dd5c72695c70cea52` / native
+`56a3cf38edb06c8ea7b8e4f364ecc13dd29ccd51`. The newer documentation commits are source-only and do not relabel
+that candidate, build-info, seal or any installation receipt. Prior deployment
+history is retained unchanged. Actual R8 installation, genuine-call acceptance
+and sanitized before/after screenshot delivery remain separate held evidence.
+Fresh standalone source reconstruction and final-head hosted checks are recorded
+separately before publication; existing archive custody and exact native overlay
+are reused without a payload download or rehash.
 
 ## October 13 Discord config documentation
 
