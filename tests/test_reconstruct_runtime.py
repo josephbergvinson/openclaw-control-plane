@@ -347,7 +347,7 @@ class RuntimeReconstructionTests(unittest.TestCase):
                 with self.assertRaises(RUNTIME.ReconstructionError):
                     RUNTIME.validate_release_url(url, package.native.artifact.file)
 
-    def test_current_metadata_keeps_history_out_and_binds_the_distribution(self) -> None:
+    def test_current_metadata_keeps_history_out_and_scopes_deployment_separately(self) -> None:
         source, distribution = "1" * 40, "2" * 40
         manifest = {
             "schemaVersion": 1, "source": {"referenceCommit": source},
@@ -355,10 +355,17 @@ class RuntimeReconstructionTests(unittest.TestCase):
             "referenceDeployment": {"distributionCommit": distribution},
         }
         RUNTIME.validate_manifest_metadata(manifest, native_distribution=True)
+        RUNTIME.validate_manifest_metadata(
+            {**manifest, "referenceDeployment": {"distributionCommit": "3" * 40}},
+            native_distribution=True,
+        )
         for change in (
             {"historicalQualification": {"status": "pending"}},
             {"source": {"referenceCommit": "main"}},
-            {"referenceDeployment": {"distributionCommit": source}},
+            {"referenceDeployment": {}},
+            {"referenceDeployment": {"distributionCommit": "main"}},
+            {"referenceDeployment": {"distributionCommit": "g" * 40}},
+            {"referenceDeployment": []},
         ):
             with self.subTest(change=change):
                 with self.assertRaises(RUNTIME.ReconstructionError):

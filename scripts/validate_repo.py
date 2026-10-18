@@ -6,12 +6,14 @@ carries the fields its schema requires, relative links resolve, Mermaid sources 
 valid header, each diagram is referenced by at least one chapter, and every chapter has
 exactly one title.
 
-This is a lint. It checks structure, not accuracy.
+Checks cover document structure and declared artifact bindings, not live behavior.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import importlib.util
 import json
 import re
@@ -251,7 +253,9 @@ def validate_tree() -> list[Finding]:
         findings.append(Finding(manifest_path, f"reconstruction helper unavailable: {error}"))
     else:
         try:
-            package.load_package(ROOT / "runtime", native_distribution=True)
+            runtime = package.load_package(ROOT / "runtime", native_distribution=True)
+            if runtime.native is not None:
+                findings.extend(validate_native_provenance(runtime.native.artifact))
         except (package.ReconstructionError, OSError, ValueError, KeyError, TypeError) as error:
             findings.append(Finding(manifest_path, f"invalid reconstruction package: {error}"))
     for path in ROOT.rglob("*"):
@@ -260,6 +264,28 @@ def validate_tree() -> list[Finding]:
         if path.is_symlink():
             findings.append(Finding(path, "symlinks are not allowed in this tree"))
     return findings
+
+
+def validate_native_provenance(artifact) -> list[Finding]:
+    path = ROOT / "runtime/native154/native154-provenance.json"
+    try:
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        expected = {
+            "archiveName": artifact.file, "publicAssetURL": artifact.url,
+            "bytes": artifact.bytes, "sha256": artifact.sha256,
+            "integrity": "sha512-" + base64.b64encode(bytes.fromhex(artifact.sha512)).decode("ascii"),
+        }
+        findings = [Finding(path, f"native provenance differs from reconstruction artifact: {key}")
+                    for key, value in expected.items() if provenance["package"].get(key) != value]
+        patch = provenance["source"]["patch"]
+        if patch["path"] != "native154-source.patch":
+            return findings + [Finding(path, "native source patch must name the adjacent source patch")]
+        raw = (path.parent / patch["path"]).read_bytes()
+        if len(raw) != patch["bytes"] or hashlib.sha256(raw).hexdigest() != patch["sha256"]:
+            findings.append(Finding(path, "native source patch size or SHA-256 differs from provenance"))
+        return findings
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return [Finding(path, "native provenance cannot be verified")]
 
 
 def validate_expected_reference(source_commit: str | None, distribution_commit: str | None) -> list[Finding]:

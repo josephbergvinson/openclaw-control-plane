@@ -228,11 +228,68 @@ vi.mock(import("../../src/config/sessions/paths.js"), async (importOriginal) => 
 const loadSessionEntryMock = vi.hoisted(() => vi.fn());
 const updateAmbientTranscriptWatermarkMock = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 
+type SessionAccessor = typeof import("../../src/config/sessions/session-accessor.js");
+
+// SQLite persistence has its own conformance suites. Keep its pending-input
+// contract here while the real recorder, queue and live admission owners run.
 vi.mock("../../src/config/sessions/session-accessor.js", () => ({
   listSessionEntriesCore: vi.fn().mockReturnValue([]),
   loadSessionEntry: loadSessionEntryMock,
+  loadSessionEntryReadOnly: loadSessionEntryMock,
   patchSessionEntryCore: vi.fn(),
   persistSessionTranscriptTurn: vi.fn(),
+  resolveSessionTranscriptRuntimeTarget: vi.fn(
+    async (scope: Parameters<SessionAccessor["resolveSessionTranscriptRuntimeTarget"]>[0]) => {
+      if (!scope.agentId || !scope.sessionId || !scope.sessionKey) {
+        throw new Error("fixture transcript target requires an exact session");
+      }
+      return {
+        agentId: scope.agentId,
+        sessionId: scope.sessionId,
+        sessionKey: scope.sessionKey,
+        storePath: scope.storePath ?? "/tmp/fixture-sessions.json",
+      };
+    },
+  ),
+  stageSessionPendingInput: vi.fn(
+    async (
+      _scope: Parameters<SessionAccessor["stageSessionPendingInput"]>[0],
+      options: Parameters<SessionAccessor["stageSessionPendingInput"]>[1],
+    ) => {
+      options.assertCurrent();
+      const message = options.prepareMessageAfterIdempotencyCheck
+        ? options.prepareMessageAfterIdempotencyCheck(options.message)
+        : options.message;
+      if (!message) return undefined;
+      let finished = false;
+      return {
+        state: "queued" as const,
+        inputId: `fixture-pending-${options.runId}`,
+        message,
+        run: <T>(operation: () => T): T => {
+          if (finished) throw new Error("fixture pending-input ownership ended");
+          options.assertCurrent();
+          return operation();
+        },
+        finish: () => { finished = true; },
+      };
+    },
+  ),
+  bindSessionPendingInputSources: vi.fn(
+    (sources: Parameters<SessionAccessor["bindSessionPendingInputSources"]>[0]) => {
+      // Collected queue sources are unstaged until their aggregate is admitted.
+      // A staged-source case needs the storage owner's real receipt binding.
+      if (sources.length) {
+        preparedReplyMockState.unexpectedCalls.push("staged-source-binding");
+        throw new Error("unexpected staged-source binding in queue/admission fixture");
+      }
+      return undefined;
+    },
+  ),
+  withSessionPendingInputPersistence: vi.fn(
+    <T>(receipt: Parameters<SessionAccessor["withSessionPendingInputPersistence"]>[0], persist: () => T): T =>
+      receipt.run(persist),
+  ),
 }));
 
 vi.mock("../../src/config/sessions/ambient-transcript-watermark.js", () => ({

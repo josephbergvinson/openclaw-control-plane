@@ -99,11 +99,10 @@ def validate_manifest_metadata(manifest: dict, *, native_distribution: bool = Fa
     if deployment is not None:
         if not isinstance(deployment, dict):
             raise ReconstructionError("Manifest referenceDeployment must be an object")
-        commit = require_digest(deployment.get("distributionCommit"), 40,
-                                "reference deployment distribution commit SHA-1")
-        native = manifest.get("nativeDistribution")
-        if not isinstance(native, dict) or commit != native.get("referenceCommit"):
-            raise ReconstructionError("Reference deployment must bind the declared distribution commit")
+        # An installed reference can precede the source being reconstructed.
+        # Its identity is descriptive and never substitutes for the native tree.
+        require_digest(deployment.get("distributionCommit"), 40,
+                       "reference deployment distribution commit SHA-1")
 
 
 def validate_release_url(url: str, filename: str) -> None:
