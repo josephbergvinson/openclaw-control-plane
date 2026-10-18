@@ -8,13 +8,22 @@ on:
       - .github/workflows/steering-regression.yml
   pull_request:
   workflow_dispatch:
+    inputs:
+      expected_source_commit:
+        description: Reviewed canonical runtime commit; rejects a coherently stale package
+        required: false
+        type: string
+      expected_distribution_commit:
+        description: Reviewed native distribution commit
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   reference-checks:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,9 +36,26 @@ jobs:
         with:
           node-version: ${{ steps.runtime.outputs.node }}
       - name: Check documentation and examples
-        run: python3 -B scripts/validate_repo.py
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
+          EXPECTED_DISTRIBUTION_COMMIT: ${{ inputs.expected_distribution_commit }}
+        run: |
+          expected=()
+          if [ -n "$EXPECTED_SOURCE_COMMIT" ]; then
+            expected+=(--expected-source-commit "$EXPECTED_SOURCE_COMMIT")
+          fi
+          if [ -n "$EXPECTED_DISTRIBUTION_COMMIT" ]; then
+            expected+=(--expected-distribution-commit "$EXPECTED_DISTRIBUTION_COMMIT")
+          fi
+          python3 -B scripts/validate_repo.py "${expected[@]}"
       - name: Test reconstruction and workspace installers
         run: python3 -B -m unittest discover -s tests -p 'test_*.py'
+      - name: Test exported workspace behavior in its confined fixtures
+        run: |
+          python3 -m venv "$RUNNER_TEMP/reference-workspace-tests"
+          "$RUNNER_TEMP/reference-workspace-tests/bin/python" -m pip install \
+            -r workspace/dependencies/requirements.txt pytest
+          "$RUNNER_TEMP/reference-workspace-tests/bin/python" workspace/tests/run_periphery_tests.py
       - name: Test native plan preservation with fake command execution
         run: node --test tests/native-reference-checks.test.mjs
       - name: Check patch whitespace
@@ -314,6 +340,7 @@ jobs:
             src/auto-reply/reply/agent-runner-browser-cleanup.test.ts \
             src/auto-reply/reply/agent-runner-result-complete.retained-child.test.ts \
             src/auto-reply/reply/followup-runner.test.ts \
+            test/discord-queued-origin.integration.test.ts \
             src/browser-task-completion-cleanup.test.ts \
             src/plugin-sdk/browser-maintenance.completion.test.ts \
             extensions/browser/src/browser-node-proxy.completion.test.ts \

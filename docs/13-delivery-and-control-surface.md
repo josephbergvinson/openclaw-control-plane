@@ -1,386 +1,148 @@
 # Delivery and the operator interface
 
-Discord and Telegram are interfaces for directing work, receiving progress and reviewing results. A useful interface should make the state of a task understandable without exposing its internal event vocabulary.
-
-The agent's final answer and the runtime's terminal record serve different audiences. The first should satisfy the request. The second should help establish what executed and whether delivery succeeded.
+Discord and Telegram are interfaces for directing work, receiving progress and
+reviewing results. The answer should satisfy the request in ordinary language;
+the runtime records establish what executed and whether delivery succeeded.
 
 ## Separate three events
 
 | Event | What it proves | What it does not prove |
 | --- | --- | --- |
-| Model response completes | The provider returned that response. | The goal is satisfied or the destination received it. |
+| Model response completes | The provider returned that response. | The requested task finished or the destination received it. |
 | Task or goal completes | Its owner recorded a terminal outcome. | A visible message or external write exists at the intended destination. |
 | Destination readback confirms an effect | The particular message, event or file is observable there. | Every other part of the workflow is correct. |
 
-A transcript may retain generated responses and delivery mirrors. Counting final-looking transcript records is not a reliable way to count messages visible in Discord. Inspect the actual destination and the relevant delivery metadata.
+A transcript may contain generated responses and delivery mirrors. Count actual
+destination messages when checking duplicates, and inspect the intended account,
+channel and thread when checking a missing final.
 
 ## One clear result
 
-The parent responsible for the request owns the operator-facing result. A child returns evidence to that parent unless a specifically supported route assigns delivery elsewhere. A late child result should not cause another copy of an already complete answer.
+The parent responsible for the request owns its visible result. A worker returns
+evidence to that parent unless a supported route assigns delivery elsewhere.
+Direct replies, commands and resumed child results must preserve the same native
+completion ownership. A later worker event should not repeat a delivered final.
 
-Long-form text may need several channel-sized parts or an attachment. Preserve the complete content, continue automatically when required, and verify the delivered artifact rather than assuming a local file proves delivery.
+For multi-part text or attachments, preserve all requested content and verify the
+delivered artifact. A committed patch, prepared message or local report does not
+finish a request that also authorized release or delivery. Continue until the
+requested effect is verified or an actual dependency prevents further progress.
 
-Use ordinary prose. Avoid emoji, internal tool banners, routing dumps and redundant terminal-status messages. A necessary limitation should explain its practical effect on the request.
+The default reply mode may supply the originating message reference when a tool
+caller omits it. That convenience does not change the destination or grant a worker
+new posting authority. Explicit account, channel and thread bindings still apply.
+
+Use useful prose, without routing dumps, redundant terminal notices or internal
+inspection vocabulary. Explain a limitation by its effect on the request.
 
 ## Progress should reduce uncertainty
 
-During substantial work, post meaningful milestones and explain real dependencies promptly. Say what has been established and what the next step will resolve. Editing an old message is not always an adequate substitute for a new visible update during a long wait.
+During substantial work, provide material milestones and explain a real dependency
+promptly. Say what is established and what the next step will resolve. Repeatedly
+editing an old message may be insufficient during a long wait; use the supported
+visible progress path. Policy sets the expected cadence, while runtime presentation
+and native task ownership keep continuation updates deliverable.
 
-To omit generic tool-status narration, set
-`channels.discord.streaming.progress.narration` to `false`. Keep `commentary`
-enabled for authored progress and retain `streaming.mode: "progress"` for the
-existing editable progress card. `toolProgress` is a separate control for tool
-progress updates; keeping it disabled does not disable authored commentary.
-This presentation choice changes neither task execution nor final delivery.
+`channels.discord.streaming.progress.narration: false` omits generic tool-status
+narration. Keep authored `commentary` enabled when wanted; `toolProgress` controls
+tool progress separately. The editable progress card uses `streaming.mode:
+"progress"`. These settings change presentation, not execution or final ownership.
 
-A legitimate yield is not a failed empty answer. The runtime patch preserves pending-continuation ownership through native Discord command settlement. That implementation supports the agent's progress policy; it does not remove the need for useful communication.
+A legitimate yield is not an empty failed answer. Retain the original objective,
+child/result owner and requester return path, and resume when the child returns.
 
-## Approved company Discord reply surfaces
+## Company reply surfaces
 
-A company channel can be both a registered read source and an explicitly approved
-reply surface. Source registration alone does not create an inbound agent binding
-or permission to post. When the operator approves another reply channel, align
-its exact guild/channel route, live company-agent binding, sender/mention controls,
-channel prompt and company workspace policy. Verify the bot's effective View
-Channel and Send Messages permissions, plus Send Messages in Threads when used;
-category or member overrides can block replies despite correct routing. Preserve
-the intended teammate permissions and company context. Verify an ordinary allowed
-mention receives its response in that channel; a configuration readback alone does
-not prove delivery.
+A registered read source can also be an approved reply surface. Registering the
+source alone does not create inbound routing or a standing posting grant. Bind the
+intended agent, account, guild/channel, sender/mention behavior and company policy.
+Verify effective View Channel, Send Messages and applicable thread permissions;
+category/member overrides can still reject a correctly routed send.
 
-## Requested Discord voice meetings
+Test an ordinary permitted mention in the intended channel. A configuration
+readback or a reply elsewhere does not establish this route. The provider's actual
+roles apply; “full access” should not be interpreted as authority the operator lacks.
 
-The configured operator preference is to take meeting minutes when asked to join
-a registered company voice room. Announce to participants that the bot is recording
-for meeting notes, then use `transcripts` with the `discord-voice` provider to join
-silently and capture that meeting. An explicit request to join without recording
-uses native `message` action `voice-join` instead; that action remains connection-only.
-Ordinary team-server membership does not authorize unattended recording or broaden
-other teammates' authority. Run voice controls and capture start/stop in the
-authenticated requesting agent; delegate note drafting only after capture ends,
-and do not assume a background worker inherits the caller’s live meeting authority.
+## Realtime voice and task handoff
 
-For “join me” or “hop in voice”, resolve the authenticated requester’s current room
-with native `message` action `voice-status`, using the current `guildId` and their
-`userId`. Verify the returned room before joining. Ask which room only when the
-requester is not in voice or the intended target remains ambiguous.
+Voice uses the authenticated speaker, their selected agent and the room's policy.
+Bind the operator's real identity separately from display aliases. Configure the
+voice provider/model, preferred voice and speaking instructions, wake names and
+room/guild overrides through the native schema. Text-channel admission alone does
+not enable voice; verify voice-state access and actual Connect/Speak permissions.
 
-This workflow requires a selected runtime that exposes those message actions and
-the transcript provider. The policy templates are not a runtime implementation,
-and the earlier September 21 reference results below do not qualify this feature.
+Selected profile and policy context enters a new voice session at startup. The
+owner's permitted primary context and room context may both be supplied. Guests
+receive only their applicable context. Changing a file does not rewrite a running
+voice session; reconnect or use the supported session refresh before accepting the
+change. Inspect actual context/loading diagnostics instead of asking the model to
+infer whether a file was loaded.
 
-Bind the installation's verified operator identity and company guilds. Enable
-`channels.discord.voice.enabled`; keep voice states enabled, allow the intended
-voice rooms, and verify the bot's actual Connect permission. Enable transcripts
-and configure a working batch audio-transcription backend, including an existing
-local CLI backend when suitable. A missing `voice` block does not enable voice.
-Allowlisting a company's text channel alone need not admit its voice room. Keep
-text participation and teammate tool authority scoped to their intended uses.
+Configure `voice.actionHandoff` for rooms that should execute tasks. The realtime
+speaker can acknowledge a request and consult the normal agent for relevant records,
+delegation or actions. Conversation-only settings should not be presented as a
+missing capability. Authorized work retains its original requester and destination;
+the assistant follows up with the verified result rather than only promising work.
 
-Before requested capture, tell the participants that the bot is taking and saving
-meeting notes. Save the returned exact capture selector. The operator can then ask
-to stop and deliver the minutes: stop that capture, wait for finalization, inspect
-its notes, and deliver decisions, action owners, deadlines and open questions in
-the originating conversation. Manual capture does not automatically detect the end
-of a meeting, and the transcript provider does not automatically send its notes
-to Discord. Do not install an occupancy-based recurring recorder to implement a
-single requested meeting.
+Playback queueing, interruption preferences and provider recovery have independent
+owners. A generated reply is not proof that the full audio played. Measure first
+response delay and full audible completion on a real call; a test count or preferred
+voice setting cannot establish latency or a consistent accent by itself.
 
-A capture-only connection may leave automatically when capture stops; do not
-promise continued presence. When asked to leave, first stop and deliver any active
-capture, then use `voice-leave` if the task's connection remains and verify it left.
-A capture attached to a pre-existing conversation must not disconnect that owner.
-Qualification should cover a plain-language join and leave, rejected unauthorized
-control, a bounded sample capture with speech, stopping the exact capture, readable
-notes delivered to the originating conversation, and final connection cleanup.
-An enabled configuration or a successful join alone does not prove transcription
-or minutes delivery.
+## Meeting capture and minutes
 
-## September 23 requester presentation repair
+Use a requested or standing authorized recording preference and make participants
+aware that notes are being captured. Resolve “join me” with the authenticated
+requester's native voice-status result and verify the room. Ask for a room only
+when that result leaves a material ambiguity.
 
-Source `24e9bfe5431` addressed a gap in that lifecycle: a worker could
-resume its original requester without the presentation route used for ordinary
-incoming messages. The model kept working while typing, progress and narration
-were absent. The repair carries current run/session/destination authority through
-the internal resume and reuses the channel's configured progress card. Private
-worker completion prompts are excluded from narration. Progress does not acquire
-final-delivery custody; stale, replaced or cancelled owners cannot send delayed
-updates. Ninety focused cases passed across the agent and Discord owners. The
-September 23 source `5b5942def95c` retained this repair and passed its
-[dated hosted qualification](../runtime/README.md#september-23-qualified-source).
-Later runtime and live channel receipts retain their separate scope.
+Two supported workflows have different lifecycle owners:
 
-## September 22 native goal delivery repair
-
-A native goal could acknowledge the command and retain a completed model answer without sending the final result to Discord. The direct channel owner claimed the pending final before the native command adapter invoked a second durable sender. That sender rejected the already-claimed record and suppressed delivery before any transport call. A completed goal or clean transcript therefore did not establish publication.
-
-The repair selects the existing core durable route for continuing-goal finals and retains the actual command-target session identity. Private acknowledgements and ordinary slash responses keep their existing interaction hooks. Final preparation drains completed progress first; hooks may rewrite or cancel content, multi-part replies retain their delivery receipts, and an unsupported durable route reports failure without claiming that a message was sent.
-
-The real adapter/channel-turn/queue regression reproduced zero physical final sends before the repair. Eighteen focused cases subsequently passed across custody, dispatch/adoption and goal progress, including hook cancellation, multi-part delivery and ordinary slash responses. Source `1fb1f66cfe29` activated on the originating gateway at 11:22:01.365523 UTC on September 22. Its signed app, build `2609000592`, was verified installed and observed connected on the originating Mini on September 22. A bounded native-goal final subsequently passed with exact Discord readback; that result does not establish longer-work progress or every completion path.
-
-A later owned-handoff check delivered its final into an existing Discord thread, but the backend incorrectly reported missing visible delivery. Existing thread channels lacked canonical thread identity in the provider receipt. Source `085711060c84` records that identity from actual channel metadata in each chunk and the aggregate receipt. It leaves strict source matching, account authority and refusal handling intact. Fourteen producer and composed settlement cases pass, including nonthread, unknown-metadata, account, target, partial, progress-only and dry-run refusals. Transport and model/handoff boundaries are substituted in those tests; the successor activated at 12:37:05.013053 UTC. Its fresh diagnostic reached a provider rate limit before child creation, so actual live settlement remains pending. The qualified native companion is unchanged because this producer runs in the external Gateway.
-
-## September 21 follow-up delivery incident
-
-An observed “Yield failed” message was a runtime-generated tool-failure warning.
-It did not mean Discord had rejected a message. The parent had sent follow-up work
-to an existing child, but its current turn did not own a completion handoff. The
-wait tool rejected the request. With no visible final answer, the generic warning
-became the channel response while child work continued independently.
-
-The repair binds eligible follow-ups to the current parent turn and
-preserves the child's logical task across executions. Eligibility requires the
-same requester, controller and child-session identity. An active child is steered
-through its current execution owner; a completed child uses native reactivation.
-The accepted receipt keeps execution and completion identities separate so both
-supported harness paths can settle the correct obligation. A pending send or watch
-alone is insufficient.
-
-The handoff must also retain other results in the same completion batch. A delayed
-callback from an older wait must not settle a newly claimed obligation or reuse its
-delivery identity. These are lifecycle requirements, beyond changing the warning text.
-
-The repair also explains a rejected wait in ordinary prose while retaining the
-failure. It does not replace a useful final answer with a duplicate warning, claim
-that work stopped, or promise an unconfirmed later response.
-
-The [repair record](../runtime/README.md#september-21-follow-up-repair)
-pins source `daf5771a7d868903ada1a99cf595a587027f018c`. Local source checks, 507 focused
-suite tests, four filtered cases and 16 requester-wake end-to-end cases passed.
-Fresh reconstruction matched all 39,499 tracked entries, except the two established
-fixture-label substitutions. Two review findings were corrected and independently
-inspected after correction.
-
-The sealed release was activated on September 21. A bounded live diagnostic then
-completed phase one in a native child, followed up in that same child with a stable
-completion receipt, successfully yielded, and resumed the parent with phase two.
-Exactly one final message was read back from Discord at 18:41:39.824 UTC,
-35.974 seconds after acceptance. The first attempted wait had been skipped because
-phase-one completion was already queued; this was one successful yield, not two.
-
-That check establishes the exercised follow-up and delivery path. The
-[hosted qualification](../runtime/README.md#earlier-september-21-qualification) subsequently
-passed for `daf5771a7d86`. Broader workloads retain their own acceptance requirements.
-The older results below retain their original source and deployment identities.
-
-### Active-child follow-up and stale terminal warning
-
-A later task exposed a distinct path: a follow-up targeted a child that was still
-running. The owned follow-up helper forced a new agent-to-agent reply-delivery mode
-onto that existing execution. Its validator correctly rejected the mismatch. The
-parent continued useful work and successfully yielded to an owned continuation,
-but the earlier send error became a final “Session Send failed” channel warning.
-Child work was still running; the warning did not describe a terminal task failure.
-
-The correction preserves the active child's admitted delivery mode and leaves
-generic agent-to-agent restrictions unchanged. The shared terminal owner defers
-that fallback warning during a successful, core-confirmed pause, regardless of
-tool effect class. Error facts remain recorded; failed, cancelled or unowned turns
-still expose unresolved errors. This behavior applies to both supported harnesses.
-
-The [correction record](../runtime/README.md#active-child-follow-up-correction)
-describes failing-then-passing regressions through the real execution validator
-and payload renderer. The source is committed as `18b432ca2f83a107b1bc329cedf2221f20e61639`
-and included in the patch. Its full build, activation and a bounded live check of
-active and completed child follow-ups passed. That live check delivered one final
-Discord response in 103.310 seconds, with one skipped wait and one successful yield.
-A second live check retained a real failed `sessions_send` result through a
-successful yield. The same child completed, the parent resumed automatically, and
-Discord received exactly one final response in 117.275 seconds with no stale failure
-warning. The nonzero shell exit in the first check was not used as tool-error proof.
-Hosted qualification of that exact historical public revision remained pending
-at this checkpoint; the current source's separate hosted result is recorded in the
-[runtime package](../runtime/README.md#hosted-qualification). The earlier
-completed-child check did not cover this active-child mode mismatch.
-
-## Additional Discord repair qualification
-
-The additional repair has operator source commit [6e5890826b64df455be0c50756ef917aa6ee1211](https://github.com/josephbergvinson/openclaw-runtime-source/commit/6e5890826b64df455be0c50756ef917aa6ee1211). Local qualification passed 570 behavior tests and the native type, lint, import, state, security and dead-export checks. The aggregate build, release staging, candidate import, source seal and initial activation also passed. A private exact-message fetch passed after activation. The first live Discord retest nevertheless failed delivery acceptance; the deployed successor subsequently passed the bounded live checks described below.
-
-The historical September 15 reference `3498293635372bd128eb4d3cddd520ffb0cfb6ae` retained these repairs and added the native Mac app/private-worker authentication change described in the [source map](20-runtime-source-changes.md). Its gateway remained on source `b3ee068c6c6b1fe4f90b5313c7b07a4cb0647a47`; its manifest separately identified the companion production delta and scoped acceptance. Its normalized tree was `4afd5efe52ae0ba136f738538477f4256500bc5a`. The current [runtime manifest](../runtime/manifest.json) separately records the September 22 source export and deployed gateway. The Discord results below retain their original revisions and do not qualify that newer source. The compact resolver change remains a workspace helper with its own fixture tests.
-
-The baseline calendar request took 598.812 seconds from submission to its final Discord reply. Its trace contained 42 successful tool calls, no tool errors or timeouts, and no compaction. Broad searches, a full resolver result and an exact-message read that incorrectly returned channel history added large outputs to the context. These observations identify unnecessary input volume; they do not establish how much of the delay each output caused. The repair preserves model and reasoning settings.
-
-Source inspection established that preview cleanup ran at a worker yield and that the resumed command path lacked continuation presentation. Later channel history contained no retained progress updates, but cannot establish whether a transient initial preview appeared before deletion. The fixes retain eligible progress at yield and give resumed work the existing native progress and typing path. Separately, a compact resolver fixture reduced output from 63,527 to 21,048 bytes, a 66.87% reduction. That measures output size, not an improvement in end-to-end latency.
-
-| Boundary | Required behavior |
+| Workflow | Lifecycle |
 | --- | --- |
-| Exact message read | Discord `read --message-id <id>` returns that exact message or an error. It must not silently become a channel-history read. Exact reads preserve target authorization and reject `--limit`, `--before`, `--after` or `--around` alongside the message ID. |
-| Worker yield and resume | The original request keeps one delivery owner. Its visible preview survives a worker yield, and resumed milestones use the native channel presentation path. A retained transcript alone does not prove channel delivery. |
-| Continuation typing | Typing follows the lifetime of the resumed turn, including time between tool work and a final response. It stops when that turn settles or fails; a partial progress update must not end it early. |
-| Delivery-disabled heartbeat | A legitimate silent internal result must not trigger a retry demanding a visible answer. Ordinary requests still need a useful result or an explicit explanation of what remains. |
+| Configured participant following/meeting recording | The follow owner tracks the visit, recording, finalization and configured summary destination. Explicit leave pauses following for that visit; a new visit is a separate event. |
+| Manual `transcripts` capture with `discord-voice` | Retain the exact returned selector, stop that capture explicitly, wait for finalization and inspect/deliver its notes. Do not assume it automatically posts or detects the meeting end. |
 
-Qualify these paths separately with regression tests and actual destination readback. Measure the time to the first visible update and final result, observe preview retention and typing across continuation, and check for missing or duplicate messages. Keep runtime verification and live acceptance distinct from the compact resolver's fixture-only presentation tests.
+Native `message` action `voice-join` is connection-only; it does not by itself start
+a manual transcript. Use `voice-status`, `voice-join` and `voice-leave` through the
+authenticated requesting agent. A background drafting worker does not inherit live
+meeting-control authority merely because it received a transcript.
 
-### First live retest
+Captures can include human speech and assistant speech that actually reached
+playback. Outgoing audio enters the recorder separately from conversational input,
+so it cannot make the bot hear and answer itself. Stop/leave finalization drains
+accepted input/output for that capture; a late old response must not enter a new
+meeting. Interrupted, unheard or uncaptured content remains a coverage limitation.
 
-An ordinary Discord request received a retained acknowledgment after 20.082 seconds. The agent generated an accurate two-meeting answer after 230.292 seconds, but that answer was absent from the observed interface and bounded Discord history during the initial observation window; only the acknowledgment was retained in that window. This was a failed delivery test, despite correct answer generation.
+Use the LLM to draft decisions, action owners, stated deadlines and open questions.
+Check names and facts against relevant existing records; do not turn a transcription
+mistake into an invented company or decision. Preserve uncertainty and meaningful
+coverage gaps. Avoid a second elaborate correction system when contextual review
+is sufficient.
 
-The trace showed a silent heartbeat with delivery target `none` and a prompt requiring only `NO_REPLY`. Native retry logic then demanded a visible answer and placed it in the shared transcript. The proper requester-settlement continuation subsequently produced `NO_REPLY` on three attempts. The observed classification was asynchronous command completion; the precise wake origin was not retained. It would therefore be incorrect to assert an exact wake source from this trace.
+When leaving, finalize and deliver the task's active capture before closing any
+remaining owned connection. A capture attached to an existing conversation must
+not disconnect that other owner. Do not install a recurring recorder for one
+requested meeting or broaden recording to unrelated rooms.
 
-### Committed successor
+## Context notices and interrupted requests
 
-The corrections are integrated in operator source commit [7fbb56e134a70c63d1404af547db71bd4870dc3c](https://github.com/josephbergvinson/openclaw-runtime-source/commit/7fbb56e134a70c63d1404af547db71bd4870dc3c), now published to the operator-owned private repository with the remote revision verified:
+Supported compaction preserves task continuity but is separate from the next model
+request. If a provider request fails after compaction, retain the original task and
+use supported bounded recovery; do not claim the task finished or require a new
+conversation when normal continuation can recover it.
 
-- An optional silent heartbeat result settles without a retry demanding a visible answer. The regression reproduced the failure before the fix.
-- Heartbeat preflight and run admission recheck both durable and live requester ownership, preserving the owner of a yielded request.
-- The announcement socket fallback requires the canonical native child task before dispatch, while preserving an existing silent CLI task row rather than treating it as the child task.
-
-Separate behavioral runs passed 175 heartbeat/reply-context cases, 66 ownership/sibling cases and 54 admission cases. Registration qualification includes 149 passing cases, the corrected final store case, and an 18-case file rerun after mechanical test extraction.
-
-An independent review found no P0–P2 issues within its scope. Production and test type checks passed, including the final affected test graph after extraction, along with the required lint, state, import, authorization and dead-export checks. The successor is deployed and native activation checks passed. Post-activation verification renewed current-process capture capability and confirmed that configuration, authentication state and scheduled jobs were preserved.
-
-### Successor live retest
-
-An ordinary calendar read delivered its final response after 52.933 seconds with two command executions; a follow-up calendar verification delivered after 58.361 seconds with one. Exact Discord REST readback matched the generated final response in each case. An independent destination-calendar read confirmed both existing entries retained their identifiers, times and joining links, with no duplicates. In both runs, a silent heartbeat returned `NO_REPLY` and settled successfully without a forced visible-answer retry. These fresh-run timings do not establish a comparable latency improvement over the earlier incident.
-
-A document-retrieval request received steering after 21.377 seconds and continued in the same native run. It delivered one retained final response with the PDF after 88.633 seconds from the request, or 67.256 seconds from the steering message, using three successful tool calls with no compaction or timeout. The sent local PDF matched the independently retained original hash and 8,401-byte size, and provider attachment metadata matched. A CDN download returned HTTP 403, so destination attachment bytes were not independently hash-verified.
-
-A controlled two-worker request retained its acknowledgment after 25.393 seconds and delivered its final answer after 343.825 seconds. The parent yielded, both canonical native child tasks succeeded, and native requester settlement resumed the parent and delivered the final response without an operator nudge. Exact Discord readback matched a retained worker progress message to its source commentary and confirmed the final response. No intervening heartbeat took over the parent. The final interface observation showed typing stopped; sparse observations did not capture typing during the brief resumed parent phase, so live resumed-typing acceptance remains unverified.
-
-These four checks passed their observed delivery and calendar-state boundaries. The controlled worker test establishes the exercised yield-and-resume path; it does not establish blanket production readiness. The initial failure remains documented above, and the attachment-byte and resumed-typing limits remain explicit.
-
-The operator Workspace has also adopted the [browser and app cleanup policy](../templates/AGENTS.example.md#browser-and-app-cleanup), now mirrored in the public templates. That initial policy change alone did not establish actual cleanup behavior or memory savings.
-
-The bundled Calendar helpers now own the app lifecycle around their verified
-operation. A per-user advisory lock serializes helper calls through readback and
-cleanup. A helper launches Calendar hidden in the background only when needed,
-records its process and launch identity, and normally quits only its own unchanged,
-hidden, inactive instance with no visible windows or modified documents. Preexisting
-apps, user takeover, uncertain ownership and incomplete operations are preserved.
-A cleanup failure does not turn a verified event write into an instruction to retry it.
-
-Forty-two focused Calendar tests cover lifecycle and existing read/write behavior.
-The installed public bundle also exercises its lifecycle suite. A real read-only
-probe confirmed that an existing Calendar process stayed open with unchanged
-identity. Actual termination of a newly owned Calendar instance and memory savings
-remain separate live acceptance claims. Browser cleanup likewise preserves existing
-user and control tabs; this repair adds no global app or browser sweeper.
-
-## Later ownership and access repairs
-
-The current source addresses a separate memory-search lifecycle race:
-background cleanup could close a shared manager after search returned but before
-the tool finalized its status, exposing a false index/model mismatch. Search now
-holds the existing manager lease through result and status finalization. Closing
-waits for admitted work; the lease does not admit work after its callback ends.
-
-Before automatic compaction, a foreground memory checkpoint can itself require
-substantial work. That checkpoint now retains the existing reply-operation and
-ingress-watchdog ownership, including deferred finalization, and can emit a native
-checkpoint notice. This fixes a gap before compaction begins without increasing a
-global timeout or adding another maintenance loop. The observed incident involved
-an already large conversation; it does not show aggressive compaction of a fresh
-short request.
-
-The same source includes registered-project routing for visible source workers,
-a run-bound Gateway context for delegated tools and an authenticated owner access
-default. Accepted provider-profile and steering authority remain bound to the
-admitted operation. The public templates use these controls and avoid inventing a
-hard deadline for work the operator did not timebox. An explicit worker deadline
-still takes effect; a deadline ending before handoff is distinct from lost delivery.
-
-These are source repairs and operating-policy changes. Their focused regressions
-and independent review do not replace activation or fresh destination readback.
-The four live checks above remain attached to predecessor source `7fbb56e`.
-
-### Discord host-context regression
-
-Source `1f38d05` passed native checks, a full build and sealed-release activation.
-Its subsequent ordinary Discord request failed before provider execution with
-“embedded tool authority lost its source execution claim.” This was failed live
-acceptance despite successful activation.
-
-Discord preflight had omitted the host-provided `buildContext` function when
-constructing its next processing context. The later raw builder therefore lost the
-Gateway ownership binding required by the admitted reply operation. Successor
-`b3ee068` forwards that existing builder through the preflight type and value fields.
-It preserves the authority check: unbound and retired owners still receive no valid
-Gateway binding. The three-case regression exercises ordinary Discord preflight
-and message processing, and a downstream execution regression verifies the bound
-tool route. No global fallback or broader permission grant was added.
-
-The successor passed native checks, scoped review, a complete build and
-sealed-release activation. The fresh live check below then established the exercised
-Discord path; the earlier failure retains its original outcome.
-
-### Activated successor check
-
-On deployed source `b3ee068`, a request submitted through an existing Discord
-session received its first visible progress update after about 29 seconds. A
-follow-up arrived during the active run and was consumed by that same run with
-explicit steering ownership. The final response was visible about 3 minutes
-38 seconds after the initial request.
-
-The task used a native helper bound to a registered project with the operator's
-admitted access. Temporary notes in two registered project roots were written,
-read back and removed. Parent execution, helper execution and requester continuation
-succeeded, and the configured reasoning and fast-mode preferences were preserved.
-No compaction or timeout was observed. Visible final delivery was checked in the
-existing Discord interface.
-
-This verifies the exercised authority, project-routing, steering, reversible file
-effects and final-delivery path on the activated source. It is not blanket account
-acceptance or a latency comparison with the earlier calendar request.
-
-A separate request through the existing Discord session exercised the native
-`typeSecret` route using a configured opaque alias. The source credential stayed
-within its existing secure route; the exact origin and configured account matched,
-and two application pages loaded real data. The first visible progress update
-arrived after about 17 seconds. The result was delivered, and an explicit follow-up
-verified the account and closed the test tab. Keeping that tab open for the original
-requested handoff was appropriate. No timeout or compaction was observed, and the
-configured reasoning and fast-mode preferences were preserved.
-
-This verifies the exercised browser account route. It does not supply missing
-credentials for other accounts or prove their login and application workflows.
-
-### Hosted permission-fixture correction
-
-The first hosted qualification of the deployed source passed all ten isolated
-steering cases, but one of 539 focused ownership/cron cases failed. The permission
-test changed only a shared session row, while runtime authority now follows the
-permission captured for the admitted incoming turn. Its expected rejection therefore
-exercised the wrong input.
-
-Reference `a9aa626` sets the guarded permission on the incoming turn and retains the
-rejection assertions. A separate case confirms that changing the shared row alone
-does not replace admitted authority. The original failure was reproduced locally;
-all 20 cases in the corrected file, its selected native checks and scoped review
-passed. That test correction left runtime production files unchanged from deployed `b3ee068`, and
-no second activation or repeated live acceptance is claimed for this test correction.
-The manifest records the exact changed test path and both blobs separately from
-the two existing privacy substitutions in another fixture. Consult the hosted
-workflows for the exact reference commit being adopted.
-
-## Replies to a shared bot identity
-
-A bot message may have been posted by a different agent or session. Suppressing
-its quoted body because the author is the bot can leave a first-turn company
-agent with only a message ID and sender, even though the user explicitly replied
-to a deployment request. The Discord context builder uses the existing
-`suppressSelfQuoteBody: false` option to retain that bounded reply text. The shared
-default for other channels is unchanged. Existing visibility filtering still
-applies; quoted text does not become the human's command or acquire authority,
-and self-message attachments are not fetched by this change.
-
-The regression exercises a company agent with no prior history and checks the
-quoted body, current human input, command authority and session routing. These
-source checks do not by themselves establish live delivery or conversational
-quality. Company voice and participation are covered separately in the
-[context policy](08-memory-and-context.md#shared-voice-in-a-separate-company-workspace).
-
-## Context notices
-
-Compaction is a runtime operation, not a new operator objective. Native foreground notices can describe supported compaction paths when configured. A warning that context pressure is high is only a warning; it does not prove that compaction subsequently completed.
-
-Background maintenance may compact without a separate channel notice. Manual compaction can produce an explicit command result, but testing it does not prove every automatic path sends the same result. Do not build a parallel warning monitor that leaves the interface permanently pending after the runtime has moved on.
+Background maintenance and manual compaction can have different notice paths.
+Test the actual foreground owner instead of adding a parallel warning monitor.
+A checkpoint, typing indicator or retained child is not a substitute for useful
+progress and a final answer.
 
 ## Ambiguous delivery
 
-An external provider can accept a message even if the caller never receives its acknowledgment. Before retrying, inspect the destination and reconcile the retained operation identity. If delivery remains unknown, retain that uncertainty instead of claiming success or assuming nothing happened.
-
-Internal deduplication and single-owner completion reduce duplicates. They do not justify an unconditional exactly-once promise across every provider failure. The [delivery diagram](../diagrams/delivery-path.mmd) makes the verification boundary explicit.
+Inspect the provider destination, native delivery owner and retained evidence before
+retrying an uncertain send. A stale transcript mirror or missing optional diagnostic
+record proves neither success nor failure. Keep account/thread bindings intact and
+retain an unknown outcome if the provider result cannot be established.
 
 ```mermaid
 flowchart LR
@@ -395,8 +157,18 @@ flowchart LR
     D -->|No| U[Retain unknown and inspect before retry]
 ```
 
+Internal deduplication reduces repeated sends; it is not an unconditional exactly-once
+promise across every provider failure. The [standalone diagram](../diagrams/delivery-path.mmd)
+shows the same verification boundary.
+
 ## Acceptance through the real interface
 
-Submit a natural request through the channel, observe its progress, and check the final destination. Correlate the result with native session/task records where needed. For attachments, compare the delivered bytes or content with the intended artifact. Test normal completion, worker continuation and relevant failure paths separately.
+Use a natural text request to check context, progress, worker continuation and a
+single visible final. Compare attachments with the intended bytes/content. In voice,
+verify identity/context in a new session, a complete audible reply, permitted task
+handoff and return of the result. Finish a short capture and check both sides of the
+saved transcript and its delivered minutes. Exercise relevant interruption cases
+separately; one successful call is not proof for every room, account or future run.
 
-The [worked example](07-worked-example.md) demonstrates the user-facing behavior. The [runtime source map](20-runtime-source-changes.md) locates the streaming, continuation and channel changes.
+The [worked example](07-worked-example.md) demonstrates the user-facing contract;
+the [source map](20-runtime-source-changes.md) locates its runtime mechanisms.

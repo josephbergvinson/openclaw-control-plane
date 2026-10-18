@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import openclaw_health_audit_cron as cron
+from scripts import resolve_capability as capability_resolver
 
 
 def security_audit_json(findings: list[tuple[str, str, str]]) -> str:
@@ -274,6 +275,12 @@ TASK_MAINTENANCE_RESIDUE = '''{
 
 
 class OpenClawHealthAuditCronTests(unittest.TestCase):
+    def setUp(self):
+        # Existing runtime checks do not own account/provider activity.
+        google = mock.patch.object(cron, 'google_account_access_problem', return_value=None)
+        google.start()
+        self.addCleanup(google.stop)
+
     def assert_public_prose(self, output: str) -> None:
         self.assertTrue(output.strip())
         self.assertEqual(len(output.strip().splitlines()), 1)
@@ -590,6 +597,7 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
         cases = [
             ('accepted warnings and terminal history', None, None, 0, 'health audit passed'),
             ('accepted rendered fallback', 'security audit --json', (1, 'private diagnostic'), 0, 'health audit passed'),
+            ('Google account failure', None, None, 1, 'Google exact-account refresh rejected'),
             ('gateway failure', 'gateway status', (7, 'private diagnostic'), 1, 'gateway RPC check failed'),
             ('runtime timeout', 'status --deep', (124, 'private diagnostic'), 1, 'full runtime and Discord check did not complete'),
             ('maintenance failure', 'tasks maintenance --apply --json', (7, 'private diagnostic'), 1, 'task-ledger maintenance did not complete'),
@@ -646,6 +654,16 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                         encoding='utf-8',
                     )
                     fake_cli.chmod(0o700)
+                    # Exercise the real scheduler child while mocking only the
+                    # provider boundary; no live account commands belong here.
+                    audit_driver = tmp / 'audit-fixture.py'
+                    google_problem = 'Google exact-account refresh rejected' if label == 'Google account failure' else None
+                    audit_driver.write_text(
+                        'import sys\n'
+                        'from scripts import openclaw_health_audit_cron as module\n'
+                        f'module.google_account_access_problem = lambda: {google_problem!r}\n'
+                        'raise SystemExit(module.main(sys.argv[1:]))\n'
+                    )
                     receipts = tmp / 'receipts'
                     fixture_operator = json.loads(Path(os.environ['OPENCLAW_OPERATOR_CONFIG']).read_text())
                     fixture_operator['paths']['openclaw_cli'] = str(fake_cli)
@@ -654,7 +672,7 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                     proc = subprocess.run(
                         [
                             sys.executable, str(root / 'scripts/cron_python_entrypoint.py'),
-                            '--script', str(root / 'scripts/openclaw_health_audit_cron.py'),
+                            '--script', str(audit_driver),
                             '--receipt-dir', str(receipts), '--cwd', str(tmp),
                             *(['--weekly'] if weekly else []),
                         ],
@@ -670,7 +688,7 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                     self.assertNotIn(DISCORD_BROAD_MEMBERS[0], proc.stdout)
                     self.assertNotIn('new or changed', proc.stdout)
                     if expected_code == 1:
-                        security_only = command.startswith('security audit') and replacement[0] == 0
+                        security_only = (command or '').startswith('security audit') and replacement[0] == 0
                         if security_only:
                             self.assertIn(SECURITY_ONLY_OUTCOME, proc.stdout)
                             self.assertNotIn('before relying on scheduled delivery', proc.stdout)
@@ -687,6 +705,13 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
 
 class ScopedCompanyAlphaAcceptanceTests(unittest.TestCase):
     def setUp(self):
+        # Existing runtime checks do not own account/provider activity.
+        google = mock.patch.object(cron, 'google_account_access_problem', return_value=None)
+        google.start()
+        self.addCleanup(google.stop)
+        self._set_up_company_policy()
+
+    def _set_up_company_policy(self):
         from scripts.operator_contract import OperatorContract
         policy = {
             'enabled': True,
@@ -1457,6 +1482,155 @@ class RunTimeoutIsAFailureNotACrash(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.output, "fine")
 
+class GoogleAccountHealthTests(unittest.TestCase):
+    def setUp(self):
+        from contextlib import ExitStack
+        from test_google_capability_probe import configured_google_fixture
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(configured_google_fixture())
+
+    def accounts(self):
+        return cron.registered_google_accounts()
+
+    def identity(self, account, **overrides):
+        return dict(email=account, auth='oauth', client='default', valid=True,
+                    services=['gmail', 'drive', 'calendar'], scopes=[
+                        'https://www.googleapis.com/auth/gmail.modify',
+                        'https://www.googleapis.com/auth/drive',
+                        'https://www.googleapis.com/auth/calendar',
+                    ], **overrides)
+
+    def check(self, *, identities=None, fail_account=None, error=''):
+        accounts = self.accounts()
+        identities = identities if identities is not None else [self.identity(a) for a in accounts]
+        calls = []
+
+        def transport(argv, timeout):
+            calls.append((argv, timeout))
+            if argv == capability_resolver.GOG_AUTH_LIST_PROBE_ARGV:
+                return capability_resolver.ProbeCommandResult(0, json.dumps({'accounts': identities}))
+            account = argv[argv.index('--account') + 1]
+            self.assertIn(account, accounts)
+            self.assertIn('--gmail-no-send', argv)
+            if account == fail_account:
+                return capability_resolver.ProbeCommandResult(1, '', error)
+            if 'gmail' in argv:
+                payload = {'labels': [{'id': 'INBOX'}]}
+            else:
+                self.assertIn('drive', argv)
+                self.assertEqual(argv[-3:], ('ls', '--max', '1'))
+                payload = {'files': []}
+            return capability_resolver.ProbeCommandResult(0, json.dumps(payload))
+
+        with mock.patch.object(capability_resolver, 'subprocess_probe_transport', side_effect=transport):
+            problem = cron.google_account_access_problem()
+        return problem, calls
+
+    def test_registered_accounts_are_deduplicated_and_require_provisioned_exact_oauth_owner(self):
+        registry = capability_resolver.load_json('registry/integration_routes.json')
+        expected = {r['required_account'] for r in registry['routes'] if r['system'] == 'google-workspace'}
+        self.assertEqual(set(self.accounts()), expected)
+        selected = next(h for h in registry['credential_handles']
+                        if h['credential_kind'] == 'provider-oauth' and h['owner']['ref'] == 'gog')
+        excluded = selected['owner']['keys'][0]
+        duplicate = json.loads(json.dumps(selected))
+        duplicate['handle_id'] += '.duplicate'
+        registry['credential_handles'].append(duplicate)
+        with mock.patch.object(capability_resolver, 'load_json', return_value=registry):
+            self.assertEqual(set(cron.registered_google_accounts()), expected)
+            self.assertEqual(len(cron.registered_google_accounts()), len(expected))
+        registry['credential_handles'].remove(duplicate)
+        selected['provisioning_state'] = 'unprovisioned'
+        with mock.patch.object(capability_resolver, 'load_json', return_value=registry):
+            self.assertNotIn(excluded, cron.registered_google_accounts())
+
+    def test_one_refresh_check_and_account_bound_reads_cover_all_registered_accounts(self):
+        problem, calls = self.check()
+        self.assertIsNone(problem)
+        auth = [argv for argv, _ in calls if argv == capability_resolver.GOG_AUTH_LIST_PROBE_ARGV]
+        self.assertEqual(len(auth), 1)
+        self.assertEqual(len(calls), 1 + 2 * len(self.accounts()))
+        self.assertTrue(all(0 < timeout <= 15 for _, timeout in calls))
+
+    def test_revoked_identity_is_reported_without_requesting_auth_or_hiding_other_accounts(self):
+        accounts = self.accounts()
+        identities = [self.identity(a) for a in accounts]
+        identities[0].update(valid=False, error='invalid_grant synthetic-private-value')
+        problem, calls = self.check(identities=identities)
+        self.assertIn(accounts[0], problem)
+        self.assertIn('oauth_refresh_rejected', problem)
+        self.assertNotIn('synthetic-private-value', problem)
+        self.assertEqual(len(calls), 1 + 2 * (len(accounts) - 1))
+
+    def test_missing_account_does_not_substitute_default_identity(self):
+        accounts = self.accounts()
+        problem, _ = self.check(identities=[self.identity(a) for a in accounts[1:]])
+        self.assertIn(accounts[0], problem)
+        self.assertIn('oauth_account_missing', problem)
+
+    def test_write_scope_loss_is_visible_even_when_baseline_gets_succeed(self):
+        identities = [self.identity(a) for a in self.accounts()]
+        identities[0]['scopes'] = ['https://www.googleapis.com/auth/gmail.readonly']
+        problem, _ = self.check(identities=identities)
+        for service in ('gmail', 'drive', 'calendar'):
+            self.assertIn(service + ':oauth_scope_missing', problem)
+
+    def test_full_mail_scope_is_compatible_without_requiring_redundant_send_grant(self):
+        identities = [self.identity(a) for a in self.accounts()]
+        for row in identities:
+            row['scopes'][0] = 'https://mail.google.com/'
+        problem, _ = self.check(identities=identities)
+        self.assertIsNone(problem)
+
+    def test_native_read_failure_is_classified_without_provider_output(self):
+        account = self.accounts()[0]
+        problem, _ = self.check(fail_account=account,
+                               error='Request had insufficient authentication scopes synthetic-private-value')
+        self.assertIn(account, problem)
+        self.assertIn('gmail-read:oauth_scope_missing', problem)
+        self.assertNotIn('synthetic-private-value', problem)
+
+    def test_local_transport_and_provider_denial_do_not_claim_expired_authentication(self):
+        cases = [(126, '', 'confined_gog_transport_unavailable'),
+                 (3, 'Error403 synthetic-private-value', 'provider_access_denied')]
+        for code, diagnostic, expected in cases:
+            with self.subTest(code=code):
+                result = capability_resolver.ProbeCommandResult(code, '', diagnostic)
+                self.assertEqual(cron.google_probe.failure_reason(result), expected)
+
+    def test_registry_failure_and_expired_budget_cannot_report_healthy(self):
+        with mock.patch.object(cron, 'registered_google_accounts', side_effect=ValueError('private')), \
+             mock.patch.object(capability_resolver, 'subprocess_probe_transport') as transport:
+            self.assertIn('coverage is unverified', cron.google_account_access_problem())
+            transport.assert_not_called()
+        with mock.patch.object(cron.time, 'monotonic', side_effect=[0, 0] + [121] * 100):
+            problem, calls = self.check()
+        self.assertIn('probe_timeout', problem)
+        self.assertEqual(len(calls), 1)
+
+    def test_daily_and_weekly_cannot_pass_when_google_account_check_fails(self):
+        responses = {
+            ('gateway', 'status'): GATEWAY_STATUS_OK,
+            ('status', '--deep'): STATUS_DEEP_OK,
+            ('security', 'audit', '--json'): SECURITY_AUDIT_ACCEPTED,
+            ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_ACCEPTED,
+            ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
+            ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+        }
+        for weekly in (False, True):
+            with self.subTest(weekly=weekly), \
+                 mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/fixture-openclaw'), \
+                 mock.patch.object(cron, 'run', side_effect=lambda argv, **_: cron.CommandResult(0, responses[tuple(argv[1:])])), \
+                 mock.patch.object(cron, 'google_account_access_problem', return_value='Google exact-account refresh rejected') as check:
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    code = cron.main(['--weekly'] if weekly else [])
+                self.assertEqual(code, 1)
+                self.assertIn('Google exact-account refresh rejected', out.getvalue())
+                check.assert_called_once_with()
+
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -1535,7 +1709,8 @@ def test_headroom_attention_keeps_daily_and_weekly_health_audits_failed():
                 return cron.CommandResult(0, responses[tuple(command[1:])])
 
             with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/fixture-openclaw'), \
-                 mock.patch.object(cron, 'run', side_effect=fake_run) as runner:
+                 mock.patch.object(cron, 'run', side_effect=fake_run) as runner, \
+                 mock.patch.object(cron, 'google_account_access_problem', return_value=None):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     rc = cron.main((['--weekly'] if weekly else []) + ['--maintenance'])

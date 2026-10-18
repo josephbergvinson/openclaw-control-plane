@@ -27,6 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_PATH = "/josephbergvinson/openclaw-control-plane/releases/download/"
 NATIVE_DELTA_PATHS = {"pnpm-lock.yaml", "pnpm-workspace.yaml"}
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
+CURRENT_MANIFEST_FIELDS = {
+    "schemaVersion", "upstream", "source", "patch", "toolchain",
+    "nativeDistribution", "nativeCompanion", "referenceDeployment", "license",
+}
 
 
 class ReconstructionError(Exception):
@@ -74,6 +78,31 @@ def require_digest(value: object, length: int, label: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(rf"[0-9a-f]{{{length}}}", value):
         raise ReconstructionError(f"Manifest requires a full {label}")
     return value
+
+
+def validate_manifest_metadata(manifest: dict, *, native_distribution: bool = False) -> None:
+    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
+        raise ReconstructionError("Unsupported runtime manifest version")
+    if set(manifest) - CURRENT_MANIFEST_FIELDS:
+        raise ReconstructionError("The current manifest contains fields outside the reconstruction contract")
+    sections = ("source", "nativeDistribution", "nativeCompanion") if native_distribution else ("source",)
+    for name in sections:
+        section = manifest.get(name)
+        if section is None:
+            continue
+        if not isinstance(section, dict):
+            raise ReconstructionError(f"Manifest {name} must be an object")
+        for key in ("referenceCommit", "referenceTree", "sourceCommit", "sourceTree"):
+            if key in section:
+                require_digest(section[key], 40, f"{name}.{key} SHA-1")
+    deployment = manifest.get("referenceDeployment") if native_distribution else None
+    if deployment is not None:
+        if not isinstance(deployment, dict):
+            raise ReconstructionError("Manifest referenceDeployment must be an object")
+        # An installed reference can precede the source being reconstructed.
+        # Its identity is descriptive and never substitutes for the native tree.
+        require_digest(deployment.get("distributionCommit"), 40,
+                       "reference deployment distribution commit SHA-1")
 
 
 def validate_release_url(url: str, filename: str) -> None:
@@ -126,19 +155,22 @@ def load_native_distribution(directory: Path, manifest: dict, source_tree: str) 
 
 def load_package(directory: Path, *, native_distribution: bool = False) -> SourcePackage:
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["schemaVersion"] != 1:
-        raise ReconstructionError("Unsupported runtime manifest version")
+    validate_manifest_metadata(manifest, native_distribution=native_distribution)
     upstream = manifest["upstream"]
     patch = manifest["patch"]
     name = patch["file"]
     if not isinstance(name, str) or Path(name).name != name or not name.endswith(".patch"):
         raise ReconstructionError("Patch must name a file inside the runtime package")
     path = directory / name
-    if path.is_symlink():
+    if path.is_symlink() or not path.is_file():
         raise ReconstructionError("Patch must be a regular package file, not a symlink")
+    raw = path.read_bytes()
+    digest = require_digest(patch["sha256"], 64, "patch SHA-256")
+    if type(patch["bytes"]) is not int or patch["bytes"] != len(raw) or hashlib.sha256(raw).hexdigest() != digest:
+        raise ReconstructionError("Patch size or SHA-256 does not match the manifest")
     package = SourcePackage(
         upstream["tag"], upstream["tagObject"], upstream["commit"], upstream["tree"],
-        manifest["source"]["normalizedTree"], patch["sha256"], path.read_bytes(),
+        manifest["source"]["normalizedTree"], digest, raw,
     )
     for value in (package.tag_object, package.base_commit, package.base_tree, package.normalized_tree):
         if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):

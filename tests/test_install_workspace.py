@@ -102,6 +102,8 @@ class WorkspaceInstallTests(unittest.TestCase):
         files = INSTALLER.make_plan(self.destination)
         names = set(files)
         self.assertIn(Path("REFERENCE.md"), names)
+        self.assertIn(Path("docs/README.md"), names)
+        self.assertIn(Path("docs/history/README.md"), names)
         manifest_path = Path("runtime/manifest.json")
         self.assertIn(manifest_path, names)
         manifest = json.loads(files[manifest_path][0])

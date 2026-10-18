@@ -110,6 +110,7 @@ def test_installed_documentation_and_local_bindings_keep_distinct_ownership() ->
     for path in ('REFERENCE.md', '.gitignore', 'docs/17-adoption-guide.md',
                  'runtime/openclaw.patch', 'config/operator.example.json',
                  'scripts/materialize_host.py', 'scripts/reconstruct_runtime.py',
+                 'scripts/google_capability_probe.py',
                  'scripts/lib/company_alpha_walletconnect_hedera_adapter.mjs',
                  'dependencies/requirements.txt', 'walletconnect/package-lock.json',
                  'skills/work-product/SKILL.md',

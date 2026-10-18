@@ -71,7 +71,7 @@ def check_disks() -> dict:
         try:
             if external:
                 if not path.is_mount():
-                    raise OSError('OWC drive is not mounted at the configured path')
+                    raise OSError('Workspace volume is not mounted at the configured path')
                 openclaw_storage_prune.require_owc_identity()
             usage = get_usage(path)
             filesystems[key] = {'path': str(path), 'resolved_path': str(path.resolve(strict=False)),
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
                'action': action, 'filesystems': after, 'before_filesystems': before, 'cleanup': cleanup,
                'system_swap': swap}
     parts = []
-    for key, name in (('internal_root', 'Mac mini'), ('workspace', 'OWC')):
+    for key, name in (('internal_root', 'Internal'), ('workspace', 'Workspace')):
         disk = after[key]
         parts.append(f'{name} {disk["gib"]["free"]:.1f} GiB free ({disk["level"]})'
                      if disk['level'] != 'unavailable' else f'{name} unavailable')
