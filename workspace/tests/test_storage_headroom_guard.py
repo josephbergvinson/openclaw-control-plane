@@ -30,8 +30,8 @@ class StorageHeadroomGuardTests(unittest.TestCase):
     def test_success_is_always_human_visible(self):
         rc, text, payload, calls = self.run_guard(self.disks())
         self.assertEqual(rc, 0)
-        self.assertIn('Mac mini 40.0 GiB free', text)
-        self.assertIn('OWC 1500.0 GiB free', text)
+        self.assertIn('Internal 40.0 GiB free', text)
+        self.assertIn('Workspace 1500.0 GiB free', text)
         self.assertNotIn('NO_REPLY', text)
         self.assertEqual(payload['alert_authority'], 'both_disks')
         self.assertEqual(calls, 0)
@@ -40,7 +40,7 @@ class StorageHeadroomGuardTests(unittest.TestCase):
         rc, text, payload, _ = self.run_guard(self.disks(external=15))
         self.assertEqual(rc, 1)
         self.assertEqual(payload['level'], 'emergency')
-        self.assertIn('OWC 15.0 GiB free (emergency)', text)
+        self.assertIn('Workspace 15.0 GiB free (emergency)', text)
 
     def test_pressure_runs_cleanup_and_remeasures_both_disks(self):
         rc, text, payload, calls = self.run_guard(self.disks(5), self.disks(45),
@@ -48,7 +48,7 @@ class StorageHeadroomGuardTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(calls, 1)
         self.assertEqual(payload['action'], 'guarded_cleanup_attempted')
-        self.assertIn('Mac mini 45.0 GiB free', text)
+        self.assertIn('Internal 45.0 GiB free', text)
         self.assertIn('Safe cleanup completed', text)
 
     def test_cleanup_does_not_mask_remaining_pressure(self):
@@ -62,7 +62,7 @@ class StorageHeadroomGuardTests(unittest.TestCase):
         disks['workspace'] = {'level': 'unavailable'}
         rc, text, payload, calls = self.run_guard(disks, apply=True)
         self.assertEqual(rc, 1)
-        self.assertIn('OWC unavailable', text)
+        self.assertIn('Workspace unavailable', text)
         self.assertIsNone(payload)
         self.assertEqual(calls, 0)
 

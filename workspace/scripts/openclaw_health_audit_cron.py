@@ -19,6 +19,13 @@ try:
 except ModuleNotFoundError:
     from scripts.openclaw_cli_common import build_openclaw_env, resolve_openclaw_bin
 
+try:
+    from scripts import resolve_capability as capability_resolver
+    from scripts import google_capability_probe as google_probe
+except ModuleNotFoundError:
+    import resolve_capability as capability_resolver
+    import google_capability_probe as google_probe
+
 # Accepted findings are explicit adopter policy, bound to an exact severity.
 # An empty mapping accepts no findings; unknown or escalated findings remain visible.
 def _accepted_security_findings() -> dict[str, tuple[str, str]]:
@@ -788,6 +795,78 @@ def emit(message: str, *, exit_code: int = 0) -> int:
     return exit_code
 
 
+def registered_google_accounts() -> tuple[str, ...]:
+    """Select provisioned native OAuth bindings, never the CLI's default account."""
+    registry = capability_resolver.load_json('registry/integration_routes.json')
+    capability_resolver.assert_integration_registry_contract(
+        registry, source='registry/integration_routes.json')
+    accounts: dict[str, str] = {}
+    for route in registry['routes']:
+        if route['system'] != 'google-workspace' or route['native_lane_kind'] != 'supported_cli':
+            continue
+        account = route['required_account']
+        for handle in registry['credential_handles']:
+            owner = handle['owner']
+            if (handle['credential_kind'] == 'provider-oauth'
+                    and handle['provisioning_state'] == 'provisioned'
+                    and owner['kind'] == 'provider-native' and owner['ref'] == 'gog'
+                    and account in owner['keys']
+                    and {'kind': 'integration-route', 'consumer_id': route['route_id']} in handle['consumers']):
+                accounts.setdefault(account.casefold(), account)
+    if not accounts:
+        raise ValueError('no registered provisioned Google accounts')
+    return tuple(accounts[key] for key in sorted(accounts))
+
+
+def google_account_access_problem() -> str | None:
+    """Refresh/read registered accounts within one bounded existing health run.
+
+    GOG owns normal refresh and protected token persistence. This command never
+    launches consent, changes scopes or repairs an interactive provider factor.
+    One shared auth-list check avoids refreshing every token once per account.
+    """
+    try:
+        accounts = registered_google_accounts()
+    except (Exception, SystemExit):
+        return 'registered Google account coverage is unverified; inspect the existing registry owner'
+    deadline = time.monotonic() + 120
+
+    def bounded_transport(argv, timeout):
+        remaining = int(deadline - time.monotonic())
+        if remaining < 1:
+            return capability_resolver.ProbeCommandResult(124, '', outcome='timeout')
+        return capability_resolver.subprocess_probe_transport(argv, min(timeout, 15, remaining))
+
+    identity = bounded_transport(capability_resolver.GOG_AUTH_LIST_PROBE_ARGV, 15)
+
+    def transport(argv, timeout):
+        if argv == capability_resolver.GOG_AUTH_LIST_PROBE_ARGV:
+            return identity
+        return bounded_transport(argv, timeout)
+
+    failures: list[str] = []
+    for account in accounts:
+        try:
+            result = google_probe.probe_account(account, transport=transport)
+            reasons = []
+            if result['overall'] != 'ready':
+                reasons.append(result.get('identity_reason', ''))
+                for operation in ('gmail_read', 'drive_read'):
+                    row = result['capabilities'][operation]
+                    if row['status'] != 'ready':
+                        reasons.append(operation.replace('_', '-') + ':' + row.get('reason', 'unverified'))
+            reasons.extend(service + ':oauth_scope_missing'
+                           for service in result.get('missing_registered_service_scopes', []))
+            if reasons:
+                failures.append(account + ' (' + ', '.join(dict.fromkeys(reason for reason in reasons if reason)) + ')')
+        except (Exception, SystemExit):
+            failures.append(account + ' (account_probe_unverified)')
+    if failures:
+        return ('Google account checks need attention: ' + '; '.join(failures)
+                + '; use the registered exact-account recovery owner in scripts/ROUTING.md')
+    return None
+
+
 def public_security_problem(
     json_output: str | None, text_output: str, blocker: str, *, company_posture_verified: bool = False,
 ) -> str:
@@ -837,6 +916,7 @@ def public_failure_message(
     security_problems: list[str],
     deep_security_ok: bool,
     task_maintenance_blocker: str | None,
+    account_access_problem: str | None = None,
 ) -> str:
     audit_name = 'weekly deep health audit' if weekly else 'daily health audit'
     problems: list[str] = []
@@ -853,12 +933,15 @@ def public_failure_message(
         else:
             problems.append('task-ledger maintenance did not complete')
 
+    if account_access_problem:
+        problems.append(account_access_problem)
+
     if not problems:
         problems.append('one or more required checks did not complete')
     detail = '; '.join(problems)
     if (
         security_problems and gateway_ok and status_ok
-        and (not weekly or deep_security_ok) and not task_maintenance_blocker
+        and (not weekly or deep_security_ok) and not task_maintenance_blocker and not account_access_problem
     ):
         outcome = (
             'The operational checks passed, but the audit remains failed pending security review. '
@@ -981,6 +1064,10 @@ def main(argv: list[str] | None = None) -> int:
     if task_maintenance_blocker:
         blockers.append(task_maintenance_blocker)
 
+    google_problem = google_account_access_problem()
+    if google_problem:
+        blockers.append('google_account_access_unverified')
+
     schedule_problems = maintenance_problems(openclaw_bin) if args.maintenance else []
     if schedule_problems:
         return emit(
@@ -999,6 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
                 security_problems=security_problems,
                 deep_security_ok=deep_security_ok,
                 task_maintenance_blocker=task_maintenance_blocker,
+                account_access_problem=google_problem,
             ),
             exit_code=1,
         )
