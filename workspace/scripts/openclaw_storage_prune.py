@@ -1133,7 +1133,7 @@ def require_owc_identity() -> None:
             or metadata.get('volumeUuid', '').upper() != contract['volumeUuid'].upper()
             or metadata.get('mountPoint') != contract['mountPoint']
             or metadata.get('readOnly') is not False or metadata.get('ownersEnabled') is not True):
-        raise RuntimeError('OWC mounted volume identity or write permission does not match the registered drive')
+        raise RuntimeError('Workspace volume identity or write permission does not match the registered drive')
 
 
 def free_space() -> dict[str, int | None]:
@@ -1168,9 +1168,9 @@ def run(*, apply: bool = False, budget_seconds: int = 480) -> dict:
     if not 1 <= budget_seconds <= 540:
         raise ValueError('budget must be between 1 and 540 seconds')
     deadline = time.monotonic() + budget_seconds
-    # A missing OWC must never redirect artifacts or cleanup into a shadow mount.
+    # A missing workspace volume must never redirect cleanup into a shadow mount.
     if not OWC.is_mount():
-        raise RuntimeError('OWC drive is not mounted; storage cleanup stopped')
+        raise RuntimeError('Workspace volume is not mounted; storage cleanup stopped')
     require_owc_identity()
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     with (ARTIFACT_ROOT / '.lock').open('a') as lock:
@@ -1199,7 +1199,7 @@ def run(*, apply: bool = False, budget_seconds: int = 480) -> dict:
             payload['deferred'].extend(log_errors)
         payload['after_free_bytes'] = free_space()
         if payload['after_free_bytes']['owc'] is None:
-            payload['skipped'].append({'reason': 'OWC drive disappeared during cleanup', 'error': True})
+            payload['skipped'].append({'reason': 'Workspace volume disappeared during cleanup', 'error': True})
         payload['errors'] = [entry for entry in payload['skipped'] + payload.get('deferred', []) if entry.get('error')]
         payload['summary'] = cleanup_summary(payload)
         payload['status'] = 'partial' if payload['errors'] or (apply and payload['summary']['deferred_targets']) else 'ok'
@@ -1228,12 +1228,12 @@ def main() -> int:
         return 0 if result['status'] == 'ok' else 1
     free = result['after_free_bytes']
     if free['owc'] is None:
-        print('Storage cleanup needs attention: OWC is unavailable; check the drive before retrying.')
+        print('Storage cleanup needs attention: Workspace is unavailable; check the drive before retrying.')
         return 1
     if args.apply:
         count = len(result['removed'])
         print(f'Storage cleanup {result["status"]}: removed {count} stale build/cache directories. '
-              f'Mac mini {free["internal"] / 1024**3:.1f} GiB free; OWC {free["owc"] / 1024**3:.1f} GiB free.'
+              f'Internal {free["internal"] / 1024**3:.1f} GiB free; Workspace {free["owc"] / 1024**3:.1f} GiB free.'
               + (f' {len(result.get("deferred", []))} candidates remain protected or need inspection.'
                  if result.get('deferred') else ''))
     else:
