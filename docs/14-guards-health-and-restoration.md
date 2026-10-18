@@ -13,6 +13,7 @@ The reference uses small host helpers around native OpenClaw facilities. They sh
 | Workspace integrity | Git/source identity and classified root residue | Remove known disposable residue while preserving unknown or conflicting source work |
 | LaunchAgent integrity | Parseable definitions, valid entrypoints and required launch contracts | Repair only explicitly supported templates; preserve retired and deliberately untriggered definitions |
 | Runtime health | Readiness, supported status and required operational surfaces | Report the narrow failure or use an already configured recovery path |
+| Registered account health | Exact provisioned account, native refresh result, minimal service reads and relevant granted scopes | Report the actual identity/scope/provider failure and use existing account recovery |
 | Release retention | Selected, rollback, active and explicitly retained release dependencies | Remove only eligible unreferenced releases |
 | Backup admission and supervision | Installation identity, resource state and pending request ownership | Start/check through the vendor interface or issue a protective pause |
 | Project result guard | Expected artifact or record for a declared period | Report a missing/failed effect, with remediation only when separately configured |
@@ -50,6 +51,32 @@ A task may complete while one optional integration is unavailable. A process may
 These descriptions need not become another runtime state machine. Native task/session state remains authoritative for its own lifecycle. The health report adds the practical consequence and remaining verification gate.
 
 Use fresh process identity, start time and current probes for a current-outage claim. Keep historical logs and old receipts as context. Evidence from a previous release or a previous command under the same job ID cannot automatically certify the current one.
+
+## Registered Google account checks
+
+The exported daily/weekly health path enumerates provisioned `provider-oauth`
+handles owned by the native Google CLI and consumed by registered Google Workspace
+CLI routes. It deduplicates exact account identities rather than probing every
+email-shaped string or claiming an unprovisioned route is connected.
+
+One native auth-list check covers normal refresh validity. Each selected account
+then receives minimal account-bound Gmail and Drive reads through the existing
+confined transport. Calls are noninteractive and forbid mail sends. The section
+uses one 120-second budget with individual native calls bounded to 15 seconds.
+Relevant registered Gmail/Drive/Calendar write grants are checked separately from
+read success; no check exercises writes or proves account-wide administrative roles.
+
+Failures distinguish unavailable/unverified transport, timeout, missing OAuth
+identity, rejected refresh, missing service scope, provider denial and malformed
+results. No provisioned accounts means coverage is unverified, not healthy. A
+successful baseline covers those accounts and services at that observation; it
+cannot promise perpetual access or every third-party application session.
+
+Use the existing account-recovery owner for a demonstrated failure, preserve exact
+bindings and recheck the requested operation. The probe does not perform interactive
+enrollment, start a new authentication daemon or change policies to obtain a pass.
+The [routing chapter](11-integrations-and-capability-routing.md#recovering-an-existing-account)
+describes the supported manual baseline and task-time recovery.
 
 ## Containment and restoration
 
