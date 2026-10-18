@@ -37,9 +37,10 @@ cover the change and retain their actual outcomes.
 
 ## Workspace behavioral fixtures
 
-The root tests do not replace the exported helpers' behavioral suite. From this
-reference repository, create a separate test environment and run its existing
-fixture runner:
+The root tests do not replace the exported helpers' behavioral suite. These host
+fixtures target macOS, including its extended attributes and filesystem metadata.
+From this reference repository on macOS, create a separate test environment and
+run its existing fixture runner:
 
 ```bash
 python3 -m venv /path/to/openclaw-reference-test-env
@@ -90,7 +91,8 @@ branches. Standard hosted runners are free for public repositories; a private fo
 uses the owner's Actions allowance. See [GitHub's runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The native plan adapter changes only full-lint shard selection and preserves every
 other command, including checks after lint. Its tests use fake command execution.
-Independent native-check and build jobs feed the existing `reconstruct-and-build`
+The repository/Workspace fixture job runs on macOS; independent native-check and
+build jobs reconstruct on Ubuntu and feed the existing `reconstruct-and-build`
 check; each qualification job must succeed. Workflow artifacts retain command plans
 and actual results without environment values.
 No operator credentials or private preservation data belong in that workflow.
