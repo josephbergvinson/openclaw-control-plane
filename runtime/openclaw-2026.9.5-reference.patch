@@ -8470,7 +8470,7 @@ index 0000000000000000000000000000000000000000..8673fe1537d845edc6ff55114e061bb6
 +}
 +#endif
 diff --git a/config/assertion-safety-baseline.txt b/config/assertion-safety-baseline.txt
-index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..b5a517201d8dabbbb499497a5c446977d0be38a7 100644
+index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..23d7d4993b4a9e236dd15fac7104e7423ee0cf86 100644
 --- a/config/assertion-safety-baseline.txt
 +++ b/config/assertion-safety-baseline.txt
 @@ -89,7 +89,6 @@ extensions/browser/src/browser/routes/agent.act.normalize.ts	1
@@ -8535,6 +8535,15 @@ index 7e01f31bce1fcec3a390ad9f5c3948ad5c08d4bf..b5a517201d8dabbbb499497a5c446977
  src/agents/tools/sessions-spawn-tool.ts	5
  src/agents/tools/sessions-tool.ts	1
  src/agents/tools/sessions-yield-tool.ts	1
+@@ -3475,7 +3472,7 @@ src/tasks/task-registry.ts	1
+ src/tasks/task-registry.types.ts	2
+ src/tasks/task-status.ts	1
+ src/trajectory/command-export.ts	1
+-src/trajectory/export.ts	22
++src/trajectory/export.ts	18
+ src/trajectory/runtime-store.sqlite.ts	1
+ src/trajectory/runtime.ts	4
+ src/transcripts/config.ts	2
 diff --git a/config/knip.config.ts b/config/knip.config.ts
 index ed16c1a5bc157a63b8c7d71dbd9daf5001d8c21a..fd9eaeb33deb02cb850aebae32b12863c00bf7c5 100644
 --- a/config/knip.config.ts
@@ -41881,6 +41890,15 @@ index 0000000000000000000000000000000000000000..2185c2da75ea246bdc70b202884c6076
 +    },
 +  );
 +});
+diff --git a/extensions/discord/queued-origin-test-api.ts b/extensions/discord/queued-origin-test-api.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..231b2326d9f1a3440da393493b90a1536b8de989
+--- /dev/null
++++ b/extensions/discord/queued-origin-test-api.ts
+@@ -0,0 +1,3 @@
++// Opt-in core queue/Discord integration fixture; never imported by production entrypoints.
++export const loadDiscordQueuedOriginTestHarness = () =>
++  import("./src/monitor/queued-origin-integration.test-harness.js");
 diff --git a/extensions/discord/src/actions/handle-action.guild-admin.ts b/extensions/discord/src/actions/handle-action.guild-admin.ts
 index 960d98cc95941e970ce10a274d0b2dad89355eb8..c434efcc9b3c2422073894b1b87a349e27e6f806 100644
 --- a/extensions/discord/src/actions/handle-action.guild-admin.ts
@@ -42854,6 +42872,125 @@ index 780eb467bc47c82a11849d96f44e9c2b7c260433..a2e65917ffc0c258da33689399205170
        if (
          hasDiscordGuildEntries(guildInfo?.channels) &&
          !allowsAllDiscordGuildChannels(guildInfo.channels)
+diff --git a/extensions/discord/src/actions/runtime.reply-reference.test-support.ts b/extensions/discord/src/actions/runtime.reply-reference.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a3e3c90a4ff0cb9e2699e9cc314fea05b462dd5e
+--- /dev/null
++++ b/extensions/discord/src/actions/runtime.reply-reference.test-support.ts
+@@ -0,0 +1,113 @@
++import { expect, it } from "vitest";
++import { buildDiscordMessageRequest } from "../send.message-request.js";
++import {
++  DISCORD_TEST_CFG,
++  enableAllActions,
++  handleMessagingAction,
++} from "./runtime-action-context.test-support.js";
++
++type ReplyReferenceMocks = {
++  sendMessageDiscord: { mock: { calls: Array<Array<unknown>> } };
++};
++
++function mockObjectArg(source: ReplyReferenceMocks["sendMessageDiscord"]): Record<string, unknown> {
++  const value = source.mock.calls[0]?.[2];
++  if (!value || typeof value !== "object") {
++    throw new Error("expected sendMessageDiscord call 0 argument 2 to be an object");
++  }
++  return value as Record<string, unknown>;
++}
++
++export function registerReplyReferenceTests({ sendMessageDiscord }: ReplyReferenceMocks) {
++  it.each([
++    {
++      label: "implicit synthetic source",
++      reply: {
++        source: "implicit",
++        replyToId: "00000000-0000-4000-8000-000000000001",
++        mode: "all",
++      } as const,
++      replyToId: "00000000-0000-4000-8000-000000000001",
++      expectedMessageId: undefined,
++    },
++    {
++      label: "implicit non-provider source",
++      reply: { source: "implicit", replyToId: "source-1", mode: "first" } as const,
++      replyToId: "source-1",
++      expectedMessageId: undefined,
++    },
++    {
++      label: "implicit Discord message",
++      reply: { source: "implicit", replyToId: "100000000000000001", mode: "first" } as const,
++      replyToId: "100000000000000001",
++      expectedMessageId: "100000000000000001",
++    },
++    {
++      label: "explicit Discord override",
++      reply: { source: "explicit", replyToId: "100000000000000002" } as const,
++      replyToId: "100000000000000002",
++      expectedMessageId: "100000000000000002",
++    },
++    {
++      label: "explicit custom caller reference",
++      reply: { source: "explicit", replyToId: "explicit-1" } as const,
++      replyToId: "explicit-1",
++      expectedMessageId: "explicit-1",
++    },
++    {
++      label: "legacy raw caller reference",
++      reply: undefined,
++      replyToId: "custom-1",
++      expectedMessageId: "custom-1",
++    },
++    {
++      label: "unthreaded send",
++      reply: undefined,
++      replyToId: undefined,
++      expectedMessageId: undefined,
++    },
++  ])(
++    "serializes only the provider reference for $label",
++    async ({ reply, replyToId, expectedMessageId }) => {
++      // Core autofill writes args.replyTo while retaining its origin in options.reply.
++      const params = {
++        to: "channel:100000000000000003",
++        content: "Public test notice",
++        replyTo: replyToId,
++      };
++      await handleMessagingAction(
++        "sendMessage",
++        params,
++        enableAllActions,
++        DISCORD_TEST_CFG,
++        reply ? { reply } : undefined,
++      );
++      expect(sendMessageDiscord).toHaveBeenCalledTimes(1);
++      const options = mockObjectArg(sendMessageDiscord);
++      const reference = options.reply;
++      const messageId =
++        reference &&
++        typeof reference === "object" &&
++        "messageId" in reference &&
++        typeof reference.messageId === "string"
++          ? reference.messageId
++          : undefined;
++      const body = buildDiscordMessageRequest({
++        endpoint: "create-message",
++        text: "Public test notice",
++        replyTo: messageId,
++        nonce: "stable-test-nonce",
++      });
++      if (expectedMessageId) {
++        expect(body).toHaveProperty("message_reference", {
++          message_id: expectedMessageId,
++          fail_if_not_exists: false,
++        });
++      } else {
++        expect(body).not.toHaveProperty("message_reference");
++      }
++      expect(body.content).toBe("Public test notice");
++      expect(params.replyTo).toBe(replyToId);
++    },
++  );
++}
 diff --git a/extensions/discord/src/actions/runtime.requester-voice.test-support.ts b/extensions/discord/src/actions/runtime.requester-voice.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..4aa16552bd1a6a63b4d1092a7afe9033fcc8cc5a
@@ -43212,7 +43349,7 @@ index 14d2d52a188106ca7abde266b33ef626bf22db70..c14bc90a8eb9455721102682ee3259dc
    params: Record<string, unknown>,
  ): string | null | undefined {
 diff --git a/extensions/discord/src/actions/runtime.test.ts b/extensions/discord/src/actions/runtime.test.ts
-index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce98720fc14d7 100644
+index d37a608d97244434bb1e7ef53712bb0398486d50..822860ed2ccf2d2fb602506e1dd94872db3d8aac 100644
 --- a/extensions/discord/src/actions/runtime.test.ts
 +++ b/extensions/discord/src/actions/runtime.test.ts
 @@ -7,23 +7,29 @@ import {
@@ -43231,7 +43368,6 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce987
 -import { DiscordThreadInitialMessageError } from "../send.js";
  import * as discordGuildActionRuntime from "../send.js";
 +import { DiscordThreadInitialMessageError } from "../send.js";
-+import { buildDiscordMessageRequest } from "../send.message-request.js";
  import { createDiscordLoopbackRest } from "../send.test-harness.js";
  import { handleDiscordMessageAction } from "./handle-action.js";
 -import { handleDiscordGuildAction } from "./runtime.guild.js";
@@ -43247,6 +43383,7 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce987
 -import { handleDiscordMessagingAction } from "./runtime.messaging.js";
  import * as discordMessagingActionRuntime from "./runtime.messaging.runtime.js";
 -import { handleDiscordModerationAction } from "./runtime.moderation.js";
++import { registerReplyReferenceTests } from "./runtime.reply-reference.test-support.js";
 +import { registerRequesterVoiceStateTests } from "./runtime.requester-voice.test-support.js";
  
  type DiscordChannelInfoTest = {
@@ -43334,109 +43471,19 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce987
  const disabledActions = (key: keyof DiscordActionConfig) => key !== "reactions";
  const channelInfoEnabled = (key: keyof DiscordActionConfig) => key === "channelInfo";
  const moderationEnabled = (key: keyof DiscordActionConfig) => key === "moderation";
-@@ -273,7 +210,101 @@ beforeEach(() => {
+@@ -273,7 +210,11 @@ beforeEach(() => {
    fetchMemberInfoDiscord.mockImplementation(defaultFetchMemberInfoDiscord);
  });
  
 +registerRequesterVoiceStateTests(discordSendMocks);
 +
  describe("handleDiscordMessagingAction", () => {
-+  it.each([
-+    {
-+      label: "implicit synthetic source",
-+      reply: {
-+        source: "implicit",
-+        replyToId: "00000000-0000-4000-8000-000000000001",
-+        mode: "all",
-+      } as const,
-+      replyToId: "00000000-0000-4000-8000-000000000001",
-+      expectedMessageId: undefined,
-+    },
-+    {
-+      label: "implicit non-provider source",
-+      reply: { source: "implicit", replyToId: "source-1", mode: "first" } as const,
-+      replyToId: "source-1",
-+      expectedMessageId: undefined,
-+    },
-+    {
-+      label: "implicit Discord message",
-+      reply: { source: "implicit", replyToId: "100000000000000001", mode: "first" } as const,
-+      replyToId: "100000000000000001",
-+      expectedMessageId: "100000000000000001",
-+    },
-+    {
-+      label: "explicit Discord override",
-+      reply: { source: "explicit", replyToId: "100000000000000002" } as const,
-+      replyToId: "100000000000000002",
-+      expectedMessageId: "100000000000000002",
-+    },
-+    {
-+      label: "explicit custom caller reference",
-+      reply: { source: "explicit", replyToId: "explicit-1" } as const,
-+      replyToId: "explicit-1",
-+      expectedMessageId: "explicit-1",
-+    },
-+    {
-+      label: "legacy raw caller reference",
-+      reply: undefined,
-+      replyToId: "custom-1",
-+      expectedMessageId: "custom-1",
-+    },
-+    {
-+      label: "unthreaded send",
-+      reply: undefined,
-+      replyToId: undefined,
-+      expectedMessageId: undefined,
-+    },
-+  ])(
-+    "serializes only the provider reference for $label",
-+    async ({ reply, replyToId, expectedMessageId }) => {
-+      // Core autofill writes args.replyTo while retaining its origin in options.reply.
-+      const params = {
-+        to: "channel:100000000000000003",
-+        content: "Public test notice",
-+        replyTo: replyToId,
-+      };
-+      await handleMessagingAction(
-+        "sendMessage",
-+        params,
-+        enableAllActions,
-+        DISCORD_TEST_CFG,
-+        reply ? { reply } : undefined,
-+      );
-+      expect(sendMessageDiscord).toHaveBeenCalledTimes(1);
-+      const options = mockObjectArg(sendMessageDiscord, "sendMessageDiscord", 0, 2);
-+      const reference = options.reply;
-+      const messageId =
-+        reference &&
-+        typeof reference === "object" &&
-+        "messageId" in reference &&
-+        typeof reference.messageId === "string"
-+          ? reference.messageId
-+          : undefined;
-+      const body = buildDiscordMessageRequest({
-+        endpoint: "create-message",
-+        text: "Public test notice",
-+        replyTo: messageId,
-+        nonce: "stable-test-nonce",
-+      });
-+      if (expectedMessageId) {
-+        expect(body).toHaveProperty("message_reference", {
-+          message_id: expectedMessageId,
-+          fail_if_not_exists: false,
-+        });
-+      } else {
-+        expect(body).not.toHaveProperty("message_reference");
-+      }
-+      expect(body.content).toBe("Public test notice");
-+      expect(params.replyTo).toBe(replyToId);
-+    },
-+  );
++  registerReplyReferenceTests(discordSendMocks);
 +
    it.each([
      {
        name: "without account",
-@@ -1254,33 +1285,35 @@ describe("handleDiscordMessagingAction", () => {
+@@ -1254,33 +1195,35 @@ describe("handleDiscordMessagingAction", () => {
      expect(message.timestampUtc).toBe(new Date(expectedMs).toISOString());
    });
  
@@ -43485,7 +43532,7 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce987
            timestampMs: Date.parse("2026-01-15T10:00:00.000Z"),
            timestampUtc: "2026-01-15T10:00:00.000Z",
          },
-@@ -1288,21 +1321,60 @@ describe("handleDiscordMessagingAction", () => {
+@@ -1288,21 +1231,60 @@ describe("handleDiscordMessagingAction", () => {
      });
    });
  
@@ -43558,7 +43605,7 @@ index d37a608d97244434bb1e7ef53712bb0398486d50..fafc09930dfef73531b19a8e195ce987
      expect(readMessagesDiscord).not.toHaveBeenCalled();
    });
  
-@@ -2309,9 +2381,9 @@ describe("handleDiscordMessagingAction", () => {
+@@ -2309,9 +2291,9 @@ describe("handleDiscordMessagingAction", () => {
    it.each([
      {
        label: "implicit first reply",
@@ -48667,627 +48714,6 @@ index 0000000000000000000000000000000000000000..b179ae49f9db4bd45ff0252eb24a4c1a
 +    },
 +  );
 +});
-diff --git a/extensions/discord/src/monitor/message-handler.process.queued-origin.test.ts b/extensions/discord/src/monitor/message-handler.process.queued-origin.test.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..7ddd5bdbf1112f86e7bf5f1b0f684f10a8f935c7
---- /dev/null
-+++ b/extensions/discord/src/monitor/message-handler.process.queued-origin.test.ts
-@@ -0,0 +1,615 @@
-+// Queued origin finals must settle the same registered Discord progress request.
-+import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
-+import {
-+  createPluginStateKeyedStoreForTests,
-+  resetPluginStateStoreForTests,
-+} from "openclaw/plugin-sdk/plugin-state-test-runtime";
-+import { createOpenClawTestState } from "openclaw/plugin-sdk/test-state";
-+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
-+import {
-+  captureQueuedProgressOptions,
-+  resolveQueuedProgressOptions,
-+} from "../../../../src/auto-reply/dispatch-queued-progress.js";
-+import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../../../src/auto-reply/dispatch.js";
-+import { deliverFollowupDecision } from "../../../../src/auto-reply/reply/followup-delivery.js";
-+import type { AdmittedFollowupTurn } from "../../../../src/auto-reply/reply/followup-turn-admission.js";
-+import { settleQueuedFollowupPresentation } from "../../../../src/auto-reply/reply/followup-turn-admission.js";
-+import {
-+  createFollowupTurnTestTurn,
-+  createFollowupTurnTestTypingController,
-+  executeFollowupTurnForTest,
-+  getFollowupTurnTestState,
-+} from "../../../../src/auto-reply/reply/followup-turn-execution.test-support.js";
-+import type { InternalGetReplyOptions } from "../../../../src/auto-reply/reply/get-reply.types.js";
-+import { setActivePluginRegistry } from "../../../../src/plugins/runtime.js";
-+import {
-+  createChannelTestPluginBase,
-+  createTestRegistry,
-+} from "../../../../src/test-utils/channel-plugins.js";
-+import { createDeferred } from "../../../../test/helpers/promise.js";
-+import { RequestClient } from "../internal/discord.js";
-+import { discordProgressWriters } from "../request-progress-writer-state.js";
-+import { setDiscordRuntime } from "../runtime.js";
-+import {
-+  admitMockDiscordReplyTurn,
-+  createDiscordDraftStream,
-+  createDiscordRequestProgressStreamForTest,
-+  createNoQueuedDispatchResult,
-+  deliverDiscordReply,
-+  dispatchBufferedReplyForTest,
-+  getSessionEntry,
-+  registerDiscordProcessTestLifecycle,
-+  runProcessDiscordMessage,
-+} from "./message-handler.process.test-harness.js";
-+import { createAutomaticDraftContext } from "./message-handler.process.test-helpers.js";
-+
-+const outbound = vi.hoisted(() => ({ deliver: vi.fn() }));
-+vi.mock("../../../../src/infra/outbound/deliver.js", () => ({
-+  deliverOutboundPayloadsInternal: (...args: unknown[]) => outbound.deliver(...args),
-+}));
-+vi.mock("../../../../src/agents/runtime-plan/build.js", () => ({
-+  buildAgentRuntimeDeliveryPlan: () => ({
-+    isSilentPayload: () => false,
-+    resolveFollowupRoute: () => undefined,
-+  }),
-+}));
-+
-+registerDiscordProcessTestLifecycle();
-+let state: Awaited<ReturnType<typeof createOpenClawTestState>>;
-+let requestNumber = 1001;
-+let providerMessageNumber = 0;
-+beforeAll(async () => {
-+  state = await createOpenClawTestState({ label: "discord-queued-origin-progress" });
-+});
-+beforeEach(() => {
-+  outbound.deliver.mockReset();
-+  state.applyEnv();
-+  setDiscordRuntime({
-+    state: {
-+      openKeyedStore: (options) => createPluginStateKeyedStoreForTests("discord", options),
-+    },
-+  } as PluginRuntime);
-+  setActivePluginRegistry(
-+    createTestRegistry([
-+      {
-+        pluginId: "discord",
-+        source: "test",
-+        plugin: createChannelTestPluginBase({
-+          id: "discord",
-+          config: { listAccountIds: () => ["default"], resolveAccount: () => ({}) },
-+        }),
-+      },
-+    ]),
-+  );
-+});
-+afterEach(() => {
-+  resetPluginStateStoreForTests();
-+  setActivePluginRegistry(createTestRegistry());
-+});
-+afterAll(async () => {
-+  await state.cleanup();
-+});
-+
-+async function createQueuedScenario(
-+  options: {
-+    fullMessageId?: string;
-+    accountId?: string;
-+    threadId?: string;
-+    abortSignal?: AbortSignal;
-+    captureOnly?: boolean;
-+    messages?: Map<string, string>;
-+  } = {},
-+) {
-+  const messages = options.messages ?? new Map<string, string>();
-+  const rest = new RequestClient("fixture-token", {
-+    queueRequests: false,
-+    fetch: async (_url, init) => {
-+      const url = typeof _url === "string" ? _url : _url instanceof URL ? _url.href : _url.url;
-+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-+      if (init?.method === "DELETE") {
-+        messages.delete(url.split("/").at(-1)!);
-+        return new Response(null, { status: 204 });
-+      }
-+      const id =
-+        init?.method === "PATCH" ? url.split("/").at(-1)! : String(++providerMessageNumber);
-+      messages.set(id, body.content);
-+      return Response.json({ id, content: body.content });
-+    },
-+  });
-+  const actualDraft =
-+    await vi.importActual<typeof import("../draft-stream.js")>("../draft-stream.js");
-+  const actualProgress =
-+    await vi.importActual<typeof import("../request-progress.js")>("../request-progress.js");
-+  createDiscordDraftStream.mockImplementation(actualDraft.createDiscordDraftStream);
-+  createDiscordRequestProgressStreamForTest.mockImplementation((params) =>
-+    actualProgress.createDiscordRequestProgressStream({ ...params, rest }),
-+  );
-+  let source: InternalGetReplyOptions | undefined;
-+  let sourceContext: Parameters<typeof admitMockDiscordReplyTurn>[0]["ctx"];
-+  dispatchBufferedReplyForTest.mockImplementation((params) => {
-+    if (options.fullMessageId && params.ctx) {
-+      params.ctx.MessageSidFull = options.fullMessageId;
-+    }
-+    return dispatchInboundMessageWithRoutedChannelDispatcher({
-+      ...params,
-+      dispatchReplyFromConfig: async (request) => {
-+        source = request.replyOptions;
-+        sourceContext = request.ctx;
-+        return createNoQueuedDispatchResult();
-+      },
-+    });
-+  });
-+  const ctx = await createAutomaticDraftContext({
-+    message: {
-+      id: String(++requestNumber),
-+      channelId: "c1",
-+      timestamp: new Date().toISOString(),
-+      attachments: [],
-+    },
-+    ...(options.accountId ? { accountId: options.accountId } : {}),
-+    ...(options.threadId
-+      ? {
-+          messageChannelId: options.threadId,
-+          threadChannel: { id: options.threadId, name: "fixture-thread" },
-+        }
-+      : {}),
-+    abortSignal: options.abortSignal,
-+    discordConfig: {
-+      streaming: { mode: "progress", progress: { commentary: true, label: false } },
-+    },
-+  });
-+  ctx.route.accountId = options.accountId ?? "default";
-+  await runProcessDiscordMessage(ctx);
-+  expect(source).toBeDefined();
-+  if (!source) {
-+    throw new Error("Normal Discord ingress did not retain its source options");
-+  }
-+  // The initial channel handler has returned; its queued turn now owns a fresh run.
-+  getSessionEntry.mockReturnValue({ sessionId: "mock-session", updatedAt: 1 });
-+  if (!options.captureOnly) {
-+    await source.onQueuedFollowupAdmitted?.();
-+    admitMockDiscordReplyTurn({ ctx: sourceContext, replyOptions: source }, options.fullMessageId);
-+    await source.onItemEvent?.({
-+      kind: "preamble",
-+      phase: "end",
-+      progressText: "Checking the corrected company account.",
-+    });
-+  }
-+  const store = createPluginStateKeyedStoreForTests<{
-+    scope: { sourceMessageId: string };
-+    closed: boolean;
-+    draft: { messages: Array<{ id: string }> };
-+  }>("discord", {
-+    namespace: "request-progress",
-+    maxEntries: 10_000,
-+    overflowPolicy: "reject-new",
-+  });
-+  const sourceMessageId = options.fullMessageId ?? ctx.message.id;
-+  const progress = (await store.entries()).find(
-+    (entry) => entry.value.scope.sourceMessageId === sourceMessageId,
-+  )?.value;
-+  const draftId = progress?.draft.messages[0]?.id ?? "";
-+  if (!options.captureOnly && (!progress || !draftId)) {
-+    throw new Error("Queued progress was not registered");
-+  }
-+  if (!options.captureOnly) {
-+    expect(messages.get(draftId)).toContain("Checking the corrected company account.");
-+  }
-+  const foreign = {
-+    closed: false,
-+    scope: { sourceMessageId: "unrelated-request" },
-+    draft: { messages: [{ id: "foreign-draft" }] },
-+  };
-+  messages.set("foreign-draft", "Unrelated request progress");
-+  await store.register("unrelated-request", foreign);
-+
-+  const final = "The company account correction is complete.";
-+  outbound.deliver.mockImplementation(async () => {
-+    messages.set("origin-final", final);
-+    return [{ channel: "discord", messageId: "origin-final" }];
-+  });
-+  deliverDiscordReply.mockImplementation(async () => {
-+    messages.set("source-final", final);
-+    return { visibleReplySent: true };
-+  });
-+  const turn = {
-+    runId: "mock-admitted",
-+    queued: {
-+      originatingChannel: "discord",
-+      originatingTo: String(sourceContext?.OriginatingTo),
-+      originatingAccountId: options.accountId ?? "default",
-+      originatingThreadId: options.threadId,
-+      messageId: sourceMessageId,
-+      ...(source.onQueuedFollowupReplyBatch
-+        ? {
-+            queuedFollowupReplyDisposition: {
-+              kind: "deliver",
-+              deliver: source.onQueuedFollowupReplyBatch,
-+            },
-+          }
-+        : {}),
-+      run: {
-+        agentId: "main",
-+        sessionKey: String(sourceContext?.SessionKey),
-+        messageProvider: "discord",
-+      },
-+    },
-+    config: ctx.cfg,
-+  } as AdmittedFollowupTurn;
-+  const sendFinal = async (payloads = [{ text: final }]) => {
-+    const delivery = await deliverFollowupDecision({
-+      decision: { kind: "deliver", payloads },
-+      turn,
-+      defaults: { defaultModel: "fixture", typingMode: "never", opts: source } as Parameters<
-+        typeof deliverFollowupDecision
-+      >[0]["defaults"],
-+      runId: turn.runId,
-+      runFollowup: vi.fn(),
-+    });
-+    if (turn.queued.queuedFollowupReplyDisposition?.kind === "deliver") {
-+      await turn.queued.queuedFollowupReplyDisposition.deliver({
-+        kind: "queued-followup",
-+        runId: turn.runId,
-+        originatingChannel: "discord",
-+        payloads: delivery.kind === "completed" ? delivery.payloads : [],
-+        completion: { kind: "completed" },
-+      });
-+    }
-+  };
-+  const assertForeignPreserved = async () => {
-+    expect(messages.get("foreign-draft")).toBe("Unrelated request progress");
-+    expect(await store.lookup("unrelated-request")).toEqual(foreign);
-+  };
-+  return {
-+    source,
-+    sourceContext,
-+    turn,
-+    final,
-+    store,
-+    sourceMessageId,
-+    draftId,
-+    messages,
-+    sendFinal,
-+    assertForeignPreserved,
-+  };
-+}
-+
-+it("removes only its deferred request progress after this final is accepted", async () => {
-+  const scenario = await createQueuedScenario();
-+  const accepted = createDeferred<{ visibleReplySent: boolean }>();
-+  const sending = createDeferred();
-+  deliverDiscordReply.mockImplementation(async () => {
-+    sending.resolve();
-+    const result = await accepted.promise;
-+    scenario.messages.set("source-final", scenario.final);
-+    return result;
-+  });
-+  const terminal = scenario.sendFinal();
-+  await sending.promise;
-+  expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+  accepted.resolve({ visibleReplySent: true });
-+  await terminal;
-+  expect([...scenario.messages.values()].filter((text) => text === scenario.final)).toHaveLength(1);
-+  expect(scenario.messages.has(scenario.draftId)).toBe(false);
-+  expect(
-+    (await scenario.store.entries()).find(
-+      (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
-+    )?.value.closed,
-+  ).toBe(true);
-+  await scenario.sendFinal();
-+  expect(deliverDiscordReply).toHaveBeenCalledOnce();
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it.each(["rejected", "uncertain"])(
-+  "preserves progress when this final is %s despite earlier accepted commentary",
-+  async (failure) => {
-+    const scenario = await createQueuedScenario();
-+    await scenario.source.onQueuedFollowupReplyBatch?.({
-+      kind: "queued-followup",
-+      runId: scenario.turn.runId,
-+      originatingChannel: "discord",
-+      payloads: [{ text: "Earlier accepted commentary", isCommentary: true }],
-+      completion: { kind: "progress" },
-+    });
-+    expect(scenario.messages.get(scenario.draftId)).toContain("Earlier accepted commentary");
-+    expect(deliverDiscordReply).not.toHaveBeenCalled();
-+    deliverDiscordReply.mockClear();
-+    deliverDiscordReply.mockImplementation(async () => {
-+      if (failure === "uncertain") {
-+        throw new Error("provider acknowledgement lost");
-+      }
-+      return { visibleReplySent: false };
-+    });
-+    await expect(scenario.sendFinal()).rejects.toThrow();
-+    await expect(scenario.sendFinal()).rejects.toThrow();
-+    expect(deliverDiscordReply).toHaveBeenCalledOnce();
-+    expect(outbound.deliver).not.toHaveBeenCalled();
-+    expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+    const sourceDelivery = scenario.source.onQueuedFollowupReplyBatch;
-+    if (!sourceDelivery?.createSourceRetry) {
-+      throw new Error("Normal source delivery did not retain its retry owner");
-+    }
-+    if (failure === "uncertain") {
-+      expect(() => sourceDelivery.createSourceRetry?.()).toThrow(
-+        "no longer owns recovery delivery",
-+      );
-+    } else {
-+      sourceDelivery.createSourceRetry();
-+      deliverDiscordReply.mockImplementation(async () => {
-+        scenario.messages.set("source-final", scenario.final);
-+        return { visibleReplySent: true };
-+      });
-+      await scenario.sendFinal();
-+      expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
-+      expect(scenario.messages.has(scenario.draftId)).toBe(false);
-+    }
-+    await scenario.assertForeignPreserved();
-+  },
-+);
-+
-+it("uses the queue's full source message identity rather than its short locator", async () => {
-+  const scenario = await createQueuedScenario({ fullMessageId: "discord:full-source" });
-+  await scenario.sendFinal();
-+  expect(scenario.messages.has(scenario.draftId)).toBe(false);
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("retains the exact nondefault account and thread for deferred final delivery", async () => {
-+  const scenario = await createQueuedScenario({ accountId: "secondary", threadId: "thread-23" });
-+  await scenario.sendFinal();
-+  expect(deliverDiscordReply).toHaveBeenCalledWith(
-+    expect.objectContaining({
-+      accountId: "secondary",
-+      target: "channel:thread-23",
-+    }),
-+  );
-+  expect(scenario.messages.has(scenario.draftId)).toBe(false);
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("retains progress and sends nothing after the deferred source is aborted", async () => {
-+  const controller = new AbortController();
-+  const scenario = await createQueuedScenario({ abortSignal: controller.signal });
-+  controller.abort();
-+  await expect(scenario.sendFinal()).rejects.toThrow();
-+  expect(deliverDiscordReply).not.toHaveBeenCalled();
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("does not resurrect an active-lane abort deliberately detached from the queued input", async () => {
-+  const controller = new AbortController();
-+  const scenario = await createQueuedScenario({ abortSignal: controller.signal });
-+  captureQueuedProgressOptions(scenario.source, undefined);
-+  controller.abort();
-+  await scenario.sendFinal();
-+  expect(outbound.deliver).toHaveBeenCalledOnce();
-+  expect(deliverDiscordReply).not.toHaveBeenCalled();
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("fences a deferred final after its source progress turn is replaced", async () => {
-+  const scenario = await createQueuedScenario();
-+  await scenario.source.onQueuedFollowupAdmitted?.();
-+  await expect(scenario.sendFinal()).rejects.toThrow("Queued source progress turn changed");
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  expect(deliverDiscordReply).not.toHaveBeenCalled();
-+  expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("keeps legacy origin delivery when the admitted run has no progress-turn binding", async () => {
-+  const scenario = await createQueuedScenario();
-+  scenario.source.onAgentRunStart?.(scenario.turn.runId);
-+  await scenario.sendFinal();
-+  expect(outbound.deliver).toHaveBeenCalledOnce();
-+  expect(deliverDiscordReply).not.toHaveBeenCalled();
-+  expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("does not treat a foreign origin's empty terminal callback as source delivery", async () => {
-+  const scenario = await createQueuedScenario();
-+  await scenario.source.onQueuedFollowupReplyBatch?.({
-+    kind: "queued-followup",
-+    runId: scenario.turn.runId,
-+    originatingChannel: "slack",
-+    payloads: [],
-+    completion: { kind: "completed" },
-+  });
-+  expect(deliverDiscordReply).not.toHaveBeenCalled();
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  expect(scenario.messages.has(scenario.draftId)).toBe(true);
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it("does not replay an accepted part after a later terminal payload fails", async () => {
-+  const scenario = await createQueuedScenario();
-+  deliverDiscordReply
-+    .mockResolvedValueOnce({ visibleReplySent: true })
-+    .mockResolvedValueOnce({ visibleReplySent: false });
-+  const payloads = [{ text: "Accepted terminal part" }, { text: "Unaccepted terminal part" }];
-+  await expect(scenario.sendFinal(payloads)).rejects.toThrow();
-+  expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
-+  expect(() => scenario.source.onQueuedFollowupReplyBatch?.createSourceRetry?.()).toThrow(
-+    "no longer owns recovery delivery",
-+  );
-+  await expect(scenario.sendFinal(payloads)).rejects.toThrow();
-+  expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+  await scenario.assertForeignPreserved();
-+});
-+
-+it.each(["quiet", "commentary"])(
-+  "joins %s progress and final when the latest runner belongs to another input",
-+  async (mode) => {
-+    const older = await createQueuedScenario({ captureOnly: true });
-+    const newer = await createQueuedScenario({ captureOnly: true, messages: older.messages });
-+    const base = createFollowupTurnTestTurn();
-+    const turn = createFollowupTurnTestTurn({
-+      ...older.turn,
-+      operation: base.operation,
-+      session: {
-+        kind: "session",
-+        key: String(older.sourceContext?.SessionKey),
-+        current: () => ({
-+          sessionId: "mock-session",
-+          updatedAt: 1,
-+          verboseLevel: mode === "quiet" ? "off" : "on",
-+        }),
-+        publish: () => {},
-+        adopt: () => {},
-+      },
-+      queued: {
-+        ...base.queued,
-+        ...older.turn.queued,
-+        run: { ...base.queued.run, ...older.turn.queued.run, sessionId: "mock-session" },
-+      },
-+    });
-+    const executionState = getFollowupTurnTestState();
-+    executionState.loadEntryReadOnly.mockReturnValue(undefined);
-+    executionState.execute.mockImplementation(async (params) => {
-+      admitMockDiscordReplyTurn({ ctx: older.sourceContext, replyOptions: params.opts });
-+      if (mode === "quiet") {
-+        await params.opts.onItemEvent?.({
-+          kind: "preamble",
-+          phase: "end",
-+          progressText: "Older queued input is running.",
-+        });
-+      } else {
-+        await deliverFollowupDecision({
-+          decision: {
-+            kind: "deliver",
-+            payloads: [{ text: "Owned durable commentary", isCommentary: true }],
-+          },
-+          turn,
-+          defaults: {
-+            defaultModel: "fixture",
-+            typingMode: "never",
-+            typing: createFollowupTurnTestTypingController(),
-+            opts: newer.source,
-+          },
-+          runId: turn.runId,
-+          runFollowup: vi.fn(),
-+          kind: "block",
-+        });
-+      }
-+      return { runId: turn.runId, outcome: { kind: "rejected", payload: { text: older.final } } };
-+    });
-+    // Use the same retained-source resolution as the actual admission boundary.
-+    await resolveQueuedProgressOptions(turn.queued, newer.source)?.onQueuedFollowupAdmitted?.();
-+    const execution = await executeFollowupTurnForTest({
-+      turn,
-+      defaults: {
-+        defaultModel: "fixture",
-+        typingMode: "never",
-+        typing: createFollowupTurnTestTypingController(),
-+        opts: newer.source,
-+      },
-+      onToolResult: vi.fn(async () => {}),
-+      onCompactionNoticePayload: vi.fn(async () => {}),
-+    });
-+    await execution.progress.drain();
-+    const progress = (await older.store.entries()).find(
-+      (entry) => entry.value.scope.sourceMessageId === older.sourceMessageId,
-+    );
-+    const draftId = progress?.value.draft.messages[0]?.id;
-+    expect(draftId).toBeDefined();
-+    await older.sendFinal();
-+    expect(older.messages.has(draftId!)).toBe(false);
-+    expect(outbound.deliver).not.toHaveBeenCalled();
-+    await settleQueuedFollowupPresentation(
-+      {
-+        defaultModel: "fixture",
-+        typingMode: "never",
-+        typing: createFollowupTurnTestTypingController(),
-+        opts: newer.source,
-+      },
-+      turn.queued,
-+    );
-+    expect(discordProgressWriters.has(progress!.key)).toBe(false);
-+  },
-+);
-+
-+it.each([true, false])(
-+  "releases its deferred writer on terminal settlement (accepted=%s)",
-+  async (accepted) => {
-+    const scenario = await createQueuedScenario();
-+    const progress = (await scenario.store.entries()).find(
-+      (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
-+    );
-+    if (!progress) {
-+      throw new Error("Source writer was not registered");
-+    }
-+    expect(discordProgressWriters.has(progress.key)).toBe(true);
-+    if (!accepted) {
-+      deliverDiscordReply.mockResolvedValue({ visibleReplySent: false });
-+      await expect(scenario.sendFinal()).rejects.toThrow();
-+    } else {
-+      await scenario.sendFinal();
-+    }
-+    await settleQueuedFollowupPresentation({
-+      defaultModel: "fixture",
-+      typingMode: "never",
-+      typing: createFollowupTurnTestTypingController(),
-+      opts: scenario.source,
-+    });
-+    expect(discordProgressWriters.has(progress.key)).toBe(false);
-+    expect(scenario.messages.has(scenario.draftId)).toBe(!accepted);
-+    await scenario.assertForeignPreserved();
-+  },
-+);
-+
-+it("preserves a scheduled same-source retry across settlement and new admission", async () => {
-+  const scenario = await createQueuedScenario();
-+  const delivery = scenario.source.onQueuedFollowupReplyBatch;
-+  if (!delivery?.createSourceRetry) {
-+    throw new Error("Source retry owner is missing");
-+  }
-+  // The existing stranded-reply decision schedules recovery before the first
-+  // runner's terminal callback/settlement; it has not attempted a source send.
-+  const retry = delivery.createSourceRetry();
-+  await delivery({
-+    kind: "queued-followup",
-+    runId: scenario.turn.runId,
-+    originatingChannel: "discord",
-+    payloads: [],
-+    completion: { kind: "completed" },
-+  });
-+  const defaults = {
-+    defaultModel: "fixture",
-+    typingMode: "never" as const,
-+    typing: createFollowupTurnTestTypingController(),
-+    opts: scenario.source,
-+  };
-+  await settleQueuedFollowupPresentation(defaults, scenario.turn.queued);
-+  const receipt = (await scenario.store.entries()).find(
-+    (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
-+  );
-+  expect(receipt?.value.closed).toBe(false);
-+  expect(discordProgressWriters.has(receipt!.key)).toBe(false);
-+  await scenario.source.onQueuedFollowupAdmitted?.();
-+  admitMockDiscordReplyTurn({ ctx: scenario.sourceContext, replyOptions: scenario.source });
-+  await scenario.source.onItemEvent?.({
-+    kind: "preamble",
-+    phase: "end",
-+    progressText: "Finishing retained source reply.",
-+  });
-+  await retry({
-+    kind: "queued-followup",
-+    runId: scenario.turn.runId,
-+    originatingChannel: "discord",
-+    payloads: [{ text: scenario.final }],
-+    completion: { kind: "completed" },
-+  });
-+  await settleQueuedFollowupPresentation(defaults, scenario.turn.queued);
-+  expect(scenario.messages.has(scenario.draftId)).toBe(false);
-+  expect(discordProgressWriters.has(receipt!.key)).toBe(false);
-+  expect(deliverDiscordReply).toHaveBeenCalledOnce();
-+  expect(outbound.deliver).not.toHaveBeenCalled();
-+});
 diff --git a/extensions/discord/src/monitor/message-handler.process.session-routing.test.ts b/extensions/discord/src/monitor/message-handler.process.session-routing.test.ts
 index 888288b9d9590835e4440538b953a221e38b1954..a9a132d25a3d72ef12a24cafeaedfd21e49127bb 100644
 --- a/extensions/discord/src/monitor/message-handler.process.session-routing.test.ts
@@ -51765,6 +51191,37 @@ index a7452255acf87ab2c3221ee1c4b924ceadd19866..5f8deaaceb1422018c3fe9db25345c8d
    registerDiscordListener(
      params.client.listeners,
      new DiscordThreadReadyListener(threadUpdateListener),
+diff --git a/extensions/discord/src/monitor/queued-origin-integration.test-harness.ts b/extensions/discord/src/monitor/queued-origin-integration.test-harness.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9954d616b85163ff033f1ef02cd5a5ccbc90948
+--- /dev/null
++++ b/extensions/discord/src/monitor/queued-origin-integration.test-harness.ts
+@@ -0,0 +1,25 @@
++import { vi } from "vitest";
++export { RequestClient } from "../internal/discord.js";
++export { discordProgressWriters } from "../request-progress-writer-state.js";
++export { setDiscordRuntime } from "../runtime.js";
++export {
++  admitMockDiscordReplyTurn,
++  createDiscordDraftStream,
++  createDiscordRequestProgressStreamForTest,
++  createNoQueuedDispatchResult,
++  deliverDiscordReply,
++  dispatchBufferedReplyForTest,
++  getSessionEntry,
++  registerDiscordProcessTestLifecycle,
++  runProcessDiscordMessage,
++} from "./message-handler.process.test-harness.js";
++export { createAutomaticDraftContext } from "./message-handler.process.test-helpers.js";
++
++/** Load real presentation owners after the existing transport harness installs its mocks. */
++export async function loadActualDiscordQueuedProgressModules() {
++  const actualDraft =
++    await vi.importActual<typeof import("../draft-stream.js")>("../draft-stream.js");
++  const actualProgress =
++    await vi.importActual<typeof import("../request-progress.js")>("../request-progress.js");
++  return { actualDraft, actualProgress };
++}
 diff --git a/extensions/discord/src/monitor/reply-delivery.ts b/extensions/discord/src/monitor/reply-delivery.ts
 index 2bf86617b4dbbcd4cefbdd24cfab23e3c2385b62..d54cebce77a8cbf2044db95a1beff8fa3f94b263 100644
 --- a/extensions/discord/src/monitor/reply-delivery.ts
@@ -51852,45 +51309,321 @@ index 8c582c805102044614405ff3e500118d0465cafa..18aa14c551d69029f9b9bef10ab84052
  
  export function resolveThreadBindingPersonaFromRecord(record: ThreadBindingRecord): string {
 diff --git a/extensions/discord/src/outbound-adapter.test.ts b/extensions/discord/src/outbound-adapter.test.ts
-index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb332f8e1c06 100644
+index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..6481aba10b8da166959f995ed5e6924837e7eab6 100644
 --- a/extensions/discord/src/outbound-adapter.test.ts
 +++ b/extensions/discord/src/outbound-adapter.test.ts
-@@ -422,7 +422,7 @@ describe("discordOutbound", () => {
-       mediaAccess,
-       mediaLocalRoots: mediaAccess.localRoots,
-       mediaReadFile,
--      replyToId: "reply-1",
-+      replyToId: "100000000000000001",
-       replyToIdSource: "implicit",
-       replyToMode: "first",
-       onDeliveryResult,
-@@ -438,7 +438,7 @@ describe("discordOutbound", () => {
-       2,
-     );
-     expect(voiceOptions.accountId).toBe("default");
--    expect(voiceOptions.reply).toEqual({ messageId: "reply-1", scope: "first" });
-+    expect(voiceOptions.reply).toEqual({ messageId: "100000000000000001", scope: "first" });
-     expect(voiceOptions.mediaAccess).toBe(mediaAccess);
-     expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
-     expect(voiceOptions.mediaReadFile).toBe(mediaReadFile);
-@@ -519,14 +519,14 @@ describe("discordOutbound", () => {
-         audioAsVoice: true,
-       },
-       accountId: "default",
--      replyToId: "reply-1",
-+      replyToId: "100000000000000001",
-       replyToIdSource: "implicit",
-       replyToMode: "batched",
-     });
+@@ -392,318 +392,13 @@ describe("discordOutbound", () => {
+     expect(hoisted.sendPollDiscordMock).not.toHaveBeenCalled();
+   });
  
-     expect(
-       mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
+-  it("routes audioAsVoice payloads through the Discord voice send helper", async () => {
+-    const onDeliveryResult = vi.fn();
+-    const mediaReadFile = vi.fn(async () => Buffer.from("trusted media"));
+-    const mediaAccess = {
+-      localRoots: ["/tmp/agent-workspace"],
+-      readFile: mediaReadFile,
+-      workspaceDir: "/tmp/agent-workspace",
+-    };
+-    hoisted.sendMessageDiscordMock.mockImplementation(
+-      async (_to: unknown, _text: unknown, options: unknown) => {
+-        const deliveryResult = { messageId: "msg-1", channelId: "ch-1" };
+-        const onProgress = (options as { onDeliveryResult?: (result: unknown) => Promise<void> })
+-          .onDeliveryResult;
+-        await onProgress?.(deliveryResult);
+-        return deliveryResult;
+-      },
+-    );
+-    const result = await discordOutbound.sendPayload?.({
+-      cfg: {},
+-      to: "channel:123456",
+-      text: "",
+-      payload: {
+-        text: "voice note",
+-        mediaUrls: ["./voice.ogg", "./extra.png"],
+-        audioAsVoice: true,
+-      },
+-      accountId: "default",
+-      mediaAccess,
+-      mediaLocalRoots: mediaAccess.localRoots,
+-      mediaReadFile,
+-      replyToId: "reply-1",
+-      replyToIdSource: "implicit",
+-      replyToMode: "first",
+-      onDeliveryResult,
+-    });
+-
+-    const voiceCall = mockCall(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord");
+-    expect(voiceCall[0]).toBe("channel:123456");
+-    expect(voiceCall[1]).toBe("./voice.ogg");
+-    const voiceOptions = mockObjectArg(
+-      hoisted.sendVoiceMessageDiscordMock,
+-      "sendVoiceMessageDiscord",
+-      0,
+-      2,
+-    );
+-    expect(voiceOptions.accountId).toBe("default");
+-    expect(voiceOptions.reply).toEqual({ messageId: "reply-1", scope: "first" });
+-    expect(voiceOptions.mediaAccess).toBe(mediaAccess);
+-    expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
+-    expect(voiceOptions.mediaReadFile).toBe(mediaReadFile);
+-
+-    const messageCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0);
+-    expect(messageCall[0]).toBe("channel:123456");
+-    expect(messageCall[1]).toBe("voice note");
+-    const messageOptions = mockObjectArg(
+-      hoisted.sendMessageDiscordMock,
+-      "sendMessageDiscord",
+-      0,
+-      2,
+-    );
+-    expect(messageOptions.accountId).toBe("default");
+-    expect(messageOptions.reply).toBeUndefined();
+-    expect(messageOptions).not.toHaveProperty("mediaAccess");
+-
+-    const mediaCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 1);
+-    expect(mediaCall[0]).toBe("channel:123456");
+-    expect(mediaCall[1]).toBe("");
+-    const mediaOptions = mockObjectArg(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 1, 2);
+-    expect(mediaOptions.accountId).toBe("default");
+-    expect(mediaOptions.mediaUrl).toBe("./extra.png");
+-    expect(mediaOptions.mediaAccess).toBe(mediaAccess);
+-    expect(mediaOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
+-    expect(mediaOptions.mediaReadFile).toBe(mediaReadFile);
+-    expect(mediaOptions.reply).toBeUndefined();
+-    expect(result).toEqual({
+-      channel: "discord",
+-      messageId: "msg-1",
+-      target: { kind: "channel", id: "ch-1" },
+-    });
+-    expect(onDeliveryResult.mock.calls.map((call) => call[0]?.messageId)).toEqual([
+-      "voice-1",
+-      "msg-1",
+-      "msg-1",
+-    ]);
+-  });
+-
+-  it("preserves reader-free workspace authority on direct voice media sends", async () => {
+-    const mediaAccess = {
+-      localRoots: ["/tmp/agent-workspace"],
+-      workspaceDir: "/tmp/agent-workspace",
+-    };
+-
+-    await discordOutbound.sendMedia?.({
+-      cfg: {},
+-      to: "channel:123456",
+-      text: "",
+-      mediaUrl: "./voice.ogg",
+-      audioAsVoice: true,
+-      mediaAccess,
+-      mediaLocalRoots: mediaAccess.localRoots,
+-    });
+-
+-    const voiceCall = mockCall(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord");
+-    expect(voiceCall[1]).toBe("./voice.ogg");
+-    const voiceOptions = mockObjectArg(
+-      hoisted.sendVoiceMessageDiscordMock,
+-      "sendVoiceMessageDiscord",
+-      0,
+-      2,
+-    );
+-    expect(voiceOptions.mediaAccess).toBe(mediaAccess);
+-    expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
+-    expect(voiceOptions.mediaReadFile).toBeUndefined();
+-    expect(voiceOptions.mediaAccess).not.toHaveProperty("readFile");
+-  });
+-
+-  it("uses a single implicit reply on audioAsVoice sends when replyToMode is batched", async () => {
+-    await discordOutbound.sendPayload?.({
+-      cfg: {},
+-      to: "channel:123456",
+-      text: "",
+-      payload: {
+-        text: "voice note",
+-        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
+-        audioAsVoice: true,
+-      },
+-      accountId: "default",
+-      replyToId: "reply-1",
+-      replyToIdSource: "implicit",
+-      replyToMode: "batched",
+-    });
+-
+-    expect(
+-      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
 -    ).toEqual({ messageId: "reply-1", scope: "first" });
-+    ).toEqual({ messageId: "100000000000000001", scope: "first" });
-     expect(
-       hoisted.sendMessageDiscordMock.mock.calls.map(
-         (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
-@@ -703,7 +703,7 @@ describe("discordOutbound", () => {
+-    expect(
+-      hoisted.sendMessageDiscordMock.mock.calls.map(
+-        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
+-      ),
+-    ).toEqual([undefined, undefined]);
+-  });
+-
+-  it.each([
+-    {
+-      name: "visible text",
+-      payload: {
+-        text: "voice note",
+-        mediaUrls: ["https://example.com/voice.ogg"],
+-        audioAsVoice: true,
+-      },
+-      expectedText: "voice note",
+-    },
+-    {
+-      name: "TTS supplement text",
+-      payload: {
+-        mediaUrls: ["https://example.com/voice.ogg"],
+-        audioAsVoice: true,
+-        ttsSupplement: {
+-          spokenText: "spoken answer",
+-        },
+-      },
+-      expectedText: "spoken answer",
+-    },
+-  ])(
+-    "delivers fallback $name before reporting an audioAsVoice failure",
+-    async ({ payload, expectedText }) => {
+-      const voiceError = new Error("ffmpeg unavailable");
+-      hoisted.sendVoiceMessageDiscordMock.mockRejectedValueOnce(voiceError);
+-
+-      await expect(
+-        discordOutbound.sendPayload?.({
+-          cfg: {},
+-          to: "channel:123456",
+-          text: "",
+-          payload,
+-          accountId: "default",
+-          replyToId: "reply-1",
+-          replyToMode: "first",
+-        }),
+-      ).rejects.toBe(voiceError);
+-
+-      expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
+-      expect(hoisted.sendMessageDiscordMock).toHaveBeenCalledOnce();
+-      const messageCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0);
+-      expect(messageCall[0]).toBe("channel:123456");
+-      expect(messageCall[1]).toBe(expectedText);
+-      expect(
+-        mockObjectArg(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0, 2).reply,
+-      ).toEqual({ messageId: "reply-1", scope: "first" });
+-      expect(outboundWarnSpy).toHaveBeenCalledWith(
+-        "discord voice send failed; continuing without voice",
+-        { error: voiceError },
+-      );
+-    },
+-  );
+-
+-  it("does not duplicate already-delivered TTS supplement text when audioAsVoice delivery fails", async () => {
+-    const voiceError = new Error("ffmpeg unavailable");
+-    hoisted.sendVoiceMessageDiscordMock.mockRejectedValueOnce(voiceError);
+-
+-    await expect(
+-      discordOutbound.sendPayload?.({
+-        cfg: {},
+-        to: "channel:123456",
+-        text: "",
+-        payload: {
+-          mediaUrls: ["https://example.com/voice.ogg"],
+-          audioAsVoice: true,
+-          ttsSupplement: {
+-            spokenText: "spoken answer",
+-            visibleTextAlreadyDelivered: true,
+-          },
+-        },
+-        accountId: "default",
+-        replyToId: "reply-1",
+-        replyToMode: "first",
+-      }),
+-    ).rejects.toBe(voiceError);
+-
+-    expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
+-    expect(hoisted.sendMessageDiscordMock).not.toHaveBeenCalled();
+-    expect(outboundWarnSpy).toHaveBeenCalledWith(
+-      "discord voice send failed; continuing without voice",
+-      { error: voiceError },
+-    );
+-  });
+-
+-  it("does not treat delivery progress failures as voice delivery failures", async () => {
+-    await expect(
+-      discordOutbound.sendPayload?.({
+-        cfg: {},
+-        to: "channel:123456",
+-        text: "",
+-        payload: {
+-          text: "voice note",
+-          mediaUrls: ["https://example.com/voice.ogg"],
+-          audioAsVoice: true,
+-        },
+-        accountId: "default",
+-        onDeliveryResult: async () => {
+-          throw new Error("progress unavailable");
+-        },
+-      }),
+-    ).rejects.toThrow("progress unavailable");
+-
+-    expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
+-    expect(hoisted.sendMessageDiscordMock).not.toHaveBeenCalled();
+-  });
+-
+-  it("keeps replyToId on every internal audioAsVoice send when replyToMode is all", async () => {
+-    await discordOutbound.sendPayload?.({
+-      cfg: {},
+-      to: "channel:123456",
+-      text: "",
+-      payload: {
+-        text: "voice note",
+-        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
+-        audioAsVoice: true,
+-      },
+-      accountId: "default",
+-      replyToId: "reply-1",
+-      replyToMode: "all",
+-    });
+-
+-    expect(
+-      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
+-    ).toEqual({ messageId: "reply-1", scope: "all" });
+-    expect(
+-      hoisted.sendMessageDiscordMock.mock.calls.map(
+-        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
+-      ),
+-    ).toEqual([
+-      { messageId: "reply-1", scope: "all" },
+-      { messageId: "reply-1", scope: "all" },
+-    ]);
+-  });
+-
+-  it("preserves explicit audioAsVoice payload replies when replyToMode is off", async () => {
+-    await discordOutbound.sendPayload?.({
+-      cfg: {},
+-      to: "channel:123456",
+-      text: "",
+-      payload: {
+-        text: "voice note",
+-        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
+-        audioAsVoice: true,
+-      },
+-      accountId: "default",
+-      replyToId: "explicit-reply-1",
+-      replyToMode: "off",
+-    });
+-
+-    expect(
+-      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
+-    ).toEqual({ messageId: "explicit-reply-1", scope: "all" });
+-    expect(
+-      hoisted.sendMessageDiscordMock.mock.calls.map(
+-        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
+-      ),
+-    ).toEqual([
+-      { messageId: "explicit-reply-1", scope: "all" },
+-      { messageId: "explicit-reply-1", scope: "all" },
+-    ]);
+-  });
+-
+   it.each([
+     {
+       name: "implicit first-mode",
        mediaUrl: "/tmp/render.mp4",
        replyToIdSource: "implicit" as const,
        replyToMode: "first" as const,
@@ -51899,7 +51632,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
      },
      {
        name: "implicit all-mode",
-@@ -711,8 +711,8 @@ describe("discordOutbound", () => {
+@@ -711,8 +406,8 @@ describe("discordOutbound", () => {
        replyToIdSource: "implicit" as const,
        replyToMode: "all" as const,
        expectedReplies: [
@@ -51910,7 +51643,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
        ],
      },
      {
-@@ -742,7 +742,7 @@ describe("discordOutbound", () => {
+@@ -742,7 +437,7 @@ describe("discordOutbound", () => {
        text: "rendered clip",
        mediaUrl: testCase.mediaUrl,
        accountId: "default",
@@ -51919,7 +51652,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
        replyToIdSource: testCase.replyToIdSource,
        replyToMode: testCase.replyToMode,
      });
-@@ -890,14 +890,14 @@ describe("discordOutbound", () => {
+@@ -890,14 +585,14 @@ describe("discordOutbound", () => {
        text: "caption\nfollow-up",
        mediaUrl: "https://example.com/photo.png",
        accountId: "default",
@@ -51936,7 +51669,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
    });
  
    it("touches bound thread activity after shared outbound delivery succeeds", async () => {
-@@ -1006,7 +1006,7 @@ describe("discordOutbound", () => {
+@@ -1006,7 +701,7 @@ describe("discordOutbound", () => {
        mediaAccess,
        mediaLocalRoots: mediaAccess.localRoots,
        mediaReadFile,
@@ -51945,7 +51678,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
        replyToIdSource: "implicit",
        replyToMode: "first",
      });
-@@ -1031,7 +1031,7 @@ describe("discordOutbound", () => {
+@@ -1031,7 +726,7 @@ describe("discordOutbound", () => {
      expect(componentOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
      expect(componentOptions.mediaReadFile).toBe(mediaReadFile);
      expect(componentOptions.accountId).toBe("default");
@@ -51954,7 +51687,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
  
      const messageCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord");
      expect(messageCall[0]).toBe("channel:123456");
-@@ -1313,7 +1313,7 @@ describe("discordOutbound", () => {
+@@ -1313,7 +1008,7 @@ describe("discordOutbound", () => {
          },
        },
        accountId: "default",
@@ -51963,7 +51696,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
        replyToIdSource: "implicit",
        replyToMode: "first",
      });
-@@ -1326,7 +1326,7 @@ describe("discordOutbound", () => {
+@@ -1326,7 +1021,7 @@ describe("discordOutbound", () => {
      expect(options.components).toEqual([{ type: 1, components: [] }]);
      expect(options.filename).toBe("photo.png");
      expect(options.accountId).toBe("default");
@@ -51972,7 +51705,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
    });
  
    it("preserves explicit component payload replies when replyToMode is off", async () => {
-@@ -1450,7 +1450,7 @@ describe("discordOutbound", () => {
+@@ -1450,7 +1145,7 @@ describe("discordOutbound", () => {
          },
        },
        accountId: "default",
@@ -51981,7 +51714,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
        replyToIdSource: "implicit",
        replyToMode: "first",
        formatting: { maxLinesPerMessage: 1 },
-@@ -1460,7 +1460,7 @@ describe("discordOutbound", () => {
+@@ -1460,7 +1155,7 @@ describe("discordOutbound", () => {
        hoisted.sendMessageDiscordMock.mock.calls.map(
          (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
        ),
@@ -51990,7 +51723,7 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
    });
  
    it.each([
-@@ -1468,19 +1468,20 @@ describe("discordOutbound", () => {
+@@ -1468,19 +1163,20 @@ describe("discordOutbound", () => {
      { name: "source-omitted", replyToIdSource: undefined, scope: "first" as const },
      { name: "explicit", replyToIdSource: "explicit" as const, scope: "all" as const },
    ])("sets $name first-mode text chunk fanout", async (testCase) => {
@@ -52013,6 +51746,375 @@ index c19d80541dfa0ca70b6e698dfeb1fbfac9644ad4..71a6cff63dfe8c3aaa25b2df63dbbb33
    });
  
    it("leaves non-approval mentions unchanged", async () => {
+diff --git a/extensions/discord/src/outbound-adapter.voice.test.ts b/extensions/discord/src/outbound-adapter.voice.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b04064823eb6058cd555ab2802590799df29fe26
+--- /dev/null
++++ b/extensions/discord/src/outbound-adapter.voice.test.ts
+@@ -0,0 +1,363 @@
++import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++import {
++  createDiscordOutboundHoisted,
++  installDiscordOutboundModuleSpies,
++  resetDiscordOutboundMocks,
++} from "./outbound-adapter.test-harness.js";
++
++const outboundWarnSpy = vi.hoisted(() => vi.fn());
++vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
++  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
++    "openclaw/plugin-sdk/runtime-env",
++  );
++  return {
++    ...actual,
++    createSubsystemLogger: (subsystem: string) => {
++      const logger = actual.createSubsystemLogger(subsystem);
++      return subsystem === "discord/outbound" ? { ...logger, warn: outboundWarnSpy } : logger;
++    },
++  };
++});
++
++const hoisted = createDiscordOutboundHoisted();
++await installDiscordOutboundModuleSpies(hoisted);
++let discordOutbound: typeof import("./outbound-adapter.js").discordOutbound;
++
++type MockCallSource = { mock: { calls: Array<Array<unknown>> } };
++
++function mockCall(source: MockCallSource, label: string, callIndex = 0): Array<unknown> {
++  const call = source.mock.calls[callIndex];
++  if (!call) {
++    throw new Error(`expected ${label} call ${callIndex}`);
++  }
++  return call;
++}
++
++function mockObjectArg(
++  source: MockCallSource,
++  label: string,
++  callIndex: number,
++  argIndex: number,
++): Record<string, unknown> {
++  const value = mockCall(source, label, callIndex)[argIndex];
++  if (!value || typeof value !== "object") {
++    throw new Error(`expected ${label} call ${callIndex} argument ${argIndex} to be an object`);
++  }
++  return value as Record<string, unknown>;
++}
++
++beforeAll(async () => {
++  ({ discordOutbound } = await import("./outbound-adapter.js"));
++});
++
++describe("discordOutbound", () => {
++  beforeEach(() => {
++    resetDiscordOutboundMocks(hoisted);
++    outboundWarnSpy.mockClear();
++  });
++
++  it("routes audioAsVoice payloads through the Discord voice send helper", async () => {
++    const onDeliveryResult = vi.fn();
++    const mediaReadFile = vi.fn(async () => Buffer.from("trusted media"));
++    const mediaAccess = {
++      localRoots: ["/tmp/agent-workspace"],
++      readFile: mediaReadFile,
++      workspaceDir: "/tmp/agent-workspace",
++    };
++    hoisted.sendMessageDiscordMock.mockImplementation(
++      async (_to: unknown, _text: unknown, options: unknown) => {
++        const deliveryResult = { messageId: "msg-1", channelId: "ch-1" };
++        const onProgress = (options as { onDeliveryResult?: (result: unknown) => Promise<void> })
++          .onDeliveryResult;
++        await onProgress?.(deliveryResult);
++        return deliveryResult;
++      },
++    );
++    const result = await discordOutbound.sendPayload?.({
++      cfg: {},
++      to: "channel:123456",
++      text: "",
++      payload: {
++        text: "voice note",
++        mediaUrls: ["./voice.ogg", "./extra.png"],
++        audioAsVoice: true,
++      },
++      accountId: "default",
++      mediaAccess,
++      mediaLocalRoots: mediaAccess.localRoots,
++      mediaReadFile,
++      replyToId: "100000000000000001",
++      replyToIdSource: "implicit",
++      replyToMode: "first",
++      onDeliveryResult,
++    });
++
++    const voiceCall = mockCall(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord");
++    expect(voiceCall[0]).toBe("channel:123456");
++    expect(voiceCall[1]).toBe("./voice.ogg");
++    const voiceOptions = mockObjectArg(
++      hoisted.sendVoiceMessageDiscordMock,
++      "sendVoiceMessageDiscord",
++      0,
++      2,
++    );
++    expect(voiceOptions.accountId).toBe("default");
++    expect(voiceOptions.reply).toEqual({ messageId: "100000000000000001", scope: "first" });
++    expect(voiceOptions.mediaAccess).toBe(mediaAccess);
++    expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
++    expect(voiceOptions.mediaReadFile).toBe(mediaReadFile);
++
++    const messageCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0);
++    expect(messageCall[0]).toBe("channel:123456");
++    expect(messageCall[1]).toBe("voice note");
++    const messageOptions = mockObjectArg(
++      hoisted.sendMessageDiscordMock,
++      "sendMessageDiscord",
++      0,
++      2,
++    );
++    expect(messageOptions.accountId).toBe("default");
++    expect(messageOptions.reply).toBeUndefined();
++    expect(messageOptions).not.toHaveProperty("mediaAccess");
++
++    const mediaCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 1);
++    expect(mediaCall[0]).toBe("channel:123456");
++    expect(mediaCall[1]).toBe("");
++    const mediaOptions = mockObjectArg(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 1, 2);
++    expect(mediaOptions.accountId).toBe("default");
++    expect(mediaOptions.mediaUrl).toBe("./extra.png");
++    expect(mediaOptions.mediaAccess).toBe(mediaAccess);
++    expect(mediaOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
++    expect(mediaOptions.mediaReadFile).toBe(mediaReadFile);
++    expect(mediaOptions.reply).toBeUndefined();
++    expect(result).toEqual({
++      channel: "discord",
++      messageId: "msg-1",
++      target: { kind: "channel", id: "ch-1" },
++    });
++    expect(onDeliveryResult.mock.calls.map((call) => call[0]?.messageId)).toEqual([
++      "voice-1",
++      "msg-1",
++      "msg-1",
++    ]);
++  });
++
++  it("preserves reader-free workspace authority on direct voice media sends", async () => {
++    const mediaAccess = {
++      localRoots: ["/tmp/agent-workspace"],
++      workspaceDir: "/tmp/agent-workspace",
++    };
++
++    await discordOutbound.sendMedia?.({
++      cfg: {},
++      to: "channel:123456",
++      text: "",
++      mediaUrl: "./voice.ogg",
++      audioAsVoice: true,
++      mediaAccess,
++      mediaLocalRoots: mediaAccess.localRoots,
++    });
++
++    const voiceCall = mockCall(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord");
++    expect(voiceCall[1]).toBe("./voice.ogg");
++    const voiceOptions = mockObjectArg(
++      hoisted.sendVoiceMessageDiscordMock,
++      "sendVoiceMessageDiscord",
++      0,
++      2,
++    );
++    expect(voiceOptions.mediaAccess).toBe(mediaAccess);
++    expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
++    expect(voiceOptions.mediaReadFile).toBeUndefined();
++    expect(voiceOptions.mediaAccess).not.toHaveProperty("readFile");
++  });
++
++  it("uses a single implicit reply on audioAsVoice sends when replyToMode is batched", async () => {
++    await discordOutbound.sendPayload?.({
++      cfg: {},
++      to: "channel:123456",
++      text: "",
++      payload: {
++        text: "voice note",
++        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
++        audioAsVoice: true,
++      },
++      accountId: "default",
++      replyToId: "100000000000000001",
++      replyToIdSource: "implicit",
++      replyToMode: "batched",
++    });
++
++    expect(
++      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
++    ).toEqual({ messageId: "100000000000000001", scope: "first" });
++    expect(
++      hoisted.sendMessageDiscordMock.mock.calls.map(
++        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
++      ),
++    ).toEqual([undefined, undefined]);
++  });
++
++  it.each([
++    {
++      name: "visible text",
++      payload: {
++        text: "voice note",
++        mediaUrls: ["https://example.com/voice.ogg"],
++        audioAsVoice: true,
++      },
++      expectedText: "voice note",
++    },
++    {
++      name: "TTS supplement text",
++      payload: {
++        mediaUrls: ["https://example.com/voice.ogg"],
++        audioAsVoice: true,
++        ttsSupplement: {
++          spokenText: "spoken answer",
++        },
++      },
++      expectedText: "spoken answer",
++    },
++  ])(
++    "delivers fallback $name before reporting an audioAsVoice failure",
++    async ({ payload, expectedText }) => {
++      const voiceError = new Error("ffmpeg unavailable");
++      hoisted.sendVoiceMessageDiscordMock.mockRejectedValueOnce(voiceError);
++
++      await expect(
++        discordOutbound.sendPayload?.({
++          cfg: {},
++          to: "channel:123456",
++          text: "",
++          payload,
++          accountId: "default",
++          replyToId: "reply-1",
++          replyToMode: "first",
++        }),
++      ).rejects.toBe(voiceError);
++
++      expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
++      expect(hoisted.sendMessageDiscordMock).toHaveBeenCalledOnce();
++      const messageCall = mockCall(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0);
++      expect(messageCall[0]).toBe("channel:123456");
++      expect(messageCall[1]).toBe(expectedText);
++      expect(
++        mockObjectArg(hoisted.sendMessageDiscordMock, "sendMessageDiscord", 0, 2).reply,
++      ).toEqual({ messageId: "reply-1", scope: "first" });
++      expect(outboundWarnSpy).toHaveBeenCalledWith(
++        "discord voice send failed; continuing without voice",
++        { error: voiceError },
++      );
++    },
++  );
++
++  it("does not duplicate already-delivered TTS supplement text when audioAsVoice delivery fails", async () => {
++    const voiceError = new Error("ffmpeg unavailable");
++    hoisted.sendVoiceMessageDiscordMock.mockRejectedValueOnce(voiceError);
++
++    await expect(
++      discordOutbound.sendPayload?.({
++        cfg: {},
++        to: "channel:123456",
++        text: "",
++        payload: {
++          mediaUrls: ["https://example.com/voice.ogg"],
++          audioAsVoice: true,
++          ttsSupplement: {
++            spokenText: "spoken answer",
++            visibleTextAlreadyDelivered: true,
++          },
++        },
++        accountId: "default",
++        replyToId: "reply-1",
++        replyToMode: "first",
++      }),
++    ).rejects.toBe(voiceError);
++
++    expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
++    expect(hoisted.sendMessageDiscordMock).not.toHaveBeenCalled();
++    expect(outboundWarnSpy).toHaveBeenCalledWith(
++      "discord voice send failed; continuing without voice",
++      { error: voiceError },
++    );
++  });
++
++  it("does not treat delivery progress failures as voice delivery failures", async () => {
++    await expect(
++      discordOutbound.sendPayload?.({
++        cfg: {},
++        to: "channel:123456",
++        text: "",
++        payload: {
++          text: "voice note",
++          mediaUrls: ["https://example.com/voice.ogg"],
++          audioAsVoice: true,
++        },
++        accountId: "default",
++        onDeliveryResult: async () => {
++          throw new Error("progress unavailable");
++        },
++      }),
++    ).rejects.toThrow("progress unavailable");
++
++    expect(hoisted.sendVoiceMessageDiscordMock).toHaveBeenCalledOnce();
++    expect(hoisted.sendMessageDiscordMock).not.toHaveBeenCalled();
++  });
++
++  it("keeps replyToId on every internal audioAsVoice send when replyToMode is all", async () => {
++    await discordOutbound.sendPayload?.({
++      cfg: {},
++      to: "channel:123456",
++      text: "",
++      payload: {
++        text: "voice note",
++        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
++        audioAsVoice: true,
++      },
++      accountId: "default",
++      replyToId: "reply-1",
++      replyToMode: "all",
++    });
++
++    expect(
++      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
++    ).toEqual({ messageId: "reply-1", scope: "all" });
++    expect(
++      hoisted.sendMessageDiscordMock.mock.calls.map(
++        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
++      ),
++    ).toEqual([
++      { messageId: "reply-1", scope: "all" },
++      { messageId: "reply-1", scope: "all" },
++    ]);
++  });
++
++  it("preserves explicit audioAsVoice payload replies when replyToMode is off", async () => {
++    await discordOutbound.sendPayload?.({
++      cfg: {},
++      to: "channel:123456",
++      text: "",
++      payload: {
++        text: "voice note",
++        mediaUrls: ["https://example.com/voice.ogg", "https://example.com/extra.png"],
++        audioAsVoice: true,
++      },
++      accountId: "default",
++      replyToId: "explicit-reply-1",
++      replyToMode: "off",
++    });
++
++    expect(
++      mockObjectArg(hoisted.sendVoiceMessageDiscordMock, "sendVoiceMessageDiscord", 0, 2).reply,
++    ).toEqual({ messageId: "explicit-reply-1", scope: "all" });
++    expect(
++      hoisted.sendMessageDiscordMock.mock.calls.map(
++        (call) => (call[2] as { reply?: unknown } | undefined)?.reply,
++      ),
++    ).toEqual([
++      { messageId: "explicit-reply-1", scope: "all" },
++      { messageId: "explicit-reply-1", scope: "all" },
++    ]);
++  });
++});
 diff --git a/extensions/discord/src/reply-reference.ts b/extensions/discord/src/reply-reference.ts
 index 73bbffd3768a53f30d365317e8de938922fc2853..227a93be27e743daa841f6b266c5e3955b812d9a 100644
 --- a/extensions/discord/src/reply-reference.ts
@@ -52053,10 +52155,10 @@ index 0000000000000000000000000000000000000000..6ed1f6297e433f27ae6dc9b2b51755af
 +export const discordProgressWriters = new Map<string, DiscordProgressWriter>();
 diff --git a/extensions/discord/src/request-progress.interrupted-source.test.ts b/extensions/discord/src/request-progress.interrupted-source.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..c8f466e786660f02f715f48b3bb7143c733e1b8c
+index 0000000000000000000000000000000000000000..084a6ac594e6470b7e29a5d986c0a8d8b9c2e1e0
 --- /dev/null
 +++ b/extensions/discord/src/request-progress.interrupted-source.test.ts
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,142 @@
 +import { ChannelType } from "discord-api-types/v10";
 +import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
 +import {
@@ -52155,7 +52257,6 @@ index 0000000000000000000000000000000000000000..c8f466e786660f02f715f48b3bb7143c
 +  client.create.mockReturnValue({ rest, account: { accountId: "default", config } });
 +  await source.pushPreambleItemEvent({
 +    itemId: "source",
-+    kind: "preamble",
 +    progressText: "Checking the original repair.",
 +  });
 +  await source.draftStream?.flush();
@@ -56072,7 +56173,7 @@ index 0000000000000000000000000000000000000000..84fac6e9343f25f09e7992a08b010480
 +  },
 +);
 diff --git a/extensions/discord/src/voice/ingress.test.ts b/extensions/discord/src/voice/ingress.test.ts
-index c4e8014049e670a5212548750d2eefd146c343bb..5702aa2cdd7202672fe8685ae02e902c5e06e3d0 100644
+index c4e8014049e670a5212548750d2eefd146c343bb..1cbb3ed3d09a30f79ff8cb66a6e0c9f109eaaf8f 100644
 --- a/extensions/discord/src/voice/ingress.test.ts
 +++ b/extensions/discord/src/voice/ingress.test.ts
 @@ -5,10 +5,20 @@ type MockIngressInput = {
@@ -56097,7 +56198,7 @@ index c4e8014049e670a5212548750d2eefd146c343bb..5702aa2cdd7202672fe8685ae02e902c
      payloads: [{ text: "spoken" }],
    })),
  }));
-@@ -19,10 +29,228 @@ vi.mock("../runtime.js", () => ({
+@@ -19,10 +29,231 @@ vi.mock("../runtime.js", () => ({
    }),
  }));
  
@@ -56126,7 +56227,10 @@ index c4e8014049e670a5212548750d2eefd146c343bb..5702aa2cdd7202672fe8685ae02e902c
 +      defaults: { systemAgent: { agentId: "main" } },
 +      entries: {
 +        main: { workspace: "/primary" },
-+        "company-beta-coordination": { workspace: "/company", identity: { name: "Mephisto · Company Beta" } },
++        "company-beta-coordination": {
++          workspace: "/company",
++          identity: { name: "Mephisto · Company Beta" },
++        },
 +        "company-alpha-coordination": { workspace: "/company-alpha" },
 +      },
 +    },
@@ -74240,6 +74344,22 @@ index 0000000000000000000000000000000000000000..1bfc5997521835b60096ddaf015e9f96
 +    });
 +  });
 +}
+diff --git a/scripts/lib/tsgo-core-test-shards.mts b/scripts/lib/tsgo-core-test-shards.mts
+index a38407e99fac21ce855b4a19d216b03d1e9a32a8..949c65c04e8dfb47d49794957737022c366233a3 100644
+--- a/scripts/lib/tsgo-core-test-shards.mts
++++ b/scripts/lib/tsgo-core-test-shards.mts
+@@ -79,6 +79,11 @@ export const TSGO_CORE_TEST_SHARDS = [
+     group: "src",
+     config: "test/tsconfig/tsconfig.core.test.commands-doctor.json",
+   },
++  {
++    name: "messaging-transport",
++    group: "src",
++    config: "test/tsconfig/tsconfig.core.test.messaging-transport.json",
++  },
+ ] as const;
+ 
+ export const TSGO_CORE_GRAPHS = [
 diff --git a/scripts/lib/vitest-build-prerequisites.mts b/scripts/lib/vitest-build-prerequisites.mts
 index e1e0f3fa55538891b9ad2dcd72caa167b4314008..31ac1246e36abf74cf2ad774844e1ef5470d9ba0 100644
 --- a/scripts/lib/vitest-build-prerequisites.mts
@@ -146052,22 +146172,30 @@ index 7c7ad353ca8fe35c84d6d44ad6846f4f650b26fa..d555f84e20f4823e7f381180c5b648ad
            userAgent,
            headers: resolveFetchHeaders(executionFetch),
            readabilityEnabled,
-diff --git a/src/agents/transcript-redact.test.ts b/src/agents/transcript-redact.test.ts
-index 1666c91d0d132b2fc40651f1e0a9ac6cd879ccbe..c5eff0af62607873a7172461d9f6fa74503f2252 100644
---- a/src/agents/transcript-redact.test.ts
-+++ b/src/agents/transcript-redact.test.ts
-@@ -9,6 +9,7 @@ import * as loggingConfigModule from "../logging/config.js";
- import { prepareModelVisibleToolTextBlock } from "../logging/redact.js";
- import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
- import { resetSecretRedactionRegistryForTest } from "../logging/secret-redaction-registry.test-support.js";
+diff --git a/src/agents/transcript-redact.run-ownership.test.ts b/src/agents/transcript-redact.run-ownership.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1f8a9ca7cad99faf2fa0dfbb21b49a8232db646d
+--- /dev/null
++++ b/src/agents/transcript-redact.run-ownership.test.ts
+@@ -0,0 +1,58 @@
++import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
++import { describe, expect, it } from "vitest";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
++import { resetSecretRedactionRegistryForTest } from "../logging/secret-redaction-registry.test-support.js";
 +import { attachSessionTranscriptRunId } from "../sessions/transcript-events.js";
- import { castAgentMessage } from "./test-helpers/agent-message-fixtures.js";
- import { redactTranscriptMessage } from "./transcript-redact.js";
- 
-@@ -74,6 +75,46 @@ const OPENAI_REASONING_REPLAY_METADATA = {
- } as const;
- 
- describe("redactTranscriptMessage", () => {
++import { castAgentMessage } from "./test-helpers/agent-message-fixtures.js";
++import { redactTranscriptMessage } from "./transcript-redact.js";
++
++function msgContent(msg: AgentMessage): unknown {
++  return (msg as unknown as { content: unknown }).content;
++}
++
++function cfg(_mode: "tools" | "off", patterns?: string[]): OpenClawConfig {
++  return { logging: patterns ? { redactPatterns: patterns } : {} } satisfies OpenClawConfig;
++}
++
++describe("redactTranscriptMessage", () => {
 +  it.each(["default", "custom", "registered"] as const)(
 +    "preserves canonical run ownership while applying %s redaction to payload lookalikes",
 +    (policy) => {
@@ -146107,10 +146235,7 @@ index 1666c91d0d132b2fc40651f1e0a9ac6cd879ccbe..c5eff0af62607873a7172461d9f6fa74
 +      }
 +    },
 +  );
-+
-   it.each(["addition", "eviction", "reset"] as const)(
-     "rechecks prepared tool text after a secret registry %s",
-     (change) => {
++});
 diff --git a/src/agents/transcript-redact.ts b/src/agents/transcript-redact.ts
 index bbed3625b754c196831cfe63424900f49dfc8f15..736725c82ba7d77304c6f3b48e370f16d23bd804 100644
 --- a/src/agents/transcript-redact.ts
@@ -146600,6 +146725,70 @@ index 0000000000000000000000000000000000000000..5bae4dfe4344610c9acd6bfa6c9fd4d1
 +  deliver.sourceProgressOptions = sourceProgressOptions(bound);
 +  return bound;
 +}
+diff --git a/src/auto-reply/dispatch.queued-followup.test-support.ts b/src/auto-reply/dispatch.queued-followup.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e52c36649ef506aec813b7e634f121dea2daa096
+--- /dev/null
++++ b/src/auto-reply/dispatch.queued-followup.test-support.ts
+@@ -0,0 +1,58 @@
++import { expect, it, vi, type Mock } from "vitest";
++import type { InternalGetReplyOptions } from "./reply/get-reply.types.js";
++import { buildTestCtx } from "./reply/test-ctx.js";
++
++export function registerQueuedFollowupDispatchTests(
++  dispatchInboundMessage: typeof import("./dispatch.js").dispatchInboundMessage,
++  hoisted: { dispatchReplyFromConfigMock: Mock },
++) {
++  it("retains an opted-in Slack progress owner's dispatcher after initial return", async () => {
++    const actual = await vi.importActual<typeof import("./reply/reply-dispatcher.js")>(
++      "./reply/reply-dispatcher.js",
++    );
++    const deliver = vi.fn(async () => ({ visibleReplySent: true }));
++    const dispatcher = actual.createReplyDispatcher({ deliver });
++    let source: InternalGetReplyOptions | undefined;
++    hoisted.dispatchReplyFromConfigMock.mockImplementationOnce(async ({ replyOptions }) => {
++      source = replyOptions;
++      return { queuedFinal: false, counts: { tool: 0, block: 0, final: 0 } };
++    });
++    await dispatchInboundMessage({
++      ctx: buildTestCtx({
++        Surface: "slack",
++        Provider: "slack",
++        OriginatingChannel: "slack",
++        OriginatingTo: "channel:C2",
++        SessionKey: "agent:test:main",
++        MessageSid: "source-23",
++      }),
++      cfg: {},
++      dispatcher,
++      replyOptions: { progressPreambleEnabled: true },
++    });
++    if (!source?.onQueuedFollowupReplyBatch) {
++      throw new Error("Normal source dispatcher was not retained");
++    }
++    const assertCurrent = vi.fn();
++    source.onAgentRunStart?.("queued-slack", undefined, undefined, {
++      sessionKey: "agent:test:main",
++      sessionId: "session-23",
++      sourceMessageId: "source-23",
++      channel: "slack",
++      to: "channel:C2",
++      assertCurrent,
++    });
++    await source.onQueuedFollowupReplyBatch({
++      kind: "queued-followup",
++      runId: "queued-slack",
++      originatingChannel: "slack",
++      payloads: [{ text: "Slack terminal" }],
++      completion: { kind: "completed" },
++    });
++    expect(deliver).toHaveBeenCalledWith(
++      expect.objectContaining({ text: "Slack terminal" }),
++      expect.objectContaining({ kind: "final" }),
++    );
++    expect(assertCurrent).toHaveBeenCalled();
++  });
++}
 diff --git a/src/auto-reply/dispatch.retained-steering.test.ts b/src/auto-reply/dispatch.retained-steering.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..b6628481ed29e72068bbbafeb71ad090ec85eb23
@@ -146890,70 +147079,22 @@ index 0000000000000000000000000000000000000000..b6628481ed29e72068bbbafeb71ad090
 +  );
 +});
 diff --git a/src/auto-reply/dispatch.test.ts b/src/auto-reply/dispatch.test.ts
-index 803662d1177050c1d3512e0ffd7971ed824ec988..ed47fe1c99c389d0386598e46c2eeaeaa5f6f06a 100644
+index 803662d1177050c1d3512e0ffd7971ed824ec988..1ec7f24e61e3a7a4cee57cc408d3dab09671cab5 100644
 --- a/src/auto-reply/dispatch.test.ts
 +++ b/src/auto-reply/dispatch.test.ts
-@@ -4,6 +4,7 @@ import type { OpenClawConfig } from "../config/config.js";
+@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import type { OpenClawConfig } from "../config/config.js";
  import { onDiagnosticEvent, resetDiagnosticEventsForTest } from "../infra/diagnostic-events.js";
  import { registerReplyDispatcherSettledTask, withReplyDispatcher } from "./dispatch-dispatcher.js";
++import { registerQueuedFollowupDispatchTests } from "./dispatch.queued-followup.test-support.js";
  import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "./reply-payload.js";
-+import type { InternalGetReplyOptions } from "./reply/get-reply.types.js";
  import type { ReplyDispatchBeforeDeliver } from "./reply/reply-dispatcher.js";
  import type { ReplyDispatcher } from "./reply/reply-dispatcher.types.js";
- import { buildTestCtx } from "./reply/test-ctx.js";
-@@ -152,6 +153,56 @@ describe("withReplyDispatcher", () => {
+@@ -152,6 +153,8 @@ describe("withReplyDispatcher", () => {
      });
    });
  
-+  it("retains an opted-in Slack progress owner's dispatcher after initial return", async () => {
-+    const actual = await vi.importActual<typeof import("./reply/reply-dispatcher.js")>(
-+      "./reply/reply-dispatcher.js",
-+    );
-+    const deliver = vi.fn(async () => ({ visibleReplySent: true }));
-+    const dispatcher = actual.createReplyDispatcher({ deliver });
-+    let source: InternalGetReplyOptions | undefined;
-+    hoisted.dispatchReplyFromConfigMock.mockImplementationOnce(async ({ replyOptions }) => {
-+      source = replyOptions;
-+      return { queuedFinal: false, counts: { tool: 0, block: 0, final: 0 } };
-+    });
-+    await dispatchInboundMessage({
-+      ctx: buildTestCtx({
-+        Surface: "slack",
-+        Provider: "slack",
-+        OriginatingChannel: "slack",
-+        OriginatingTo: "channel:C2",
-+        SessionKey: "agent:test:main",
-+        MessageSid: "source-23",
-+      }),
-+      cfg: {},
-+      dispatcher,
-+      replyOptions: { progressPreambleEnabled: true },
-+    });
-+    if (!source?.onQueuedFollowupReplyBatch) {
-+      throw new Error("Normal source dispatcher was not retained");
-+    }
-+    const assertCurrent = vi.fn();
-+    source.onAgentRunStart?.("queued-slack", undefined, undefined, {
-+      sessionKey: "agent:test:main",
-+      sessionId: "session-23",
-+      sourceMessageId: "source-23",
-+      channel: "slack",
-+      to: "channel:C2",
-+      assertCurrent,
-+    });
-+    await source.onQueuedFollowupReplyBatch({
-+      kind: "queued-followup",
-+      runId: "queued-slack",
-+      originatingChannel: "slack",
-+      payloads: [{ text: "Slack terminal" }],
-+      completion: { kind: "completed" },
-+    });
-+    expect(deliver).toHaveBeenCalledWith(
-+      expect.objectContaining({ text: "Slack terminal" }),
-+      expect.objectContaining({ kind: "final" }),
-+    );
-+    expect(assertCurrent).toHaveBeenCalled();
-+  });
++  registerQueuedFollowupDispatchTests(dispatchInboundMessage, hoisted);
 +
    it("dispatchInboundMessage owns dispatcher lifecycle", async () => {
      const order: string[] = [];
@@ -192558,7 +192699,7 @@ index 67adf8ef368523eeebe478a4774d1558b970590b..372f5e5dcc5b19f2e7df1d8a365cf14e
    it.each<{
      name: string;
 diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
-index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c621dd4866b 100644
+index f8b96bf1a289089982b7f32b5dee3de6354023a7..48964daf046c3b4fffcd398b130e6eb38dd324f1 100644
 --- a/src/gateway/agent-turn/agent-run-execution-phase.ts
 +++ b/src/gateway/agent-turn/agent-run-execution-phase.ts
 @@ -1,5 +1,8 @@
@@ -192597,11 +192738,8 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
  import type { OpenClawConfig } from "../../config/types.openclaw.js";
  import { isAbortError } from "../../infra/abort-signal.js";
  import type { MediaFact } from "../../media/media-facts.js";
-@@ -33,9 +40,13 @@ import {
-   annotateInterSessionPromptText,
-   type InputProvenance,
+@@ -35,7 +42,10 @@ import {
  } from "../../sessions/input-provenance.js";
-+import { deliveryContextKey } from "../../utils/delivery-context.shared.js";
  import { discardPreparedInboundMedia } from "../chat-attachments.js";
  import { errorShapeFromError } from "../error-shape.js";
 +import { readInProcessSubagentResume } from "../in-process-subagent-resume.js";
@@ -192611,7 +192749,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
  import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
  import { createAgentRunModelSelectionHandler } from "../server-methods/agent-run-model-selection.js";
  import { resolveSessionRuntimeCwd } from "../server-methods/agent-session-reset.js";
-@@ -53,7 +64,6 @@ import {
+@@ -53,21 +63,27 @@ import {
    resolveAgentRestartRecoveryContext,
    resolveAgentRestartRecoveryExecutionIdentityAdmission,
  } from "./agent-restart-recovery-context.js";
@@ -192619,7 +192757,11 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
  import { withAgentRunDispatchExecutionIdentity } from "./agent-run-dispatch-execution-identity.js";
  import {
    resolveAbortedAgentStopReason,
-@@ -64,10 +74,16 @@ import {
+   dispatchAgentRunFromGateway,
+ } from "./agent-run-dispatch.js";
+ import { resolveExecutionIdentitySpawnFacts } from "./agent-run-execution-lineage.js";
++import { assertAgentRunMessageActionPresentationCurrent } from "./agent-run-message-action-presentation.js";
+ import {
    finalizePreparedAgentRunUserTurn,
    releasePreparedAgentRunUserTurn,
  } from "./agent-run-user-turn.js";
@@ -192718,7 +192860,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
          const restartRecoveryContext = resolveAgentRestartRecoveryContext({
            isRestartRecoveryResumeRun: params.isRestartRecoveryResumeRun,
            canUseInternalRuntimeHandoff: params.canUseInternalRuntimeHandoff,
-@@ -323,7 +379,60 @@ export async function startAgentRunExecution(params: {
+@@ -323,7 +379,37 @@ export async function startAgentRunExecution(params: {
            sessionEntry: params.sessionEntry,
          });
          const restartRecoveryChannelContext = restartRecoveryContext?.channel;
@@ -192729,36 +192871,13 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
 +              assertCurrent: () => {
 +                assertMcpRequesterScopeCurrent();
 +                assertMessageActionSourceSessionCurrent(messageActionSource, params.cfg);
-+                const presentation = params.requesterPresentation;
-+                if (presentation) {
-+                  presentation.assertCurrent();
-+                  const locator = presentation.progressRequest;
-+                  if (
-+                    presentation.runId !== params.runId ||
-+                    !locator ||
-+                    presentation.sessionKey !== params.resolvedSessionKey ||
-+                    presentation.sessionId !==
-+                      (params.resolvedSessionId ?? params.sessionEntry?.sessionId) ||
-+                    locator.sessionKey !== presentation.sessionKey ||
-+                    locator.sessionId !== presentation.sessionId ||
-+                    locator.sourceMessageId !== messageActionSource.sourceRequest.sourceMessageId ||
-+                    locator.requestGeneration !==
-+                      messageActionSource.sourceRequest.requestGeneration ||
-+                    deliveryContextKey(presentation.source) !==
-+                      deliveryContextKey({
-+                        channel: messageActionSource.toolContext.currentChannelProvider,
-+                        to:
-+                          messageActionSource.toolContext.currentMessagingTarget ??
-+                          messageActionSource.toolContext.currentChannelId,
-+                        accountId: messageActionSource.requesterAccountId,
-+                        threadId: messageActionSource.toolContext.currentThreadTs,
-+                      })
-+                  ) {
-+                    throw new Error(
-+                      "Message action requester presentation source differs from its admitted task",
-+                    );
-+                  }
-+                }
++                assertAgentRunMessageActionPresentationCurrent({
++                  presentation: params.requesterPresentation,
++                  source: messageActionSource,
++                  runId: params.runId,
++                  sessionKey: params.resolvedSessionKey,
++                  sessionId: params.resolvedSessionId ?? params.sessionEntry?.sessionId,
++                });
 +              },
 +            }
 +          : undefined;
@@ -192779,7 +192898,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
            messageChannel:
              restartRecoveryContext?.messageChannel ?? params.delivery.originMessageChannel,
            accountId:
-@@ -333,6 +442,7 @@ export async function startAgentRunExecution(params: {
+@@ -333,6 +419,7 @@ export async function startAgentRunExecution(params: {
            groupChannel: params.groupChannel,
            groupSpace: params.groupSpace,
            currentChannelId: restartRecoveryChannelContext?.currentChannelId,
@@ -192787,7 +192906,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
            currentThreadTs:
              restartRecoveryChannelContext?.currentThreadTs ??
              (prepared.resolvedThreadId != null ? String(prepared.resolvedThreadId) : undefined),
-@@ -385,6 +495,7 @@ export async function startAgentRunExecution(params: {
+@@ -385,6 +472,7 @@ export async function startAgentRunExecution(params: {
                },
                cronCreatorAuthority: prepared.cronCreatorAuthority,
                ingressOpts: {
@@ -192795,7 +192914,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
                  skillLibraryAuthoring,
                  message,
                  images: params.images,
-@@ -475,6 +586,8 @@ export async function startAgentRunExecution(params: {
+@@ -475,6 +563,8 @@ export async function startAgentRunExecution(params: {
                    if (!authority) {
                      throw new Error("agent run delegated authority was not admitted");
                    }
@@ -192804,7 +192923,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
                    // Sessionless runs intentionally have no abort-map owner. Their
                    // prepared admission retains authority until agentCommand closes it.
                    if (prepared.activeRunAbort.registered) {
-@@ -485,6 +598,7 @@ export async function startAgentRunExecution(params: {
+@@ -485,6 +575,7 @@ export async function startAgentRunExecution(params: {
                  internalDeliverySuppressText: params.client?.internal?.internalDeliverySuppressText,
                  suppressPromptPersistence: prepared.userTurn.suppressPromptPersistence,
                  userTurnTranscriptRecorder,
@@ -192812,7 +192931,7 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
                  cleanupBundleMcpOnRunEnd: params.request.cleanupBundleMcpOnRunEnd,
                  abortSignal: prepared.activeRunAbort.controller.signal,
                  lifecycleGeneration: params.lifecycleGeneration,
-@@ -608,6 +722,7 @@ export async function startAgentRunExecution(params: {
+@@ -608,6 +699,7 @@ export async function startAgentRunExecution(params: {
      });
    } finally {
      // Shutdown joins the execution through asynchronous runtime disposal, not just bookkeeping.
@@ -192820,6 +192939,54 @@ index f8b96bf1a289089982b7f32b5dee3de6354023a7..cea1792a9186958d7045f8dd1cd73c62
      prepared.releaseCallerAuthority?.();
      releaseGatewayRootContinuation?.();
    }
+diff --git a/src/gateway/agent-turn/agent-run-message-action-presentation.ts b/src/gateway/agent-turn/agent-run-message-action-presentation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0270734d9fcc365cb6bbc9899ef5b566568b2223
+--- /dev/null
++++ b/src/gateway/agent-turn/agent-run-message-action-presentation.ts
+@@ -0,0 +1,42 @@
++import type { RequesterPresentation } from "../../agents/command/requester-presentation.js";
++import { deliveryContextKey } from "../../utils/delivery-context.shared.js";
++import type { MessageActionDelegationSource } from "../message-action-delegation-source.js";
++
++/** Recheck presentation identity at use time, after the admitted source owner. */
++export function assertAgentRunMessageActionPresentationCurrent(params: {
++  presentation?: RequesterPresentation;
++  source: MessageActionDelegationSource;
++  runId: string;
++  sessionKey?: string;
++  sessionId?: string;
++}): void {
++  const presentation = params.presentation;
++  const messageActionSource = params.source;
++  if (presentation) {
++    presentation.assertCurrent();
++    const locator = presentation.progressRequest;
++    if (
++      presentation.runId !== params.runId ||
++      !locator ||
++      presentation.sessionKey !== params.sessionKey ||
++      presentation.sessionId !== params.sessionId ||
++      locator.sessionKey !== presentation.sessionKey ||
++      locator.sessionId !== presentation.sessionId ||
++      locator.sourceMessageId !== messageActionSource.sourceRequest.sourceMessageId ||
++      locator.requestGeneration !== messageActionSource.sourceRequest.requestGeneration ||
++      deliveryContextKey(presentation.source) !==
++        deliveryContextKey({
++          channel: messageActionSource.toolContext.currentChannelProvider,
++          to:
++            messageActionSource.toolContext.currentMessagingTarget ??
++            messageActionSource.toolContext.currentChannelId,
++          accountId: messageActionSource.requesterAccountId,
++          threadId: messageActionSource.toolContext.currentThreadTs,
++        })
++    ) {
++      throw new Error(
++        "Message action requester presentation source differs from its admitted task",
++      );
++    }
++  }
++}
 diff --git a/src/gateway/agent-turn/agent-run-message-action-source.test.ts b/src/gateway/agent-turn/agent-run-message-action-source.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..e658e6952b4d5262fb6413b2926adbf319739b3a
@@ -200284,7 +200451,7 @@ index fba6394920304f5dbe88bc50c6bad76638760e8b..1b9597a10ab04f2a5d37a98cd8d9b3a9
  }
 diff --git a/src/gateway/server-methods/chat-send-requester-native-continuity.integration.test.ts b/src/gateway/server-methods/chat-send-requester-native-continuity.integration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..57bbcc1a0f29bde3320ab24e96cc979b6bdee178
+index 0000000000000000000000000000000000000000..21c45f63bf81d4a97cf927591bdccbaa7f7ed69c
 --- /dev/null
 +++ b/src/gateway/server-methods/chat-send-requester-native-continuity.integration.test.ts
 @@ -0,0 +1,923 @@
@@ -200344,7 +200511,7 @@ index 0000000000000000000000000000000000000000..57bbcc1a0f29bde3320ab24e96cc979b
 +  };
 +});
 +
-+const AGENT = "sho-coordination";
++const AGENT = "company-beta-coordination";
 +const SESSION = `agent:${AGENT}:chat-native-continuity`;
 +const ORIGINAL = "chat-native-continuity-original";
 +const PARENT_MARKER = "CHAT_NATIVE_PARENT_PROBE";
@@ -200373,11 +200540,11 @@ index 0000000000000000000000000000000000000000..57bbcc1a0f29bde3320ab24e96cc979b
 +  const modelRef = "openai/native-chat-requester-test";
 +  const token = "synthetic-chat-continuity-token";
 +  const requestedSessionId = randomUUID();
-+  const agentWorkspace = state.path("sho", "coordination-workspace");
++  const agentWorkspace = state.path("company-beta", "coordination-workspace");
 +  await mkdir(agentWorkspace, { recursive: true });
 +  const childReadMarker = "CHAT_NATIVE_CHILD_READ_CONTROL";
 +  const childReadPath = state.path(
-+    "sho",
++    "company-beta",
 +    "coordination-workspace",
 +    "native-child-read-control.txt",
 +  );
@@ -201213,10 +201380,10 @@ index 0000000000000000000000000000000000000000..57bbcc1a0f29bde3320ab24e96cc979b
 +}, 90_000);
 diff --git a/src/gateway/server-methods/chat-send-requester-native-continuity.test-support.ts b/src/gateway/server-methods/chat-send-requester-native-continuity.test-support.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e66547498267a33891ad3256161304f0138f99ad
+index 0000000000000000000000000000000000000000..37a751f18fc0de6a073df744b45c93fe0c63e8df
 --- /dev/null
 +++ b/src/gateway/server-methods/chat-send-requester-native-continuity.test-support.ts
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,436 @@
 +import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 +import { expectDefined } from "@openclaw/normalization-core";
 +import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -201243,7 +201410,22 @@ index 0000000000000000000000000000000000000000..e66547498267a33891ad3256161304f0
 +    throw new Error("SYNTHETIC_TOOL_RESULT_SHAPE");
 +  }
 +  expect(message.isError, JSON.stringify(message)).toBe(false);
-+  return message.content;
++  if (
++    typeof message.timestamp !== "number" ||
++    !Number.isSafeInteger(message.timestamp) ||
++    message.timestamp < 0
++  ) {
++    throw new Error("SYNTHETIC_TOOL_RESULT_TIMESTAMP_SHAPE");
++  }
++  const recordedAt = new Date(message.timestamp);
++  if (!Number.isFinite(recordedAt.getTime())) {
++    throw new Error("SYNTHETIC_TOOL_RESULT_TIMESTAMP_SHAPE");
++  }
++  expect(message.content[0]).toEqual({
++    type: "text",
++    text: `[Tool result recorded at ${recordedAt.toISOString()}]`,
++  });
++  return message.content.slice(1);
 +}
 +
 +export function readToolResult(messages: readonly unknown[], toolCallId: string): unknown {
@@ -228509,6 +228691,359 @@ index b33837e7cdfc65240f8182e944cdcb4a55ddacc2..92e4ec4354bb718c868be75db521a908
      upsertTaskWithDeliveryState: ({ task, deliveryState }) => {
        const nextTask = structuredClone(task);
        const nextDeliveryState = deliveryState ? structuredClone(deliveryState) : undefined;
+diff --git a/src/trajectory/export-session-branch.ts b/src/trajectory/export-session-branch.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e2c1c54582887835dbee42e0e3740b92d93b0a6d
+--- /dev/null
++++ b/src/trajectory/export-session-branch.ts
+@@ -0,0 +1,347 @@
++import fsp from "node:fs/promises";
++import path from "node:path";
++import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
++import {
++  isSessionFileEntry,
++  parseSessionFileEntriesWithWarnings,
++} from "../agents/sessions/session-file-parser.js";
++import type { FileEntry, SessionEntry, SessionHeader } from "../agents/sessions/session-manager.js";
++import { parseSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
++import {
++  listSessionEntriesReadOnly,
++  loadSessionEntryReadOnly,
++  readTranscriptExportSnapshotReadOnlySync,
++  type SessionTranscriptReadScope,
++  type SessionTranscriptRuntimeTarget,
++} from "../config/sessions/session-accessor.js";
++import { readRestoredSessionTranscript } from "../config/sessions/session-cold-storage-read.js";
++import {
++  isCanonicalSessionTranscriptEntry,
++  scanSessionTranscriptTree,
++} from "../config/sessions/transcript-tree.js";
++import { parseAgentSessionKey } from "../routing/session-key.js";
++import { resolvePreferredSessionKeyForSessionIdMatches } from "../sessions/session-id-resolution.js";
++import type { TrajectoryBundleWarning } from "./types.js";
++
++export type JsonlParseWarning = Omit<TrajectoryBundleWarning, "count" | "rows"> & {
++  row: number;
++};
++
++type SessionEntryCandidateRow = {
++  row: number;
++  value: unknown;
++};
++
++export const MAX_TRAJECTORY_SESSION_FILE_BYTES = 50 * 1024 * 1024;
++
++export function normalizeCompleteSessionTarget(
++  target: SessionTranscriptRuntimeTarget | undefined,
++): SessionTranscriptRuntimeTarget | undefined {
++  if (!target) {
++    return undefined;
++  }
++  const agentId = normalizeOptionalString(target.agentId);
++  const sessionId = normalizeOptionalString(target.sessionId);
++  const sessionKey = normalizeOptionalString(target.sessionKey);
++  const storePath = normalizeOptionalString(target.storePath);
++  return agentId && sessionId && sessionKey && storePath
++    ? { agentId, sessionId, sessionKey, storePath }
++    : undefined;
++}
++
++function formatSessionParseWarnings(
++  warnings: ReturnType<typeof parseSessionFileEntriesWithWarnings>["warnings"],
++): JsonlParseWarning[] {
++  return warnings.map((warning) => ({
++    source: "session",
++    code: warning.code,
++    row: warning.row,
++    message:
++      warning.code === "invalid-session-json"
++        ? "Skipped a session JSONL row that is not valid JSON."
++        : "Skipped a session JSONL row that is not a session entry object.",
++  }));
++}
++
++function collectSessionEntries(
++  rows: readonly SessionEntryCandidateRow[],
++  warnings: JsonlParseWarning[] = [],
++): {
++  entries: FileEntry[];
++  warnings: JsonlParseWarning[];
++  rowByEntry: Map<FileEntry, number>;
++} {
++  const entries: FileEntry[] = [];
++  const rowByEntry = new Map<FileEntry, number>();
++  for (const row of rows) {
++    if (!isSessionFileEntry(row.value)) {
++      warnings.push({
++        source: "session",
++        code: "invalid-session-row",
++        row: row.row,
++        message: "Skipped a session JSONL row that is not a session entry object.",
++      });
++      continue;
++    }
++    entries.push(row.value);
++    rowByEntry.set(row.value, row.row);
++  }
++  return { entries, warnings, rowByEntry };
++}
++
++function migrateLegacySessionEntries(entries: FileEntry[]): void {
++  const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
++  const version = header?.version ?? 1;
++  if (version < 2) {
++    // Older session logs predate entry ids. Synthetic ids preserve branch order
++    // long enough to export the reachable suffix without mutating source files.
++    let previousId: string | null = null;
++    let index = 0;
++    for (const entry of entries) {
++      if (entry.type === "session") {
++        entry.version = 2;
++        continue;
++      }
++      const mutable: SessionEntry & { firstKeptEntryIndex?: unknown } = entry;
++      if (typeof mutable.id !== "string") {
++        mutable.id = `legacy-${index++}`;
++      }
++      mutable.parentId = previousId;
++      const entryId = mutable.id;
++      previousId = typeof entryId === "string" ? entryId : null;
++      if (mutable.type === "compaction" && typeof mutable.firstKeptEntryIndex === "number") {
++        const target = entries[mutable.firstKeptEntryIndex];
++        if (target && target.type !== "session") {
++          mutable.firstKeptEntryId = target.id;
++        }
++        delete mutable.firstKeptEntryIndex;
++      }
++    }
++  }
++  if (version < 3) {
++    for (const entry of entries) {
++      if (entry.type === "session") {
++        entry.version = 3;
++        continue;
++      }
++      if (entry.type === "message") {
++        const message: { role?: string } | undefined = entry.message;
++        if (message?.role === "hookMessage") {
++          message.role = "custom";
++        }
++      }
++    }
++  }
++}
++
++function readExportTranscriptEvents(scope: SessionTranscriptReadScope) {
++  // Restoration retains its writer owner; ordinary export reads never adopt one.
++  return readRestoredSessionTranscript(
++    scope,
++    () => readTranscriptExportSnapshotReadOnlySync(scope)?.events ?? [],
++  );
++}
++
++async function readSessionEntries(params: {
++  sessionFile?: string;
++  sessionTarget?: SessionTranscriptRuntimeTarget;
++  sessionId: string;
++  sessionKey?: string;
++}): Promise<{
++  entries: FileEntry[];
++  warnings: JsonlParseWarning[];
++  rowByEntry: Map<FileEntry, number>;
++}> {
++  const completeTarget = normalizeCompleteSessionTarget(params.sessionTarget);
++  if (completeTarget) {
++    const targetKeyAgentId = parseAgentSessionKey(completeTarget.sessionKey)?.agentId;
++    const targetKeyEntry = loadSessionEntryReadOnly({
++      agentId: completeTarget.agentId,
++      sessionKey: completeTarget.sessionKey,
++      storePath: completeTarget.storePath,
++    });
++    // Export remains available after the session index row is pruned. A row
++    // that still exists must agree with the artifact's complete target.
++    if (
++      completeTarget.sessionId !== params.sessionId ||
++      (params.sessionKey !== undefined && completeTarget.sessionKey !== params.sessionKey) ||
++      (targetKeyAgentId && targetKeyAgentId !== completeTarget.agentId) ||
++      (targetKeyEntry && targetKeyEntry.sessionId !== completeTarget.sessionId)
++    ) {
++      throw new Error("Trajectory export transcript target does not match the requested session");
++    }
++    const events = await readExportTranscriptEvents({
++      agentId: completeTarget.agentId,
++      sessionId: completeTarget.sessionId,
++      sessionKey: completeTarget.sessionKey,
++      storePath: completeTarget.storePath,
++      maxEventBytes: MAX_TRAJECTORY_SESSION_FILE_BYTES,
++    });
++    return collectSessionEntries(events.map((value, index) => ({ row: index + 1, value })));
++  }
++  const incompleteTarget = params.sessionTarget
++    ? {
++        agentId: normalizeOptionalString(params.sessionTarget.agentId),
++        sessionId: normalizeOptionalString(params.sessionTarget.sessionId),
++        sessionKey: normalizeOptionalString(params.sessionTarget.sessionKey),
++        storePath: normalizeOptionalString(params.sessionTarget.storePath),
++      }
++    : undefined;
++  if (!params.sessionFile) {
++    throw new Error("Trajectory export requires a transcript identity or artifact file");
++  }
++  const marker = parseSqliteSessionFileMarker(params.sessionFile);
++  if (!marker) {
++    const { entries, warnings, rowByEntry } = parseSessionFileEntriesWithWarnings(
++      await fsp.readFile(params.sessionFile, "utf8"),
++    );
++    return {
++      entries,
++      warnings: formatSessionParseWarnings(warnings),
++      rowByEntry,
++    };
++  }
++  if (marker.sessionId !== params.sessionId) {
++    throw new Error("Trajectory export legacy marker does not match the requested session");
++  }
++  const targetKeyAgentId = parseAgentSessionKey(incompleteTarget?.sessionKey)?.agentId;
++  const targetKeyEntry =
++    incompleteTarget?.sessionKey && marker
++      ? loadSessionEntryReadOnly({
++          agentId: marker.agentId,
++          sessionKey: incompleteTarget.sessionKey,
++          storePath: marker.storePath,
++        })
++      : undefined;
++  if (
++    incompleteTarget &&
++    ((incompleteTarget.agentId && incompleteTarget.agentId !== marker.agentId) ||
++      (incompleteTarget.sessionId && incompleteTarget.sessionId !== marker.sessionId) ||
++      (targetKeyAgentId && targetKeyAgentId !== marker.agentId) ||
++      (incompleteTarget.sessionKey && targetKeyEntry?.sessionId !== marker.sessionId) ||
++      (incompleteTarget.storePath &&
++        path.resolve(incompleteTarget.storePath) !== path.resolve(marker.storePath)))
++  ) {
++    throw new Error("Trajectory export transcript target conflicts with the legacy marker");
++  }
++  const suppliedKeyEntry = params.sessionKey
++    ? loadSessionEntryReadOnly({
++        agentId: marker.agentId,
++        sessionKey: params.sessionKey,
++        storePath: marker.storePath,
++      })
++    : undefined;
++  const markerMatches = listSessionEntriesReadOnly(
++    {
++      agentId: marker.agentId,
++      storePath: marker.storePath,
++    },
++    { requireSchema: true },
++  ).filter(({ entry }) => entry.sessionId === marker.sessionId);
++  if (suppliedKeyEntry && suppliedKeyEntry.sessionId !== marker.sessionId) {
++    throw new Error("Trajectory export session key conflicts with the legacy marker");
++  }
++  if (params.sessionKey && !suppliedKeyEntry && markerMatches.length > 0) {
++    throw new Error("Trajectory export session key is not mapped to the legacy marker");
++  }
++  const markerSessionKey = suppliedKeyEntry
++    ? params.sessionKey
++    : (resolvePreferredSessionKeyForSessionIdMatches(
++        markerMatches.map(({ sessionKey, entry }) => [sessionKey, entry]),
++        marker.sessionId,
++      ) ?? (markerMatches.length === 0 ? params.sessionKey : undefined));
++  if (!markerSessionKey && markerMatches.length > 0) {
++    throw new Error("Trajectory export legacy marker session key is ambiguous");
++  }
++  return collectSessionEntries(
++    (
++      await readExportTranscriptEvents({
++        agentId: marker.agentId,
++        sessionId: marker.sessionId,
++        ...(markerSessionKey ? { sessionKey: markerSessionKey } : {}),
++        storePath: marker.storePath,
++        maxEventBytes: MAX_TRAJECTORY_SESSION_FILE_BYTES,
++      })
++    ).map((value, index) => ({ row: index + 1, value })),
++  );
++}
++
++export async function readSessionBranch(params: {
++  sessionFile?: string;
++  sessionTarget?: SessionTranscriptRuntimeTarget;
++  sessionId: string;
++  sessionKey?: string;
++}): Promise<{
++  header: SessionHeader | null;
++  leafId: string | null;
++  branchEntries: SessionEntry[];
++  warnings: JsonlParseWarning[];
++}> {
++  const { entries: fileEntries, warnings, rowByEntry } = await readSessionEntries(params);
++  migrateLegacySessionEntries(fileEntries);
++  const header =
++    fileEntries.find((entry): entry is SessionHeader => entry.type === "session") ?? null;
++  const entries = fileEntries.filter(
++    (entry): entry is SessionEntry =>
++      entry.type !== "session" &&
++      isCanonicalSessionTranscriptEntry(entry) &&
++      typeof entry.id === "string",
++  );
++  const tree = scanSessionTranscriptTree(fileEntries);
++  if (!tree.hasLeafUpdate) {
++    return {
++      header,
++      leafId: entries.at(-1)?.id ?? null,
++      branchEntries: entries,
++      warnings,
++    };
++  }
++  const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
++  const branchEntries: SessionEntry[] = [];
++  const seen = new Set<string>();
++  let descendantEntry: SessionEntry | undefined;
++  let currentId = tree.leafId;
++  while (currentId) {
++    if (seen.has(currentId)) {
++      const cycleEntry = tree.byId.get(currentId)?.entry;
++      warnings.push({
++        source: "session",
++        code: "cyclic-session-branch",
++        row: cycleEntry ? (rowByEntry.get(cycleEntry) ?? 0) : 0,
++        message: "Stopped trajectory session branch export at a cyclic parent link.",
++      });
++      break;
++    }
++    seen.add(currentId);
++    const current = tree.byId.get(currentId);
++    if (!current) {
++      warnings.push({
++        source: "session",
++        code: "incomplete-session-branch",
++        row: 0,
++        message: "Exported the reachable session branch suffix after a missing parent link.",
++      });
++      break;
++    }
++    const visibleEntry = entriesById.get(currentId);
++    if (visibleEntry) {
++      const normalizedEntry = { ...visibleEntry, parentId: current.parentId };
++      if (descendantEntry) {
++        descendantEntry.parentId = normalizedEntry.id;
++      }
++      branchEntries.unshift(normalizedEntry);
++      descendantEntry = normalizedEntry;
++    }
++    if (current.parentId && !tree.byId.has(current.parentId)) {
++      warnings.push({
++        source: "session",
++        code: "incomplete-session-branch",
++        row: rowByEntry.get(current.entry) ?? 0,
++        message: "Exported the reachable session branch suffix after a missing parent link.",
++      });
++      break;
++    }
++    currentId = current.parentId;
++  }
++  return { header, leafId: tree.leafId, branchEntries, warnings };
++}
 diff --git a/src/trajectory/export.readonly.test.ts b/src/trajectory/export.readonly.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..4d677a9d22da27f9371a8e004fc3fb1f5f945047
@@ -228703,102 +229238,380 @@ index 0000000000000000000000000000000000000000..4d677a9d22da27f9371a8e004fc3fb1f
 +  });
 +});
 diff --git a/src/trajectory/export.ts b/src/trajectory/export.ts
-index ace5b9dedd26c4ffa9f84bc091a8b315e044f663..29b18348fe7ee9cb87f91a9440274cd1051babbf 100644
+index ace5b9dedd26c4ffa9f84bc091a8b315e044f663..7db611f35f0c86ded443652053f4be1a596b8769 100644
 --- a/src/trajectory/export.ts
 +++ b/src/trajectory/export.ts
-@@ -13,11 +13,13 @@ import type { FileEntry, SessionEntry, SessionHeader } from "../agents/sessions/
+@@ -2,26 +2,12 @@
+ import fsp from "node:fs/promises";
+ import path from "node:path";
+ import { isRecord } from "@openclaw/normalization-core/record-coerce";
+-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { sanitizeDiagnosticPayload } from "../agents/payload-redaction.js";
+ import type { AgentMessage } from "../agents/runtime/index.js";
+-import {
+-  isSessionFileEntry,
+-  parseSessionFileEntriesWithWarnings,
+-} from "../agents/sessions/session-file-parser.js";
+-import type { FileEntry, SessionEntry, SessionHeader } from "../agents/sessions/session-manager.js";
++import type { SessionEntry, SessionHeader } from "../agents/sessions/session-manager.js";
  import { resolveStateDir } from "../config/paths.js";
  import { parseSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
- import {
+-import {
 -  listSessionEntriesCore,
 -  loadSessionEntry,
 -  loadTranscriptEvents,
-+  listSessionEntriesReadOnly,
-+  loadSessionEntryReadOnly,
-+  readTranscriptExportSnapshotReadOnlySync,
-+  type SessionTranscriptReadScope,
-   type SessionTranscriptRuntimeTarget,
- } from "../config/sessions/session-accessor.js";
-+import { readRestoredSessionTranscript } from "../config/sessions/session-cold-storage-read.js";
+-  type SessionTranscriptRuntimeTarget,
+-} from "../config/sessions/session-accessor.js";
+-import {
+-  isCanonicalSessionTranscriptEntry,
+-  scanSessionTranscriptTree,
+-} from "../config/sessions/transcript-tree.js";
++import type { SessionTranscriptRuntimeTarget } from "../config/sessions/session-accessor.js";
  import {
-   isCanonicalSessionTranscriptEntry,
-   scanSessionTranscriptTree,
-@@ -196,6 +198,14 @@ function migrateLegacySessionEntries(entries: FileEntry[]): void {
-   }
+   jsonSupportBundleFile,
+   jsonlSupportBundleFile,
+@@ -39,9 +25,13 @@ import {
+   hasMeaningfulRetiredMediaCarrier,
+   PERSISTED_LEGACY_MEDIA_KEYS,
+ } from "../media/media-facts.js";
+-import { parseAgentSessionKey } from "../routing/session-key.js";
+-import { resolvePreferredSessionKeyForSessionIdMatches } from "../sessions/session-id-resolution.js";
+ import { safeJsonStringify } from "../utils/safe-json.js";
++import {
++  MAX_TRAJECTORY_SESSION_FILE_BYTES,
++  normalizeCompleteSessionTarget,
++  readSessionBranch,
++  type JsonlParseWarning,
++} from "./export-session-branch.js";
+ import { TRAJECTORY_RUNTIME_FILE_MAX_BYTES, safeTrajectorySessionFileName } from "./paths.js";
+ import { isRegularNonSymlinkFile, resolveTrajectoryRuntimeFile } from "./runtime-file.js";
+ import { loadSqliteTrajectoryRuntimeEvents } from "./runtime-store.sqlite.js";
+@@ -78,325 +68,14 @@ type TrajectoryExportRedaction = SupportRedactionContext & {
+   workspaceDir: string;
+ };
+ 
+-type JsonlParseWarning = Omit<TrajectoryBundleWarning, "count" | "rows"> & {
+-  row: number;
+-};
+-
+-type SessionEntryCandidateRow = {
+-  row: number;
+-  value: unknown;
+-};
+-
+ const MAX_TRAJECTORY_RUNTIME_EVENTS = 200_000;
+ const MAX_TRAJECTORY_TOTAL_EVENTS = 250_000;
+-const MAX_TRAJECTORY_SESSION_FILE_BYTES = 50 * 1024 * 1024;
+ const MAX_TRAJECTORY_WARNING_ROWS = 20;
+ 
+-function normalizeCompleteSessionTarget(
+-  target: SessionTranscriptRuntimeTarget | undefined,
+-): SessionTranscriptRuntimeTarget | undefined {
+-  if (!target) {
+-    return undefined;
+-  }
+-  const agentId = normalizeOptionalString(target.agentId);
+-  const sessionId = normalizeOptionalString(target.sessionId);
+-  const sessionKey = normalizeOptionalString(target.sessionKey);
+-  const storePath = normalizeOptionalString(target.storePath);
+-  return agentId && sessionId && sessionKey && storePath
+-    ? { agentId, sessionId, sessionKey, storePath }
+-    : undefined;
+-}
+-
+ function isFiniteNumber(value: unknown): value is number {
+   return typeof value === "number" && Number.isFinite(value);
  }
  
-+function readExportTranscriptEvents(scope: SessionTranscriptReadScope) {
-+  // Restoration retains its writer owner; ordinary export reads never adopt one.
-+  return readRestoredSessionTranscript(
-+    scope,
-+    () => readTranscriptExportSnapshotReadOnlySync(scope)?.events ?? [],
-+  );
-+}
-+
- async function readSessionEntries(params: {
-   sessionFile?: string;
-   sessionTarget?: SessionTranscriptRuntimeTarget;
-@@ -209,7 +219,7 @@ async function readSessionEntries(params: {
-   const completeTarget = normalizeCompleteSessionTarget(params.sessionTarget);
-   if (completeTarget) {
-     const targetKeyAgentId = parseAgentSessionKey(completeTarget.sessionKey)?.agentId;
+-function formatSessionParseWarnings(
+-  warnings: ReturnType<typeof parseSessionFileEntriesWithWarnings>["warnings"],
+-): JsonlParseWarning[] {
+-  return warnings.map((warning) => ({
+-    source: "session",
+-    code: warning.code,
+-    row: warning.row,
+-    message:
+-      warning.code === "invalid-session-json"
+-        ? "Skipped a session JSONL row that is not valid JSON."
+-        : "Skipped a session JSONL row that is not a session entry object.",
+-  }));
+-}
+-
+-function collectSessionEntries(
+-  rows: readonly SessionEntryCandidateRow[],
+-  warnings: JsonlParseWarning[] = [],
+-): {
+-  entries: FileEntry[];
+-  warnings: JsonlParseWarning[];
+-  rowByEntry: Map<FileEntry, number>;
+-} {
+-  const entries: FileEntry[] = [];
+-  const rowByEntry = new Map<FileEntry, number>();
+-  for (const row of rows) {
+-    if (!isSessionFileEntry(row.value)) {
+-      warnings.push({
+-        source: "session",
+-        code: "invalid-session-row",
+-        row: row.row,
+-        message: "Skipped a session JSONL row that is not a session entry object.",
+-      });
+-      continue;
+-    }
+-    entries.push(row.value);
+-    rowByEntry.set(row.value, row.row);
+-  }
+-  return { entries, warnings, rowByEntry };
+-}
+-
+-function migrateLegacySessionEntries(entries: FileEntry[]): void {
+-  const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
+-  const version = header?.version ?? 1;
+-  if (version < 2) {
+-    // Older session logs predate entry ids. Synthetic ids preserve branch order
+-    // long enough to export the reachable suffix without mutating source files.
+-    let previousId: string | null = null;
+-    let index = 0;
+-    for (const entry of entries) {
+-      if (entry.type === "session") {
+-        entry.version = 2;
+-        continue;
+-      }
+-      const mutable = entry as unknown as Record<string, unknown>;
+-      if (typeof mutable.id !== "string") {
+-        mutable.id = `legacy-${index++}`;
+-      }
+-      mutable.parentId = previousId;
+-      const entryId = mutable.id;
+-      previousId = typeof entryId === "string" ? entryId : null;
+-      if (entry.type === "compaction" && typeof mutable.firstKeptEntryIndex === "number") {
+-        const target = entries[mutable.firstKeptEntryIndex];
+-        if (target && target.type !== "session") {
+-          mutable.firstKeptEntryId = (target as unknown as Record<string, unknown>).id;
+-        }
+-        delete mutable.firstKeptEntryIndex;
+-      }
+-    }
+-  }
+-  if (version < 3) {
+-    for (const entry of entries) {
+-      if (entry.type === "session") {
+-        entry.version = 3;
+-        continue;
+-      }
+-      if (entry.type === "message") {
+-        const message = (entry as { message?: { role?: string } }).message;
+-        if (message?.role === "hookMessage") {
+-          message.role = "custom";
+-        }
+-      }
+-    }
+-  }
+-}
+-
+-async function readSessionEntries(params: {
+-  sessionFile?: string;
+-  sessionTarget?: SessionTranscriptRuntimeTarget;
+-  sessionId: string;
+-  sessionKey?: string;
+-}): Promise<{
+-  entries: FileEntry[];
+-  warnings: JsonlParseWarning[];
+-  rowByEntry: Map<FileEntry, number>;
+-}> {
+-  const completeTarget = normalizeCompleteSessionTarget(params.sessionTarget);
+-  if (completeTarget) {
+-    const targetKeyAgentId = parseAgentSessionKey(completeTarget.sessionKey)?.agentId;
 -    const targetKeyEntry = loadSessionEntry({
-+    const targetKeyEntry = loadSessionEntryReadOnly({
-       agentId: completeTarget.agentId,
-       sessionKey: completeTarget.sessionKey,
-       storePath: completeTarget.storePath,
-@@ -224,7 +234,7 @@ async function readSessionEntries(params: {
-     ) {
-       throw new Error("Trajectory export transcript target does not match the requested session");
-     }
+-      agentId: completeTarget.agentId,
+-      sessionKey: completeTarget.sessionKey,
+-      storePath: completeTarget.storePath,
+-    });
+-    // Export remains available after the session index row is pruned. A row
+-    // that still exists must agree with the artifact's complete target.
+-    if (
+-      completeTarget.sessionId !== params.sessionId ||
+-      (params.sessionKey !== undefined && completeTarget.sessionKey !== params.sessionKey) ||
+-      (targetKeyAgentId && targetKeyAgentId !== completeTarget.agentId) ||
+-      (targetKeyEntry && targetKeyEntry.sessionId !== completeTarget.sessionId)
+-    ) {
+-      throw new Error("Trajectory export transcript target does not match the requested session");
+-    }
 -    const events = await loadTranscriptEvents({
-+    const events = await readExportTranscriptEvents({
-       agentId: completeTarget.agentId,
-       sessionId: completeTarget.sessionId,
-       sessionKey: completeTarget.sessionKey,
-@@ -261,7 +271,7 @@ async function readSessionEntries(params: {
-   const targetKeyAgentId = parseAgentSessionKey(incompleteTarget?.sessionKey)?.agentId;
-   const targetKeyEntry =
-     incompleteTarget?.sessionKey && marker
+-      agentId: completeTarget.agentId,
+-      sessionId: completeTarget.sessionId,
+-      sessionKey: completeTarget.sessionKey,
+-      storePath: completeTarget.storePath,
+-      maxEventBytes: MAX_TRAJECTORY_SESSION_FILE_BYTES,
+-    });
+-    return collectSessionEntries(events.map((value, index) => ({ row: index + 1, value })));
+-  }
+-  const incompleteTarget = params.sessionTarget
+-    ? {
+-        agentId: normalizeOptionalString(params.sessionTarget.agentId),
+-        sessionId: normalizeOptionalString(params.sessionTarget.sessionId),
+-        sessionKey: normalizeOptionalString(params.sessionTarget.sessionKey),
+-        storePath: normalizeOptionalString(params.sessionTarget.storePath),
+-      }
+-    : undefined;
+-  if (!params.sessionFile) {
+-    throw new Error("Trajectory export requires a transcript identity or artifact file");
+-  }
+-  const marker = parseSqliteSessionFileMarker(params.sessionFile);
+-  if (!marker) {
+-    const { entries, warnings, rowByEntry } = parseSessionFileEntriesWithWarnings(
+-      await fsp.readFile(params.sessionFile, "utf8"),
+-    );
+-    return {
+-      entries,
+-      warnings: formatSessionParseWarnings(warnings),
+-      rowByEntry,
+-    };
+-  }
+-  if (marker.sessionId !== params.sessionId) {
+-    throw new Error("Trajectory export legacy marker does not match the requested session");
+-  }
+-  const targetKeyAgentId = parseAgentSessionKey(incompleteTarget?.sessionKey)?.agentId;
+-  const targetKeyEntry =
+-    incompleteTarget?.sessionKey && marker
 -      ? loadSessionEntry({
-+      ? loadSessionEntryReadOnly({
-           agentId: marker.agentId,
-           sessionKey: incompleteTarget.sessionKey,
-           storePath: marker.storePath,
-@@ -279,16 +289,19 @@ async function readSessionEntries(params: {
-     throw new Error("Trajectory export transcript target conflicts with the legacy marker");
-   }
-   const suppliedKeyEntry = params.sessionKey
+-          agentId: marker.agentId,
+-          sessionKey: incompleteTarget.sessionKey,
+-          storePath: marker.storePath,
+-        })
+-      : undefined;
+-  if (
+-    incompleteTarget &&
+-    ((incompleteTarget.agentId && incompleteTarget.agentId !== marker.agentId) ||
+-      (incompleteTarget.sessionId && incompleteTarget.sessionId !== marker.sessionId) ||
+-      (targetKeyAgentId && targetKeyAgentId !== marker.agentId) ||
+-      (incompleteTarget.sessionKey && targetKeyEntry?.sessionId !== marker.sessionId) ||
+-      (incompleteTarget.storePath &&
+-        path.resolve(incompleteTarget.storePath) !== path.resolve(marker.storePath)))
+-  ) {
+-    throw new Error("Trajectory export transcript target conflicts with the legacy marker");
+-  }
+-  const suppliedKeyEntry = params.sessionKey
 -    ? loadSessionEntry({
-+    ? loadSessionEntryReadOnly({
-         agentId: marker.agentId,
-         sessionKey: params.sessionKey,
-         storePath: marker.storePath,
-       })
-     : undefined;
+-        agentId: marker.agentId,
+-        sessionKey: params.sessionKey,
+-        storePath: marker.storePath,
+-      })
+-    : undefined;
 -  const markerMatches = listSessionEntriesCore({
 -    agentId: marker.agentId,
 -    storePath: marker.storePath,
 -  }).filter(({ entry }) => entry.sessionId === marker.sessionId);
-+  const markerMatches = listSessionEntriesReadOnly(
-+    {
-+      agentId: marker.agentId,
-+      storePath: marker.storePath,
-+    },
-+    { requireSchema: true },
-+  ).filter(({ entry }) => entry.sessionId === marker.sessionId);
-   if (suppliedKeyEntry && suppliedKeyEntry.sessionId !== marker.sessionId) {
-     throw new Error("Trajectory export session key conflicts with the legacy marker");
-   }
-@@ -306,7 +319,7 @@ async function readSessionEntries(params: {
-   }
-   return collectSessionEntries(
-     (
+-  if (suppliedKeyEntry && suppliedKeyEntry.sessionId !== marker.sessionId) {
+-    throw new Error("Trajectory export session key conflicts with the legacy marker");
+-  }
+-  if (params.sessionKey && !suppliedKeyEntry && markerMatches.length > 0) {
+-    throw new Error("Trajectory export session key is not mapped to the legacy marker");
+-  }
+-  const markerSessionKey = suppliedKeyEntry
+-    ? params.sessionKey
+-    : (resolvePreferredSessionKeyForSessionIdMatches(
+-        markerMatches.map(({ sessionKey, entry }) => [sessionKey, entry]),
+-        marker.sessionId,
+-      ) ?? (markerMatches.length === 0 ? params.sessionKey : undefined));
+-  if (!markerSessionKey && markerMatches.length > 0) {
+-    throw new Error("Trajectory export legacy marker session key is ambiguous");
+-  }
+-  return collectSessionEntries(
+-    (
 -      await loadTranscriptEvents({
-+      await readExportTranscriptEvents({
-         agentId: marker.agentId,
-         sessionId: marker.sessionId,
-         ...(markerSessionKey ? { sessionKey: markerSessionKey } : {}),
+-        agentId: marker.agentId,
+-        sessionId: marker.sessionId,
+-        ...(markerSessionKey ? { sessionKey: markerSessionKey } : {}),
+-        storePath: marker.storePath,
+-        maxEventBytes: MAX_TRAJECTORY_SESSION_FILE_BYTES,
+-      })
+-    ).map((value, index) => ({ row: index + 1, value })),
+-  );
+-}
+-
+-async function readSessionBranch(params: {
+-  sessionFile?: string;
+-  sessionTarget?: SessionTranscriptRuntimeTarget;
+-  sessionId: string;
+-  sessionKey?: string;
+-}): Promise<{
+-  header: SessionHeader | null;
+-  leafId: string | null;
+-  branchEntries: SessionEntry[];
+-  warnings: JsonlParseWarning[];
+-}> {
+-  const { entries: fileEntries, warnings, rowByEntry } = await readSessionEntries(params);
+-  migrateLegacySessionEntries(fileEntries);
+-  const header =
+-    fileEntries.find((entry): entry is SessionHeader => entry.type === "session") ?? null;
+-  const entries = fileEntries.filter(
+-    (entry): entry is SessionEntry =>
+-      entry.type !== "session" &&
+-      isCanonicalSessionTranscriptEntry(entry) &&
+-      typeof (entry as { id?: unknown }).id === "string",
+-  );
+-  const tree = scanSessionTranscriptTree(fileEntries);
+-  if (!tree.hasLeafUpdate) {
+-    return {
+-      header,
+-      leafId: entries.at(-1)?.id ?? null,
+-      branchEntries: entries,
+-      warnings,
+-    };
+-  }
+-  const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
+-  const branchEntries: SessionEntry[] = [];
+-  const seen = new Set<string>();
+-  let descendantEntry: SessionEntry | undefined;
+-  let currentId = tree.leafId;
+-  while (currentId) {
+-    if (seen.has(currentId)) {
+-      const cycleEntry = tree.byId.get(currentId)?.entry;
+-      warnings.push({
+-        source: "session",
+-        code: "cyclic-session-branch",
+-        row: cycleEntry ? (rowByEntry.get(cycleEntry) ?? 0) : 0,
+-        message: "Stopped trajectory session branch export at a cyclic parent link.",
+-      });
+-      break;
+-    }
+-    seen.add(currentId);
+-    const current = tree.byId.get(currentId);
+-    if (!current) {
+-      warnings.push({
+-        source: "session",
+-        code: "incomplete-session-branch",
+-        row: 0,
+-        message: "Exported the reachable session branch suffix after a missing parent link.",
+-      });
+-      break;
+-    }
+-    const visibleEntry = entriesById.get(currentId);
+-    if (visibleEntry) {
+-      const normalizedEntry = { ...visibleEntry, parentId: current.parentId };
+-      if (descendantEntry) {
+-        descendantEntry.parentId = normalizedEntry.id;
+-      }
+-      branchEntries.unshift(normalizedEntry);
+-      descendantEntry = normalizedEntry;
+-    }
+-    if (current.parentId && !tree.byId.has(current.parentId)) {
+-      warnings.push({
+-        source: "session",
+-        code: "incomplete-session-branch",
+-        row: rowByEntry.get(current.entry) ?? 0,
+-        message: "Exported the reachable session branch suffix after a missing parent link.",
+-      });
+-      break;
+-    }
+-    currentId = current.parentId;
+-  }
+-  return { header, leafId: tree.leafId, branchEntries, warnings };
+-}
+-
+ async function parseJsonlFile<T>(
+   filePath: string,
+   params: {
 diff --git a/src/trajectory/metadata.test.ts b/src/trajectory/metadata.test.ts
 index a943f9f3b749ca38ddb247ef6fb637956da911f1..e191ba86988563a24c76b105e887e141ca2ab5cd 100644
 --- a/src/trajectory/metadata.test.ts
@@ -231619,6 +232432,627 @@ index aeb25d8f4dd66d49805234c431c54cc116205378..3a4175853ac0e2b07cca2419127f5140
      summary.overview,
      "",
      "## Participants",
+diff --git a/test/discord-queued-origin.integration.test.ts b/test/discord-queued-origin.integration.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..fbdfa11cbcd1ba92b47209ca202c683f9e3b99c4
+--- /dev/null
++++ b/test/discord-queued-origin.integration.test.ts
+@@ -0,0 +1,615 @@
++// Queued origin finals must settle the same registered Discord progress request.
++import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
++import {
++  createPluginStateKeyedStoreForTests,
++  resetPluginStateStoreForTests,
++} from "openclaw/plugin-sdk/plugin-state-test-runtime";
++import { createOpenClawTestState } from "openclaw/plugin-sdk/test-state";
++import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
++import { loadDiscordQueuedOriginTestHarness } from "../extensions/discord/queued-origin-test-api.js";
++import {
++  captureQueuedProgressOptions,
++  resolveQueuedProgressOptions,
++} from "../src/auto-reply/dispatch-queued-progress.js";
++import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../src/auto-reply/dispatch.js";
++import { deliverFollowupDecision } from "../src/auto-reply/reply/followup-delivery.js";
++import type { AdmittedFollowupTurn } from "../src/auto-reply/reply/followup-turn-admission.js";
++import { settleQueuedFollowupPresentation } from "../src/auto-reply/reply/followup-turn-admission.js";
++import {
++  createFollowupTurnTestTurn,
++  createFollowupTurnTestTypingController,
++  executeFollowupTurnForTest,
++  getFollowupTurnTestState,
++} from "../src/auto-reply/reply/followup-turn-execution.test-support.js";
++import type { InternalGetReplyOptions } from "../src/auto-reply/reply/get-reply.types.js";
++import { setActivePluginRegistry } from "../src/plugins/runtime.js";
++import {
++  createChannelTestPluginBase,
++  createTestRegistry,
++} from "../src/test-utils/channel-plugins.js";
++import { createDeferred } from "./helpers/promise.js";
++
++const outbound = vi.hoisted(() => ({ deliver: vi.fn() }));
++vi.mock("../src/infra/outbound/deliver.js", () => ({
++  deliverOutboundPayloadsInternal: (...args: unknown[]) => outbound.deliver(...args),
++}));
++vi.mock("../src/agents/runtime-plan/build.js", () => ({
++  buildAgentRuntimeDeliveryPlan: () => ({
++    isSilentPayload: () => false,
++    resolveFollowupRoute: () => undefined,
++  }),
++}));
++
++const {
++  RequestClient,
++  discordProgressWriters,
++  setDiscordRuntime,
++  admitMockDiscordReplyTurn,
++  createDiscordDraftStream,
++  createDiscordRequestProgressStreamForTest,
++  createNoQueuedDispatchResult,
++  deliverDiscordReply,
++  dispatchBufferedReplyForTest,
++  getSessionEntry,
++  registerDiscordProcessTestLifecycle,
++  runProcessDiscordMessage,
++  createAutomaticDraftContext,
++  loadActualDiscordQueuedProgressModules,
++} = await loadDiscordQueuedOriginTestHarness();
++
++registerDiscordProcessTestLifecycle();
++let state: Awaited<ReturnType<typeof createOpenClawTestState>>;
++let requestNumber = 1001;
++let providerMessageNumber = 0;
++beforeAll(async () => {
++  state = await createOpenClawTestState({ label: "discord-queued-origin-progress" });
++});
++beforeEach(() => {
++  outbound.deliver.mockReset();
++  state.applyEnv();
++  setDiscordRuntime({
++    state: {
++      openKeyedStore: (options) => createPluginStateKeyedStoreForTests("discord", options),
++    },
++  } as PluginRuntime);
++  setActivePluginRegistry(
++    createTestRegistry([
++      {
++        pluginId: "discord",
++        source: "test",
++        plugin: createChannelTestPluginBase({
++          id: "discord",
++          config: { listAccountIds: () => ["default"], resolveAccount: () => ({}) },
++        }),
++      },
++    ]),
++  );
++});
++afterEach(() => {
++  resetPluginStateStoreForTests();
++  setActivePluginRegistry(createTestRegistry());
++});
++afterAll(async () => {
++  await state.cleanup();
++});
++
++async function createQueuedScenario(
++  options: {
++    fullMessageId?: string;
++    accountId?: string;
++    threadId?: string;
++    abortSignal?: AbortSignal;
++    captureOnly?: boolean;
++    messages?: Map<string, string>;
++  } = {},
++) {
++  const messages = options.messages ?? new Map<string, string>();
++  const rest = new RequestClient("fixture-token", {
++    queueRequests: false,
++    fetch: async (_url, init) => {
++      const url = typeof _url === "string" ? _url : _url instanceof URL ? _url.href : _url.url;
++      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
++      if (init?.method === "DELETE") {
++        messages.delete(url.split("/").at(-1)!);
++        return new Response(null, { status: 204 });
++      }
++      const id =
++        init?.method === "PATCH" ? url.split("/").at(-1)! : String(++providerMessageNumber);
++      messages.set(id, body.content);
++      return Response.json({ id, content: body.content });
++    },
++  });
++  const { actualDraft, actualProgress } = await loadActualDiscordQueuedProgressModules();
++  createDiscordDraftStream.mockImplementation(actualDraft.createDiscordDraftStream);
++  createDiscordRequestProgressStreamForTest.mockImplementation((params) =>
++    actualProgress.createDiscordRequestProgressStream({ ...params, rest }),
++  );
++  let source: InternalGetReplyOptions | undefined;
++  let sourceContext: Parameters<typeof admitMockDiscordReplyTurn>[0]["ctx"];
++  dispatchBufferedReplyForTest.mockImplementation((params) => {
++    if (options.fullMessageId && params.ctx) {
++      params.ctx.MessageSidFull = options.fullMessageId;
++    }
++    return dispatchInboundMessageWithRoutedChannelDispatcher({
++      ...params,
++      dispatchReplyFromConfig: async (request) => {
++        source = request.replyOptions;
++        sourceContext = request.ctx;
++        return createNoQueuedDispatchResult();
++      },
++    });
++  });
++  const ctx = await createAutomaticDraftContext({
++    message: {
++      id: String(++requestNumber),
++      channelId: "c1",
++      timestamp: new Date().toISOString(),
++      attachments: [],
++    },
++    ...(options.accountId ? { accountId: options.accountId } : {}),
++    ...(options.threadId
++      ? {
++          messageChannelId: options.threadId,
++          threadChannel: { id: options.threadId, name: "fixture-thread" },
++        }
++      : {}),
++    abortSignal: options.abortSignal,
++    discordConfig: {
++      streaming: { mode: "progress", progress: { commentary: true, label: false } },
++    },
++  });
++  ctx.route.accountId = options.accountId ?? "default";
++  await runProcessDiscordMessage(ctx);
++  expect(source).toBeDefined();
++  if (!source) {
++    throw new Error("Normal Discord ingress did not retain its source options");
++  }
++  // The initial channel handler has returned; its queued turn now owns a fresh run.
++  getSessionEntry.mockReturnValue({ sessionId: "mock-session", updatedAt: 1 });
++  if (!options.captureOnly) {
++    await source.onQueuedFollowupAdmitted?.();
++    admitMockDiscordReplyTurn({ ctx: sourceContext, replyOptions: source }, options.fullMessageId);
++    await source.onItemEvent?.({
++      kind: "preamble",
++      phase: "end",
++      progressText: "Checking the corrected company account.",
++    });
++  }
++  const store = createPluginStateKeyedStoreForTests<{
++    scope: { sourceMessageId: string };
++    closed: boolean;
++    draft: { messages: Array<{ id: string }> };
++  }>("discord", {
++    namespace: "request-progress",
++    maxEntries: 10_000,
++    overflowPolicy: "reject-new",
++  });
++  const sourceMessageId = options.fullMessageId ?? ctx.message.id;
++  const progress = (await store.entries()).find(
++    (entry) => entry.value.scope.sourceMessageId === sourceMessageId,
++  )?.value;
++  const draftId = progress?.draft.messages[0]?.id ?? "";
++  if (!options.captureOnly && (!progress || !draftId)) {
++    throw new Error("Queued progress was not registered");
++  }
++  if (!options.captureOnly) {
++    expect(messages.get(draftId)).toContain("Checking the corrected company account.");
++  }
++  const foreign = {
++    closed: false,
++    scope: { sourceMessageId: "unrelated-request" },
++    draft: { messages: [{ id: "foreign-draft" }] },
++  };
++  messages.set("foreign-draft", "Unrelated request progress");
++  await store.register("unrelated-request", foreign);
++
++  const final = "The company account correction is complete.";
++  outbound.deliver.mockImplementation(async () => {
++    messages.set("origin-final", final);
++    return [{ channel: "discord", messageId: "origin-final" }];
++  });
++  deliverDiscordReply.mockImplementation(async () => {
++    messages.set("source-final", final);
++    return { visibleReplySent: true };
++  });
++  const turn = {
++    runId: "mock-admitted",
++    queued: {
++      originatingChannel: "discord",
++      originatingTo: String(sourceContext?.OriginatingTo),
++      originatingAccountId: options.accountId ?? "default",
++      originatingThreadId: options.threadId,
++      messageId: sourceMessageId,
++      ...(source.onQueuedFollowupReplyBatch
++        ? {
++            queuedFollowupReplyDisposition: {
++              kind: "deliver",
++              deliver: source.onQueuedFollowupReplyBatch,
++            },
++          }
++        : {}),
++      run: {
++        agentId: "main",
++        sessionKey: String(sourceContext?.SessionKey),
++        messageProvider: "discord",
++      },
++    },
++    config: ctx.cfg,
++  } as AdmittedFollowupTurn;
++  const sendFinal = async (payloads = [{ text: final }]) => {
++    const delivery = await deliverFollowupDecision({
++      decision: { kind: "deliver", payloads },
++      turn,
++      defaults: { defaultModel: "fixture", typingMode: "never", opts: source } as Parameters<
++        typeof deliverFollowupDecision
++      >[0]["defaults"],
++      runId: turn.runId,
++      runFollowup: vi.fn(),
++    });
++    if (turn.queued.queuedFollowupReplyDisposition?.kind === "deliver") {
++      await turn.queued.queuedFollowupReplyDisposition.deliver({
++        kind: "queued-followup",
++        runId: turn.runId,
++        originatingChannel: "discord",
++        payloads: delivery.kind === "completed" ? delivery.payloads : [],
++        completion: { kind: "completed" },
++      });
++    }
++  };
++  const assertForeignPreserved = async () => {
++    expect(messages.get("foreign-draft")).toBe("Unrelated request progress");
++    expect(await store.lookup("unrelated-request")).toEqual(foreign);
++  };
++  return {
++    source,
++    sourceContext,
++    turn,
++    final,
++    store,
++    sourceMessageId,
++    draftId,
++    messages,
++    sendFinal,
++    assertForeignPreserved,
++  };
++}
++
++it("removes only its deferred request progress after this final is accepted", async () => {
++  const scenario = await createQueuedScenario();
++  const accepted = createDeferred<{ visibleReplySent: boolean }>();
++  const sending = createDeferred();
++  deliverDiscordReply.mockImplementation(async () => {
++    sending.resolve();
++    const result = await accepted.promise;
++    scenario.messages.set("source-final", scenario.final);
++    return result;
++  });
++  const terminal = scenario.sendFinal();
++  await sending.promise;
++  expect(scenario.messages.has(scenario.draftId)).toBe(true);
++  accepted.resolve({ visibleReplySent: true });
++  await terminal;
++  expect([...scenario.messages.values()].filter((text) => text === scenario.final)).toHaveLength(1);
++  expect(scenario.messages.has(scenario.draftId)).toBe(false);
++  expect(
++    (await scenario.store.entries()).find(
++      (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
++    )?.value.closed,
++  ).toBe(true);
++  await scenario.sendFinal();
++  expect(deliverDiscordReply).toHaveBeenCalledOnce();
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  await scenario.assertForeignPreserved();
++});
++
++it.each(["rejected", "uncertain"])(
++  "preserves progress when this final is %s despite earlier accepted commentary",
++  async (failure) => {
++    const scenario = await createQueuedScenario();
++    await scenario.source.onQueuedFollowupReplyBatch?.({
++      kind: "queued-followup",
++      runId: scenario.turn.runId,
++      originatingChannel: "discord",
++      payloads: [{ text: "Earlier accepted commentary", isCommentary: true }],
++      completion: { kind: "progress" },
++    });
++    expect(scenario.messages.get(scenario.draftId)).toContain("Earlier accepted commentary");
++    expect(deliverDiscordReply).not.toHaveBeenCalled();
++    deliverDiscordReply.mockClear();
++    deliverDiscordReply.mockImplementation(async () => {
++      if (failure === "uncertain") {
++        throw new Error("provider acknowledgement lost");
++      }
++      return { visibleReplySent: false };
++    });
++    await expect(scenario.sendFinal()).rejects.toThrow();
++    await expect(scenario.sendFinal()).rejects.toThrow();
++    expect(deliverDiscordReply).toHaveBeenCalledOnce();
++    expect(outbound.deliver).not.toHaveBeenCalled();
++    expect(scenario.messages.has(scenario.draftId)).toBe(true);
++    const sourceDelivery = scenario.source.onQueuedFollowupReplyBatch;
++    if (!sourceDelivery?.createSourceRetry) {
++      throw new Error("Normal source delivery did not retain its retry owner");
++    }
++    if (failure === "uncertain") {
++      expect(() => sourceDelivery.createSourceRetry?.()).toThrow(
++        "no longer owns recovery delivery",
++      );
++    } else {
++      sourceDelivery.createSourceRetry();
++      deliverDiscordReply.mockImplementation(async () => {
++        scenario.messages.set("source-final", scenario.final);
++        return { visibleReplySent: true };
++      });
++      await scenario.sendFinal();
++      expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
++      expect(scenario.messages.has(scenario.draftId)).toBe(false);
++    }
++    await scenario.assertForeignPreserved();
++  },
++);
++
++it("uses the queue's full source message identity rather than its short locator", async () => {
++  const scenario = await createQueuedScenario({ fullMessageId: "discord:full-source" });
++  await scenario.sendFinal();
++  expect(scenario.messages.has(scenario.draftId)).toBe(false);
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  await scenario.assertForeignPreserved();
++});
++
++it("retains the exact nondefault account and thread for deferred final delivery", async () => {
++  const scenario = await createQueuedScenario({ accountId: "secondary", threadId: "thread-23" });
++  await scenario.sendFinal();
++  expect(deliverDiscordReply).toHaveBeenCalledWith(
++    expect.objectContaining({
++      accountId: "secondary",
++      target: "channel:thread-23",
++    }),
++  );
++  expect(scenario.messages.has(scenario.draftId)).toBe(false);
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  await scenario.assertForeignPreserved();
++});
++
++it("retains progress and sends nothing after the deferred source is aborted", async () => {
++  const controller = new AbortController();
++  const scenario = await createQueuedScenario({ abortSignal: controller.signal });
++  controller.abort();
++  await expect(scenario.sendFinal()).rejects.toThrow();
++  expect(deliverDiscordReply).not.toHaveBeenCalled();
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  expect(scenario.messages.has(scenario.draftId)).toBe(true);
++  await scenario.assertForeignPreserved();
++});
++
++it("does not resurrect an active-lane abort deliberately detached from the queued input", async () => {
++  const controller = new AbortController();
++  const scenario = await createQueuedScenario({ abortSignal: controller.signal });
++  captureQueuedProgressOptions(scenario.source, undefined);
++  controller.abort();
++  await scenario.sendFinal();
++  expect(outbound.deliver).toHaveBeenCalledOnce();
++  expect(deliverDiscordReply).not.toHaveBeenCalled();
++  await scenario.assertForeignPreserved();
++});
++
++it("fences a deferred final after its source progress turn is replaced", async () => {
++  const scenario = await createQueuedScenario();
++  await scenario.source.onQueuedFollowupAdmitted?.();
++  await expect(scenario.sendFinal()).rejects.toThrow("Queued source progress turn changed");
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  expect(deliverDiscordReply).not.toHaveBeenCalled();
++  expect(scenario.messages.has(scenario.draftId)).toBe(true);
++  await scenario.assertForeignPreserved();
++});
++
++it("keeps legacy origin delivery when the admitted run has no progress-turn binding", async () => {
++  const scenario = await createQueuedScenario();
++  scenario.source.onAgentRunStart?.(scenario.turn.runId);
++  await scenario.sendFinal();
++  expect(outbound.deliver).toHaveBeenCalledOnce();
++  expect(deliverDiscordReply).not.toHaveBeenCalled();
++  expect(scenario.messages.has(scenario.draftId)).toBe(true);
++  await scenario.assertForeignPreserved();
++});
++
++it("does not treat a foreign origin's empty terminal callback as source delivery", async () => {
++  const scenario = await createQueuedScenario();
++  await scenario.source.onQueuedFollowupReplyBatch?.({
++    kind: "queued-followup",
++    runId: scenario.turn.runId,
++    originatingChannel: "slack",
++    payloads: [],
++    completion: { kind: "completed" },
++  });
++  expect(deliverDiscordReply).not.toHaveBeenCalled();
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  expect(scenario.messages.has(scenario.draftId)).toBe(true);
++  await scenario.assertForeignPreserved();
++});
++
++it("does not replay an accepted part after a later terminal payload fails", async () => {
++  const scenario = await createQueuedScenario();
++  deliverDiscordReply
++    .mockResolvedValueOnce({ visibleReplySent: true })
++    .mockResolvedValueOnce({ visibleReplySent: false });
++  const payloads = [{ text: "Accepted terminal part" }, { text: "Unaccepted terminal part" }];
++  await expect(scenario.sendFinal(payloads)).rejects.toThrow();
++  expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
++  expect(() => scenario.source.onQueuedFollowupReplyBatch?.createSourceRetry?.()).toThrow(
++    "no longer owns recovery delivery",
++  );
++  await expect(scenario.sendFinal(payloads)).rejects.toThrow();
++  expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
++  expect(outbound.deliver).not.toHaveBeenCalled();
++  await scenario.assertForeignPreserved();
++});
++
++it.each(["quiet", "commentary"])(
++  "joins %s progress and final when the latest runner belongs to another input",
++  async (mode) => {
++    const older = await createQueuedScenario({ captureOnly: true });
++    const newer = await createQueuedScenario({ captureOnly: true, messages: older.messages });
++    const base = createFollowupTurnTestTurn();
++    const turn = createFollowupTurnTestTurn({
++      ...older.turn,
++      operation: base.operation,
++      session: {
++        kind: "session",
++        key: String(older.sourceContext?.SessionKey),
++        current: () => ({
++          sessionId: "mock-session",
++          updatedAt: 1,
++          verboseLevel: mode === "quiet" ? "off" : "on",
++        }),
++        publish: () => {},
++        adopt: () => {},
++      },
++      queued: {
++        ...base.queued,
++        ...older.turn.queued,
++        run: { ...base.queued.run, ...older.turn.queued.run, sessionId: "mock-session" },
++      },
++    });
++    const executionState = getFollowupTurnTestState();
++    executionState.loadEntryReadOnly.mockReturnValue(undefined);
++    executionState.execute.mockImplementation(async (params) => {
++      admitMockDiscordReplyTurn({ ctx: older.sourceContext, replyOptions: params.opts });
++      if (mode === "quiet") {
++        await params.opts.onItemEvent?.({
++          kind: "preamble",
++          phase: "end",
++          progressText: "Older queued input is running.",
++        });
++      } else {
++        await deliverFollowupDecision({
++          decision: {
++            kind: "deliver",
++            payloads: [{ text: "Owned durable commentary", isCommentary: true }],
++          },
++          turn,
++          defaults: {
++            defaultModel: "fixture",
++            typingMode: "never",
++            typing: createFollowupTurnTestTypingController(),
++            opts: newer.source,
++          },
++          runId: turn.runId,
++          runFollowup: vi.fn(),
++          kind: "block",
++        });
++      }
++      return { runId: turn.runId, outcome: { kind: "rejected", payload: { text: older.final } } };
++    });
++    // Use the same retained-source resolution as the actual admission boundary.
++    await resolveQueuedProgressOptions(turn.queued, newer.source)?.onQueuedFollowupAdmitted?.();
++    const execution = await executeFollowupTurnForTest({
++      turn,
++      defaults: {
++        defaultModel: "fixture",
++        typingMode: "never",
++        typing: createFollowupTurnTestTypingController(),
++        opts: newer.source,
++      },
++      onToolResult: vi.fn(async () => {}),
++      onCompactionNoticePayload: vi.fn(async () => {}),
++    });
++    await execution.progress.drain();
++    const progress = (await older.store.entries()).find(
++      (entry) => entry.value.scope.sourceMessageId === older.sourceMessageId,
++    );
++    const draftId = progress?.value.draft.messages[0]?.id;
++    expect(draftId).toBeDefined();
++    await older.sendFinal();
++    expect(older.messages.has(draftId!)).toBe(false);
++    expect(outbound.deliver).not.toHaveBeenCalled();
++    await settleQueuedFollowupPresentation(
++      {
++        defaultModel: "fixture",
++        typingMode: "never",
++        typing: createFollowupTurnTestTypingController(),
++        opts: newer.source,
++      },
++      turn.queued,
++    );
++    expect(discordProgressWriters.has(progress!.key)).toBe(false);
++  },
++);
++
++it.each([true, false])(
++  "releases its deferred writer on terminal settlement (accepted=%s)",
++  async (accepted) => {
++    const scenario = await createQueuedScenario();
++    const progress = (await scenario.store.entries()).find(
++      (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
++    );
++    if (!progress) {
++      throw new Error("Source writer was not registered");
++    }
++    expect(discordProgressWriters.has(progress.key)).toBe(true);
++    if (!accepted) {
++      deliverDiscordReply.mockResolvedValue({ visibleReplySent: false });
++      await expect(scenario.sendFinal()).rejects.toThrow();
++    } else {
++      await scenario.sendFinal();
++    }
++    await settleQueuedFollowupPresentation({
++      defaultModel: "fixture",
++      typingMode: "never",
++      typing: createFollowupTurnTestTypingController(),
++      opts: scenario.source,
++    });
++    expect(discordProgressWriters.has(progress.key)).toBe(false);
++    expect(scenario.messages.has(scenario.draftId)).toBe(!accepted);
++    await scenario.assertForeignPreserved();
++  },
++);
++
++it("preserves a scheduled same-source retry across settlement and new admission", async () => {
++  const scenario = await createQueuedScenario();
++  const delivery = scenario.source.onQueuedFollowupReplyBatch;
++  if (!delivery?.createSourceRetry) {
++    throw new Error("Source retry owner is missing");
++  }
++  // The existing stranded-reply decision schedules recovery before the first
++  // runner's terminal callback/settlement; it has not attempted a source send.
++  const retry = delivery.createSourceRetry();
++  await delivery({
++    kind: "queued-followup",
++    runId: scenario.turn.runId,
++    originatingChannel: "discord",
++    payloads: [],
++    completion: { kind: "completed" },
++  });
++  const defaults = {
++    defaultModel: "fixture",
++    typingMode: "never" as const,
++    typing: createFollowupTurnTestTypingController(),
++    opts: scenario.source,
++  };
++  await settleQueuedFollowupPresentation(defaults, scenario.turn.queued);
++  const receipt = (await scenario.store.entries()).find(
++    (entry) => entry.value.scope.sourceMessageId === scenario.sourceMessageId,
++  );
++  expect(receipt?.value.closed).toBe(false);
++  expect(discordProgressWriters.has(receipt!.key)).toBe(false);
++  await scenario.source.onQueuedFollowupAdmitted?.();
++  admitMockDiscordReplyTurn({ ctx: scenario.sourceContext, replyOptions: scenario.source });
++  await scenario.source.onItemEvent?.({
++    kind: "preamble",
++    phase: "end",
++    progressText: "Finishing retained source reply.",
++  });
++  await retry({
++    kind: "queued-followup",
++    runId: scenario.turn.runId,
++    originatingChannel: "discord",
++    payloads: [{ text: scenario.final }],
++    completion: { kind: "completed" },
++  });
++  await settleQueuedFollowupPresentation(defaults, scenario.turn.queued);
++  expect(scenario.messages.has(scenario.draftId)).toBe(false);
++  expect(discordProgressWriters.has(receipt!.key)).toBe(false);
++  expect(deliverDiscordReply).toHaveBeenCalledOnce();
++  expect(outbound.deliver).not.toHaveBeenCalled();
++});
 diff --git a/test/discord-request-progress.integration.test.ts b/test/discord-request-progress.integration.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..63915108f55d4a46945606fd703e389b48ce0153
@@ -239830,6 +241264,24 @@ index 0000000000000000000000000000000000000000..62c950569063fe072c11054eccb5be2a
 +    expect(fs.existsSync(fixture.owner)).toBe(false);
 +  });
 +});
+diff --git a/test/scripts/tsgo-core-test-shards.test.ts b/test/scripts/tsgo-core-test-shards.test.ts
+index 5304d0ed94b699e4e5296c783aae42575276c83e..444131c08c0b1a85c1ee3d900b99fb64d9156ab6 100644
+--- a/test/scripts/tsgo-core-test-shards.test.ts
++++ b/test/scripts/tsgo-core-test-shards.test.ts
+@@ -57,8 +57,13 @@ describe("tsgo core test shards", () => {
+       ["src/commands/doctor-session-worktree-workspace.test.ts", "commands-doctor"],
+       ["src/commands/doctor/repair-sequencing.test.ts", "commands-doctor"],
+       ["src/commands/oauth-tls-preflight.doctor.test.ts", "commands-doctor"],
++      ["src/auto-reply/dispatch.test.ts", "messaging"],
++      ["src/channels/session.test.ts", "messaging-transport"],
++      ["src/infra/outbound/deliver.test.ts", "messaging-transport"],
+       ["src/commands/onboard-agent.test.ts", "commands"],
+       ["src/agents/command/session-store.test.ts", "commands"],
++      ["src/agents/agent-command-execution-identity.test.ts", "commands"],
++      ["src/agents/agent-run-terminal-outcome.test.ts", "commands"],
+       ["src/tui/tui-plugin-approvals.test.ts", "commands"],
+       ["src/wizard/setup.test.ts", "commands"],
+     ] as const) {
 diff --git a/test/scripts/ui.test.ts b/test/scripts/ui.test.ts
 index 9a25f27af510ea4c7c748a432ca7d57356d27d7d..183ba9d305d743f9c4c9b2258529d11ff4292f27 100644
 --- a/test/scripts/ui.test.ts
@@ -239916,20 +241368,86 @@ index 16edd322a78b78fef1899a0fc1918f8d0c0d421c..f6896cd207495e4d660cae089d346966
          hasRealtimeCapture: () => false,
          startTranscriptsCapture: join,
          stopTranscriptsCapture: async () => {},
+diff --git a/test/tsconfig/tsconfig.core.test.agents-root.json b/test/tsconfig/tsconfig.core.test.agents-root.json
+index daf18cd5260e96ec53514bc3c58ab80261244103..169773c9d5b35d1a8ef5703088e8744c54426e01 100644
+--- a/test/tsconfig/tsconfig.core.test.agents-root.json
++++ b/test/tsconfig/tsconfig.core.test.agents-root.json
+@@ -19,6 +19,10 @@
+     "../../src/agents/model-catalog.planning.test.ts",
+     "../../src/agents/model-catalog-view.test.ts",
+     "../../src/agents/tool-*.test.ts",
+-    "../../src/agents/tool-*.test.tsx"
++    "../../src/agents/tool-*.test.tsx",
++    "../../src/agents/agent-command*.test.ts",
++    "../../src/agents/agent-command*.test.tsx",
++    "../../src/agents/agent-run-*.test.ts",
++    "../../src/agents/agent-run-*.test.tsx"
+   ]
+ }
+diff --git a/test/tsconfig/tsconfig.core.test.commands.json b/test/tsconfig/tsconfig.core.test.commands.json
+index 66cd8cc2f9e7ab5cf869a0391d9b9ba39fa43024..023a3c21036e43d9a4721086efee7bf7604bba1c 100644
+--- a/test/tsconfig/tsconfig.core.test.commands.json
++++ b/test/tsconfig/tsconfig.core.test.commands.json
+@@ -4,6 +4,10 @@
+     "tsBuildInfoFile": "../../.artifacts/tsgo-cache/core-test-commands.tsbuildinfo"
+   },
+   "include": [
++    "../../src/agents/agent-command*.test.ts",
++    "../../src/agents/agent-command*.test.tsx",
++    "../../src/agents/agent-run-*.test.ts",
++    "../../src/agents/agent-run-*.test.tsx",
+     "../../src/agents/command/**/*.test.ts",
+     "../../src/agents/command/**/*.test.tsx",
+     "../../src/commands/**/*.test.ts",
+diff --git a/test/tsconfig/tsconfig.core.test.messaging-transport.json b/test/tsconfig/tsconfig.core.test.messaging-transport.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..d25affa28802abc88a8646646c534690e92da489
+--- /dev/null
++++ b/test/tsconfig/tsconfig.core.test.messaging-transport.json
+@@ -0,0 +1,12 @@
++{
++  "extends": "./tsconfig.core.test.shard.json",
++  "compilerOptions": {
++    "tsBuildInfoFile": "../../.artifacts/tsgo-cache/core-test-messaging-transport.tsbuildinfo"
++  },
++  "include": [
++    "../../src/channels/**/*.test.ts",
++    "../../src/channels/**/*.test.tsx",
++    "../../src/infra/outbound/**/*.test.ts",
++    "../../src/infra/outbound/**/*.test.tsx"
++  ]
++}
+diff --git a/test/tsconfig/tsconfig.core.test.messaging.json b/test/tsconfig/tsconfig.core.test.messaging.json
+index 55000ba4f74247433c0f231450afc9348cd24e3c..a82cd2921dfc2bce3815fa446d207bdf1f0c2e25 100644
+--- a/test/tsconfig/tsconfig.core.test.messaging.json
++++ b/test/tsconfig/tsconfig.core.test.messaging.json
+@@ -5,10 +5,6 @@
+   },
+   "include": [
+     "../../src/auto-reply/**/*.test.ts",
+-    "../../src/auto-reply/**/*.test.tsx",
+-    "../../src/channels/**/*.test.ts",
+-    "../../src/channels/**/*.test.tsx",
+-    "../../src/infra/outbound/**/*.test.ts",
+-    "../../src/infra/outbound/**/*.test.tsx"
++    "../../src/auto-reply/**/*.test.tsx"
+   ]
+ }
 diff --git a/test/vitest/vitest.database-worker-core-paths.mjs b/test/vitest/vitest.database-worker-core-paths.mjs
-index f9cc80f569660e331dcfdd388ba47adef176b312..72a7ab6bca4f04b3e37f60c6db0fab183f7ead46 100644
+index f9cc80f569660e331dcfdd388ba47adef176b312..289bedf9b3a300300a044d1a592768c933180b8d 100644
 --- a/test/vitest/vitest.database-worker-core-paths.mjs
 +++ b/test/vitest/vitest.database-worker-core-paths.mjs
-@@ -1,5 +1,8 @@
+@@ -1,5 +1,9 @@
  // These consumers need the host-owned SQLite broker, which runs in forked processes.
  export const databaseWorkerCoreTestFiles = [
 +  "test/discord-request-progress.integration.test.ts",
++  "test/discord-queued-origin.integration.test.ts",
 +  "test/ordinary-reply-sentinels.integration.test.ts",
 +  "src/plugin-sdk/agent-harness-task-continuation.test.ts",
    "src/state/agent-provenance.test.ts",
    "src/commands/agents.commands.list.worker.test.ts",
    "src/state/openclaw-agent-worker-store.test.ts",
-@@ -22,6 +25,7 @@ export const databaseWorkerCoreTestFiles = [
+@@ -22,6 +26,7 @@ export const databaseWorkerCoreTestFiles = [
    "src/tasks/task-registry.restore-ownership.test.ts",
    "src/agents/agent-harness-completion-delivery.test.ts",
    "src/agents/embedded-agent-runner/context-engine-maintenance.lifecycle.test.ts",
@@ -239937,7 +241455,7 @@ index f9cc80f569660e331dcfdd388ba47adef176b312..72a7ab6bca4f04b3e37f60c6db0fab18
    "src/agents/subagents/registry/subagent-registry-recovery-acceptance.test.ts",
    "src/agents/subagents/registry/subagent-registry-task-replacement.test.ts",
    "src/tasks/task-registry-session-index.test.ts",
-@@ -85,6 +89,8 @@ export const databaseWorkerCoreTestFiles = [
+@@ -85,6 +90,8 @@ export const databaseWorkerCoreTestFiles = [
    "src/acp/runtime/session-meta-doctor.test.ts",
    "src/agents/agent-tools.at-prefixed-remote-paths.test.ts",
    "src/agents/agent-tools.create-openclaw-coding-tools.test.ts",
@@ -239947,10 +241465,10 @@ index f9cc80f569660e331dcfdd388ba47adef176b312..72a7ab6bca4f04b3e37f60c6db0fab18
    "src/agents/memory-write-provenance.test.ts",
    "src/agents/prepared-model-runtime.run-resources.test.ts",
 diff --git a/test/vitest/vitest.extension-database-workers-paths.mjs b/test/vitest/vitest.extension-database-workers-paths.mjs
-index 14a2834376f65af1b1052e17d1aa5dc435a895a2..8eba2d7fb567a2ba479fbc3b140e7a3900890e05 100644
+index 14a2834376f65af1b1052e17d1aa5dc435a895a2..258e16bf43aa88240e8f8e3cf1dd37dd274bf646 100644
 --- a/test/vitest/vitest.extension-database-workers-paths.mjs
 +++ b/test/vitest/vitest.extension-database-workers-paths.mjs
-@@ -97,7 +97,11 @@ export const databaseWorkerExtensionTestFiles = [
+@@ -97,6 +97,9 @@ export const databaseWorkerExtensionTestFiles = [
    "extensions/crabbox/src/crabbox-worker-warm-image.test.ts",
    "extensions/device-pair/doctor-contract-api.test.ts",
    "extensions/device-pair/notify.test.ts",
@@ -239958,10 +241476,8 @@ index 14a2834376f65af1b1052e17d1aa5dc435a895a2..8eba2d7fb567a2ba479fbc3b140e7a39
 +  "extensions/discord/src/request-progress.interrupted-source.test.ts",
 +  "extensions/discord/src/continuation-progress.test.ts",
    "extensions/discord/src/monitor/model-picker-preferences.test.ts",
-+  "extensions/discord/src/monitor/message-handler.process.queued-origin.test.ts",
    "extensions/discord/src/monitor/presence-cooldown-store.test.ts",
    "extensions/discord/src/monitor/thread-bindings.state.test.ts",
-   "extensions/imessage/src/monitor.approval-reaction-replay.test.ts",
 diff --git a/tsdown.config.ts b/tsdown.config.ts
 index c8109efbdd02f409e05119d5ab920c1f3d71c862..6801241884431e02966b7af6bd74eb31e8ed2f2b 100644
 --- a/tsdown.config.ts

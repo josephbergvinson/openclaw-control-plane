@@ -32,6 +32,7 @@ import os
 import plistlib
 import shutil
 import socket
+import stat
 import sys
 import tempfile
 import uuid
@@ -107,9 +108,13 @@ def _resolved_executable_problem(command: str) -> str | None:
                 return f"relative executable not found on launchd PATH: {command}"
             candidate = Path(resolved)
 
-        if not candidate.exists():
+        # Python 3.14's exists()/is_file() suppress every OSError. Preserve the
+        # distinction between an absent executable and an unreadable filesystem.
+        try:
+            candidate_status = candidate.stat()
+        except (FileNotFoundError, NotADirectoryError):
             return f"executable does not exist: {candidate}"
-        if not candidate.is_file():
+        if not stat.S_ISREG(candidate_status.st_mode):
             return f"executable is not a regular file: {candidate}"
         if not os.access(candidate, os.X_OK):
             return f"executable is not executable: {candidate}"

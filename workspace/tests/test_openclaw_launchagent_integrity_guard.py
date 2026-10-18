@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import plistlib
 import sys
@@ -326,6 +327,35 @@ def test_check_reports_executable_filesystem_probe_error(tmp_path: Path) -> None
     assert guard.check(path) == [
         "executable cannot be inspected: File name too long"
     ]
+
+
+def test_check_reports_inaccessible_executable_when_exists_suppresses_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label = "com.openclaw.inaccessible-executable"
+    executable = tmp_path / "inaccessible"
+    path = write_plist(
+        tmp_path / f"{label}.plist",
+        launch_agent(label, program_arguments=[str(executable)]),
+    )
+    original_stat = Path.stat
+    original_exists = Path.exists
+
+    def stat_path(candidate: Path, *args, **kwargs):
+        if candidate == executable:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return original_stat(candidate, *args, **kwargs)
+
+    def exists_path(candidate: Path, *args, **kwargs):
+        if candidate == executable:
+            return False  # Python 3.14 suppresses the PermissionError here.
+        return original_exists(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat_path)
+    monkeypatch.setattr(Path, "exists", exists_path)
+
+    assert guard.check(path) == ["executable cannot be inspected: Permission denied"]
 
 
 def test_check_resolves_relative_executable_on_controlled_launchd_path(
