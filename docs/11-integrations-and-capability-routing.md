@@ -50,6 +50,15 @@ Keep three states separate: a declared route, a stored readiness observation and
 
 A missing or failed readiness probe does not by itself make a valid authorized operation forbidden. Inspect what actually failed. A route may support the requested operation even if a diagnostic is stale; conversely, a successful identity probe may prove no access to the requested document. The real operation and authoritative readback settle the effect.
 
+The configuration invalidation helper uses the supported native changes-list
+interface for current observations; an explicit `--log` input selects historical
+file mode. It projects relevant change paths and valid timestamps, not private
+summaries or raw runtime journals. Native retained history is bounded and best
+effort, so its coverage remains incomplete even when it finds a positive change.
+An empty, opaque, malformed or capped result cannot establish that no relevant
+configuration changed. Preserve that uncertainty instead of silently refreshing
+a readiness claim.
+
 Do not call an entire capability unavailable after trying one mismatched lane. Continue through the next registered supported route when that preserves the account, target and authority. A specific adapter stop condition takes precedence over the generic fallback order. Repeated identical calls without changed evidence are not a recovery strategy.
 
 ## Supported fallback order
@@ -111,6 +120,45 @@ Model selection and authentication profiles are separate configuration concerns.
 Credential values remain in sanctioned state and SecretRef/environment/broker lanes. Public configuration contains references and selectable account placeholders, not OAuth tokens, browser profiles or live host identifiers. A successful chooser or login screen does not prove that refreshed state persists across subsequent runtime use. Acceptance must check the supported stored state, the provider operation and the later use relevant to account rotation.
 
 The reference distinguishes the main reasoning model, its image-understanding capability and the separate Images 2.5 generation route. The [configuration and runtime chapters](10-runtime-releases-and-promotion.md) describe the pinned model settings. An unavailable generation route is not permission to silently switch to an older model or a new billing mechanism.
+
+## Recovering an existing account
+
+Resolve the exact registered identity before treating a login failure as missing
+authorization. A browser's numeric account slot is local to that profile; a link
+copied from another signed-in browser may open under the wrong account. Check the
+selected email and application workspace instead of declaring the inbox unavailable
+after retrying the same mismatched session.
+
+Use the registered native API first when appropriate, then the supported browser
+or credential-recovery route for that same identity. Normal refresh can renew an
+existing OAuth session. Interactive enrollment, missing scopes and provider-required
+verification have different recovery paths; do not turn a transient expired session
+into a new account or substitute a convenient default account.
+
+A Google sign-in used by a separate application does not establish a standalone
+mailbox or every Google service. Verify the downstream application's identity,
+workspace and requested operation. Its session and recovery binding may be the
+right route even when no local Gmail OAuth token is registered.
+
+The exported bounded Google baseline is available as:
+
+```bash
+python3 scripts/google_capability_probe.py --account operator@company-alpha.example
+```
+
+It requires an exact registered route and OAuth account. It checks account-bound
+Gmail label and minimal Drive metadata through the confined native transport,
+without sending mail or exercising writes. The result retains diagnostic categories
+and counts, not message contents. Relevant service grants are checked separately;
+successful reads do not establish send/write permission, object ownership or admin.
+
+Existing daily/weekly health owns recurring registered-account checks. It deduplicates
+provisioned Google OAuth consumers, shares one native refresh/check observation and
+uses a bounded per-account baseline. Empty coverage remains unverified. Task-time
+recovery still verifies the original requested operation and preserves healthy
+accounts, legitimate verification requirements and the provider's actual roles.
+See [health](14-guards-health-and-restoration.md); none of these checks makes access
+irrevocable or establishes every downstream SSO session.
 
 ## Verifying an adopted route
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -38,10 +39,33 @@ class RepositoryTests(unittest.TestCase):
         )
         self.assertEqual(list(range(len(numbers))), numbers)
 
-    def test_readme_indexes_every_chapter(self) -> None:
+    def test_release_validation_rejects_a_coherently_stale_reference(self) -> None:
+        manifest = json.loads((ROOT / "runtime/manifest.json").read_text())
+        source = manifest["source"]["referenceCommit"]
+        distribution = manifest["nativeDistribution"]["referenceCommit"]
+        for expected_source, expected_distribution, expected_code, message in (
+            (source, distribution, 0, ""),
+            ("0" * 40, distribution, 1, "stale source reference"),
+            (source, "0" * 40, 1, "stale distribution reference"),
+        ):
+            with self.subTest(source=expected_source, distribution=expected_distribution):
+                result = subprocess.run([
+                    sys.executable, "-B", str(ROOT / "scripts/validate_repo.py"),
+                    "--expected-source-commit", expected_source,
+                    "--expected-distribution-commit", expected_distribution,
+                ], cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(expected_code, result.returncode, result.stderr)
+                if message:
+                    self.assertIn(message, result.stderr)
+                    self.assertNotIn("checks passed", result.stdout)
+
+    def test_readme_reaches_the_complete_documentation_index(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for path in sorted((ROOT / "docs").glob("*.md")):
-            self.assertIn(f"docs/{path.name}", readme, path.name)
+        self.assertIn("](docs/README.md)", readme)
+        index = (ROOT / "docs/README.md").read_text(encoding="utf-8")
+        for path in sorted((ROOT / "docs").glob("[0-9][0-9]-*.md")):
+            self.assertIn(f"]({path.name})", index, path.name)
+        self.assertIn("](history/README.md)", index)
 
     def test_capability_provenance_defines_all_four_levels(self) -> None:
         text = (ROOT / "docs" / "03-capability-provenance.md").read_text(encoding="utf-8").casefold()

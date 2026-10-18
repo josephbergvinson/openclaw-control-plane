@@ -6,7 +6,11 @@ The operating setup extends beyond the OpenClaw Workspace. macOS launches the ga
 
 The reference treats these as explicit dependencies with separate owners. It does not claim that a configured backup destination or a healthy agent process makes the whole machine recoverable.
 
-Backblaze is an optional historical reference in this repository. It was removed from the operator's Mac Mini and external volume; the exported helpers and examples do not describe an installed client or active backup schedule. Adopting them requires a separate installation and acceptance decision. The current upgrade uses a fresh manual stopped-state snapshot for rollback and does not reinstall Backblaze or add a replacement recurring backup service.
+The Backblaze helpers are optional adoption inputs. Their presence does not imply
+an installed client, active schedule or accepted offsite recovery. Decide whether
+to adopt that service separately from runtime installation. A release can use a
+matching stopped-state snapshot for rollback without introducing a recurring
+backup service; full host recovery has its own requirements.
 
 ## Maintenance classes
 
@@ -39,7 +43,11 @@ When cleanup pins its helper and evidence files, a legitimate helper update must
 
 Retained cleanup manifests can outlive a volume remount; a saved filesystem device number is not a durable volume identity. Derive a current device binding only after the existing owner verifies the originally pinned volume UUID and filesystem policy, retains the recorded inode and fixture hashes, and holds the current mount anchor throughout the operation. Keep immutable manifests and prior failure receipts unchanged. A different volume or replaced mount or inode must still fail closed, and current ownership, flags, reference and activity checks continue to govern each target. The repair does not prove cleanup completion without actual effect and delivery evidence.
 
-On September 23, the existing retention job completed after that repair: all four children and all 64 effect predicates passed, and the normal Discord result was read back. No eligible removal remained, so no reclaimed space is claimed. This was a manually admitted run of the existing scheduled owner; its next natural daily tick remains unobserved. The [deployment record](../runtime/README.md#september-23-qualified-source) retains the exact acceptance receipt and the earlier failure.
+A retention or storage check can pass with no eligible removal. Report the actual
+effect and measured capacity, not an invented reclaimed-space total. A forced
+native occurrence verifies that occurrence; it does not become proof of a later
+natural tick. Keep schedule, thresholds, execution and required delivery visible
+when accepting either path.
 
 Resource pressure is broader than disk free space. Builds, large Node processes, swap growth and backup catalog loading can compete. The headroom report measures before and after cleanup; it cannot promise that other applications will not consume the recovered capacity moments later. Logical sparse-file size is not allocated size, and neither establishes exclusive reclaimed bytes during concurrent work.
 
@@ -56,7 +64,11 @@ The retained Backblaze guards use swap occupancy and growth as diagnostics. Thei
 
 The local recovery engine uses the runtime's native backup owner for application state and SQLite capture, with selective Workspace/policy and Git-history supplements. A native restore is tested in a fresh private directory without activating restored state. Capture semantics, included roots and exclusions belong to that versioned engine; a file copy is not a substitute.
 
-The historical Backblaze design assigned weekly cloud initiation and daily follow-up to its client. Those templates confer no current schedule ownership. Retained local archive engines and historical generations remain useful recovery resources; their presence does not mean a periodic local producer is enabled. An adopter must declare schedule ownership explicitly to avoid overlapping producers or cleanup of a still-required recovery set.
+The sample Backblaze integration separates weekly cloud initiation from daily
+follow-up. Those templates confer no active schedule ownership. Retained local
+archive engines and historical generations can remain useful recovery resources
+without a periodic local producer. Declare schedule ownership explicitly to avoid
+overlapping producers or cleanup of a still-required recovery set.
 
 Backblaze Personal Backup is filtered file backup, not a byte-for-byte VM or disk image. Supported-file coverage and a current scan must be established for the selected external volume. Do not infer coverage of live databases or raw virtual disks from the parent directory appearing in the client.
 

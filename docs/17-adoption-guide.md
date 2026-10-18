@@ -5,33 +5,48 @@ workspace. It covers the runtime, policy, integrations and host operations. Adop
 only the Markdown gives the model instructions; it does not install the runtime
 changes or operational helpers.
 
+Before configuring host services, run the root repository checks and the separate
+exported Workspace fixture suite described in
+[CONTRIBUTING](../CONTRIBUTING.md#workspace-behavioral-fixtures). Its existing
+`workspace/tests/run_periphery_tests.py` runner uses a disposable operator/state
+contract, pytest and the declared Python dependencies. It requires no private
+credentials or live service enrollment; fixture success remains separate from
+the installation acceptance at the end of this guide.
+
 Use a separate directory for the reference repository, runtime source and new
 workspace. A service must never point at the disposable clone used to test a patch.
 The examples below use explicit paths; replace them with the intended local paths.
 
+You need Git, Python 3, the manifest's exact Node.js/pnpm versions, access to the
+declared public repositories/package registries and sufficient build resources.
+The service/application procedures below target macOS and its native permission
+model. Linux CI verifies source reconstruction and build separately.
+
+Follow the numbered steps in order. First reconstruct source, then create a new
+workspace, initialize one native state directory, connect the intended accounts,
+install a sealed release and test the actual interface. Optional maintenance and
+backup services are staged after the first working installation.
+
 ## 1. Reconstruct and check the runtime
 
-Follow [the runtime package](../runtime/README.md) to clone official tag `v2026.9.5`,
-verify and apply the patch, and record the resulting tree in a local commit. The
-expected tree is `b8d24593af90951eb74769c1849a2b09d0c1cd2b`.
+Follow [the runtime package](../runtime/README.md) to obtain the manifest's official
+tag, verify and apply the complete source patch, and record the resulting tree in
+a local commit. Compare with `source.normalizedTree` in the
+[current manifest](../runtime/manifest.json), not a tree copied from a dated guide.
+If adopting the optional native distribution, use its separate clean-clone command
+and compare with `nativeDistribution.normalizedTree` instead.
 
-The preceding source `5b5942def95c29e75aaca6c3bc3ba6f084ae1dc8` passed
-[hosted qualification](../runtime/README.md#september-23-source-qualification) at public
-commit `bbd7a78e2f8c2426d7a53d5cb8e4b75fbaf280e4`, including the complete native
-plan, reconstructed build and owned regression suites. Deployment records and
-bounded live results are recorded separately. The current `f29bb229c5c8` reference
-adds only the [native prompt correction](../runtime/README.md#september-24-native-prompt-successor);
-its own hosted qualification and signed companion acceptance must be checked.
-Match the workflow's source and
-patch identities to the manifest being adopted; neither a source test nor the
-originating host's live result qualifies your installation.
+Use the exact `toolchain.node` and `toolchain.pnpm` versions for the frozen
+dependency install, native changed-source checks and build. A new local commit
+hash is expected because the adopter supplies its author and timestamp; the
+declared tree is the reproducibility check.
 
-Use Node.js 24.16.0 and pnpm 12.4.0. Run the documented frozen dependency installation,
-native changed-source checks and build from that checkout. The source package
-contains the complete delta from the official release. A new commit hash is expected
-because the adopter supplies its author and timestamp; the tree is the source check.
+Inspect [hosted qualification](../runtime/README.md#hosted-qualification) on the
+exact public commit you adopt. Matching source, distribution/archive and patch
+identities matter; neither a prior green workflow nor another host's live result
+qualifies your installation.
 
-Read the reconstructed source's `AGENTS.md`, `docs/testing.md` and command-specific
+Read the reconstructed source's `AGENTS.md`, `docs/help/testing/suites.md` and command-specific
 CLI documentation before invoking platform checks. The online
 [getting-started guide](https://docs.openclaw.ai/start/getting-started) is useful
 background, but the pinned source defines the exact version being installed.
@@ -511,6 +526,11 @@ Use ordinary prompts with independently established ground truth. Useful example
   source support and prose; a completed file alone does not establish quality.
 - Start a real goal spanning tool calls and context pressure. Check continued work,
   task state, cancellation when requested, and visible completion or a specific blocker.
+- If using voice, start a new permitted room session and check the authenticated
+  speaker's profile and preferences. Ask for a bounded records consultation or
+  delegated task, then verify the spoken acknowledgment and completed result.
+  Finish a short authorized capture and inspect both human and played assistant
+  speech in its transcript and the delivered minutes.
 
 Confirm reasoning and runtime selection from request evidence, not the preference
 file. Check progress during long tools, foreground compaction notification and a

@@ -39,4 +39,8 @@ The [capability provenance chapter](03-capability-provenance.md) identifies poli
 
 Read the [adoption guide](17-adoption-guide.md), inspect the configuration and policy templates, and reconstruct the pinned runtime in an isolated directory. Supply your own accounts, paths, credentials and operating-system permissions. Then test a small real workflow through the channel you will use.
 
+The [documentation index](README.md) groups the remaining chapters by task.
+For exact source and distribution identities, use the current
+[manifest](../runtime/manifest.json) rather than a historical installation label.
+
 The portable reference deliberately contains no personal history or active credentials. Its example identities are fictitious. Its useful behavior should come from explicit instructions and working code, not from facts that only the original operator knows.

@@ -12,6 +12,7 @@ This is a lint. It checks structure, not accuracy.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -29,6 +30,7 @@ REQUIRED = {
     "SECURITY.md",
     "LICENSE",
     "runtime/manifest.json",
+    "scripts/reconstruct_runtime.py",
     "config/openclaw.preferences.json",
     "templates/WRITING.example.md",
     "docs/00-start-here.md",
@@ -237,6 +239,21 @@ def validate_tree() -> list[Finding]:
             findings.append(Finding(ROOT / "runtime" / patch, "required manifest patch missing"))
     except (OSError, ValueError, KeyError, TypeError):
         findings.append(Finding(manifest_path, "runtime patch declaration unavailable"))
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "reference_runtime_package", ROOT / "scripts/reconstruct_runtime.py")
+        if spec is None or spec.loader is None:
+            raise ValueError("reconstruction helper unavailable")
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = package
+        spec.loader.exec_module(package)
+    except (OSError, ImportError, ValueError) as error:
+        findings.append(Finding(manifest_path, f"reconstruction helper unavailable: {error}"))
+    else:
+        try:
+            package.load_package(ROOT / "runtime", native_distribution=True)
+        except (package.ReconstructionError, OSError, ValueError, KeyError, TypeError) as error:
+            findings.append(Finding(manifest_path, f"invalid reconstruction package: {error}"))
     for path in ROOT.rglob("*"):
         if any(part in SKIP_PARTS for part in path.parts):
             continue
@@ -245,9 +262,37 @@ def validate_tree() -> list[Finding]:
     return findings
 
 
+def validate_expected_reference(source_commit: str | None, distribution_commit: str | None) -> list[Finding]:
+    if source_commit is None and distribution_commit is None:
+        return []
+    path = ROOT / "runtime/manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        findings = []
+        for section, label, expected in (
+            ("source", "source", source_commit),
+            ("nativeDistribution", "distribution", distribution_commit),
+        ):
+            if expected is not None and manifest[section]["referenceCommit"] != expected:
+                findings.append(Finding(path, f"stale {label} reference: expected reviewed commit {expected}"))
+        return findings
+    except (OSError, ValueError, KeyError, TypeError):
+        return [Finding(path, "expected release identity cannot be verified")]
+
+
+def exact_commit(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise argparse.ArgumentTypeError("use the full reviewed Git commit SHA-1")
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the documentation checks.")
     parser.add_argument("--quiet", action="store_true", help="print nothing on success")
+    parser.add_argument("--expected-source-commit", type=exact_commit, metavar="SHA",
+                        help="require the public package to match this reviewed canonical source commit")
+    parser.add_argument("--expected-distribution-commit", type=exact_commit, metavar="SHA",
+                        help="require the public package to match this reviewed distribution commit")
     return parser.parse_args()
 
 
@@ -256,6 +301,7 @@ def main() -> int:
     files = candidate_files()
 
     findings = validate_tree()
+    findings.extend(validate_expected_reference(args.expected_source_commit, args.expected_distribution_commit))
     findings.extend(validate_json(files))
     findings.extend(validate_examples_against_schemas())
     findings.extend(validate_links(files))

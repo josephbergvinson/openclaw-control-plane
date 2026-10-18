@@ -50,42 +50,13 @@ Native failures remain failures. The separate [reference workflow](https://githu
 owns the complete native-check plan and full build against the runtime manifest;
 this regression workflow no longer repeats the historical overlay/build sequence.
 
-## Qualification history
+## Historical overlays
 
-The original four-case baseline reproduced the source defect in
-[run 34657404147](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34657404147):
-three controls passed and `adopted-current` failed because injection was called
-zero times instead of once. Native exit was one with no unhandled errors and all
-four cleanup paths completed. This is the expected assertion failure, not a
-passing baseline. Earlier setup failures and pool observations remain recorded in
-`source-parity.json`; they do not establish a production-incident cause.
+`candidate.patch`, `cron-zero-timeout.patch`, `candidate-overlay.json` and
+`source-parity.json` describe the earlier isolated candidate. They remain
+reference inputs for that diagnostic package, not additional installation steps.
+The current complete runtime patch already incorporates the applicable fixes.
 
-The eight-file steering overlay passed all ten cases in
-[run 34658769048](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34658769048).
-The combined steering and two-file cron overlay then passed
-[run 34659951151](https://github.com/josephbergvinson/openclaw-control-plane/actions/runs/34659951151)
-at reference commit `6795d19633907166fcac2c24dfbff99bd8186321`:
-
-- The unchanged baseline produced its exact expected assertion failure.
-- All ten steering cases passed with no unhandled errors.
-- All 525 tests across twelve native files passed, including fourteen cron tests.
-- The complete native plan ran all 34 commands successfully.
-- The full build passed against the same normalized source tree.
-
-That qualified tree is `cc032d12126f13922aad858d6104ec1c62e71abc`, the sanitized
-derivative of canonical source `f31686e33ce3fa8564cecf97e3f36f39a69f57dd`. The
-canonical source subsequently completed a full macOS build. Source qualification,
-local packaging and live acceptance remain distinct facts.
-
-`candidate-overlay.json` preserves the exact original base and ten before/after
-hashes. `candidate.patch` and `cron-zero-timeout.patch` remain separate historical
-overlays. `apply_candidate.py` and the prepare/verify modes of `freeze_candidate.py`
-are tied to that older base and fail closed on a different generation. To replay
-the complete historical qualification, use reference commit `6795d196` and its
-manifest/workflow together. Do not replace the historical base hashes with the
-current reference tree.
-
-The 91-file source-parity record describes the original bounded comparison, not
-the complete import graph. A successful regression or build does not prove that
-the original Discord incident took this path, that a provider saved the steering
-message, or that an adopter's channels and devices work.
+Use the exact public commit's workflow results for qualification. Earlier fixture
+results do not establish provider delivery, an installed runtime or a new source
+revision. See the [history index](../../../docs/history/README.md) for context.

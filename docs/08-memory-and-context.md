@@ -48,7 +48,7 @@ The `filterBootstrapFilesForSession` implementation applies two separate decisio
 
 Do not infer a worker's context from its name or a declared manifest profile. Inspect the actual compiled context when accepting a role-sensitive behavior. The public [bootstrap template](../templates/BOOTSTRAP.example.md) and [advisory manifest](../templates/policy_bootstrap_manifest.example.json) describe these boundaries without pretending to enforce them.
 
-## Shared voice in a separate company workspace
+## Company agents and shared conversations
 
 A separate company agent needs an explicit voice policy as well as private-source
 boundaries. It does not inherit the main agent's SOUL, IDENTITY or writing guide
@@ -74,6 +74,27 @@ answer colleagues does not grant them access to private records or spending.
 Voice guidance shapes tone and argument, not factual accuracy or access control.
 WRITING is still a deliberate read for substantial prose, not a bootstrap filename;
 the company agent must actually have the file-read capability its policy assumes.
+
+## Realtime voice context
+
+Realtime voice has a separate session-start context boundary. Its authenticated
+speaker resolver can supply the permitted primary profile together with the room's
+company policy. Bind the verified operator identity explicitly; a display label
+alone is not the person's durable profile. Guest speakers keep their applicable
+room context without receiving another speaker's primary context.
+
+The selected bootstrap files, whole-file budget and speaking instructions must
+agree with the actual configuration. An excluded or truncated required profile is
+a loading/configuration defect to diagnose, not a reason to invent missing facts.
+Detailed references such as TOOLS still use their permitted retrieval route.
+The normal-agent consultation path can retrieve current records or execute/delegate
+an authorized task when the room's action-handoff setting enables it.
+
+Changes to a text bootstrap file take effect at the next applicable text turn;
+a running realtime session retains its startup snapshot until supported refresh
+or replacement. Verify a new voice session's supplied context and an ordinary
+spoken factual/task request. A correct text reply cannot establish voice loading,
+and a model's claim about what it loaded is not a context receipt.
 
 ## Loading and retrieval expose different things
 
@@ -130,7 +151,12 @@ when adopting this profile into an existing native configuration.
 
 After compaction or handoff, inspect current source/process/effect state before mutating. Resume the same objective and account bindings. Do not replay a side effect merely because its earlier narrative was shortened. If the runtime can compact safely, continue; ask for a new conversation only when technically required.
 
-The runtime's bootstrap cache refreshes before the next turn. An on-disk policy edit does not rewrite a turn already executing. Use a fresh session for isolated acceptance after a behavioral change and inspect its actual injected context. A stable session identifier alone is not enough to prove reset failure or success; verify the native reset boundary and the first compiled context.
+The runtime's text bootstrap cache refreshes before the next applicable turn.
+An on-disk policy edit does not rewrite a turn already executing or a realtime
+voice session's startup snapshot. Use a fresh session for isolated acceptance
+after a behavioral change and inspect its actual injected context. A stable
+session identifier alone does not prove reset failure or success; verify the
+native reset boundary and the first compiled context.
 
 ## How to verify this design
 

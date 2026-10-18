@@ -310,7 +310,8 @@ class RuntimeReconstructionTests(unittest.TestCase):
             "schemaVersion": 1,
             "upstream": {"tag": package.tag, "tagObject": package.tag_object, "commit": package.base_commit, "tree": package.base_tree},
             "source": {"normalizedTree": package.normalized_tree},
-            "patch": {"file": "source.patch", "sha256": package.patch_sha256},
+            "patch": {"file": "source.patch", "sha256": package.patch_sha256,
+                      "bytes": len(package.patch)},
             "nativeDistribution": {
                 "sourceTree": package.normalized_tree, "normalizedTree": package.native.normalized_tree,
                 "patch": {"file": "native.patch", "sha256": package.native.patch_sha256, "bytes": len(package.native.patch)},
@@ -320,6 +321,19 @@ class RuntimeReconstructionTests(unittest.TestCase):
         manifest_path = directory / "manifest.json"
         manifest_path.write_text(json.dumps(manifest))
         self.assertEqual(package, RUNTIME.load_package(directory, native_distribution=True))
+        for field, value in (("bytes", len(package.patch) + 1), ("sha256", "0" * 64)):
+            with self.subTest(source_patch_field=field):
+                broken = json.loads(json.dumps(manifest))
+                broken["patch"][field] = value
+                manifest_path.write_text(json.dumps(broken))
+                with self.assertRaisesRegex(RUNTIME.ReconstructionError, "Patch size or SHA-256"):
+                    RUNTIME.load_package(directory)
+        broken = json.loads(json.dumps(manifest))
+        broken["nativeDistribution"]["sourceTree"] = "moving-reference"
+        manifest_path.write_text(json.dumps(broken))
+        self.assertEqual(self.package, RUNTIME.load_package(directory))
+        with self.assertRaisesRegex(RUNTIME.ReconstructionError, "SHA-1"):
+            RUNTIME.load_package(directory, native_distribution=True)
         manifest["nativeDistribution"] = None
         manifest_path.write_text(json.dumps(manifest))
         self.assertEqual(self.package, RUNTIME.load_package(directory))
@@ -332,6 +346,23 @@ class RuntimeReconstructionTests(unittest.TestCase):
             with self.subTest(url=url):
                 with self.assertRaises(RUNTIME.ReconstructionError):
                     RUNTIME.validate_release_url(url, package.native.artifact.file)
+
+    def test_current_metadata_keeps_history_out_and_binds_the_distribution(self) -> None:
+        source, distribution = "1" * 40, "2" * 40
+        manifest = {
+            "schemaVersion": 1, "source": {"referenceCommit": source},
+            "nativeDistribution": {"referenceCommit": distribution},
+            "referenceDeployment": {"distributionCommit": distribution},
+        }
+        RUNTIME.validate_manifest_metadata(manifest, native_distribution=True)
+        for change in (
+            {"historicalQualification": {"status": "pending"}},
+            {"source": {"referenceCommit": "main"}},
+            {"referenceDeployment": {"distributionCommit": source}},
+        ):
+            with self.subTest(change=change):
+                with self.assertRaises(RUNTIME.ReconstructionError):
+                    RUNTIME.validate_manifest_metadata({**manifest, **change}, native_distribution=True)
 
 
 if __name__ == "__main__":
