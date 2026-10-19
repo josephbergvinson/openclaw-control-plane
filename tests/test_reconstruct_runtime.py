@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -370,6 +372,160 @@ class RuntimeReconstructionTests(unittest.TestCase):
             with self.subTest(change=change):
                 with self.assertRaises(RUNTIME.ReconstructionError):
                     RUNTIME.validate_manifest_metadata({**manifest, **change}, native_distribution=True)
+
+
+    def test_actual_candidate_packet_uses_the_existing_resource_contract(self) -> None:
+        path = ROOT / "runtime/native160/native160-provenance.json"
+        artifact, package, raw = RUNTIME.load_native_provenance(path)
+        self.assertEqual(package["archiveName"], artifact.file)
+        self.assertEqual(package["publicAssetURL"], artifact.url)
+        self.assertEqual(package["bytes"], artifact.bytes)
+        self.assertEqual(package["sha256"], artifact.sha256)
+        self.assertEqual(package["integrity"], "sha512-" + base64.b64encode(
+            bytes.fromhex(artifact.sha512)).decode("ascii"))
+        self.assertEqual(path.read_bytes(), raw)
+
+    def candidate_provenance(self):
+        artifact, contents = self.native_artifact()
+        version = "0.160.0-openclaw.fixture-darwin-arm64"
+        integrity = "sha512-" + base64.b64encode(bytes.fromhex(artifact.sha512)).decode("ascii")
+        package = {
+            "name": "@openai/codex", "platformPackage": "@openai/codex",
+            "version": version, "target": "aarch64-apple-darwin",
+            "archiveName": artifact.file, "publicAssetURL": artifact.url,
+            "bytes": artifact.bytes, "sha256": artifact.sha256, "integrity": integrity,
+        }
+        provenance = Path(self.temporary.name).resolve() / "native160-provenance.json"
+        provenance.write_text(json.dumps({"schemaVersion": 1, "package": package}))
+        selector = "@openai/codex@0.160.0>@openai/codex-darwin-arm64"
+        relative = "native-package-artifacts/" + artifact.file
+        override = "  " + json.dumps(selector) + ": " + json.dumps("file:./" + relative) + "\n"
+        workspace = "packages: []\noverrides:\n" + override
+        lock = (
+            "lockfileVersion: '9.0'\noverrides:\n" + override
+            + "packages:\n  '@openai/codex@file:" + relative + "':\n"
+            + "    resolution: {integrity: " + integrity + ", tarball: file:" + relative + "}\n"
+            + "    version: " + version + "\n    cpu: [arm64]\n    os: [darwin]\n"
+            + "snapshots:\n  '@openai/codex@file:" + relative + "':\n    optional: true\n"
+        )
+        (self.checkout / "pnpm-workspace.yaml").write_text(workspace)
+        environment = "---\nlockfileVersion: '9.0'\npackages:\n  environment@1: {}\nsnapshots:\n  environment@1: {}\n---\n"
+        (self.checkout / "pnpm-lock.yaml").write_text(environment + lock)
+        return artifact, contents, provenance
+
+    def test_artifact_only_cli_uses_existing_owner_without_source_or_selection(self) -> None:
+        artifact, contents, provenance = self.candidate_provenance()
+        before = {name: (self.checkout / name).read_bytes()
+                  for name in ("runtime.txt", "pnpm-workspace.yaml", "pnpm-lock.yaml")}
+        head, index = self.run_git("rev-parse", "HEAD"), self.run_git("write-tree")
+        selector = Path(self.temporary.name) / "current"
+        selector.symlink_to(self.checkout, target_is_directory=True)
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(contents)
+        with patch.object(RUNTIME, "build_opener", return_value=opener), (
+            patch.object(RUNTIME, "load_package", side_effect=AssertionError("active manifest loaded"))
+        ), patch.object(RUNTIME, "reconstruct", side_effect=AssertionError("source reconstruction")), (
+            patch.object(RUNTIME, "git", side_effect=AssertionError("artifact mode ran Git"))
+        ), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(0, RUNTIME.main([
+                str(self.checkout), "--native-artifact-provenance", str(provenance),
+            ]))
+        result = json.loads(output.getvalue())
+        self.assertEqual("artifact-provisioned-without-source-or-runtime-selection", result["status"])
+        self.assertEqual("downloaded", result["artifact"]["source"])
+        self.assertEqual(contents, (self.checkout / "native-package-artifacts" / artifact.file).read_bytes())
+        self.assertEqual(before, {name: (self.checkout / name).read_bytes() for name in before})
+        self.assertEqual(head, self.run_git("rev-parse", "HEAD"))
+        self.assertEqual(index, self.run_git("write-tree"))
+        self.assertEqual(self.checkout.resolve(), selector.resolve())
+        self.assertTrue(selector.is_symlink())
+        with patch.object(RUNTIME, "build_opener") as repeated:
+            self.assertEqual("existing", RUNTIME.provision_native_from_provenance(
+                self.checkout, provenance)["artifact"]["source"])
+            repeated.assert_not_called()
+
+    def test_artifact_only_rejects_source_options_before_any_owner_runs(self) -> None:
+        _, _, provenance = self.candidate_provenance()
+        for flag in ("--apply", "--native-distribution"):
+            with self.subTest(flag=flag), contextlib.ExitStack() as stack:
+                owner = stack.enter_context(patch.object(RUNTIME, "provision_native_from_provenance"))
+                source = stack.enter_context(patch.object(RUNTIME, "reconstruct"))
+                stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                with self.assertRaises(SystemExit) as refusal:
+                    RUNTIME.main([str(self.checkout), "--native-artifact-provenance", str(provenance), flag])
+                self.assertEqual(2, refusal.exception.code)
+                owner.assert_not_called()
+                source.assert_not_called()
+
+    def test_candidate_provenance_refuses_invalid_sri_size_url_and_identity_before_fetch(self) -> None:
+        _, _, provenance = self.candidate_provenance()
+        original = json.loads(provenance.read_text())
+        changes = [
+            ("bytes", True), ("bytes", 0), ("bytes", -1),
+            ("integrity", "sha512-" + base64.b64encode(b"short").decode("ascii")),
+            ("integrity", original["package"]["integrity"] + " "),
+            ("integrity", original["package"]["integrity"] + " " + original["package"]["integrity"]),
+            ("integrity", "sha256-" + "a" * 64), ("sha256", "A" * 64),
+            ("publicAssetURL", original["package"]["publicAssetURL"] + "?token=fixture"),
+            ("publicAssetURL", original["package"]["publicAssetURL"].replace(
+                "josephbergvinson/openclaw-control-plane", "other/repository")),
+            ("archiveName", "../archive.tgz"), ("target", "x86_64-apple-darwin"),
+            ("name", "other"), ("version", "not-a-bound-platform-version"),
+        ]
+        for key, value in changes:
+            with self.subTest(key=key, value=value):
+                modified = json.loads(json.dumps(original))
+                modified["package"][key] = value
+                provenance.write_text(json.dumps(modified))
+                with patch.object(RUNTIME, "build_opener") as opener:
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.provision_native_from_provenance(self.checkout, provenance)
+                    opener.assert_not_called()
+                self.assertFalse((self.checkout / "native-package-artifacts").exists())
+        provenance.write_text('{"schemaVersion":1,"schemaVersion":1,"package":{}}')
+        with self.assertRaisesRegex(RUNTIME.ReconstructionError, "duplicate JSON key"):
+            RUNTIME.load_native_provenance(provenance)
+
+    def test_candidate_binding_refuses_wrong_or_ambiguous_workspace_and_lock_before_fetch(self) -> None:
+        artifact, _, provenance = self.candidate_provenance()
+        workspace, lock = self.checkout / "pnpm-workspace.yaml", self.checkout / "pnpm-lock.yaml"
+        original_workspace, original_lock = workspace.read_text(), lock.read_text()
+        changes = [
+            (workspace, original_workspace.replace(artifact.file, "another.tgz")),
+            (workspace, original_workspace + "overrides:\n"),
+            (workspace, original_workspace + original_workspace.split("overrides:\n")[1]),
+            (lock, original_lock.replace("integrity: sha512-", "integrity: sha256-")),
+            (lock, original_lock.replace("optional: true", "optional: false")),
+            (lock, original_lock.replace("os: [darwin]", "os: [linux]")),
+            (lock, original_lock.replace("cpu: [arm64]", "cpu: [x64]")),
+            (lock, original_lock.replace("version: 0.160.0-openclaw.fixture", "version: 0.160.0-openclaw.other")),
+        ]
+        for target, changed in changes:
+            with self.subTest(target=target.name, changed=changed):
+                workspace.write_text(original_workspace)
+                lock.write_text(original_lock)
+                target.write_text(changed)
+                with patch.object(RUNTIME, "build_opener") as opener:
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.provision_native_from_provenance(self.checkout, provenance)
+                    opener.assert_not_called()
+                self.assertFalse((self.checkout / "native-package-artifacts").exists())
+
+    def test_candidate_inputs_are_rechecked_after_the_existing_download_owner(self) -> None:
+        artifact, contents, provenance = self.candidate_provenance()
+        lock = self.checkout / "pnpm-lock.yaml"
+        original = lock.read_text()
+        opener = Mock()
+        def change_binding(*args, **kwargs):
+            lock.write_text(original.replace("optional: true", "optional: false"))
+            return io.BytesIO(contents)
+        opener.open.side_effect = change_binding
+        with patch.object(RUNTIME, "build_opener", return_value=opener):
+            with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.provision_native_from_provenance(self.checkout, provenance)
+        self.assertIn("optional: false", lock.read_text())
+        self.assertEqual(contents, (self.checkout / "native-package-artifacts" / artifact.file).read_bytes())
+
 
 
 if __name__ == "__main__":

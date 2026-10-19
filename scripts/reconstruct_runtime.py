@@ -9,6 +9,8 @@ resets a checkout, or changes the selected runtime.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -120,6 +122,185 @@ def validate_release_url(url: str, filename: str) -> None:
     parts = parsed.path[len(prefix):].split("/")
     if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parts[0]) or parts[1] != filename:
         raise ReconstructionError("Native release URL must name the declared archive exactly")
+
+
+def read_resource_input(path: Path, limit: int) -> bytes:
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ReconstructionError("Native resource input must be a physical absolute path")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise ReconstructionError("Native resource input is not a bounded regular file")
+        payload = stream.read(limit + 1)
+        after = path.lstat()
+        if len(payload) > limit or (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns
+        ) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            raise ReconstructionError("Native resource input changed while being read")
+        return payload
+
+
+def unique_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ReconstructionError("Native provenance has a duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def load_native_provenance(path: Path) -> tuple[NativeArtifact, dict, bytes]:
+    """Read the existing candidate packet; no active runtime manifest is selected."""
+    raw = read_resource_input(path, 256 * 1024)
+    value = json.loads(raw, object_pairs_hook=unique_json_object)
+    if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
+        raise ReconstructionError("Unsupported native provenance schema")
+    package = value.get("package")
+    if (
+        not isinstance(package, dict)
+        or package.get("name") != "@openai/codex"
+        or package.get("platformPackage") != "@openai/codex"
+        or package.get("target") != "aarch64-apple-darwin"
+        or not isinstance(package.get("version"), str)
+        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9.-]+-darwin-arm64",
+                        package["version"]) is None
+        or type(package.get("bytes")) is not int or package["bytes"] <= 0
+    ):
+        raise ReconstructionError("Native provenance package identity or size is invalid")
+    integrity = package.get("integrity")
+    if not isinstance(integrity, str) or not integrity.startswith("sha512-"):
+        raise ReconstructionError("Native provenance requires one canonical SHA-512 SRI")
+    try:
+        digest = base64.b64decode(integrity[7:], validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ReconstructionError("Native provenance SHA-512 SRI is invalid") from error
+    if len(digest) != 64 or "sha512-" + base64.b64encode(digest).decode("ascii") != integrity:
+        raise ReconstructionError("Native provenance requires one canonical SHA-512 SRI")
+    validate_release_url(package.get("publicAssetURL"), package.get("archiveName"))
+    artifact = NativeArtifact(
+        package["archiveName"], package["publicAssetURL"], package["bytes"],
+        require_digest(package.get("sha256"), 64, "native archive SHA-256"), digest.hex(),
+    )
+    return artifact, package, raw
+
+
+def yaml_scalar(value: str) -> str:
+    """Only the ordinary scalar spellings emitted in the admitted pnpm files."""
+    if value.startswith('"'):
+        decoded = json.loads(value)
+        if not isinstance(decoded, str):
+            raise ReconstructionError("Native dependency scalar is not a string")
+        return decoded
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
+    if not value or any(char in value for char in "&*!{}[],#\t\r\n"):
+        raise ReconstructionError("Native dependency uses an unsupported scalar")
+    return value
+
+
+def yaml_mapping_entry(source: str, section: str, key: str) -> tuple[str, list[str]]:
+    """Select one direct entry, refusing duplicate/ambiguous binding spellings.
+
+    This is a narrow admission of pnpm's existing scalar/inline-map form, not a
+    general YAML reader. Frozen pnpm remains the dependency graph owner.
+    """
+    lines = source.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == section + ":"]
+    if len(starts) != 1:
+        raise ReconstructionError("Native dependency mapping is missing or duplicated")
+    start = starts[0] + 1
+    end = next((index for index in range(start, len(lines))
+                if lines[index] and not lines[index].startswith((" ", "#"))), len(lines))
+    found = []
+    for index in range(start, end):
+        line = lines[index]
+        if not line.startswith("  ") or line.startswith(("   ", "  #")) or not line.strip():
+            continue
+        match = re.fullmatch(r"""  ('(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|[^'"\s][^:]*):(?: (.*))?""", line)
+        if match is None:
+            raise ReconstructionError("Native dependency mapping uses an unsupported key")
+        if yaml_scalar(match.group(1)) == key:
+            tail = next((cursor for cursor in range(index + 1, end)
+                         if lines[cursor].startswith("  ") and not lines[cursor].startswith("   ")
+                         and lines[cursor].strip() and not lines[cursor].startswith("  #")), end)
+            found.append((match.group(2) or "", lines[index + 1:tail]))
+    if len(found) != 1:
+        raise ReconstructionError("Native dependency entry is missing or duplicated")
+    return found[0]
+
+
+def pnpm_dependency_document(source: str) -> str:
+    # Same two-document framing as pnpm and the existing source bootstrap owner
+    # scripts/lib/pnpm-lockfile-documents.mjs; never inspect the env document as
+    # the project's package graph.
+    text = source.removeprefix("\ufeff").replace("\r\n", "\n")
+    separator = "\n---\n"
+    if not text.startswith("---\n"):
+        if separator in text:
+            raise ReconstructionError("Native lock has an unexpected document separator")
+        return text
+    boundary = text.find(separator, 4)
+    if boundary < 0 or separator in text[boundary + len(separator):]:
+        raise ReconstructionError("Native lock must have exactly environment and dependency documents")
+    return text[boundary + len(separator):]
+
+
+def validate_native_dependency_binding(checkout: Path, artifact: NativeArtifact, package: dict) -> dict:
+    workspace = read_resource_input(checkout / "pnpm-workspace.yaml", 1024 * 1024)
+    lock = read_resource_input(checkout / "pnpm-lock.yaml", 16 * 1024 * 1024)
+    lock_source = pnpm_dependency_document(lock.decode("utf-8"))
+    version = package["version"].split("-", 1)[0]
+    selector = "@openai/codex@" + version + ">@openai/codex-darwin-arm64"
+    relative = "native-package-artifacts/" + artifact.file
+    for source in (workspace.decode("utf-8"), lock_source):
+        selected, children = yaml_mapping_entry(source, "overrides", selector)
+        if children and any(line.strip() for line in children):
+            raise ReconstructionError("Native override is not a scalar")
+        if yaml_scalar(selected) not in ("file:" + relative, "file:./" + relative):
+            raise ReconstructionError("Native dependency override differs from provenance")
+    selected, children = yaml_mapping_entry(
+        lock_source, "packages", "@openai/codex@file:" + relative)
+    if selected:
+        raise ReconstructionError("Native lock package is not a mapping")
+    values = {}
+    for line in children:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"    ([A-Za-z]+): (.*)", line)
+        if match is None or match.group(1) in values:
+            raise ReconstructionError("Native lock package mapping is ambiguous")
+        values[match.group(1)] = match.group(2)
+    resolution = "{integrity: " + package["integrity"] + ", tarball: file:" + relative + "}"
+    if (
+        values.get("resolution") != resolution
+        or yaml_scalar(values.get("version", "")) != package["version"]
+        or values.get("os") != "[darwin]" or values.get("cpu") != "[arm64]"
+    ):
+        raise ReconstructionError("Native lock resolution, version or platform differs from provenance")
+    selected, children = yaml_mapping_entry(
+        lock_source, "snapshots", "@openai/codex@file:" + relative)
+    if selected or [line.strip() for line in children if line.strip() and not line.lstrip().startswith("#")] != ["optional: true"]:
+        raise ReconstructionError("Native lock snapshot must retain the optional platform package")
+    return {"pnpm-workspace.yaml": hashlib.sha256(workspace).hexdigest(),
+            "pnpm-lock.yaml": hashlib.sha256(lock).hexdigest()}
+
+
+def provision_native_from_provenance(checkout: Path, provenance: Path) -> dict:
+    """Hydrate one bound dependency only; never apply source or select a runtime."""
+    checkout = checkout.expanduser().resolve(strict=True)
+    artifact, package, raw = load_native_provenance(provenance)
+    before = validate_native_dependency_binding(checkout, artifact, package)
+    result = provision_native_artifact(checkout, artifact)
+    if read_resource_input(provenance, 256 * 1024) != raw or (
+        validate_native_dependency_binding(checkout, artifact, package) != before
+    ):
+        raise ReconstructionError("Native resource/dependency binding changed during provisioning")
+    return {"status": "artifact-provisioned-without-source-or-runtime-selection",
+            "provenance": {"path": str(provenance), "sha256": hashlib.sha256(raw).hexdigest()},
+            "dependencyInputs": before, "artifact": result}
 
 
 def load_native_distribution(directory: Path, manifest: dict, source_tree: str) -> NativeDistribution:
@@ -387,19 +568,26 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path, help="existing clean standalone clone of the pinned upstream tag")
     parser.add_argument("--apply", action="store_true", help="apply and stage the patch after checking; never commit")
     parser.add_argument("--native-distribution", action="store_true", help="with --apply, stage the native delta and provision its verified public archive")
-    args = parser.parse_args()
+    parser.add_argument("--native-artifact-provenance", type=Path,
+                        help="provision only the existing packet-bound local dependency; never apply source or select a runtime")
+    args = parser.parse_args(argv)
+    if args.native_artifact_provenance is not None and (args.apply or args.native_distribution):
+        parser.error("--native-artifact-provenance cannot be combined with source reconstruction options")
     if args.native_distribution and not args.apply:
         parser.error("--native-distribution requires --apply")
     try:
-        result = reconstruct(
-            args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution),
-            apply=args.apply,
-        )
+        if args.native_artifact_provenance is not None:
+            result = provision_native_from_provenance(args.checkout, args.native_artifact_provenance)
+        else:
+            result = reconstruct(
+                args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution),
+                apply=args.apply,
+            )
     except (ReconstructionError, OSError, KeyError, TypeError, ValueError) as error:
         print(f"Reconstruction refused: {error}", file=sys.stderr)
         return 1
