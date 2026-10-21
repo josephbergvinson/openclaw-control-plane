@@ -80,9 +80,10 @@ separate checks.
 ## Native application and browser interaction
 
 The Mac companion and bundled worker retain explicit source and build identities.
-The companion may use the native distribution's exact source identity or the
-manifest's supported finite four-file Swift delta; either case requires a full
-target-tree check. Source reconstruction does not install or launch the app.
+The companion may use the native distribution's exact source identity or one of
+the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
+Every case requires a full target-tree check. Source reconstruction does not
+install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
 the matching native helper, using bounded private pipes and current configuration.

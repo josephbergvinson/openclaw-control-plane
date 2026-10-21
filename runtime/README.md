@@ -153,7 +153,7 @@ Before committing, `git write-tree` must match `nativeCompanion.sourceTree`.
 Recording the reconstructed target in `HEAD` lets the validation below compare
 its changes with the official upstream commit, using your own Git identity.
 
-The helper first reconstructs and verifies the native distribution. It admits two
+The helper first reconstructs and verifies the native distribution. It admits three
 companion cases:
 
 - **Same source:** omit `nativeCompanion.delta` only when the companion's
@@ -165,8 +165,14 @@ companion cases:
   in `nativeCompanion.delta`. The patch must change exactly the four declared
   macOS Swift source/test paths. Its bytes and SHA-256, base tree and complete
   final companion tree are checked.
+- **Retained companion after prompt-fixture maintenance:** use the same exact
+  delta binding for only the five declared happy-path prompt artifacts. No file
+  type or mode change is accepted. The full reconstructed target remains the
+  retained companion's original source tree. The source-only export preserves
+  the prior `referenceDeployment` and native archive; it claims no new installed
+  runtime or app build. See the [finite path list](../docs/21-native-runtime-reconstruction.md#optional-companion-source).
 
-Both cases verify `nativeCompanion.sourceTree` and use the same declared native
+All cases verify `nativeCompanion.sourceTree` and use the same declared native
 archive. A descriptive companion identity that differs without a valid delta is
 not reconstructable in this mode. Ordinary source and native-distribution modes
 keep their existing targets; do not apply another mode on an already modified

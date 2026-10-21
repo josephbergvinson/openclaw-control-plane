@@ -40,14 +40,25 @@ companion source. The helper accepts either of these finite cases:
 | --- | --- |
 | Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals both `nativeDistribution.referenceTree` and `nativeDistribution.normalizedTree`. No extra patch is needed or accepted as a substitute for equality. |
 | Separate four-file Swift delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the four declared macOS Swift source/test paths. |
+| Retained companion after prompt-fixture maintenance | The same bound delta schema changes exactly the five declared happy-path prompt artifacts, preserving regular file types and modes. Applying it to the new distribution reconstructs the retained companion's complete original source tree. No production path or mixed four-file/five-file scope is accepted. |
 
-Both cases first verify the distribution, then the complete companion source tree,
+All cases first verify the distribution, then the complete companion source tree,
 including modes, and provision the same bound archive. A historical descriptive
 companion identity does not grant reconstruction when these conditions fail.
 `--native-companion` requires both other options; ordinary source and native modes
 remain unchanged. Use the [runtime procedure](../runtime/README.md) for subsequent
 checks and build. A successful tree check is separate from app installation,
 loaded-process verification and real-interface acceptance.
+
+For prompt-fixture maintenance, the five paths are under
+`test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/`:
+`telegram-direct-codex-message-tool.md`, `discord-group-codex-message-tool.md.diff`,
+`telegram-heartbeat-codex-tool.md.diff`, `codex-dynamic-tools.telegram-direct.json`
+and `codex-dynamic-tools.heartbeat-turn.json`. Their inverse delta preserves the
+retained app's actual source identity; it does not relabel or rebuild that app.
+A source-only publication preserves `referenceDeployment` and the native archive
+binding. Its newer source/distribution commits do not claim a new installed
+runtime, build, activation or acceptance result.
 
 ## Native distribution fields
 
