@@ -63,12 +63,14 @@ barrier. A later invocation observes an existing barrier instead of sending anot
 signal. Its exact PID-only signalling boundary still requires local acceptance.
 The disabled template retains the five-minute cadence and watched update directory.
 
-The optional runtime-environment helper selects temporary/cache/state roots and
-retrieves a gateway token through the login Keychain's configured service/account.
-It then replaces its loader process with the configured desktop application. The
-script contains no token. Review whether this compatibility bridge is required by
-the adopted native application before enabling it. Do not log its environment or
-copy Keychain values into the repository. The optional keepawake definition uses
+The optional runtime-environment helper publishes temporary/cache/state roots,
+clears stale token overrides and preserves attach-only markers and external
+supervisor ownership. It never launches an app or service; the native
+`ai.openclaw.mac` login job is the sole app startup owner. Authentication stays
+with the native configuration bridge. The helper does not retrieve or export
+a Keychain gateway token. Review whether this environment publisher is required
+by the adopted native application before enabling it. Do not log its environment
+or copy credential values into the repository. The optional keepawake definition uses
 macOS `caffeinate`; its power/session tradeoff is a separate adopter choice.
 
 Copy a reviewed plist to its intended `paths.launch_agents` directory using its
@@ -120,8 +122,10 @@ permits eligible removal. `storage_headroom_guard.py --check-only` measures capa
 The retention wrapper runs four checked stages and must not report overall success
 when any stage fails. Workspace integrity preserves known source edits and retained
 state, removes only classified untracked residue, and reports unresolved conflicts
-and unknown layouts. The health audit performs native task-ledger maintenance and
-keeps unapproved or severity-changed security findings visible. Accepted findings
+and unknown layouts. The health audit reads the native Gateway/harness health owners
+without repairing retired task ledgers. Retained-run recovery belongs to the native
+startup/registry owner; the scoped read does not prove global child delivery.
+The audit keeps unapproved or severity-changed security findings visible. Accepted findings
 are adopter policy; the default public mapping is empty.
 
 Record execution, observable effect and required delivery separately. After manual

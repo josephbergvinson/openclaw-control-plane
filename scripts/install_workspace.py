@@ -51,7 +51,9 @@ def collect_files() -> dict[Path, tuple[bytes, int]]:
     for source in source_files(ROOT / "workspace"):
         add(source.relative_to(ROOT / "workspace"), source)
     for source in source_files(ROOT / "templates"):
-        if ".example." in source.name:
+        if source.name == "TOOLS.example.md":
+            add(Path("runbook/tools-reference.md"), source)
+        elif ".example." in source.name:
             add(Path(source.name.replace(".example.", ".", 1)), source)
         elif source.name == "analytical-workbook.md":
             add(Path("templates") / source.name, source)
@@ -135,7 +137,7 @@ def make_plan(destination: Path, operator_file: Path | None = None) -> dict[Path
         "<legacy-state-root>": contract.get("paths.legacy_state_root"),
         "<project-data-root>": contract.get("paths.project_data_root"),
     }
-    for name in ["AGENTS.md", "TOOLS.md"]:
+    for name in ["AGENTS.md", "runbook/tools-reference.md"]:
         path = Path(name)
         payload, mode = files[path]
         body = payload.decode()

@@ -53,11 +53,10 @@ test("preserves every command, tail, argument and environment except the full-li
   assert.deepEqual(runtime.events.filter(({ kind }) => kind === "started").map(({ actualArgs }) => actualArgs), runtime.calls.map(({ args }) => args));
 });
 
-test("rejects non-all, missing, duplicate, malformed and special plans before executing anything", async () => {
+test("rejects empty, duplicate, malformed and unsupported callback plans before executing anything", async () => {
   const malformed = [
-    { ...fixture(), summary: "core" },
+    { ...fixture(), summary: "" },
     { summary: "all", commands: [] },
-    { ...fixture(), commands: fixture().commands.filter(({ name }) => name !== "lint") },
     { ...fixture(), commands: [...fixture().commands, { name: "lint", args: ["lint"] }] },
     { ...fixture(), commands: [{ name: "lint", args: ["lint", "--only=core"] }] },
     { ...fixture(), commands: [{ name: "lint", bin: "pnpm", args: ["lint"] }] },
@@ -71,6 +70,41 @@ test("rejects non-all, missing, duplicate, malformed and special plans before ex
     assert.equal(runtime.calls.length, 0);
     assert.equal(runtime.packages.length, 0);
   }
+});
+
+test("preserves a narrow native plan and its shared core-test callback owner", async () => {
+  const plan = { summary: "core-tests", commands: [
+    { name: "core boundary", args: ["native-boundary"], coreTestCheck: "checkBoundary" },
+    { name: "core types", args: ["native-types"], coreTestCheck: "checkTypes" },
+    { name: "tail check", args: ["check:import-cycles"] },
+  ] };
+  const runtime = fakeRuntime(), callbacks = [];
+  runtime.coreTestCheck = {
+    async checkBoundary() { callbacks.push("boundary"); return 0; },
+    async checkTypes() { callbacks.push("types"); return 0; },
+  };
+  const original = structuredClone(plan);
+  assert.equal(await executeNativePlan(plan, runtime), 0);
+  assert.deepEqual(plan, original);
+  assert.deepEqual(callbacks, ["boundary", "types"]);
+  assert.deepEqual(runtime.calls.map(({ args }) => args), [["pnpm", "check:import-cycles"]]);
+  assert.deepEqual(runtime.events.filter(({ kind }) => kind === "completed").map(({ exitCode }) => exitCode), [0, 0, 0]);
+  assert.equal(runtime.events.filter(({ executionKind }) => executionKind === "native-callback").length, 2);
+});
+
+test("missing or failed native callbacks cannot fall back to process execution", async () => {
+  const plan = { summary: "core-tests", commands: [
+    { name: "core boundary", args: ["native-boundary"], coreTestCheck: "checkBoundary" },
+    { name: "tail check", args: ["check:import-cycles"] },
+  ] };
+  const missing = fakeRuntime();
+  await assert.rejects(executeNativePlan(plan, missing), /callbacks are unavailable/);
+  assert.equal(missing.calls.length, 0);
+  const failed = fakeRuntime();
+  failed.coreTestCheck = { async checkBoundary() { return 143; } };
+  assert.equal(await executeNativePlan(plan, failed), 143);
+  assert.equal(failed.calls.length, 0);
+  assert.deepEqual(failed.events.filter(({ kind }) => kind === "completed").map(({ exitCode }) => exitCode), [143]);
 });
 
 test("preserves native failure exit and does not run or report unexecuted tail checks", async () => {

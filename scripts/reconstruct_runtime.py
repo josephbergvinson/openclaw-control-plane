@@ -28,6 +28,12 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_PATH = "/josephbergvinson/openclaw-control-plane/releases/download/"
 NATIVE_DELTA_PATHS = {"pnpm-lock.yaml", "pnpm-workspace.yaml"}
+NATIVE_COMPANION_DELTA_PATHS = {
+    "apps/macos/Sources/OpenClaw/ConnectionModeCoordinator.swift",
+    "apps/macos/Sources/OpenClaw/NodeServiceManager.swift",
+    "apps/macos/Tests/Fixtures/ConnectionModeCoordinator/Fixture.swift",
+    "apps/macos/Tests/OpenClawIPCTests/NodeServiceManagerTests.swift",
+}
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
 CURRENT_MANIFEST_FIELDS = {
     "schemaVersion", "upstream", "source", "patch", "toolchain",
@@ -62,6 +68,17 @@ class NativeDistribution:
     patch_sha256: str
     patch: bytes
     artifact: NativeArtifact
+    reference_commit: str | None = None
+    reference_tree: str | None = None
+
+
+@dataclass(frozen=True)
+class NativeCompanion:
+    source_commit: str
+    source_tree: str
+    distribution_tree: str
+    patch_sha256: str | None
+    patch: bytes | None
 
 
 @dataclass(frozen=True)
@@ -74,6 +91,7 @@ class SourcePackage:
     patch_sha256: str
     patch: bytes
     native: NativeDistribution | None = None
+    companion: NativeCompanion | None = None
 
 
 def require_digest(value: object, length: int, label: str) -> str:
@@ -331,10 +349,46 @@ def load_native_distribution(directory: Path, manifest: dict, source_tree: str) 
         filename, artifact["url"], artifact["bytes"],
         require_digest(artifact["sha256"], 64, "native archive SHA-256"),
         require_digest(artifact["sha512"], 128, "native archive SHA-512"),
-    ))
+    ), native.get("referenceCommit"), native.get("referenceTree"))
 
 
-def load_package(directory: Path, *, native_distribution: bool = False) -> SourcePackage:
+def load_native_companion(directory: Path, manifest: dict, native: NativeDistribution) -> NativeCompanion:
+    companion = manifest.get("nativeCompanion")
+    if not isinstance(companion, dict) or companion.get("platform") != "darwin-arm64":
+        raise ReconstructionError("The runtime manifest has no bound macOS companion")
+    source_commit = require_digest(companion.get("sourceCommit"), 40, "companion source commit SHA-1")
+    source_tree = require_digest(companion.get("sourceTree"), 40, "companion source tree SHA-1")
+    if "delta" not in companion:
+        if (source_commit != native.reference_commit or source_tree != native.reference_tree
+                or source_tree != native.normalized_tree):
+            raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
+        return NativeCompanion(source_commit, source_tree, native.normalized_tree, None, None)
+    delta = companion["delta"]
+    if not isinstance(delta, dict) or set(delta) != {"distributionTree", "patch"}:
+        raise ReconstructionError("Companion reconstruction requires one bound finite delta")
+    base = require_digest(delta["distributionTree"], 40, "companion distribution tree SHA-1")
+    if base != native.normalized_tree:
+        raise ReconstructionError("Companion base must match the normalized native distribution")
+    patch = delta["patch"]
+    if not isinstance(patch, dict) or set(patch) != {"file", "bytes", "sha256"}:
+        raise ReconstructionError("Companion delta requires one exact patch binding")
+    name = patch["file"]
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.patch", name):
+        raise ReconstructionError("Companion patch must name a file inside the runtime package")
+    path = directory / name
+    if path.is_symlink() or not path.is_file():
+        raise ReconstructionError("Companion patch must be a regular package file")
+    raw = path.read_bytes()
+    digest = require_digest(patch["sha256"], 64, "companion patch SHA-256")
+    if type(patch["bytes"]) is not int or patch["bytes"] <= 0 or patch["bytes"] != len(raw) or hashlib.sha256(raw).hexdigest() != digest:
+        raise ReconstructionError("Companion patch size or SHA-256 does not match the manifest")
+    return NativeCompanion(source_commit, source_tree, base, digest, raw)
+
+
+def load_package(directory: Path, *, native_distribution: bool = False,
+                 native_companion: bool = False) -> SourcePackage:
+    if native_companion and not native_distribution:
+        raise ReconstructionError("Companion reconstruction requires the native distribution")
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     validate_manifest_metadata(manifest, native_distribution=native_distribution)
     upstream = manifest["upstream"]
@@ -365,6 +419,13 @@ def load_package(directory: Path, *, native_distribution: bool = False) -> Sourc
             package.tag, package.tag_object, package.base_commit, package.base_tree,
             package.normalized_tree, package.patch_sha256, package.patch,
             load_native_distribution(directory, manifest, package.normalized_tree),
+        )
+    if native_companion:
+        assert package.native is not None
+        package = SourcePackage(
+            package.tag, package.tag_object, package.base_commit, package.base_tree,
+            package.normalized_tree, package.patch_sha256, package.patch, package.native,
+            load_native_companion(directory, manifest, package.native),
         )
     return package
 
@@ -499,6 +560,8 @@ def git(checkout: Path, *args: str, data: bytes | None = None) -> str:
 
 
 def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) -> dict:
+    if package.companion is not None and package.native is None:
+        raise ReconstructionError("Companion reconstruction requires the native distribution")
     if package.native is not None and not apply:
         raise ReconstructionError("Native distribution requires --apply; no source or archive was changed")
     checkout = checkout.expanduser().resolve(strict=True)
@@ -525,6 +588,30 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             paths.append(fields[2])
         if len(paths) != 2 or set(paths) != NATIVE_DELTA_PATHS:
             raise ReconstructionError("Native delta must change only pnpm-lock.yaml and pnpm-workspace.yaml")
+    if package.companion is not None:
+        companion = package.companion
+        if companion.distribution_tree != package.native.normalized_tree:
+            raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")
+        for value in (companion.source_commit, companion.source_tree):
+            require_digest(value, 40, "companion Git object SHA-1")
+        if companion.patch is None:
+            if (companion.patch_sha256 is not None
+                    or companion.source_commit != package.native.reference_commit
+                    or companion.source_tree != package.native.reference_tree
+                    or companion.source_tree != package.native.normalized_tree):
+                raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
+        else:
+            if not companion.patch or hashlib.sha256(companion.patch).hexdigest() != companion.patch_sha256:
+                raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")
+            changes = git(checkout, "apply", "--numstat", "-z", "-", data=companion.patch).split("\0")
+            paths = []
+            for change in filter(None, changes):
+                fields = change.split("\t")
+                if len(fields) != 3 or not all(value.isdigit() for value in fields[:2]):
+                    raise ReconstructionError("Companion delta must contain ordinary text changes")
+                paths.append(fields[2])
+            if len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
+                raise ReconstructionError("Companion delta must change only the four declared macOS source and fixture files")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
         raise ReconstructionError("Checkout HEAD is not the pinned upstream commit")
     if git(checkout, "rev-parse", "HEAD^{tree}") != package.base_tree:
@@ -557,14 +644,32 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
         if git(checkout, "write-tree") != native.normalized_tree:
             raise ReconstructionError("Native applied tree differs from the manifest; inspect this isolated checkout")
         git(checkout, "diff", "--quiet")
-        artifact = provision_native_artifact(checkout, native.artifact)
-        if git(checkout, "write-tree") != native.normalized_tree:
-            raise ReconstructionError("Native source index changed during provisioning")
-        git(checkout, "diff", "--quiet")
         result["nativeDistribution"] = {
             "normalizedTree": native.normalized_tree, "normalizedTreeVerified": True,
-            "patchSha256": native.patch_sha256, "artifact": artifact,
+            "patchSha256": native.patch_sha256,
         }
+        final_tree = native.normalized_tree
+        if package.companion is not None:
+            companion = package.companion
+            if companion.patch is not None:
+                git(checkout, "apply", "--check", "--index", "--whitespace=error-all", "-", data=companion.patch)
+                git(checkout, "apply", "--index", "--whitespace=error-all", "-", data=companion.patch)
+            if git(checkout, "write-tree") != companion.source_tree:
+                raise ReconstructionError("Companion applied tree differs from the manifest; inspect this isolated checkout")
+            git(checkout, "diff", "--quiet")
+            final_tree = companion.source_tree
+            result["nativeCompanion"] = {
+                "sourceCommit": companion.source_commit, "sourceTree": companion.source_tree,
+                "normalizedTree": final_tree, "normalizedTreeVerified": True,
+            }
+            if companion.patch is not None:
+                result["nativeCompanion"]["patchSha256"] = companion.patch_sha256
+        artifact = provision_native_artifact(checkout, native.artifact)
+        if git(checkout, "write-tree") != final_tree:
+            raise ReconstructionError("Companion source index changed during provisioning" if package.companion is not None
+                                      else "Native source index changed during provisioning")
+        git(checkout, "diff", "--quiet")
+        result["nativeDistribution"]["artifact"] = artifact
     return result
 
 
@@ -573,19 +678,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("checkout", type=Path, help="existing clean standalone clone of the pinned upstream tag")
     parser.add_argument("--apply", action="store_true", help="apply and stage the patch after checking; never commit")
     parser.add_argument("--native-distribution", action="store_true", help="with --apply, stage the native delta and provision its verified public archive")
+    parser.add_argument("--native-companion", action="store_true",
+                        help="with --apply --native-distribution, verify the bound macOS companion source, applying its finite delta if needed")
     parser.add_argument("--native-artifact-provenance", type=Path,
                         help="provision only the existing packet-bound local dependency; never apply source or select a runtime")
     args = parser.parse_args(argv)
-    if args.native_artifact_provenance is not None and (args.apply or args.native_distribution):
+    if args.native_artifact_provenance is not None and (args.apply or args.native_distribution or args.native_companion):
         parser.error("--native-artifact-provenance cannot be combined with source reconstruction options")
     if args.native_distribution and not args.apply:
         parser.error("--native-distribution requires --apply")
+    if args.native_companion and not (args.apply and args.native_distribution):
+        parser.error("--native-companion requires --apply and --native-distribution")
     try:
         if args.native_artifact_provenance is not None:
             result = provision_native_from_provenance(args.checkout, args.native_artifact_provenance)
         else:
             result = reconstruct(
-                args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution),
+                args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution,
+                                            native_companion=args.native_companion),
                 apply=args.apply,
             )
     except (ReconstructionError, OSError, KeyError, TypeError, ValueError) as error:

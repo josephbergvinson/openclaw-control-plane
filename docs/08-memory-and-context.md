@@ -34,7 +34,7 @@ The [standalone diagram](../diagrams/memory-tiers.mmd) includes the privacy boun
 
 The pinned source's `WORKSPACE_BOOTSTRAP_FILENAMES` in `src/agents/workspace.ts` contains `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `BOOTSTRAP.md` and `MEMORY.md`. Recognized means eligible for the loader, subject to file presence, safe reads, session filtering, setup/continuation handling and context budgets. It is not a promise that the entire file appears in every prompt.
 
-`TOOLS.md`, `WRITING.md` and `WORKER.md` are outside that recognized list. TOOLS remains a detailed mechanics reference opened when AGENTS routes a task to it. WRITING is opened for applicable long-form prose. WORKER, if retained, is a legacy generated reference. Extra-file configuration is not a universal bypass of accepted bootstrap basenames.
+`runbook/tools-reference.md`, `WRITING.md` and `WORKER.md` are outside that recognized list. The tool execution reference is opened deliberately when AGENTS routes a task to it. WRITING is opened for applicable long-form prose. WORKER, if retained, is a legacy generated reference. Extra-file configuration is not a universal bypass of accepted bootstrap basenames.
 
 The `filterBootstrapFilesForSession` implementation applies two separate decisions: privacy filtering and the session-specific filename allowlist.
 
@@ -132,7 +132,7 @@ The reference relies on native context-pressure and overflow compaction. It leav
 `agents.defaults.compaction.maxActiveTranscriptBytes` unset, so logical transcript
 storage alone does not force a compaction. That optional byte guard also counts
 runtime control records and can diverge from the content sent to the model.
-The reference keeps its 120,000-token recent-tail budget, six recent turns and
+The reference keeps its 48,000-token recent-tail budget, six recent turns and
 summary quality guard; these retention choices do not change the model's window.
 The recent-tail setting is higher than the pinned native 20,000-token default in
 `src/agents/sessions/settings-manager.ts`. It retains more recent detail and leaves

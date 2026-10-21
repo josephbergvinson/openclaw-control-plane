@@ -133,6 +133,80 @@ class NativeWeeklyBackupTests(unittest.TestCase):
             self.assertNotIn("sqlite_backup", manifest)
             self.assertTrue(source.exists())
 
+    def test_canonical_tools_reference_is_archived_once_without_retired_tools(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config, identity = self.fixture(Path(raw))
+            canonical = config.workspace_physical / "runbook/tools-reference.md"
+            content = b"canonical tool mechanics fixture\n"
+            canonical.write_bytes(content)
+            self.assertFalse((config.workspace_physical / "TOOLS.md").exists())
+            code, result = self.run_backup(config, identity, NativeProvider())
+            self.assertEqual(code, 0, result)
+            generation = Path(result["destination"])
+            with tarfile.open(generation / "openclaw-workspace-policy.tgz") as archive:
+                members = archive.getmembers()
+                selected = [row for row in members if row.name == "runbook/tools-reference.md"]
+                self.assertEqual(len(selected), 1)
+                self.assertTrue(selected[0].isfile())
+                self.assertEqual(archive.extractfile(selected[0]).read(), content)
+                self.assertNotIn("TOOLS.md", [row.name for row in members])
+            manifest = backup.load_manifest(generation)
+            self.assertIn("runbook/tools-reference.md", manifest["source_contract"]["policy_files"])
+            self.assertNotIn("TOOLS.md", manifest["source_contract"]["policy_files"])
+            policy_proof = next(row for row in manifest["verification"]
+                                if row["name"] == "openclaw-workspace-policy.tgz")
+            self.assertEqual(policy_proof["full_isolated_restore"]["result"], "verified")
+            self.assertTrue(policy_proof["full_isolated_restore"]["performed"])
+
+    def test_missing_or_symlink_canonical_policy_fails_before_native(self):
+        for invalid in ("missing", "symlink"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as raw:
+                config, identity = self.fixture(Path(raw))
+                canonical = config.workspace_physical / "runbook/tools-reference.md"
+                canonical.unlink()
+                if invalid == "symlink":
+                    canonical.symlink_to(config.workspace_physical / "AGENTS.md")
+                provider = NativeProvider()
+                code, result = self.run_backup(config, identity, provider)
+                self.assertEqual(code, 1, result)
+                self.assertEqual(provider.calls, [])
+                self.assertFalse(Path(result["destination"]).exists())
+
+    def test_canonical_policy_replaced_after_preflight_prevents_publication(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config, identity = self.fixture(Path(raw))
+            canonical = config.workspace_physical / "runbook/tools-reference.md"
+            provider = NativeProvider()
+            def replaced(*args, **kwargs):
+                result = provider(*args, **kwargs)
+                if args[2][1] == "create":
+                    canonical.unlink()
+                    canonical.symlink_to(config.workspace_physical / "AGENTS.md")
+                return result
+            code, result = self.run_backup(config, identity, replaced)
+            self.assertEqual(code, 1, result)
+            self.assertIn("required policy archive member is not a regular file", str(result["blockers"]))
+            self.assertFalse(Path(result["destination"]).exists())
+
+    def test_retention_policy_contract_is_finite_and_preserves_omitted_old_metadata(self):
+        legacy_files = ["AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
+                        "MEMORY.md", "POLICY_CHANGELOG.md"]
+        for manifest in ({}, {"source_contract": {}},
+                         {"source_contract": {"policy_files": legacy_files}}):
+            with self.subTest(manifest=manifest):
+                spec = next(row for row in retention.verification_specs(manifest)
+                            if row.role == "policy")
+                self.assertIn("TOOLS.md", spec.required_members)
+                self.assertNotIn("runbook/tools-reference.md", spec.required_members)
+                backup.verify_member_scope(spec, set(spec.required_members))
+        for policy_files in (None, "TOOLS.md", [],
+                             [*backup.POLICY_FILES, "private-secret.md"],
+                             ["../TOOLS.md", *backup.POLICY_FILES[1:]]):
+            with self.subTest(policy_files=policy_files), self.assertRaises(retention.RetentionError):
+                retention.verification_specs({"source_contract": {"policy_files": policy_files}})
+        with self.assertRaises(retention.RetentionError):
+            retention.verification_specs({"source_contract": None})
+
     def test_native_failure_never_publishes_or_deletes_source(self):
         for command in ("create", "verify", "restore"):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as raw:
@@ -154,11 +228,27 @@ class NativeWeeklyBackupTests(unittest.TestCase):
             provider = NativeProvider()
             code, native = self.run_backup(config, identity, provider)
             self.assertEqual(code, 0, native)
-            code, legacy = create_v3_fixture(
-                config, identity_reader=lambda _: identity,
-                now=datetime(2026, 9, 9, 12, tzinfo=timezone.utc),
-            )
+            canonical = config.workspace_physical / "runbook/tools-reference.md"
+            canonical.unlink()
+            retired = config.workspace_physical / "TOOLS.md"
+            retired.write_text("historical tools fixture\n")
+            legacy_files = ("AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
+                            "MEMORY.md", "POLICY_CHANGELOG.md")
+            with mock.patch.object(backup, "POLICY_FILES", legacy_files):
+                code, legacy = create_v3_fixture(
+                    config, identity_reader=lambda _: identity,
+                    now=datetime(2026, 9, 9, 12, tzinfo=timezone.utc),
+                )
             self.assertEqual(code, 0, legacy)
+            retired.unlink()
+            canonical.write_text("canonical tools fixture\n")
+            old_generation = Path(legacy["destination"])
+            old_manifest = backup.load_manifest(old_generation)
+            self.assertEqual(old_manifest["source_contract"]["policy_files"], list(legacy_files))
+            with tarfile.open(old_generation / "openclaw-workspace-policy.tgz") as archive:
+                names = archive.getnames()
+                self.assertIn("TOOLS.md", names)
+                self.assertNotIn("runbook/tools-reference.md", names)
             settings = retention.RetentionConfig(
                 producer_config=replace(config, expected_device=identity.device),
                 receipt_dir=config.receipt_dir / "retention",

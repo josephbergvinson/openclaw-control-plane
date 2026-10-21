@@ -50,7 +50,7 @@ def safe_restart_payload(*, result: str = 'scheduled', pid: int = 4242) -> dict:
         'restart': {
             'ok': True,
             'pid': pid,
-            'signal': 'SIGUSR1',
+            'signal': 'SIGUSR2',
             'delayMs': 0,
             'mode': 'emit',
             'coalesced': result == 'coalesced',

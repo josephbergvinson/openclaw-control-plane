@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Illustrative native subagents list/wait run observation",
+  "description": "Projection of the pinned stable subagents tool mapRun result; execution outcome and requester delivery are separate. This is not a TaskRecord or a new runtime ledger.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "sessionKey",
+    "status"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sessionKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "label": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "interrupted",
+        "terminal",
+        "waiting"
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "timeout",
+            "unknown"
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "deliveryStatus": {
+      "type": "string",
+      "enum": [
+        "not_required",
+        "pending",
+        "in_progress",
+        "delivered",
+        "failed",
+        "suspended",
+        "discarded"
+      ]
+    },
+    "startedAt": {
+      "type": "integer"
+    },
+    "endedAt": {
+      "type": "integer"
+    }
+  }
+}

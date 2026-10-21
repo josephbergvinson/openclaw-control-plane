@@ -38,15 +38,20 @@ inspection vocabulary. Explain a limitation by its effect on the request.
 ## Progress should reduce uncertainty
 
 During substantial work, provide material milestones and explain a real dependency
-promptly. Say what is established and what the next step will resolve. Repeatedly
-editing an old message may be insufficient during a long wait; use the supported
-visible progress path. Policy sets the expected cadence, while runtime presentation
-and native task ownership keep continuation updates deliverable.
+promptly. Say what is established and what the next step will resolve. Edit the
+request's original progress card with the current status, including when delegated
+work returns. Post the completed result as a separate final message, then stop
+editing the progress card. Do not mix fresh progress posts with edits to an older
+card for the same request. Policy sets the expected cadence; native run ownership
+keeps continuation updates attached to that card.
 
 `channels.discord.streaming.progress.narration: false` omits generic tool-status
 narration. Keep authored `commentary` enabled when wanted; `toolProgress` controls
 tool progress separately. The editable progress card uses `streaming.mode:
-"progress"`. These settings change presentation, not execution or final ownership.
+"progress"`. Set `streaming.progress.maxLines: 1` to retain the latest authored
+status item instead of a rolling commentary history. Required approval attention
+keeps its native presentation. These settings change presentation, not execution
+or final ownership; configuration alone cannot repair a lost continuation owner.
 
 A legitimate yield is not an empty failed answer. Retain the original objective,
 child/result owner and requester return path, and resume when the child returns.

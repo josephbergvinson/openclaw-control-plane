@@ -61,7 +61,7 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         self.loader.write_text(source.replace('/bin/launchctl', shlex.quote(str(self.native))))
         self.env = {
             'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(self.home),
-            'OPENCLAW_STATE_DIR': str(self.state), 'OPENCLAW_RUNTIME_APP': str(self.app),
+            'OPENCLAW_STATE_DIR': str(self.state),
             'CLAUDE_CODE_TMPDIR': str(self.root / 'scratch'),
             'PYTEST_DEBUG_TEMPROOT': str(self.root / 'pytest'),
             'NODE_COMPILE_CACHE': str(self.root / 'node-cache'),
@@ -81,24 +81,36 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         return subprocess.run([shutil.which('zsh'), str(self.loader)], env=self.env,
                               capture_output=True, text=True)
 
-    def test_attach_only_startup_drops_legacy_token_without_credential_lookup(self):
+    def test_environment_publication_drops_legacy_token_without_starting_app(self):
         self.env['OPENCLAW_GATEWAY_TOKEN'] = 'fixture-old-token'
         result = self.run_loader()
         self.assertEqual(0, result.returncode, result.stderr)
-        app = json.loads(self.observed.read_text())
-        self.assertEqual(['--attach-only'], app['args'])
-        self.assertNotIn('OPENCLAW_GATEWAY_TOKEN', app['env'])
-        self.assertEqual('external', app['env']['OPENCLAW_SUPERVISOR_MODE'])
-        self.assertEqual('external', app['env']['OPENCLAW_SERVICE_REPAIR_POLICY'])
-        self.assertEqual(str(self.state / 'openclaw.json'), app['env']['OPENCLAW_CONFIG_PATH'])
-        self.assertTrue(app['defaultMarker'])
-        self.assertTrue(app['canonicalMarker'])
+        self.assertFalse(self.observed.exists())
+        self.assertTrue((self.home / '.openclaw/disable-launchagent').is_file())
+        self.assertTrue((self.state / 'disable-launchagent').is_file())
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertEqual(['unsetenv', 'OPENCLAW_GATEWAY_TOKEN'], calls[0])
         self.assertNotIn('fixture-old-token', self.calls.read_text() + result.stdout + result.stderr)
         self.assertEqual(8, len(calls[1:]))
         self.assertTrue(all(call[0] == 'setenv' for call in calls[1:]))
-        self.assertEqual(str(self.state), dict((c[1], c[2]) for c in calls[1:])['OPENCLAW_STATE_DIR'])
+        published = dict((c[1], c[2]) for c in calls[1:])
+        self.assertEqual(str(self.state), published['OPENCLAW_STATE_DIR'])
+        self.assertEqual(str(self.state / 'openclaw.json'), published['OPENCLAW_CONFIG_PATH'])
+        self.assertEqual('external', published['OPENCLAW_SUPERVISOR_MODE'])
+        self.assertEqual('external', published['OPENCLAW_SERVICE_REPAIR_POLICY'])
+        self.assertNotIn('OPENCLAW_GATEWAY_TOKEN', published)
+        self.assertNotIn('OPENCLAW_RUNTIME_APP', published)
+
+    def test_legacy_app_binding_cannot_reopen_app_during_repeated_publication(self):
+        self.env['OPENCLAW_RUNTIME_APP'] = str(self.app)
+        for _ in range(2):
+            result = self.run_loader()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(self.observed.exists())
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(18, len(calls))
+        self.assertTrue(all(call[0] in ('unsetenv', 'setenv') for call in calls))
+        self.assertEqual(calls[:9], calls[9:])
 
     def test_absent_external_state_preserves_default_marker_without_shadow_or_app(self):
         shutil.rmtree(self.state)
@@ -153,6 +165,8 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         self.assertFalse(any('KEYCHAIN' in key or 'TOKEN' in key for key in environment))
         self.assertTrue(template['Disabled'])
         self.assertFalse(template['RunAtLoad'])
+        self.assertIsNot(template.get('StartOnMount'), True)
+        self.assertNotIn('OPENCLAW_RUNTIME_APP', environment)
 
 
 if __name__ == '__main__':

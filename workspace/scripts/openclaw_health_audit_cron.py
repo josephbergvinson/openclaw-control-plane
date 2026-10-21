@@ -11,6 +11,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -610,182 +611,45 @@ def parse_json_object(output: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _int_from_mapping(data: dict, key: str) -> int | None:
-    value = data.get(key)
-    return value if isinstance(value, int) else None
+NATIVE_RUN_HEALTH_ARGS = (
+    'doctor', '--lint', '--json',
+    '--only', 'core/doctor/gateway-health',
+    '--only', 'core/doctor/codex-session-routes',
+)
 
 
-def _counts_by_code(section: dict | None) -> dict[str, int]:
-    if not isinstance(section, dict):
-        return {}
-    by_code = section.get('byCode')
-    if not isinstance(by_code, dict):
-        return {}
-    return {key: value for key, value in by_code.items() if isinstance(value, int)}
+def run_native_run_health(openclaw_bin: str) -> tuple[str, str | None]:
+    """Observe current native runtime/harness owners without a second repair loop.
 
-
-# Task findings that clear themselves. Every one of these fires only on a row
-# the ledger has already finished with: maintenance stamps cleanupAfter on it
-# and prunes it when the window expires, so counting them daily would ask the
-# operator to authorize a repair for records that need none.
-#
-# Nothing on the flow side belongs here. A TaskFlow is only pruned once its
-# status is succeeded/failed/cancelled/lost; 'blocked' is not one of those, so
-# a blocked flow is never pruned and its finding never ages out. Anything not
-# named here -- including a code added to the ledger after this was written --
-# is reported, because silence about a set that only grows is the failure this
-# job exists to catch.
-SELF_CLEARING_TASK_CODES = ('lost', 'delivery_failed', 'inconsistent_timestamps')
-
-
-def repairable_residue(data: dict | None) -> dict[str, int]:
-    """Findings the operator still needs to see after a repair pass.
-
-    Everything the audit reports is surfaced except the task codes that
-    provably age out on their own, so an unrecognised finding is never
-    silently dropped.
+    Stable retired Tasks/TaskFlow and their maintenance CLI. Retained run recovery
+    belongs to the native registry/startup lifecycle; this scoped health read
+    proves Gateway/harness readiness only, not global child delivery completion.
+    Exact automation execution/delivery is checked separately below.
     """
-
-    if not data:
-        return {}
-    audit_after = data.get('auditAfter') if isinstance(data.get('auditAfter'), dict) else {}
-    task_counts = _counts_by_code(audit_after)
-    flow_counts = _counts_by_code(audit_after.get('taskFlows'))
-    found: dict[str, int] = {}
-    for code, count in task_counts.items():
-        if count and code not in SELF_CLEARING_TASK_CODES:
-            found[code] = count
-    for code, count in flow_counts.items():
-        if count:
-            found[f'flow_{code}'] = count
-    return found
-
-
-def retained_history_total(data: dict | None) -> int:
-    """Count findings that are terminal history inside their retention window."""
-
-    if not data:
-        return 0
-    audit_after = data.get('auditAfter') if isinstance(data.get('auditAfter'), dict) else {}
-    task_counts = _counts_by_code(audit_after)
-    return sum(task_counts.get(code, 0) for code in SELF_CLEARING_TASK_CODES)
-
-
-def repairs_applied(data: dict | None) -> dict[str, int]:
-    """What the supported maintenance path actually changed this run."""
-
-    if not data:
-        return {}
-    maintenance = data.get('maintenance')
-    if not isinstance(maintenance, dict):
-        return {}
-    applied: dict[str, int] = {}
-    for section, prefix in (('tasks', ''), ('taskFlows', 'flow_')):
-        values = maintenance.get(section)
-        if not isinstance(values, dict):
-            continue
-        for key, value in values.items():
-            if isinstance(value, int) and value:
-                applied[f'{prefix}{key}'] = value
-    return applied
-
-
-def task_ledger_counts(data: dict | None) -> dict[str, int | str] | None:
-    if not data:
-        return None
-    audit_after = data.get('auditAfter') if isinstance(data.get('auditAfter'), dict) else {}
-    total = _int_from_mapping(audit_after, 'total')
-    if not total:
-        return None
-    by_code = audit_after.get('byCode') if isinstance(audit_after.get('byCode'), dict) else {}
-    return {
-        'total': total,
-        'errors': audit_after.get('errors', '?'),
-        'warnings': audit_after.get('warnings', '?'),
-        'stale_running': by_code.get('stale_running', '?'),
-        'lost': by_code.get('lost', '?'),
-        'delivery_failed': by_code.get('delivery_failed', '?'),
-    }
-
-
-def task_ledger_summary(data: dict | None) -> str:
-    counts = task_ledger_counts(data)
-    if not counts:
-        return 'audit_after=0 errors=0 warnings=0'
-    return (
-        f"audit_after={counts['total']} "
-        f"errors={counts['errors']} "
-        f"warnings={counts['warnings']} "
-        f"stale_running={counts['stale_running']} "
-        f"lost={counts['lost']} "
-        f"delivery_failed={counts['delivery_failed']}"
-    )
-
-
-def task_ledger_residue_blocker(data: dict | None) -> str | None:
-    """Block only on residue a repair pass could still have cleared.
-
-    Everything else the audit surfaces is finished work inside its retention
-    window: those rows are already terminal and carry a cleanup stamp, so the
-    ledger removes them on its own schedule. Reporting them as a blocker asked
-    the operator to authorize a repair for records that needed none, every day.
-    """
-
-    if not data:
-        return 'task_ledger_residue_unparseable'
-    repairable = repairable_residue(data)
-    if not repairable:
-        return None
-    detail = ' '.join(f'{code}={count}' for code, count in sorted(repairable.items()))
-    return f'task_ledger_repair_incomplete {detail}'
-
-
-def run_task_ledger_maintenance(openclaw_bin: str) -> tuple[str, str | None]:
-    """Run the supported task-ledger repair: preview, then apply, twice if needed.
-
-    Applying maintenance can make a second pass productive (a reconciled task
-    releases the flow that was waiting on it), so a run that still shows
-    repairable residue gets one more apply before anything is reported.
-    """
-    preview = run([openclaw_bin, 'tasks', 'maintenance', '--json'], timeout=180)
-    if preview.returncode != 0:
-        return f'preview_failed rc={preview.returncode}', f'task_maintenance_preview={trim(preview.output or str(preview.returncode))}'
-    preview_data = parse_json_object(preview.output)
-
-    apply = run([openclaw_bin, 'tasks', 'maintenance', '--apply', '--json'], timeout=240)
-    if apply.returncode != 0:
-        return (
-            f'preview={task_ledger_summary(preview_data)} apply_failed rc={apply.returncode}',
-            f'task_maintenance_apply={trim(apply.output or str(apply.returncode))}',
-        )
-    apply_data = parse_json_object(apply.output)
-    fixed = repairs_applied(apply_data)
-
-    if repairable_residue(apply_data):
-        # Bounded well inside the delivery window. Runs that exceed ~145s lose
-        # their report to a yield race (exec hard-clamps yieldMs to 120s), and
-        # this second pass only ever runs on days WITH residue — precisely the
-        # days whose report matters most. A deferred second pass is reported
-        # next run; a dropped report is lost.
-        second = run([openclaw_bin, 'tasks', 'maintenance', '--apply', '--json'], timeout=45)
-        if second.returncode == 0:
-            second_data = parse_json_object(second.output)
-            if second_data:
-                apply_data = second_data
-                for code, count in repairs_applied(second_data).items():
-                    fixed[code] = fixed.get(code, 0) + count
-
-    fixed_note = (
-        ', '.join(f'{code}={count}' for code, count in sorted(fixed.items()))
-        if fixed
-        else 'nothing needed repair'
-    )
-    note = (
-        f'fixed={fixed_note} '
-        f'retained_history={retained_history_total(apply_data)} '
-        f'after={task_ledger_summary(apply_data)}'
-    )
-    return note, task_ledger_residue_blocker(apply_data)
+    result = run([openclaw_bin, *NATIVE_RUN_HEALTH_ARGS], timeout=180)
+    if result.returncode != 0:
+        return f'native_check_failed rc={result.returncode}', 'native_run_health_failed'
+    data = parse_json_object(result.output)
+    # Doctor counts every check outside --only as skipped. Require both selected
+    # checks to run; excluded registry checks are not missing scoped coverage.
+    if (not isinstance(data, dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1
+            or type(data.get('ok')) is not bool
+            or type(data.get('checksRun')) is not int or data['checksRun'] != 2
+            or type(data.get('checksSkipped')) is not int or data['checksSkipped'] < 0
+            or not isinstance(data.get('findings'), list)
+            or not isinstance(data.get('warnings', []), list)):
+        return 'native health coverage unavailable', 'native_run_health_unparseable'
+    findings = [*data['findings'], *data.get('warnings', [])]
+    if any(not isinstance(finding, dict)
+           or not isinstance(finding.get('checkId'), str) or not finding['checkId']
+           or not isinstance(finding.get('message'), str)
+           or finding.get('severity') not in {'info', 'warning', 'error'}
+           for finding in findings):
+        return 'native health finding contract drift', 'native_run_health_unparseable'
+    if data['ok'] is not True or any(finding['severity'] != 'info' for finding in findings):
+        # Do not expose config-derived target, message or path in public reports.
+        return f'native findings={len(findings)}', 'native_run_health_findings'
+    return f'native checks={data["checksRun"]}; informational={len(findings)}', None
 
 
 def emit(message: str, *, exit_code: int = 0) -> int:
@@ -793,6 +657,52 @@ def emit(message: str, *, exit_code: int = 0) -> int:
 
     print(message)
     return exit_code
+
+
+CAPABILITY_CLASSIFIER_RESULTS = frozenset({
+    'accepted', 'resolver_failed', 'invalid_resolution', 'probe_not_observed',
+    'evidence_missing', 'reauthentication_required', 'probe_failed',
+    'response_unverified', 'command_observed',
+})
+CAPABILITY_PROBE_RESULTS = frozenset({
+    'passed', 'blocked_exact_probe_parser_unavailable',
+    'blocked_exact_probe_transport_failed', 'blocked_exact_probe_transport_invalid',
+    'blocked_exact_probe_output_too_large', 'blocked_exact_probe_timeout',
+    'blocked_exact_probe_failed', 'blocked_exact_probe_output_invalid',
+    'blocked_exact_probe_signal_unverified',
+})
+
+
+def retain_capability_process_evidence(
+    check: str, classification: str, result=None, *, probe_result=None,
+) -> None:
+    """Retain fixed enums and exit status, never provider text or account values."""
+    valid = isinstance(result, capability_resolver.ProbeCommandResult)
+    outcome = result.outcome if valid else None
+    code = result.returncode if valid else None
+    code = (code if isinstance(code, int) and not isinstance(code, bool)
+            and -255 <= code <= 255 else None)
+    if result is None:
+        command = 'not_observed'
+    elif not valid or code is None:
+        command = 'invalid_result'
+    elif outcome == 'completed':
+        command = 'signal_exit' if code < 0 else 'nonzero_exit' if code else 'zero_exit'
+    elif isinstance(outcome, str) and outcome in {'timeout', 'transport_failed', 'custody_failed', 'output_too_large'}:
+        command = outcome
+    else:
+        command = 'unrecognized_outcome'
+    evidence = {
+        'check': (check if isinstance(check, str) and check in {'registered_instance_read', 'registered_google_account_read'} else 'unrecognized_check'),
+        'classifier_result': (classification if isinstance(classification, str) and classification in CAPABILITY_CLASSIFIER_RESULTS
+                              else 'unrecognized_classifier_result'),
+        'command_outcome': command,
+        'command_returncode': code,
+        'probe_result': (probe_result if isinstance(probe_result, str) and probe_result in CAPABILITY_PROBE_RESULTS else
+                         'not_reported' if probe_result is None else 'unrecognized_probe_result'),
+    }
+    print('OPENCLAW_HEALTH_AUDIT_CAPABILITY_RESULT '
+          + json.dumps(evidence, separators=(',', ':')), file=sys.stderr, flush=True)
 
 
 def registered_google_accounts() -> tuple[str, ...]:
@@ -833,9 +743,11 @@ def google_account_access_problem() -> str | None:
 
     def bounded_transport(argv, timeout):
         remaining = int(deadline - time.monotonic())
-        if remaining < 1:
-            return capability_resolver.ProbeCommandResult(124, '', outcome='timeout')
-        return capability_resolver.subprocess_probe_transport(argv, min(timeout, 15, remaining))
+        result = (capability_resolver.ProbeCommandResult(124, '', outcome='timeout')
+                  if remaining < 1 else
+                  capability_resolver.subprocess_probe_transport(argv, min(timeout, 15, remaining)))
+        retain_capability_process_evidence('registered_google_account_read', 'command_observed', result)
+        return result
 
     identity = bounded_transport(capability_resolver.GOG_AUTH_LIST_PROBE_ARGV, 15)
 
@@ -915,7 +827,7 @@ def public_failure_message(
     status_ok: bool,
     security_problems: list[str],
     deep_security_ok: bool,
-    task_maintenance_blocker: str | None,
+    native_run_health_blocker: str | None,
     account_access_problem: str | None = None,
 ) -> str:
     audit_name = 'weekly deep health audit' if weekly else 'daily health audit'
@@ -927,11 +839,8 @@ def public_failure_message(
     problems.extend(dict.fromkeys(security_problems))
     if weekly and not deep_security_ok:
         problems.append('the deep security check did not complete')
-    if task_maintenance_blocker:
-        if task_maintenance_blocker.startswith('task_ledger_repair_incomplete'):
-            problems.append('task-ledger maintenance left active residue that it could not safely settle')
-        else:
-            problems.append('task-ledger maintenance did not complete')
+    if native_run_health_blocker:
+        problems.append('the native run health check did not complete cleanly')
 
     if account_access_problem:
         problems.append(account_access_problem)
@@ -941,7 +850,7 @@ def public_failure_message(
     detail = '; '.join(problems)
     if (
         security_problems and gateway_ok and status_ok
-        and (not weekly or deep_security_ok) and not task_maintenance_blocker and not account_access_problem
+        and (not weekly or deep_security_ok) and not native_run_health_blocker and not account_access_problem
     ):
         outcome = (
             'The operational checks passed, but the audit remains failed pending security review. '
@@ -1060,9 +969,9 @@ def main(argv: list[str] | None = None) -> int:
                     company_posture_verified=deep_company_posture_verified,
                 ))
 
-    _, task_maintenance_blocker = run_task_ledger_maintenance(openclaw_bin)
-    if task_maintenance_blocker:
-        blockers.append(task_maintenance_blocker)
+    _, native_run_health_blocker = run_native_run_health(openclaw_bin)
+    if native_run_health_blocker:
+        blockers.append(native_run_health_blocker)
 
     google_problem = google_account_access_problem()
     if google_problem:
@@ -1073,7 +982,7 @@ def main(argv: list[str] | None = None) -> int:
         return emit(
             f"OpenClaw's {'weekly deep health audit' if args.weekly else 'daily health audit'} needs attention: "
             + '; '.join(schedule_problems)
-            + ('. Other runtime checks also need attention.' if blockers else '. Runtime checks and task-ledger maintenance passed.'),
+            + ('. Other runtime checks also need attention.' if blockers else '. Runtime and native run health checks passed.'),
             exit_code=1,
         )
 
@@ -1085,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
                 status_ok=status_ok,
                 security_problems=security_problems,
                 deep_security_ok=deep_security_ok,
-                task_maintenance_blocker=task_maintenance_blocker,
+                native_run_health_blocker=native_run_health_blocker,
                 account_access_problem=google_problem,
             ),
             exit_code=1,
@@ -1094,7 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
     return emit(
         f"OpenClaw's {'weekly deep health audit' if args.weekly else 'daily health audit'} passed. "
         'The gateway and Discord are reachable, the security audit found no new unapproved issues, '
-        'and task-ledger maintenance completed cleanly.'
+        'and the native runtime and harness checks completed cleanly.'
         + (' The scheduler is active and daily maintenance runs have confirmed reports.' if args.maintenance else '')
     )
 

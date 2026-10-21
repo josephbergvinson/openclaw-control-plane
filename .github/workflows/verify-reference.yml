@@ -3,9 +3,6 @@ name: Verify reference
 on:
   push:
     branches: [main, "docs/current-build-reference-*"]
-    paths-ignore:
-      - runtime/diagnostics/**
-      - .github/workflows/steering-regression.yml
   pull_request:
   workflow_dispatch:
     inputs:
@@ -15,6 +12,10 @@ on:
         type: string
       expected_distribution_commit:
         description: Reviewed native distribution commit
+        required: false
+        type: string
+      expected_companion_commit:
+        description: Reviewed separately reconstructable macOS companion commit
         required: false
         type: string
 
@@ -39,6 +40,7 @@ jobs:
         env:
           EXPECTED_SOURCE_COMMIT: ${{ inputs.expected_source_commit }}
           EXPECTED_DISTRIBUTION_COMMIT: ${{ inputs.expected_distribution_commit }}
+          EXPECTED_COMPANION_COMMIT: ${{ inputs.expected_companion_commit }}
         run: |
           expected=()
           if [ -n "$EXPECTED_SOURCE_COMMIT" ]; then
@@ -47,9 +49,21 @@ jobs:
           if [ -n "$EXPECTED_DISTRIBUTION_COMMIT" ]; then
             expected+=(--expected-distribution-commit "$EXPECTED_DISTRIBUTION_COMMIT")
           fi
+          if [ -n "$EXPECTED_COMPANION_COMMIT" ]; then
+            expected+=(--expected-companion-commit "$EXPECTED_COMPANION_COMMIT")
+          fi
           python3 -B scripts/validate_repo.py "${expected[@]}"
       - name: Test reconstruction and workspace installers
         run: python3 -B -m unittest discover -s tests -p 'test_*.py'
+      - name: Verify optional companion source reconstruction
+        env:
+          COMPANION_CHECKOUT: ${{ runner.temp }}/openclaw-companion-reference
+        run: |
+          has_companion=$(python3 -c 'import json; from scripts.validate_repo import companion_uses_native_source; m=json.load(open("runtime/manifest.json")); print(int("delta" in (m.get("nativeCompanion") or {}) or companion_uses_native_source(m)))')
+          if [ "$has_companion" = 1 ]; then
+            git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$COMPANION_CHECKOUT"
+            python3 -B scripts/reconstruct_runtime.py "$COMPANION_CHECKOUT" --apply --native-distribution --native-companion
+          fi
       - name: Test exported workspace behavior in its confined fixtures
         run: |
           python3 -m venv "$RUNNER_TEMP/reference-workspace-tests"
@@ -82,6 +96,10 @@ jobs:
           git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
+      - name: Admit native workflow targets against the reconstructed source
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
+        run: python3 -B scripts/validate_runtime_targets.py "$RUNTIME_CHECKOUT" --workflow .github/workflows/verify-reference.yml
       - name: Install frozen runtime dependencies
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: pnpm install --frozen-lockfile
@@ -123,6 +141,10 @@ jobs:
           git clone --depth 1 --branch "${{ steps.runtime.outputs.tag }}" "${{ steps.runtime.outputs.repository }}" "$RUNTIME_CHECKOUT"
           python3 scripts/reconstruct_runtime.py "$RUNTIME_CHECKOUT" --apply
           git -C "$RUNTIME_CHECKOUT" -c user.name='Reference verification' -c user.email='reference-verification@users.noreply.github.com' -c core.hooksPath=/dev/null commit -m 'Reconstruct the reference runtime'
+      - name: Admit native workflow targets against the reconstructed source
+        env:
+          RUNTIME_CHECKOUT: ${{ runner.temp }}/openclaw-reference
+        run: python3 -B scripts/validate_runtime_targets.py "$RUNTIME_CHECKOUT" --workflow .github/workflows/verify-reference.yml
       - name: Install frozen runtime dependencies
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: pnpm install --frozen-lockfile
@@ -143,7 +165,7 @@ jobs:
             test/vitest/vitest.agents-support.config.ts \
             src/agents/subagents/requester-final-attachment.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
-            src/agents/subagents/announce/subagent-announce.requester-final-overlap.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-ownership.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-requester-final-overlap.log"
       - name: Verify Discord voice yield and guild policy
         id: discord-voice-yield-policy
@@ -176,7 +198,7 @@ jobs:
             extensions/discord/src/voice/realtime-voice-selection.test.ts \
             extensions/discord/src/voice/voice-session.lifecycle.test.ts \
             extensions/discord/src/voice/follow-recording.test.ts \
-            extensions/discord/src/voice/follow-recording-composition.test.ts \
+            extensions/discord/src/voice/transcripts-capture.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-discord-voice-yield-policy.log"
       - name: Verify voice execution identity and final ownership
         id: voice-execution-identity
@@ -245,7 +267,9 @@ jobs:
             --config test/vitest/vitest.unit-fast.config.ts \
             src/plugin-sdk/channel-route.test.ts \
             src/utils/delivery-context.test.ts \
-            src/agents/command/requester-presentation.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-progress-checkpoint.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-discord-own-channel-route.log"
       - name: Verify frozen npm lock override contexts
         id: npm-override-contexts
@@ -260,7 +284,9 @@ jobs:
         run: |
           set -o pipefail
           node scripts/run-vitest.mjs \
-            src/tasks/task-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-progress-checkpoint.test.ts \
+            src/agents/tools/subagents-tool.test.ts \
             src/agents/openclaw-tools.sessions.test.ts \
             src/agents/openclaw-tools.sessions-steering.test.ts \
             src/agents/openclaw-tools.web-fetch-workspace.test.ts \
@@ -286,6 +312,8 @@ jobs:
       - name: Configure offline Chrome MCP
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: npm config set cache="$HOME/.npm" offline=true --location=project
+      # Native sequential compaction, shared child admission and signed Bun
+      # replace the old parallel-compaction/process/Koffi implementations.
       - name: Run owned follow-up and yield regressions
         id: followup
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -299,76 +327,92 @@ jobs:
             src/agents/tools/gateway-caller-context.test.ts \
             src/gateway/device-revocation.test.ts \
             src/gateway/server-cron-command-repair-delivery.test.ts \
-            src/gateway/server-methods/requester-local-operator-authority.integration.test.ts \
-            src/gateway/server-methods/chat-send-requester-native-continuity.integration.test.ts \
+            src/gateway/server-plugin-in-process-dispatch.authorization.test.ts \
+            src/agents/tools/in-process-gateway.test.ts \
+            src/agents/requester-tool-policy.test.ts \
+            src/gateway/subagent-completion-tool-handoff.test.ts \
+            src/gateway/server-methods/chat-send-steering-custody.test.ts \
+            src/gateway/server.private-completion.test.ts \
+            src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts \
+            src/agents/subagents/announce/subagent-requester-mcp-scope.test.ts \
             src/gateway/server-methods/secrets.provided-input.test.ts \
             src/gateway/server-methods/chat-send-provided-secret.test.ts \
             src/gateway/message-action-turn-capability.provided-input.test.ts \
             packages/gateway-protocol/src/schema/secrets.test.ts \
-            src/agents/tools/sessions-send-tool.recovery.test.ts \
+            src/agents/tools/sessions-send-tool.a2a.test.ts \
+            src/agents/tools/sessions-send-tool.admission.test.ts \
+            src/agents/embedded-agent-runner/runs.steering.test.ts \
+            src/agents/subagents/registry/subagent-session-reconciliation.test.ts \
             src/agents/subagents/registry/subagent-registry-restart-recovery.test.ts \
-            src/agents/subagents/registry/subagent-registry-restart-recovery-notice.test.ts \
-            src/tasks/task-registry-private-cancellation.test.ts \
-            src/gateway/server.private-completion.test.ts \
-            src/agents/sessions/session-manager.user-idempotency.test.ts \
-            src/gateway/server.private-recovery-completion.test.ts \
-            src/gateway/server-restart-sentinel.internal-continuation.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts \
+            src/agents/subagents/completion/subagent-completion-admission.cancel-rollback.test.ts \
+            src/agents/sessions/session-manager.persistence-compat.test.ts \
+            src/agents/sessions/session-manager-model-context.test.ts \
+            src/agents/sessions/session-manager-transaction-rollback.test.ts \
+            src/agents/main-session-recovery/main-session-restart-recovery.test.ts \
+            src/agents/subagents/requester-final-attachment.test.ts \
             src/gateway/server-restart-sentinel.test.ts \
+            src/gateway/server-startup-restart-sentinel.test.ts \
+            src/gateway/server-restart-sentinel.system-event-owner.test.ts \
+            src/gateway/server-restart-sentinel.state-context.test.ts \
             src/gateway/server-restart-sentinel-notice.test.ts \
             src/gateway/server-restart-update-run.test.ts \
             src/gateway/update-run-notice.test.ts \
             src/gateway/startup-tasks.test.ts \
             src/infra/restart-sentinel.test.ts \
             src/infra/restart-sentinel.update-result.test.ts \
-            src/gateway/server-close.cron-restart.test.ts \
+            src/gateway/server-close.test.ts \
             src/gateway/server-cron-lazy.test.ts \
             src/gateway/server-cron.drain.test.ts \
             src/cron/service/active-run-cancellation.test.ts \
             src/cron/isolated-agent/run.yielded-continuation.test.ts \
             src/cli/gateway-cli/run-loop.test.ts \
-            src/gateway/server-close.test.ts \
             src/gateway/server-reload-handlers.test.ts \
             src/cron/isolated-agent.session-identity.test.ts \
             src/cron/isolated-agent/run.bootstrap-context-continuation.test.ts \
             src/cron/command-runner.test.ts \
             src/cron/service/command-repair.test.ts \
             src/agents/bootstrap-files.test.ts \
-            src/gateway/session-subagent-private-completion.test.ts \
+            src/agents/subagents/registry/subagent-registry-requester-yield.test.ts \
+            src/gateway/session-utils.queued-collector.test.ts \
             src/gateway/session-subagent-resume.test.ts \
             src/agents/embedded-agent-runner/compact.auth-fallback.test.ts \
             src/agents/command/browser-cleanup.test.ts \
             src/auto-reply/reply/agent-runner-browser-cleanup.test.ts \
-            src/auto-reply/reply/agent-runner-result-complete.retained-child.test.ts \
+            src/auto-reply/reply/dispatch-from-config.continuation-settlement.test.ts \
+            src/auto-reply/reply/dispatch-from-config.source-completion.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
             src/auto-reply/reply/followup-runner.test.ts \
-            test/discord-queued-origin.integration.test.ts \
+            test/discord-requester-progress.native.integration.test.ts \
+            test/discord-queued-source.native.integration.test.ts \
+            test/discord-preflight-custody.integration.test.ts \
             src/browser-task-completion-cleanup.test.ts \
             src/plugin-sdk/browser-maintenance.completion.test.ts \
             extensions/browser/src/browser-node-proxy.completion.test.ts \
             extensions/browser/src/browser/client-fetch.completion.test.ts \
             extensions/browser/src/browser/session-tab-registry.completion.test.ts \
-            src/agents/agent-hooks/compaction-safeguard-corrective.test.ts \
-            src/agents/agent-hooks/compaction-safeguard-parallel.test.ts \
             src/agents/agent-hooks/compaction-safeguard.test.ts \
+            src/agents/compaction.summarize-fallback.test.ts \
             src/agents/memory-extraction-budget.test.ts \
             src/auto-reply/reply/agent-runner-memory.private-transcript.test.ts \
             src/auto-reply/reply/memory-flush-extraction.test.ts \
-            test/plugins/embedded-current-user-active-memory.test.ts \
+            test/plugins/current-user-hook-composition.test.ts \
             extensions/active-memory/index.test.ts \
             src/auto-reply/reply/memory-flush-session.test.ts \
             src/agents/embedded-agent-runner/run/attempt-prompt-phase.test.ts \
-            src/agents/compaction.summarize-fallback.test.ts \
             src/auto-reply/reply/agent-runner-execution-compaction.test.ts \
             src/auto-reply/reply/agent-runner-failure-reply.test.ts \
             src/auto-reply/reply/commands-compact.test.ts \
             src/agents/agent-tools.media-read-authority.test.ts \
             src/agents/agent-tools.subagent-session-status.test.ts \
-            src/commands/tasks.notify.test.ts \
-            src/gateway/server-methods/tasks.test.ts \
+            src/agents/tools/subagents-tool.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.test.ts \
+            src/agents/tools/subagents-tool.registry.test.ts \
             src/gateway/method-scopes.test.ts \
             src/gateway/server-methods-list.test.ts \
-            packages/gateway-protocol/src/tasks-validators.test.ts \
             src/gateway/config-reload.test.ts \
-            src/gateway/config-reload.browser.test.ts \
+            src/gateway/config-reload-plan.test.ts \
             extensions/browser/index.test.ts \
             extensions/browser/chrome-extension/background.native-cleanup.test.ts \
             extensions/browser/chrome-extension/background.native-policy-enumeration.test.ts \
@@ -379,7 +423,7 @@ jobs:
             extensions/browser/src/browser/pw-screenshots.chromium.test.ts \
             extensions/browser/src/browser/pw-role-snapshot.chromium.test.ts \
             extensions/browser/src/browser/pw-role-snapshot.test.ts \
-            extensions/browser/src/browser/pw-session.selector-refs.test.ts \
+            extensions/browser/src/browser/pw-session.test.ts \
             extensions/browser/src/browser/pw-tools-core.interactions.credential-origin.test.ts \
             extensions/browser/src/browser/pw-tools-core.screenshots-element-selector.test.ts \
             extensions/browser/src/browser/pw-tools-core.snapshot.test.ts \
@@ -398,7 +442,6 @@ jobs:
             extensions/browser/src/node-host/invoke-browser.test.ts \
             src/node-host/local-gateway-auth.test.ts \
             extensions/browser/src/browser/extension-install.test.ts \
-            extensions/browser/src/browser/extension-install-migration.test.ts \
             extensions/browser/src/browser/extension-install-layout.test.ts \
             extensions/browser/src/browser/extension-install-atomic.test.ts \
             extensions/browser/src/browser/extension-install-external.test.ts \
@@ -410,11 +453,12 @@ jobs:
             extensions/cua-computer/src/mcp-session-recovery.test.ts \
             src/plugins/computer-use-contract.test.ts \
             test/scripts/package-mac-app.test.ts \
-            test/scripts/mac-worker-native-provenance.test.ts \
-            test/scripts/verify-mac-node-worker-fs.test.ts \
+            test/scripts/mac-runtime.test.ts \
+            test/scripts/verify-mac-runtime-fs.test.ts \
             test/helpers/process-watchdog.test.ts \
             test/scripts/dist-artifact-ownership.test.ts \
-            test/scripts/managed-build-admission.test.ts \
+            test/scripts/managed-child-process.admission.test.ts \
+            test/scripts/local-check-runtime.test.ts \
             test/scripts/managed-child-process.darwin.test.ts \
             test/scripts/managed-child-process.test.ts \
             test/scripts/managed-child-process.tree.test.ts \
@@ -425,15 +469,26 @@ jobs:
             extensions/browser/src/browser-tool.schema.test.ts \
             extensions/browser/src/browser-tool-binding.test.ts \
             extensions/browser/src/browser-tool.test.ts \
-            extensions/browser/src/browser-tool.act.test.ts \
             extensions/browser/src/browser/client-actions-core.hooks.test.ts \
-            src/auto-reply/dispatch.retained-steering.test.ts \
-            src/auto-reply/reply/agent-runner-steer-source.test.ts \
-            src/auto-reply/reply/queue/drain.steer-owner.test.ts \
+            src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts \
+            src/auto-reply/reply/agent-runner-steer-adoption.question-recovery.test.ts \
+            src/auto-reply/reply/queue/enqueue.steering.test.ts \
+            src/auto-reply/reply/followup-turn-admission.test.ts \
+            src/auto-reply/reply/agent-runner-utils.secret-resolution.test.ts \
+            src/auto-reply/reply/get-reply-run.prepared-metadata.test.ts \
+            src/channels/message-access/admission-evidence.test.ts \
+            src/auto-reply/reply/queue.media-carrier.test.ts \
+            src/auto-reply/reply/channel-run-admission.test.ts \
+            src/auto-reply/reply/queue/state.test.ts \
+            src/auto-reply/reply/queue.in-flight.test.ts \
+            src/auto-reply/reply/queue.collect.test.ts \
+            src/auto-reply/reply/queue.drain-restart.test.ts \
+            src/auto-reply/reply/queue/drain.identity-guard.test.ts \
+            src/auto-reply/reply/reply-run-registry.test.ts \
+            src/auto-reply/reply/reply-run-registry.control-owner.test.ts \
             src/agents/sessions/agent-session-small-context-compaction.test.ts \
-            src/agents/agent-hooks/compaction-safeguard-first-budget.test.ts \
             src/agents/tools/sessions-yield-tool.test.ts \
-            src/tasks/task-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-progress-checkpoint.test.ts \
             src/plugin-sdk/channel-outbound.streaming.test.ts \
             src/channels/progress-draft-compositor.test.ts \
             src/channels/progress-draft-diffstat.test.ts \
@@ -441,9 +496,8 @@ jobs:
             src/agents/bash-tools.descriptions.test.ts \
             src/agents/tools/cron-tool.test.ts src/agents/tools/cron-tool.description.test.ts \
             test/scripts/build-all.test.ts \
-            test/scripts/build-all.admission.test.ts \
-            test/scripts/tsdown-build.admission.test.ts \
-            test/scripts/tsdown-process.test.ts \
+            test/scripts/build-all-ownership.test.ts \
+            test/scripts/tsdown-build.test.ts \
             src/agents/tools/sessions-spawn-tool.test.ts \
             src/transcripts/configured-capture.test.ts \
             src/cron/delivery.failure-notify.test.ts \
@@ -451,7 +505,7 @@ jobs:
             src/gateway/server-cron-notifications.test.ts \
             src/gateway/server-cron-notifications.presentation.test.ts \
             src/gateway/server-cron.test.ts \
-            src/tasks/task-registry.test.ts \
+            src/agents/subagents/registry/subagent-registry.store.codec.test.ts \
             src/agents/credential-safety-prompt.test.ts \
             src/agents/system-prompt-messaging.test.ts \
             extensions/codex/src/app-server/thread-prompt.test.ts \
@@ -459,7 +513,8 @@ jobs:
             extensions/codex/src/app-server/attempt-steering.test.ts \
             extensions/codex/src/app-server/run-attempt.steering.test.ts \
             extensions/copilot/src/prompt-guidance.test.ts \
-            src/agents/subagents/registry/subagent-followup-owner.test.ts \
+            src/agents/subagents/completion/session-followup-completion.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-ownership.test.ts \
             src/agents/subagents/registry/subagent-registry-lifecycle.test.ts \
             src/agents/embedded-agent-runner/run/tool-error-warning.test.ts \
             src/agents/openclaw-tools.registration.test.ts \
@@ -471,15 +526,12 @@ jobs:
             extensions/codex/src/app-server/dynamic-tools.test.ts \
             src/agents/embedded-agent-runner/run/attempt-session-boundary.orphan-custody.test.ts \
             src/agents/command/session-preparation.private-completion.test.ts \
-            src/auto-reply/reply/agent-runner-source-admission.test.ts \
-            src/agents/subagents/registry/subagent-registry-requester-yield.test.ts \
+            src/auto-reply/reply/agent-runner-source-identity.test.ts \
             src/agents/embedded-agent-runner/runs.publication-wait.test.ts \
-            src/agents/main-session-recovery/main-session-restart-recovery.test.ts \
-            src/agents/main-session-recovery/main-session-restart-recovery-progress.test.ts \
+            src/gateway/server-instance-runtime.test.ts \
             src/trajectory/metadata.test.ts \
-            src/auto-reply/reply/agent-runner-steer-adoption.context.test.ts \
+            test/codex-original-source-publication.integration.test.ts \
             src/agents/system-prompt.test.ts \
-            src/agents/system-prompt.behavior.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-unit.log"
           pnpm test:serial \
             src/gateway/server-methods/chat-send-message-injection.test.ts \
@@ -489,48 +541,60 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/reference-qa-authority-gateway.log"
           pnpm test:serial \
             src/auto-reply/reply/inbound-meta.test.ts \
-            src/auto-reply/reply/reply-mcp-requester-scope.test.ts \
-            src/auto-reply/reply/queue.mcp-requester-scope.test.ts \
+            src/agents/mcp-requester-scope.test.ts \
+            src/gateway/server-plugin-in-process-dispatch.authorization.test.ts \
+            src/auto-reply/reply/agent-runner-source-identity.test.ts \
+            src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts \
+            src/auto-reply/reply/queue.drain-scope.test.ts \
+            src/auto-reply/reply/queue.drain-restart.test.ts \
             src/auto-reply/reply/agent-runner-utils.test.ts \
             src/auto-reply/reply/agent-runner-execution-cli-admission.test.ts \
             src/auto-reply/reply/agent-runner-execution-runtime.test.ts \
-            test/plugins/codex-retained-steering-publication.test.ts \
-            test/plugins/codex-retained-steering-custody.test.ts \
-            src/auto-reply/reply/agent-runner-steer-adoption.auth-rotation.test.ts \
-            src/auto-reply/reply/agent-runner-steer-adoption.recovery-admission.test.ts \
-            src/auto-reply/reply/agent-runner-steer-adoption.recovery-publication.test.ts \
-            src/auto-reply/reply/agent-runner-steer-adoption.recovery.test.ts \
+            extensions/codex/src/app-server/run-attempt.steering-authority.test.ts \
+            extensions/codex/src/app-server/run-attempt.steering-media.test.ts \
+            extensions/codex/src/app-server/run-attempt.steering-settlement.test.ts \
             src/auto-reply/reply/followup-turn-execution.steering.test.ts \
-            src/auto-reply/reply/inbound-meta.current-request.test.ts \
-            src/auto-reply/reply/dispatch-from-config.cancelled-reply.test.ts \
+            extensions/codex/src/app-server/request-authority.test.ts \
+            extensions/codex/src/app-server/auth-refresh-authority.integration.test.ts \
+            extensions/codex/src/app-server/auth-binding.test.ts \
+            src/auto-reply/reply/dispatch-from-config.terminal-recovery.test.ts \
+            src/auto-reply/reply/reply-turn-admission.recovery.test.ts \
+            src/auto-reply/reply/agent-runner-fallback-steering.test.ts \
+            src/auto-reply/reply/dispatch-from-config.abort-cutoff.test.ts \
+            src/auto-reply/reply/dispatch-from-config.lifecycle.test.ts \
+            src/auto-reply/reply/dispatch-from-config.acp-abort.test.ts \
+            src/auto-reply/reply/dispatch-from-config.test.ts \
+            src/auto-reply/reply/dispatch-from-config.final-outcome-counts.test.ts \
             src/auto-reply/envelope.test.ts \
             src/auto-reply/reply/get-reply-run.media-only.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-qa-authority-auto-reply.log"
           pnpm test:serial \
-            src/agents/embedded-agent-runner/run/attempt.mcp-connect-continuation.test.ts \
+            src/agents/mcp-requester-connect-refresh.test.ts \
+            src/agents/agent-bundle-mcp-manager.requester-connect.test.ts \
+            src/agents/embedded-agent-runner/run.plugin-runtime-refresh.integration.test.ts \
             src/agents/embedded-agent-runner/run/attempt-bundle-tools.test.ts \
             src/agents/embedded-agent-runner/run/attempt-session.test.ts \
             src/agents/embedded-agent-runner/run/attempt-session-runtime-prepare.test.ts \
             src/agents/sessions/agent-session-loop-next-turn.test.ts \
-            test/discord-voice-runtime-owner.integration.test.ts \
-            test/project-memory-bootstrap.integration.test.ts \
-            src/agents/agent-bundle-mcp-runtime-owner.steering.test.ts \
+            test/project-memory-bootstrap-lifecycle.integration.test.ts \
+            src/agents/project-memory-bootstrap.test.ts \
+            src/agents/project-memory-bootstrap.audience.test.ts \
+            src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts \
+            src/agents/agent-bundle-mcp-tools.request-boundary.test.ts \
+            src/agents/agent-bundle-mcp-tools.materialize.test.ts \
+            src/agents/embedded-agent-runner/runs.steering.test.ts \
             src/agents/agent-bundle-mcp-reload.test.ts \
             src/agents/mcp-http-transport.test.ts \
             src/agents/agent-bundle-mcp-runtime.test.ts \
-            src/agents/agent-bundle-mcp-tools.materialize.test.ts \
             src/agents/agent-bundle-mcp-output-preservation.test.ts \
-            src/agents/session-tool-result-guard.persistence-order.test.ts \
             src/agents/session-tool-result-guard.tool-result-persist-hook.test.ts \
             src/agents/sessions/tools/read.test.ts \
-            src/agents/agent-bundle-mcp-tools.request-boundary.test.ts \
             src/agents/agent-bundle-mcp-runtime-shared.test.ts \
             src/agents/agent-bundle-mcp-acquisition.test.ts \
             src/agents/mcp-pagination.test.ts \
             src/agents/mcp-tool-filter.test.ts \
-            src/agents/mcp-oauth.requester-recovery.test.ts \
             src/agents/mcp-oauth.test.ts \
-            src/agents/agent-bundle-mcp-manager.requester-connect.test.ts \
+            src/agents/mcp-oauth-provider.preparation.test.ts \
             src/agents/agent-bundle-mcp-harness.test.ts \
             src/agents/mcp-oauth-refresh-issuer.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-mcp-discovery.log"
@@ -540,37 +604,39 @@ jobs:
         run: |
           set -o pipefail
           pnpm test:serial \
-            extensions/codex/src/app-server/run-attempt.requester-continuity.test.ts \
+            extensions/codex/src/app-server/run-attempt.configured-mcp.test.ts \
             src/agents/agent-bundle-mcp-harness.requester-continuity.test.ts \
-            src/agents/tools/sessions-send-tool.a2a-requester-scope.test.ts \
-            src/agents/tools/in-process-gateway.completion-handoff.test.ts \
-            src/agents/requester-tool-policy.a2a.test.ts \
+            src/agents/mcp-requester-scope.test.ts \
+            src/agents/tools/sessions-send-tool.a2a.test.ts \
+            src/agents/subagents/registry/subagent-registry-requester-yield.test.ts \
+            src/agents/subagents/announce/subagent-requester-mcp-scope.test.ts \
+            src/gateway/subagent-completion-tool-handoff.test.ts \
+            src/agents/tools/in-process-gateway.test.ts \
+            src/gateway/server-plugin-in-process-dispatch.authorization.test.ts \
+            src/agents/requester-tool-policy.test.ts \
             src/agents/command/attempt-execution.cli.test.ts \
             src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts \
-            src/agents/tools/sessions-send-tool.a2a.test.ts \
             src/agents/tools/agent-step.test.ts \
             src/agents/subagents/announce/subagent-announce-handoff.test.ts \
-            src/agents/requester-tool-policy.test.ts \
-            src/agents/tools/in-process-gateway.test.ts \
             src/agents/embedded-agent-runner/run/run-attempt-dispatch.owner.test.ts \
-            src/agents/subagents/announce/subagent-announce.requester-mcp-continuity.test.ts \
-            src/agents/subagents/registry/subagent-registry-run-launch.requester-scope.test.ts \
+            src/agents/subagents/registry/subagent-registry.store.codec.test.ts \
+            src/agents/subagents/registry/subagent-session-reconciliation.test.ts \
+            src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts \
             src/agents/subagents/registry/subagent-registry.test.ts \
             src/agents/subagents/spawn/subagent-spawn-gateway.test.ts \
-            src/agents/subagents/spawn/subagent-spawn.in-process-gateway.test.ts \
-            src/agents/tools/sessions-spawn-tool.requester-scope.test.ts \
-            src/cron/active-jobs.test.ts \
-            src/cron/isolated-agent/run.mcp-requester-scope.test.ts \
-            src/cron/store/run-receipt-store.test.ts \
-            src/cron/tools-allow-provenance.test.ts \
             src/gateway/agent-runtime-identity-token.test.ts \
-            src/gateway/agent-turn/agent-run-admission-phase.requester-scope.test.ts \
+            src/cron/active-jobs.test.ts \
+            src/cron/tools-allow-provenance.test.ts \
+            src/cron/isolated-agent/run.bootstrap-context-continuation.test.ts \
+            src/cron/isolated-agent/run.yielded-continuation.test.ts \
+            src/cron/store/run-receipt-store.test.ts \
             src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts \
             src/gateway/server-instance-runtime.test.ts \
-            src/gateway/subagent-completion-tool-handoff.test.ts \
             src/plugins/compat/registry.test.ts \
             test/scripts/plugin-boundary-report.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-credential-continuity.log"
+      # Stable retained runs replace the removed Tasks/LaneContract API. The
+      # native cohort/current-source and safe-checkpoint suites below own those effects.
       - name: Verify original-conversation completion and checkpoint admission
         id: completion-checkpoint
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -579,14 +645,19 @@ jobs:
           pnpm test:serial \
             src/agents/subagents/announce/subagent-announce-delivery.test.ts \
             src/agents/subagents/announce/subagent-announce-delivery.runtime.test.ts \
-            src/agents/subagents/announce/subagent-announce-requester-incarnation.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts \
+            src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
+            src/gateway/server.private-completion.test.ts \
+            src/agents/embedded-agent-runner/runs.steering.test.ts \
             src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts \
             packages/agent-core/src/stream-steering.test.ts \
             src/agents/subagents/spawn/acp-spawn.test.ts \
-            src/agents/embedded-agent-runner/run/attempt.checkpoint-admission.test.ts \
             src/agents/sessions/agent-session-checkpoint-admission.test.ts \
-            src/plugins/runtime/runtime-tasks.test.ts \
-            extensions/lane-contract/src/detached-lane-checkpoint.test.ts \
+            src/agents/tools/subagents-tool.test.ts \
+            src/agents/tools/sessions-send-current-input.test.ts \
+            src/agents/embedded-agent-runner/runs.publication-wait.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-progress-checkpoint.test.ts \
             extensions/discord/src/voice/segment.test.ts \
             src/transcripts/summary.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-completion-checkpoint.log"
@@ -596,7 +667,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm test:serial \
-            packages/ai/src/providers/openai-chatgpt-responses.identity.test.ts \
+            packages/ai/src/providers/openai-chatgpt-responses.runtime.test.ts \
             packages/ai/src/providers/openai-chatgpt-responses.cache.test.ts \
             src/agents/embedded-agent-runner/run/attempt-recovery.test.ts \
             src/agents/embedded-agent-runner/run/attempt-recovery.quota-continuation.test.ts \
@@ -629,15 +700,21 @@ jobs:
         run: |
           set -o pipefail
           pnpm test:serial src/agents/embedded-agent-runner/run/terminal-preparation.test.ts \
-            src/agents/embedded-agent-runner/run.terminal-timeout.test.ts \
             src/agents/embedded-agent-runner/run.terminal-timeout-delivery.integration.test.ts \
-            src/agents/embedded-agent-runner/run/attempt.native-steering-context.test.ts \
+            src/agents/embedded-agent-runner/run.timeout-context-recovery.test.ts \
+            src/agents/embedded-agent-runner/run.prepared-harness-source-delivery.integration.test.ts \
+            src/agents/embedded-agent-runner/run/payloads.test.ts \
+            test/codex-original-source-publication.integration.test.ts \
+            src/agents/embedded-agent-runner/run/attempt.llm-boundary.steering.test.ts \
+            src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts \
             src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts \
             src/agents/embedded-agent-runner/run/attempt-stream-prepare.test.ts \
             src/agents/embedded-agent-runner/provider-prompt-state.fixed-cost.test.ts \
             src/agents/embedded-agent-runner/run/preemptive-compaction.fixed-cost.test.ts \
             src/agents/embedded-agent-runner/run/attempt-prompt-submit.measured-fixed-cost.test.ts \
-            src/agents/embedded-agent-runner/run/attempt-prompt-submit.midturn-projection.test.ts \
+            src/agents/embedded-agent-runner/run/attempt-prompt-submit.test.ts \
+            src/agents/embedded-agent-runner/run/preemptive-compaction.test.ts \
+            src/agents/embedded-agent-runner/tool-result-context-guard.test.ts \
             src/agents/embedded-agent-runner/run.overflow-context-recovery.test.ts \
             src/agents/embedded-agent-runner/run.shared-integration.test.ts \
             src/agents/embedded-agent-runner/run.overflow-compaction.loop.test.ts \
@@ -647,6 +724,19 @@ jobs:
             packages/ai/src/transports/openai-responses-prompt-observer.test.ts \
             packages/llm-core/src/utils/event-stream.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-terminal.log"
+      - name: Verify voice manager plugin-instance ownership
+        working-directory: ${{ runner.temp }}/openclaw-reference
+        env:
+          OPENCLAW_E2E_WORKERS: "1"
+          OPENCLAW_E2E_VERBOSE: "1"
+        run: |
+          set -o pipefail
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.e2e.config.ts \
+            test/e2e/gateway-transcripts-discord-capture.e2e.test.ts \
+            --maxWorkers=1 \
+            --testNamePattern "keeps a voice manager on its owning plugin runtime" \
+            2>&1 | tee "$RUNNER_TEMP/reference-voice-plugin-instance.log"
       - name: Verify resumed requester progress ownership
         id: cadence
         working-directory: ${{ runner.temp }}/openclaw-reference
@@ -655,7 +745,8 @@ jobs:
           node scripts/run-vitest.mjs run \
             src/agents/tools/computer-tool.gateway.test.ts \
             src/agents/tools/computer-tool.native-credentials.test.ts \
-            src/agents/command/continuation-presentation.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.test.ts \
+            src/agents/subagents/registry/subagent-progress-checkpoint.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-results.test.ts \
@@ -672,14 +763,11 @@ jobs:
             extensions/discord/src/voice/voice-auto-join.test.ts \
             extensions/discord/src/voice/follow-recording.test.ts \
             extensions/discord/src/voice/voice-following.test.ts \
-            extensions/discord/src/voice/follow-recording-composition.test.ts \
             extensions/discord/src/voice/voice-session.terminal.test.ts \
-            extensions/discord/src/continuation-progress.test.ts \
+            extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts \
+            extensions/discord/src/monitor/message-handler.process.draft-final.test.ts \
             extensions/discord/src/monitor/message-handler.draft-preview.rest.test.ts \
-            extensions/discord/src/monitor/message-handler.draft-preview.checkpoint.test.ts \
-            extensions/discord/src/monitor/message-handler.draft-preview.visibility.test.ts \
             extensions/discord/src/monitor/dm-command-auth.test.ts \
-            extensions/discord/src/monitor/message-handler.preflight-context.test.ts \
             extensions/discord/src/monitor/message-handler.preflight.test.ts \
             extensions/discord/src/monitor/message-handler.process.session-routing.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-cadence-discord.log"

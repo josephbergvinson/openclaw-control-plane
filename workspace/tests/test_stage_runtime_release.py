@@ -94,6 +94,68 @@ def test_relocates_executable_shim_and_preserves_source_and_internal_links(built
     assert all(not row['mode'] & 0o222 for row in result['files'] if row['type'] != 'symlink')
 
 
+def test_completed_mac_app_preserves_all_members_without_disabling_other_cache_exclusions(
+    built_source, tmp_path: Path,
+) -> None:
+    source, commit = built_source
+    app = source / 'dist/OpenClaw.app'
+    payloads = {
+        'Contents/_CodeSignature/CodeResources': b'fixture resource seal, never codesigned or executed',
+        'Contents/Resources/OpenClawKit_OpenClawProtocol.bundle/.cache/native-protocol.sha256': b'protocol hash',
+        'Contents/Resources/runtime/lib/node_modules/openclaw/node_modules/gaxios/build/esm/tsconfig.tsbuildinfo': b'esm build metadata',
+        'Contents/Resources/runtime/lib/node_modules/openclaw/node_modules/gaxios/build/cjs/tsconfig.cjs.tsbuildinfo': b'cjs build metadata',
+        'Contents/Resources/.git/signed-member': b'embedded git-named resource',
+        'Contents/Resources/.artifacts/signed-member': b'embedded artifact-named resource',
+        'Contents/Resources/.pytest_cache/signed-member': b'embedded pytest-named resource',
+        'Contents/Resources/__pycache__/signed-member': b'embedded python-named resource',
+    }
+    for name, data in payloads.items():
+        target = app / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (app / 'Contents/Resources/protocol-cache').symlink_to('OpenClawKit_OpenClawProtocol.bundle/.cache',
+                                                         target_is_directory=True)
+    excluded_outside = (
+        'packages/ai/dist/.cache/not-shipped',
+        'packages/ai/dist/not-shipped.tsbuildinfo',
+        'dist/OpenClaw.app-other/Contents/.cache/not-shipped',
+        'dist/OpenClaw.app-other/Contents/not-shipped.tsbuildinfo',
+    )
+    for name in excluded_outside:
+        target = source / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('regenerable cache outside the completed app')
+    app_before = staging.snapshot(app, source_exclusions=False)
+    prefix = 'dist/OpenClaw.app/'
+    included_app = {row['path'][len(prefix):] for row in staging.snapshot(source)
+                    if row['path'].startswith(prefix)}
+    assert included_app == {row['path'] for row in app_before}
+    result = run_stage(source, commit, tmp_path)
+    candidate = Path(result['candidate'])
+    copied_app = {row['path'][len(prefix):]: row for row in result['files']
+                  if row['path'].startswith(prefix)}
+    assert set(copied_app) == {row['path'] for row in app_before}
+    for old in app_before:
+        copied = copied_app[old['path']]
+        assert copied['type'] == old['type']
+        if old['type'] == 'symlink':
+            assert copied['target'] == old['target']
+        else:
+            assert copied['mode'] == old['mode'] & ~0o222
+        if old['type'] == 'file':
+            assert copied['sha256'] == old['sha256']
+            assert copied['bytes'] == old['bytes']
+            assert copied['links'] == 1
+            assert (copied['device'], copied['inode']) != (old['device'], old['inode'])
+    for name, data in payloads.items():
+        assert (candidate / prefix / name).read_bytes() == data
+    assert staging.snapshot(app, source_exclusions=False) == app_before
+    assert not (candidate / '.cache').exists()
+    assert not (candidate / 'ignored.tsbuildinfo').exists()
+    assert all(not (candidate / name).exists() for name in excluded_outside)
+    assert result['preservedArtifactRoots'] == ['dist/OpenClaw.app']
+
+
 @pytest.mark.parametrize('kind', ['escaping', 'absolute', 'dangling', 'cycle'])
 def test_nonportable_links_fail_before_creating_candidate(built_source, tmp_path: Path, kind: str) -> None:
     source, commit = built_source

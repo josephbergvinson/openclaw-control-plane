@@ -58,6 +58,7 @@ class OpenClawArchiveV3RetentionTests(unittest.TestCase):
         ):
             path.mkdir(parents=True, exist_ok=True)
         for name in archive_backup.POLICY_FILES:
+            (workspace / name).parent.mkdir(parents=True, exist_ok=True)
             (workspace / name).write_text(
                 "{} fixture\n".format(name),
                 encoding="utf-8",

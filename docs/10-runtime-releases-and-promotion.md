@@ -8,7 +8,13 @@ identities. The current design checks each one.
 The reference uses a single activation owner, `openclaw_runtime_activate.py`. It seals
 candidates, captures a stopped predecessor, activates once and preserves a matching
 recovery path. The earlier workspace phase-plan machinery has been retired. Native
-OpenClaw task and state mechanisms remain the execution authority.
+OpenClaw retained-run, harness and state mechanisms remain the execution authority.
+
+The managed Codex package is a reviewed dependency of the sealed runtime. Its
+native homes and stores, and the matching companion, belong in the affected
+installation's recovery inventory. Native store initialization remains with its
+existing owner. Updates use the same sealed-release activation procedure;
+a competing package updater must not replace components alongside it.
 
 ## From source to candidate
 
@@ -68,7 +74,10 @@ in an activation receipt or public configuration.
 
 A same-version change preserves the protected runtime configuration and uses the same
 state root. A version upgrade additionally binds an explicitly reviewed configuration
-and invokes the candidate's native migration once. After migration it rechecks the
+and invokes the candidate's native Doctor migration once. The helper uses the
+declared worker/SDK entrypoints and the native protected result-file contract;
+successful process exit alone is insufficient. Advisory results and native
+maintenance/config-write refusals remain failures. After migration it rechecks the
 protected state, service definitions and semantic approval/authentication bindings.
 The migration path is not a license to rewrite unrelated account state.
 
@@ -117,7 +126,19 @@ listener. A healthy gateway alone does not prove the node loaded the same releas
 Recovery couples a release with its matching state and service definitions. Selecting
 old code against migrated current state is not an established rollback. The stopped
 snapshot includes the protected runtime state, gateway and node definitions and
-selector, with checked archive members and metadata.
+selector, with checked archive members and metadata. Its explicit recovery-root
+inventory also covers actual external agent/plugin/config data, native rollout
+history, the real native home and any separate SQLite home, all seven database
+families and the matching companion. Derive this inventory from effective config
+and native environment rather than inventing default paths. Roots inside captured
+state and nested external roots are normalized under the existing snapshot owner.
+
+Settle the affected native writers and preserve their admission/lease fences before
+capture or restore. Open-file checks supplement that custody; they cannot prevent
+a running writer from opening a file after inspection. Copied-state migration and
+a matched whole-generation restore rehearsal qualify the transition separately
+from source tests. Do not run the native updater or a second snapshot/migration
+engine alongside the activator.
 
 Use the helper's `restore` procedure against the exact failed activation bindings.
 Restoring after a successful activation is a distinct explicit mode because effects

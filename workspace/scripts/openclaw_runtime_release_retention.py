@@ -17,8 +17,10 @@ import os
 import plistlib
 import re
 import shutil
+import shlex
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -1071,6 +1073,118 @@ def collect_promotion_dependency_refs(
     return refs
 
 
+def read_owned_browser_native_hosts(
+    state_root: Path, home: Path, releases_root: Path,
+) -> list[dict[str, Path]]:
+    """Read the installed native-messaging contract, without browser profile data.
+
+    These dependencies protect release bytes; they never authorize browser access.
+    Only private, self-bound OpenClaw launcher/manifest pairs are admitted.
+    """
+    state_root = state_root.resolve()
+    roots = [state_root / 'browser' / 'native-messaging']
+    if sys.platform == 'darwin':
+        roots.append(home / 'Library' / 'Application Support' / 'OpenClaw' / 'native-messaging')
+    result: list[dict[str, Path]] = []
+
+    def read_private(path: Path) -> str:
+        before = path.lstat()
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+                or stat.S_IMODE(before.st_mode) & 0o077 or before.st_size > 64 * 1024):
+            raise ValueError(f'unsafe browser native-host dependency: {path}')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            opened = os.fstat(fd)
+            payload = os.read(fd, 64 * 1024 + 1)
+            after = os.fstat(fd)
+        finally:
+            os.close(fd)
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if (identity(before) != identity(opened) or identity(opened) != identity(after)
+                or identity(after) != identity(path.lstat()) or len(payload) != after.st_size):
+            raise ValueError(f'browser native-host dependency changed while reading: {path}')
+        return payload.decode('utf-8')
+
+    for root in roots:
+        try:
+            info = root.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o022:
+            raise ValueError(f'unsafe browser native-host launcher directory: {root}')
+        launchers = []
+        with os.scandir(root) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 1024:
+                    raise ValueError('browser native-host directory entry count exceeds bound')
+                if entry.name.startswith('ai.openclaw.browser_bootstrap.') and entry.name.endswith('.sh'):
+                    launchers.append(root / entry.name)
+                    if len(launchers) > 256:
+                        raise ValueError('browser native-host launcher count exceeds bound')
+        for launcher in launchers:
+            content = read_private(launcher)
+            lines = content.splitlines()
+            try:
+                command = shlex.split(lines[-1]) if lines else []
+                if (command[:1] != ['exec']
+                        or command[3:4] != ['--manifest'] or command[5:6] != ['--launcher']
+                        or command[6:7] != [str(launcher)] or command[-1:] != ['$@']):
+                    raise ValueError('managed-namespace launcher command is unverifiable')
+                if not Path(command[1]).is_absolute() or not Path(command[2]).is_absolute():
+                    raise ValueError('registered launcher target must be absolute')
+                manifest_path = Path(command[4])
+                try:
+                    manifest_path.lstat()
+                except FileNotFoundError:
+                    continue  # An unregistered retired launcher is no longer a dependency.
+                manifest = json.loads(read_private(manifest_path))
+                if not isinstance(manifest, dict):
+                    raise ValueError('manifest must be an object')
+                if manifest.get('path') != str(launcher):
+                    continue  # The registration now names a different launcher.
+                if len(lines) not in (4, 5) or lines[:2] != ['#!/bin/sh', '# OpenClaw native messaging bootstrap v1']:
+                    raise ValueError('registered launcher header changed')
+                state = shlex.split(lines[2])
+                if (len(state) != 2 or state[0] != 'export' or not state[1].startswith('OPENCLAW_STATE_DIR=')
+                        or not Path(state[1].partition('=')[2]).is_absolute()):
+                    raise ValueError('registered launcher state export changed')
+                if len(lines) == 5:
+                    config = shlex.split(lines[3])
+                    if (len(config) != 2 or config[0] != 'export' or not config[1].startswith('OPENCLAW_CONFIG_PATH=')
+                            or not Path(config[1].partition('=')[2]).is_absolute()):
+                        raise ValueError('registered launcher config export changed')
+                arguments = command[7:-1]
+                if len(arguments) >= 2 and arguments[-2] == '--browser-profile':
+                    profile = arguments[-1]
+                    if (re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}', profile) is None
+                            or not lines[-1].endswith(" '--browser-profile' '" + profile + "' \"$@\"")):
+                        raise ValueError('registered launcher browser profile changed')
+                    arguments = arguments[:-2]
+                origins = manifest.get('allowed_origins')
+                if (manifest_path.name != 'ai.openclaw.browser_bootstrap.json'
+                        or manifest.get('name') != 'ai.openclaw.browser_bootstrap'
+                        or manifest.get('description') != 'OpenClaw browser extension bootstrap'
+                        or manifest.get('type') != 'stdio' or manifest.get('path') != str(launcher)
+                        or not isinstance(origins, list) or not origins
+                        or any(not isinstance(origin, str) or re.fullmatch(r'chrome-extension://[a-p]{32}/', origin) is None for origin in origins)
+                        or origins != sorted(set(origins))
+                        or arguments != [word for origin in origins for word in ('--expected-origin', origin)]):
+                    raise ValueError('launcher and manifest binding changed')
+                entry = Path(command[2])
+                try:
+                    relative = entry.relative_to(releases_root.resolve())
+                except ValueError:
+                    continue
+                if (len(relative.parts) != 5 or not relative.parts[0].startswith('openclaw-')
+                        or relative.parts[1:] != ('dist', 'extensions', 'browser', 'native-host-entry.js')):
+                    raise ValueError('registered release entry shape changed')
+                result.append({'manifest': manifest_path, 'launcher': launcher, 'entry': entry,
+                               'release': releases_root.resolve() / relative.parts[0]})
+            except (IndexError, KeyError, TypeError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(f'unverifiable owned browser native-host dependency: {launcher}') from exc
+    return result
+
+
 def collect_references(
     *,
     deadline: float | None = None,
@@ -1087,6 +1201,10 @@ def collect_references(
         )
     )
     refs.extend(collect_process_refs(deadline=deadline))
+    refs.extend(Reference(f'browser-native-host:{row["manifest"]}', row['release'])
+                for row in read_owned_browser_native_hosts(
+                    OPERATOR.require_path("paths.state_root"), OPERATOR.require_path("paths.host_home"),
+                    OPERATOR.require_path("paths.runtime_releases_root")))
     refs.extend(collect_promotion_dependency_refs())
     refs.extend(collect_unfinished_release_refs())
     return refs

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -24,12 +24,14 @@ from pathlib import Path
 import plistlib
 import pwd
 import re
+import shlex
 import stat
 import sqlite3
 import subprocess
 import sys
 import tarfile
 import tempfile
+import uuid
 import time
 from typing import Any, Protocol
 
@@ -164,6 +166,14 @@ class ActivationError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class BrowserRecoveryRoot:
+    """A fixed OpenClaw-owned browser surface, never an arbitrary absent path."""
+
+    owner: str
+    product: str | None = None
+
+
+@dataclass(frozen=True)
 class ActivationPaths:
     releases_root: Path
     current_link: Path
@@ -182,6 +192,371 @@ class ActivationPaths:
     health_timeout_seconds: float = DEFAULT_HEALTH_TIMEOUT_SECONDS
     health_poll_seconds: float = 0.25
     screen_capture_binding: Path | None = None
+    recovery_roots: tuple[Path | BrowserRecoveryRoot, ...] = ()
+
+
+BROWSER_HOST_NAME = "ai.openclaw.browser_bootstrap"
+BROWSER_STORE_ID = "kcdjddhmeafeomebliikmbpblkmkfoig"
+BROWSER_LAUNCHER_MARKER = "# OpenClaw native messaging bootstrap v1"
+BROWSER_PRODUCT_ROOTS = {
+    "chrome": ("Google", "Chrome"),
+    "chrome-for-testing": ("Google", "Chrome for Testing"),
+    "chrome-for-testing-documented": ("Google", "ChromeForTesting"),
+    "chromium": ("Chromium",),
+}
+
+
+def browser_recovery_target(spec: BrowserRecoveryRoot) -> tuple[Path, str]:
+    home = OPERATOR.require_path("paths.host_home")
+    support = home / "Library" / "Application Support"
+    if spec.owner == "browser-native-launchers" and spec.product is None:
+        return support / "OpenClaw" / "native-messaging", "directory"
+    if spec.owner == "browser-native-manifest" and spec.product in BROWSER_PRODUCT_ROOTS:
+        return (support.joinpath(*BROWSER_PRODUCT_ROOTS[spec.product]) /
+                "NativeMessagingHosts" / f"{BROWSER_HOST_NAME}.json"), "file"
+    if spec.owner == "browser-store-request" and spec.product == "chrome":
+        return (support / "Google" / "Chrome" / "External Extensions" /
+                f"{BROWSER_STORE_ID}.json"), "file"
+    raise ActivationError("unsupported owned browser recovery surface")
+
+
+def parse_recovery_root(value: Any) -> Path | BrowserRecoveryRoot:
+    if isinstance(value, str):
+        return Path(value)
+    if (isinstance(value, dict) and set(value) in ({"owner"}, {"owner", "product"})
+            and isinstance(value.get("owner"), str)
+            and ("product" not in value or isinstance(value["product"], str))):
+        spec = BrowserRecoveryRoot(value["owner"], value.get("product"))
+        browser_recovery_target(spec)
+        return spec
+    raise ActivationError("runtime.recovery_roots contains an invalid owned declaration")
+
+
+def browser_recovery_specs(paths: ActivationPaths) -> dict[Path, BrowserRecoveryRoot]:
+    result: dict[Path, BrowserRecoveryRoot] = {}
+    for item in paths.recovery_roots:
+        if isinstance(item, BrowserRecoveryRoot):
+            target, _ = browser_recovery_target(item)
+            if target in result:
+                raise ActivationError("duplicate owned browser recovery surface")
+            result[target] = item
+        elif not isinstance(item, Path):
+            raise ActivationError("invalid external recovery declaration")
+    return result
+
+
+def _owned_browser_ancestor(paths: ActivationPaths, target: Path) -> dict[str, Any]:
+    """Observe an existing physical parent; never create a missing ancestor."""
+    home = OPERATOR.require_path("paths.host_home")
+    if (not home.is_absolute() or home.resolve(strict=True) != home
+            or not target.is_relative_to(home) or target == home):
+        raise ActivationError("owned browser recovery home is not physical")
+    anchor: Path | None = None
+    cursor = home
+    for part in ("", *target.parent.relative_to(home).parts):
+        if part:
+            cursor /= part
+        try:
+            info = cursor.lstat()
+        except FileNotFoundError:
+            break
+        if (not stat.S_ISDIR(info.st_mode) or cursor.is_symlink()
+                or info.st_uid != paths.operator_uid or stat.S_IMODE(info.st_mode) & 0o7022):
+            raise ActivationError("owned browser recovery ancestor is unsafe")
+        anchor = cursor
+    if anchor is None:
+        raise ActivationError("owned browser recovery ancestor is unavailable")
+    info = anchor.lstat()
+    return {"path": str(anchor), "device": info.st_dev, "inode": info.st_ino,
+            "uid": info.st_uid, "mode": stat.S_IMODE(info.st_mode)}
+
+
+def _assert_browser_ancestor(paths: ActivationPaths, target: Path, value: Any) -> None:
+    if (not isinstance(value, dict)
+            or set(value) != {"path", "device", "inode", "uid", "mode"}
+            or not isinstance(value["path"], str)
+            or any(type(value[key]) is not int for key in ("device", "inode", "uid", "mode"))):
+        raise ActivationError("owned browser recovery ancestor binding drift")
+    anchor = Path(value["path"])
+    home = OPERATOR.require_path("paths.host_home")
+    if (not anchor.is_absolute() or ".." in anchor.parts or anchor.resolve(strict=True) != anchor
+            or not anchor.is_relative_to(home) or not target.is_relative_to(anchor)
+            or anchor == target):
+        raise ActivationError("owned browser recovery ancestor binding drift")
+    # Also reject a symlink introduced below the sealed ancestor.
+    _owned_browser_ancestor(paths, target)
+    info = anchor.lstat()
+    observed = {"path": str(anchor), "device": info.st_dev, "inode": info.st_ino,
+                "uid": info.st_uid, "mode": stat.S_IMODE(info.st_mode)}
+    if observed != value:
+        raise ActivationError("owned browser recovery ancestor binding drift")
+
+
+def _browser_owned_file(paths: ActivationPaths, path: Path) -> bytes:
+    payload, info = read_physical(path, "owned browser recovery file", maximum=65536)
+    if info.st_uid != paths.operator_uid or stat.S_IMODE(info.st_mode) & 0o7022:
+        raise ActivationError("owned browser recovery file ownership drift")
+    return payload
+
+
+def _browser_launcher_payload(paths: ActivationPaths, path: Path, payload: bytes) -> tuple[str, list[str]]:
+    match = re.fullmatch(r"ai\.openclaw\.browser_bootstrap\.([a-f0-9]{16})(?:\.([a-f0-9]{64}))?\.sh", path.name)
+    try:
+        lines = payload.decode("utf-8").splitlines(keepends=True)
+        quote = lambda value: "'" + value.replace("'", "'\"'\"'") + "'"
+        if (match is None or len(lines) not in (4, 5)
+                or lines[:2] != ["#!/bin/sh\n", BROWSER_LAUNCHER_MARKER + "\n"]
+                or lines[2] != f"export OPENCLAW_STATE_DIR={quote(str(paths.predecessor_state_dir))}\n"
+                or (len(lines) == 5 and lines[3] !=
+                    f"export OPENCLAW_CONFIG_PATH={quote(str(paths.predecessor_state_dir / 'openclaw.json'))}\n")
+                or not lines[-1].startswith("exec ") or not lines[-1].endswith(' "$@"\n')):
+            raise ValueError("launcher grammar")
+        command_text = lines[-1][5:-6]
+        command = shlex.split(command_text)
+        if (" ".join(quote(value) for value in command) != command_text
+                or len(command) < 8 or not Path(command[0]).is_absolute()
+                or not Path(command[1]).is_absolute() or command[2] != "--manifest"
+                or command[4:6] != ["--launcher", str(path)]):
+            raise ValueError("launcher command")
+        manifests = {str(browser_recovery_target(BrowserRecoveryRoot("browser-native-manifest", key))[0])
+                     for key in BROWSER_PRODUCT_ROOTS}
+        manifest = Path(command[3])
+        managed_profile = manifest.parent.parent.parent.name
+        managed_manifest = (paths.predecessor_state_dir / "browser" / managed_profile /
+                            "user-data" / "NativeMessagingHosts" / f"{BROWSER_HOST_NAME}.json")
+        managed = (re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", managed_profile) is not None
+                   and command[3] == str(managed_manifest))
+        if ((command[3] not in manifests and not managed)
+                or hashlib.sha256(command[3].encode()).hexdigest()[:16] != match[1]):
+            raise ValueError("launcher manifest")
+        tail = command[6:]
+        if len(tail) >= 2 and tail[-2] == "--browser-profile":
+            if (re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", tail[-1]) is None
+                    or (managed and tail[-1] != managed_profile)):
+                raise ValueError("launcher profile")
+            tail = tail[:-2]
+        origins = tail[1::2]
+        if (not origins or len(tail) % 2 or any(flag != "--expected-origin" for flag in tail[::2])
+                or origins != sorted(set(origins))
+                or any(re.fullmatch(r"chrome-extension://[a-p]{32}/", value) is None for value in origins)):
+            raise ValueError("launcher origins")
+        if match[2]:
+            base = path.with_name(f"{BROWSER_HOST_NAME}.{match[1]}.sh")
+            canonical = payload.replace(f" '--launcher' {quote(str(path))}".encode(),
+                                        f" '--launcher' {quote(str(base))}".encode())
+            if hashlib.sha256(canonical).hexdigest() != match[2]:
+                raise ValueError("launcher immutable identity")
+        return command[3], origins
+    except (UnicodeError, ValueError) as exc:
+        raise ActivationError("owned browser launcher binding drift") from exc
+
+
+def _browser_surface_hash(paths: ActivationPaths, target: Path, spec: BrowserRecoveryRoot,
+                          kind: str) -> tuple[int, str]:
+    info = target.lstat()
+    if (info.st_uid != paths.operator_uid or stat.S_IMODE(info.st_mode) & 0o7022
+            or target.is_symlink()):
+        raise ActivationError("owned browser recovery surface is unsafe")
+    if kind == "directory":
+        if not stat.S_ISDIR(info.st_mode):
+            raise ActivationError("owned browser recovery kind drift")
+        entries = []
+        for child in sorted(target.iterdir()):
+            payload = _browser_owned_file(paths, child)
+            if not child.lstat().st_mode & stat.S_IXUSR:
+                raise ActivationError("owned browser launcher is not executable")
+            manifest, _ = _browser_launcher_payload(paths, child, payload)
+            manifest_path = Path(manifest)
+            profile = manifest_path.parent.parent.parent.name
+            managed_manifest = (paths.predecessor_state_dir / "browser" / profile /
+                                "user-data" / "NativeMessagingHosts" / f"{BROWSER_HOST_NAME}.json")
+            covered_by_state = (re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", profile) is not None
+                                and manifest_path == managed_manifest)
+            if manifest_path not in normalized_recovery_roots(paths) and not covered_by_state:
+                raise ActivationError("owned browser launcher manifest is not inventoried")
+            entries.append({"name": child.name, "mode": stat.S_IMODE(child.lstat().st_mode),
+                            "sha256": sha256_bytes(payload)})
+        digest = sha256_bytes(json.dumps(entries, sort_keys=True).encode())
+    else:
+        payload = _browser_owned_file(paths, target)
+        try:
+            value = json.loads(payload)
+            if spec.owner == "browser-store-request":
+                if value != {"external_update_url": "https://clients2.google.com/service/update2/crx",
+                             "openclawOwnership": "browser-store-install-v1"}:
+                    raise ValueError("store request")
+            else:
+                if (not isinstance(value, dict)
+                        or set(value) != {"name", "description", "path", "type", "allowed_origins"}
+                        or value["name"] != BROWSER_HOST_NAME
+                        or value["description"] != "OpenClaw browser extension bootstrap"
+                        or value["type"] != "stdio" or not isinstance(value["path"], str)
+                        or not isinstance(value["allowed_origins"], list)
+                        or not value["allowed_origins"]
+                        or any(not isinstance(origin, str) or re.fullmatch(r"chrome-extension://[a-p]{32}/", origin) is None
+                               for origin in value["allowed_origins"])
+                        or value["allowed_origins"] != sorted(set(value["allowed_origins"]))):
+                    raise ValueError("native manifest")
+                launcher = Path(value["path"])
+                roots = {paths.predecessor_state_dir / "browser" / "native-messaging",
+                         browser_recovery_target(BrowserRecoveryRoot("browser-native-launchers"))[0]}
+                if launcher.parent not in roots:
+                    raise ValueError("native launcher root")
+                if launcher.parent == browser_recovery_target(BrowserRecoveryRoot("browser-native-launchers"))[0]:
+                    if launcher.parent not in browser_recovery_specs(paths):
+                        raise ValueError("native launcher root is not inventoried")
+                    _owned_browser_ancestor(paths, launcher)
+                elif launcher.resolve(strict=True) != launcher:
+                    raise ValueError("native launcher physical path")
+                launcher_payload = _browser_owned_file(paths, launcher)
+                manifest_path, origins = _browser_launcher_payload(paths, launcher, launcher_payload)
+                if manifest_path != str(target) or origins != value["allowed_origins"]:
+                    raise ValueError("native launcher manifest")
+        except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            raise ActivationError("owned browser recovery content drift") from exc
+        digest = sha256_bytes(payload)
+    return stat.S_IMODE(info.st_mode), digest
+
+
+def normalized_recovery_roots(paths: ActivationPaths) -> tuple[Path, ...]:
+    """Bind explicitly inventoried external data, never guess a native home.
+
+    The state root already covers its descendants. Separate external agent,
+    plugin, config-include, native home/SQLite and companion roots must come
+    from the operator's effective-configuration inventory. This is backup
+    coverage, not another registry or a new writer to those stores.
+    """
+    owned = browser_recovery_specs(paths)
+    declared = {item for item in paths.recovery_roots if isinstance(item, Path)} | set(owned)
+    for root in owned:
+        if any(root != other and (root.is_relative_to(other) or other.is_relative_to(root))
+               for other in declared):
+            raise ActivationError("owned browser recovery overlaps another recovery root")
+    roots: list[Path] = []
+    for root in sorted(declared, key=lambda item: (len(item.parts), str(item))):
+        if (not root.is_absolute() or root == Path("/") or ".." in root.parts
+                or root == paths.predecessor_state_dir
+                or root.is_relative_to(paths.predecessor_state_dir)):
+            if root.is_absolute() and ".." not in root.parts and root.is_relative_to(paths.predecessor_state_dir):
+                continue
+            raise ActivationError("external recovery root is invalid")
+        if paths.predecessor_state_dir.is_relative_to(root):
+            raise ActivationError("external recovery root contains the separately bound state root")
+        if any(control.is_relative_to(root) or root.is_relative_to(control) for control in (
+                paths.releases_root, paths.current_link, paths.gateway_plist, paths.node_plist,
+                paths.lock, paths.result)):
+            raise ActivationError("external recovery root overlaps activation control surfaces")
+        if not any(root.is_relative_to(parent) for parent in roots):
+            roots.append(root)
+    return tuple(roots)
+
+
+def snapshot_members(paths: ActivationPaths, inventory: list[dict[str, Any]] | None = None) -> tuple[Path, ...]:
+    external = inventory if inventory is not None else recovery_root_inventory(paths)
+    return (paths.predecessor_state_dir, paths.gateway_plist, paths.node_plist,
+            paths.current_link, *(Path(row["path"]) for row in external if row.get("present", True)))
+
+
+def recovery_root_inventory(paths: ActivationPaths) -> list[dict[str, Any]]:
+    inventory = []
+    owned = browser_recovery_specs(paths)
+    for root in normalized_recovery_roots(paths):
+        spec = owned.get(root)
+        if spec is not None:
+            _, kind = browser_recovery_target(spec)
+            ancestor = _owned_browser_ancestor(paths, root)
+            present = os.path.lexists(root)
+            mode, digest = _browser_surface_hash(paths, root, spec, kind) if present else (None, None)
+            inventory.append({"path": str(root), "kind": kind, "owner": spec.owner,
+                              "product": spec.product, "present": present, "ancestor": ancestor,
+                              "mode": mode, "contentSha256": digest})
+            continue
+        if root.resolve(strict=True) != root:
+            raise ActivationError("external recovery root must be a physical path")
+        info = root.lstat()
+        kind = "directory" if stat.S_ISDIR(info.st_mode) else "file" if stat.S_ISREG(info.st_mode) else None
+        if kind is None:
+            raise ActivationError("external recovery root must be a regular file or directory")
+        inventory.append({"path": str(root), "kind": kind})
+    return inventory
+
+
+def recovery_open_file_inventory(paths: ActivationPaths) -> list[dict[str, Any]]:
+    """Observe physical lsof targets even while restore has quarantined dependencies.
+
+    Content ownership belongs to the preimage/archive/rename guards, not this
+    supplemental stopped observation. A manifest may temporarily point at an
+    already-quarantined launcher during failure compensation.
+    """
+    specs = browser_recovery_specs(paths)
+    result = []
+    for root in normalized_recovery_roots(paths):
+        spec = specs.get(root)
+        if spec is not None:
+            _owned_browser_ancestor(paths, root)
+        if not os.path.lexists(root):
+            # A restore may have just renamed a legacy root too. Snapshot
+            # inventory and initial preimage observation still require every
+            # legacy root to exist; this is no authority to seal an absence.
+            result.append({"path": str(root), "kind": browser_recovery_target(spec)[1] if spec else "absent",
+                           "present": False})
+            continue
+        if root.resolve(strict=True) != root:
+            raise ActivationError("external recovery root must be a physical path")
+        info = root.lstat()
+        kind = "directory" if stat.S_ISDIR(info.st_mode) else "file" if stat.S_ISREG(info.st_mode) else None
+        if kind is None or (spec is not None and (kind != browser_recovery_target(spec)[1]
+                or info.st_uid != paths.operator_uid or stat.S_IMODE(info.st_mode) & 0o7022
+                or kind == "file" and info.st_nlink != 1)):
+            raise ActivationError("external recovery root physical kind drift")
+        result.append({"path": str(root), "kind": kind})
+    return result
+
+
+def validate_recovery_inventory(paths: ActivationPaths, rows: Any, version: int) -> None:
+    if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
+            or [row.get("path") for row in rows] != [str(root) for root in normalized_recovery_roots(paths)]):
+        raise ActivationError("stopped snapshot external recovery binding drift")
+    owned = browser_recovery_specs(paths)
+    if (owned and version != 4) or (not owned and version == 4):
+        raise ActivationError("stopped snapshot owned recovery format drift")
+    for row in rows:
+        spec = owned.get(Path(row["path"]))
+        if spec is None:
+            if set(row) != {"path", "kind"} or row["kind"] not in ("file", "directory"):
+                raise ActivationError("stopped snapshot external recovery binding drift")
+            continue
+        target, kind = browser_recovery_target(spec)
+        if (set(row) != {"path", "kind", "owner", "product", "present", "ancestor", "mode", "contentSha256"}
+                or row["kind"] != kind or row["owner"] != spec.owner or row["product"] != spec.product
+                or type(row["present"]) is not bool
+                or (row["present"] and (type(row["mode"]) is not int or not 0 <= row["mode"] <= 0o7777
+                    or row["mode"] & 0o7022
+                    or not isinstance(row["contentSha256"], str)
+                    or re.fullmatch(r"[a-f0-9]{64}", row["contentSha256"]) is None))
+                or (not row["present"] and (row["mode"] is not None or row["contentSha256"] is not None))):
+            raise ActivationError("stopped snapshot owned recovery binding drift")
+        _assert_browser_ancestor(paths, target, row["ancestor"])
+
+
+def validate_restored_browser_inventory(paths: ActivationPaths, rows: list[dict[str, Any]]) -> None:
+    specs = browser_recovery_specs(paths)
+    for row in rows:
+        target = Path(row["path"])
+        spec = specs.get(target)
+        if spec is None:
+            continue
+        _assert_browser_ancestor(paths, target, row["ancestor"])
+        if os.path.lexists(target) != row["present"]:
+            raise ActivationError("restored owned browser presence drift")
+        if row["present"]:
+            mode, digest = _browser_surface_hash(paths, target, spec, row["kind"])
+            if (mode, digest) != (row["mode"], row["contentSha256"]):
+                raise ActivationError("restored owned browser content drift")
+
+
+def recovery_open_files_argv(root: Path, *, directory: bool) -> tuple[str, ...]:
+    return ("/usr/sbin/lsof", "-nP", "-Fpn", *( ("+D", str(root)) if directory else ("--", str(root)) ))
 
 
 @dataclass(frozen=True)
@@ -1124,7 +1499,9 @@ def validate_release(
     if require_candidate_native_entrypoints:
         required_entrypoints.extend(
             (
-                release / "dist" / "infra" / "exec-approvals-inspection.js",
+                release / "dist" / "plugin-sdk" / "exec-approvals-runtime.js",
+                release / "dist" / "plugin-sdk" / "security-runtime.js",
+                release / "dist" / "commands" / "doctor.worker.js",
                 release
                 / "dist"
                 / "extensions"
@@ -1268,13 +1645,30 @@ def validate_snapshot_archive_members(
     paths: ActivationPaths,
     archive_path: Path,
     expected_current_target: str,
-) -> None:
-    """Reject any archive member outside the four stopped-snapshot surfaces."""
+    recovery_roots: list[dict[str, Any]] | None = None,
+    *, collect_inventory: bool = False, selected_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Reject members outside the exact stopped recovery generation."""
     state_root = str(paths.predecessor_state_dir).lstrip("/")
     gateway_plist = str(paths.gateway_plist).lstrip("/")
     node_plist = str(paths.node_plist).lstrip("/")
     current_link = str(paths.current_link).lstrip("/")
-    exact_roots = {state_root, gateway_plist, node_plist, current_link}
+    external = {str(row["path"]).lstrip("/"): row["kind"] for row in recovery_roots or []
+                if row.get("present", True)}
+    owned = {str(row["path"]).lstrip("/"): row for row in recovery_roots or [] if "owner" in row}
+    owned_entries: dict[str, list[dict[str, Any]]] = {name: [] for name in owned}
+    owned_metadata: list[tuple[str, str]] = []
+    directory_roots = {state_root, *(name for name, kind in external.items() if kind == "directory")}
+    exact_roots = {state_root, gateway_plist, node_plist, current_link, *external}
+    if selected_root is not None:
+        selected = str(selected_root).lstrip("/")
+        if external.get(selected) != "directory" or selected in owned:
+            raise ActivationError("private restore root is not an explicit captured directory")
+        external = {selected: "directory"}
+        owned = {}
+        owned_entries = {}
+        directory_roots = exact_roots = {selected}
+    inventory: dict[str, Any] = {}
     # macOS bsdtar encodes xattrs for an exact top-level surface as its sibling
     # AppleDouble member. These four derived names are metadata for the sealed
     # surfaces, not authority for any additional filesystem path.
@@ -1283,7 +1677,7 @@ def validate_snapshot_archive_members(
         for item in exact_roots
     }
     if (
-        len(exact_roots) != 4
+        len(exact_roots) != (1 if selected_root is not None else 4 + len(external))
         or any(not item for item in exact_roots)
         or not Path(expected_current_target).is_absolute()
     ):
@@ -1305,7 +1699,7 @@ def validate_snapshot_archive_members(
                     or not (
                         name in exact_roots
                         or name in appledouble_roots
-                        or name.startswith(f"{state_root}/")
+                        or any(name.startswith(f"{root}/") for root in directory_roots)
                     )
                     or not (member.isdir() or member.isfile() or member.issym() or member.islnk())
                 ):
@@ -1316,6 +1710,39 @@ def validate_snapshot_archive_members(
                     raise ActivationError(
                         "stopped snapshot archive inventory drift"
                     )
+                if name in external and (
+                    external[name] == "directory" and not member.isdir()
+                    or external[name] == "file" and not member.isfile()
+                ):
+                    raise ActivationError("stopped snapshot external root inventory drift")
+                for owned_root, row in owned.items():
+                    if name == owned_root or name.startswith(owned_root + "/"):
+                        if not row["present"]:
+                            raise ActivationError("absent owned browser surface is archived")
+                        if (member.uid != paths.operator_uid or member.issym() or member.islnk()
+                                or member.mode & 0o7022):
+                            raise ActivationError("owned browser archive ownership drift")
+                        if name == owned_root:
+                            if member.mode != row["mode"]:
+                                raise ActivationError("owned browser archive mode drift")
+                            if row["kind"] == "file":
+                                source = archive.extractfile(member)
+                                if source is None or member.size > 65536 or sha256_bytes(source.read()) != row["contentSha256"]:
+                                    raise ActivationError("owned browser archive content drift")
+                        else:
+                            relative = name[len(owned_root) + 1:]
+                            if row["kind"] != "directory" or "/" in relative or not member.isfile():
+                                raise ActivationError("owned browser archive member drift")
+                            if relative.startswith("._"):
+                                owned_metadata.append((owned_root, relative[2:]))
+                            else:
+                                source = archive.extractfile(member)
+                                if source is None or member.size > 65536:
+                                    raise ActivationError("owned browser archive content drift")
+                                payload = source.read()
+                                _browser_launcher_payload(paths, Path("/") / name, payload)
+                                owned_entries[owned_root].append({"name": relative, "mode": member.mode,
+                                                                 "sha256": sha256_bytes(payload)})
                 if name in (gateway_plist, node_plist) and not member.isfile():
                     raise ActivationError(
                         "stopped snapshot archive inventory drift"
@@ -1331,7 +1758,7 @@ def validate_snapshot_archive_members(
                     raise ActivationError(
                         "stopped snapshot archive inventory drift"
                     )
-                if member.issym() and name.startswith(f"{state_root}/"):
+                if member.issym() and any(name.startswith(f"{root}/") for root in directory_roots):
                     target = member.linkname
                     normalized_target = posixpath.normpath(
                         posixpath.join(posixpath.dirname(name), target)
@@ -1341,8 +1768,8 @@ def validate_snapshot_archive_members(
                         or (
                             not posixpath.isabs(target)
                             and not (
-                                normalized_target == state_root
-                                or normalized_target.startswith(f"{state_root}/")
+                                any(normalized_target == root or normalized_target.startswith(f"{root}/")
+                                    for root in directory_roots)
                             )
                         )
                     ):
@@ -1354,17 +1781,39 @@ def validate_snapshot_archive_members(
                     # member in this same state root may supply their inode.
                     target = member.linkname
                     if (
-                        not name.startswith(f"{state_root}/")
+                        not any(name.startswith(f"{root}/") for root in directory_roots)
                         or member.size != 0
                         or not target
                         or target.startswith("/")
                         or any(part in ("", ".", "..") for part in target.split("/"))
-                        or not target.startswith(f"{state_root}/")
+                        or not any(target.startswith(f"{root}/") for root in directory_roots)
                         or target not in regular_members
                     ):
                         raise ActivationError(
                             "stopped snapshot archive inventory drift"
                         )
+                if collect_inventory:
+                    # Full content, link topology and restorable metadata. atime
+                    # and ctime are inspection/inode lifecycle facts, not tar
+                    # restoration promises; every other PAX key is retained.
+                    payload_sha = None
+                    if member.isfile():
+                        source = archive.extractfile(member)
+                        if source is None:
+                            raise ActivationError("archive file payload unavailable")
+                        digest = hashlib.sha256()
+                        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                        payload_sha = digest.hexdigest()
+                    inventory[name] = {
+                        "type": member.type.hex(), "mode": member.mode,
+                        "uid": member.uid, "gid": member.gid,
+                        "uname": member.uname, "gname": member.gname,
+                        "mtime": member.mtime, "size": member.size,
+                        "linkname": member.linkname, "sha256": payload_sha,
+                        "pax": {key: value for key, value in member.pax_headers.items()
+                                if key not in {"atime", "ctime"}},
+                    }
                 seen.add(name)
                 if member.isfile():
                     regular_members.add(name)
@@ -1375,12 +1824,24 @@ def validate_snapshot_archive_members(
 
     if not exact_roots.issubset(seen):
         raise ActivationError("stopped snapshot archive inventory drift")
-    if any(
-        candidate.startswith(f"{link}/")
-        for link in link_members
-        for candidate in seen
-    ):
-        raise ActivationError("stopped snapshot archive inventory drift")
+    for name, row in owned.items():
+        if row["present"] and row["kind"] == "directory":
+            entries = sorted(owned_entries[name], key=lambda item: item["name"])
+            if sha256_bytes(json.dumps(entries, sort_keys=True).encode()) != row["contentSha256"]:
+                raise ActivationError("owned browser archive directory content drift")
+    if any(not any(entry["name"] == leaf for entry in owned_entries[root])
+           for root, leaf in owned_metadata):
+        raise ActivationError("owned browser archive metadata has no owned file")
+    # Check proper ancestors against the completed link set so tar member order
+    # cannot hide a descendant, without scanning every link/member pair.
+    for candidate in seen:
+        parent = posixpath.dirname(candidate)
+        while parent:
+            if parent in link_members:
+                raise ActivationError("stopped snapshot archive inventory drift")
+            parent = posixpath.dirname(parent)
+
+    return inventory if collect_inventory else None
 
 
 def recovered_invariants_content_view(value: dict[str, Any]) -> dict[str, Any]:
@@ -1522,8 +1983,8 @@ def resolve_upgrade_config(candidate: dict[str, Any], snapshot: dict[str, Any],
 
 
 def native_migration_schema_versions(release: Path) -> dict[str, int]:
-    entrypoint = release / "dist" / "infra" / "runtime-state-migration.js"
-    payload, info = read_physical(entrypoint, "native state migration entrypoint")
+    entrypoint = release / "dist" / "commands" / "doctor.worker.js"
+    payload, info = read_physical(entrypoint, "native Doctor entrypoint")
     package, _, _ = read_json(release / "package.json", "migration package")
     metadata = package.get("openclaw")
     versions = metadata.get("schemaVersions") if isinstance(metadata, dict) else None
@@ -1594,7 +2055,8 @@ def validate_plists(paths: ActivationPaths) -> dict[str, Any]:
     return result
 
 
-def expected_stopped_command_evidence(paths: ActivationPaths) -> list[dict[str, Any]]:
+def expected_stopped_command_evidence(paths: ActivationPaths,
+                                     recovery_inventory: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
     for label in (OPERATOR.require_string("runtime.gateway_label"), OPERATOR.require_string("runtime.node_label")):
         stderr = (
@@ -1610,13 +2072,22 @@ def expected_stopped_command_evidence(paths: ActivationPaths) -> list[dict[str, 
         ("/usr/sbin/lsof", "-nP", f"-iTCP:{runtime_gateway_port()}", "-sTCP:LISTEN", "-Fpn"),
         1, b"", b"", 0, False,
     ).evidence("gateway_listener_absence"))
+    rows = recovery_inventory if recovery_inventory is not None else recovery_open_file_inventory(paths)
+    for index, row in enumerate(rows):
+        if not row.get("present", True):
+            continue
+        evidence.append(CommandResult(
+            recovery_open_files_argv(Path(row["path"]), directory=row["kind"] == "directory"),
+            1, b"", b"", 0, False,
+        ).evidence(f"external_recovery_root_{index}_open_files_absence"))
     return evidence
 
 
-def validate_stopped_command_evidence(paths: ActivationPaths, value: Any) -> None:
+def validate_stopped_command_evidence(paths: ActivationPaths, value: Any,
+                                     recovery_inventory: list[dict[str, Any]] | None = None) -> None:
     if not isinstance(value, list):
         raise ActivationError("stopped snapshot command evidence drift")
-    expected = expected_stopped_command_evidence(paths)
+    expected = expected_stopped_command_evidence(paths, recovery_inventory)
     if len(value) != len(expected):
         raise ActivationError("stopped snapshot command evidence drift")
     for observed, required in zip(value, expected):
@@ -1663,10 +2134,15 @@ def load_stopped_snapshot(
         "gatewayPlistSha256",
         "nodePlistSha256",
     }
+    version = value.get("schemaVersion")
+    external_roots = value.get("recoveryRoots", [])
+    if version in (3, 4):
+        expected_manifest_keys.add("recoveryRoots")
+    validate_recovery_inventory(paths, external_roots, version)
     if (stat.S_IMODE(manifest_info.st_mode) != 0o400
             or set(value) != expected_manifest_keys
-            or value.get("schemaVersion") != 2
-            or value.get("inventoryCount") != 4
+            or version not in (2, 3, 4) or version == 2 and external_roots
+            or value.get("inventoryCount") != 4 + len(external_roots)
             or not archive_path.is_absolute() or not g6_path.is_absolute()
             or not isinstance(predecessor, dict)
             or value.get("predecessorStateDir") != str(paths.predecessor_state_dir)
@@ -1692,8 +2168,8 @@ def load_stopped_snapshot(
             or g6.get("archiveSha256") != archive_sha
             or not isinstance(g6.get("capturedAt"), str)):
         raise ActivationError("stopped snapshot observed quiescence drift")
-    validate_stopped_command_evidence(paths, g6.get("preCapture"))
-    validate_stopped_command_evidence(paths, g6.get("postCapture"))
+    validate_stopped_command_evidence(paths, g6.get("preCapture"), external_roots)
+    validate_stopped_command_evidence(paths, g6.get("postCapture"), external_roots)
     if (value.get("tarSha256") != archive_sha
             or value.get("g6QuiescenceSha256") != sha256_bytes(g6_payload)
             or (verify_predecessor_selector and (
@@ -1705,6 +2181,7 @@ def load_stopped_snapshot(
         paths,
         archive_path,
         str(predecessor.get("path", "")),
+        external_roots,
     )
     predecessor_path = Path(str(predecessor.get("path", "")))
     predecessor_commit = require_commit(str(predecessor.get("commit", "")), "snapshot predecessor commit")
@@ -1726,17 +2203,18 @@ def load_stopped_snapshot(
         "snapshotPath": str(archive_path),
         "snapshotSha256": archive_sha,
     }
-    return {"schemaVersion": 2,
+    return {"schemaVersion": version,
             "manifestPath": str(manifest_path), "manifestSha256": sha256_bytes(manifest_payload),
             "tarPath": str(archive_path), "tarSha256": archive_sha, "tarBytes": archive_info.st_size,
             "tarDevice": archive_info.st_dev, "tarInode": archive_info.st_ino,
-            "inventory": {"count": 4, "digest": archive_sha},
+            "inventory": {"count": 4 + len(external_roots), "digest": archive_sha},
             "g6QuiescencePath": str(g6_path), "g6QuiescenceSha256": sha256_bytes(g6_payload),
             "predecessorStateDir": str(paths.predecessor_state_dir), "candidateStateDir": str(paths.candidate_state_dir),
             "execApprovalsInspector": value["execApprovalsInspector"],
             "execApprovals": approvals,
             "recoveredInvariants": expected_invariants, "predecessor": rollback,
-            "gatewayPlistSha256": value["gatewayPlistSha256"], "nodePlistSha256": value["nodePlistSha256"]}
+            "gatewayPlistSha256": value["gatewayPlistSha256"], "nodePlistSha256": value["nodePlistSha256"],
+            **({"recoveryRoots": external_roots} if version in (3, 4) else {})}
 
 
 def run_bounded(argv: tuple[str, ...], timeout_seconds: float, *, cwd: Path | None = None,
@@ -1948,54 +2426,82 @@ class SystemBackend:
 
     def migrate_state_once(self, release: Path) -> dict[str, Any]:
         versions = native_migration_schema_versions(release)
-        entrypoint = release / "dist" / "infra" / "runtime-state-migration.js"
-        source = r"""
-import { pathToFileURL } from "node:url";
-try {
-  const { migrateRuntimeState } = await import(pathToFileURL(process.env.OPENCLAW_MIGRATION_ENTRYPOINT).href);
-  const report = await migrateRuntimeState({
-    stateDir: process.env.OPENCLAW_STATE_DIR,
-    configPath: process.env.OPENCLAW_CONFIG_PATH,
-  });
-  process.stdout.write(JSON.stringify(report));
-} catch {
-  process.stderr.write("Runtime state migration failed.\n");
-  process.exitCode = 1;
-}
-"""
         state = self.paths.candidate_state_dir
         environment = {
             "HOME": str(expected_gateway_working_directory(self.paths)),
             "PATH": str(self.paths.node.parent) + ":/usr/bin:/bin",
             "OPENCLAW_STATE_DIR": str(state),
             "OPENCLAW_CONFIG_PATH": str(state / "openclaw.json"),
-            "OPENCLAW_MIGRATION_ENTRYPOINT": str(entrypoint),
             "OPENCLAW_SUPERVISOR_MODE": "external",
             "OPENCLAW_SERVICE_REPAIR_POLICY": "external",
             "TMPDIR": str(state / "tmp"),
             "XDG_CACHE_HOME": str(state / ".cache"),
             "OPENCLAW_LOG_LEVEL": "silent",
+            "OPENCLAW_UPDATE_IN_PROGRESS": "1",
         }
-        result = run_bounded(
+        # Resolve the native receipt directory through its declared SDK owner.
+        # Doctor's writer requires this exact secure root and an exclusive UUID
+        # filename; a caller-chosen scratch directory is not interchangeable.
+        source = r"""
+import { pathToFileURL } from "node:url";
+const { resolvePreferredOpenClawTmpDir } = await import(
+  pathToFileURL(process.env.OPENCLAW_NATIVE_SECURITY_SDK).href
+);
+process.stdout.write(JSON.stringify({ root: resolvePreferredOpenClawTmpDir() }));
+"""
+        prepare = run_bounded(
             (str(self.paths.node), "--input-type=module", "--eval", source),
+            self.paths.command_timeout_seconds, cwd=release,
+            env={**environment, "OPENCLAW_NATIVE_SECURITY_SDK": str(
+                release / "dist" / "plugin-sdk" / "security-runtime.js")},
+        )
+        self.command_evidence.append(prepare.evidence("native_doctor_receipt_directory"))
+        if prepare.returncode != 0 or prepare.timed_out:
+            raise ActivationError("native Doctor receipt directory unavailable")
+        try:
+            directory = json.loads(prepare.stdout)["root"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ActivationError("native Doctor receipt directory contract drift") from exc
+        if not isinstance(directory, str) or not Path(directory).is_absolute():
+            raise ActivationError("native Doctor receipt directory contract drift")
+        receipt_path = Path(directory) / f"openclaw-update-doctor-{os.getpid()}-{uuid.uuid4()}.json"
+        if os.path.lexists(receipt_path):
+            raise ActivationError("native Doctor receipt already exists")
+        environment["OPENCLAW_UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH"] = str(receipt_path)
+        # --json is intentionally absent: in stable it selects read-only lint
+        # and refuses --repair. The native protected result file owns outcome.
+        result = run_bounded(
+            (str(self.paths.node), str(release / "openclaw.mjs"), "doctor",
+             "--repair", "--non-interactive", "--no-workspace-suggestions"),
             SNAPSHOT_TIMEOUT_SECONDS, cwd=release, env=environment,
         )
         self.command_evidence.append(result.evidence("native_state_migration"))
         if result.returncode != 0 or result.timed_out:
-            raise ActivationError("native state migration failed")
+            # No second Doctor or updater is admitted after an ambiguous or
+            # partial migration. The stopped recovery generation owns rollback.
+            raise ActivationError("native Doctor migration failed")
         try:
-            report = json.loads(result.stdout)
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise ActivationError("native state migration receipt is invalid") from exc
+            # Native POSIX temp roots may traverse the platform's /tmp alias.
+            # Keep its authored lexical path for Doctor admission, then bind
+            # the regular leaf and canonical physical identity for retention.
+            lexical_info = receipt_path.lstat()
+            physical_receipt = receipt_path.resolve(strict=True)
+            report, payload, info = read_json(physical_receipt, "native Doctor result")
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raise ActivationError("native Doctor migration receipt is invalid") from exc
         if (not isinstance(report, dict)
-                or set(report) != {"schemaVersion", "status", "stateSchemaVersion", "agentSchemaVersion", "agentDatabaseCount"}
-                or type(report.get("schemaVersion")) is not int or report["schemaVersion"] != 1
-                or report.get("status") != "completed"
-                or type(report.get("stateSchemaVersion")) is not int or report["stateSchemaVersion"] != versions["state"]
-                or type(report.get("agentSchemaVersion")) is not int or report["agentSchemaVersion"] != versions["agent"]
-                or type(report.get("agentDatabaseCount")) is not int or report["agentDatabaseCount"] < 0):
-            raise ActivationError("native state migration receipt contract drift")
-        return report
+                or not stat.S_ISREG(lexical_info.st_mode)
+                or (lexical_info.st_dev, lexical_info.st_ino) != (info.st_dev, info.st_ino)
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.geteuid()
+                or report.get("status") != "ok"
+                or report.get("maintenanceRefusal") is not None
+                or report.get("configWriteRefusal") is not None):
+            raise ActivationError("native Doctor migration receipt contract drift")
+        os.chmod(physical_receipt, 0o400)
+        return {"schemaVersion": 2, "status": "completed",
+                "declaredSchemaVersions": versions,
+                "doctorResultPath": str(physical_receipt),
+                "doctorResultSha256": sha256_bytes(payload), "doctor": report}
 
     def _print(self, label: str) -> CommandResult:
         result = run_bounded(
@@ -2028,9 +2534,29 @@ try {
         if (listener.timed_out or listener.returncode != 1
                 or listener.stdout != b"" or listener.stderr != b""):
             raise ActivationError("gateway listener exact stopped-state proof failed")
+        # These observations supplement settled native/plugin/app writer
+        # custody and Doctor's lease fences. An empty lsof result alone does
+        # not authorize another process to reopen a database during capture.
+        for index, row in enumerate(recovery_open_file_inventory(self.paths)):
+            if not row.get("present", True):
+                continue
+            observed = run_bounded(
+                recovery_open_files_argv(Path(row["path"]), directory=row["kind"] == "directory"),
+                self.paths.command_timeout_seconds,
+            )
+            self.command_evidence.append(observed.evidence(
+                f"external_recovery_root_{index}_open_files_absence"))
+            if (observed.timed_out or observed.returncode != 1
+                    or observed.stdout != b"" or observed.stderr != b""):
+                raise ActivationError("external recovery root is not quiescent")
 
     def inspect_exec_approvals(self, release: Path) -> dict[str, Any]:
-        inspector_path = release / "dist" / "infra" / "exec-approvals-inspection.js"
+        # New candidates publish the value-free inspector through the existing
+        # exec-approvals SDK owner. The pinned predecessor remains readable for
+        # stopped pre-migration/restore inspection using its historical owner.
+        legacy_inspector = release / "dist" / "infra" / "exec-approvals-inspection.js"
+        inspector_path = (legacy_inspector if legacy_inspector.is_file() else
+                          release / "dist" / "plugin-sdk" / "exec-approvals-runtime.js")
         inspector_payload, inspector_info = read_physical(
             inspector_path, "candidate exec approvals inspector"
         )
@@ -2077,84 +2603,69 @@ process.stdout.write(JSON.stringify(report));
         return validate_exec_approvals_inspection(receipt)
 
     def verify_candidate_discord(self, release: Path, config_path: Path) -> dict[str, Any]:
-        """Prove Discord is bundled and has no stale install record, without mutation."""
+        """Observe native registry provenance and the leased runtime inspection CLI."""
         before_payload, _ = read_physical(config_path, "runtime config")
-        source = r"""
-import fs from "node:fs";
-import { pathToFileURL } from "node:url";
-const root = process.env.OPENCLAW_CANDIDATE_ROOT;
-const moduleAt = (path) => import(pathToFileURL(`${root}/${path}`).href);
-const loadUniqueFacade = async (prefix, requiredExports) => {
-  // Split ESM chunks use .mjs in 2026.9.3; retain .js predecessor support.
-  const candidates = fs.readdirSync(`${root}/dist`)
-    .filter((name) =>
-      name.startsWith(prefix) && (name.endsWith(".js") || name.endsWith(".mjs")),
-    );
-  const matches = [];
-  for (const name of candidates) {
-    const module = await moduleAt(`dist/${name}`);
-    if (requiredExports.every((key) => typeof module[key] === "function")) {
-      matches.push(module);
-    }
-  }
-  if (matches.length !== 1) {
-    throw new Error(`candidate ${prefix} facade selection drift`);
-  }
-  return matches[0];
-};
-const { loadConfig } = await moduleAt("dist/config/config.js");
-const recordsApi = await loadUniqueFacade("installed-plugin-index-records-", [
-  "loadInstalledPluginIndexInstallRecords",
-]);
-const { loadPluginRegistryHandle } = await moduleAt("dist/plugins/loader.js");
-const config = loadConfig({ pin: false });
-const installed = await recordsApi.loadInstalledPluginIndexInstallRecords();
-if (Object.hasOwn(installed, "discord")) {
-  throw new Error("candidate retains a stale Discord install record");
-}
-const report = loadPluginRegistryHandle({
-  config,
-  cache: false,
-  onlyPluginIds: ["discord"],
-  throwOnLoadError: false,
-});
-const plugin = report.plugins.find((item) => item.id === "discord");
-process.stdout.write(JSON.stringify({
-  discordInstallRecordAbsent: true,
-  installedIds: Object.keys(installed).sort(),
-  plugin,
-}));
-"""
         environment = dict(os.environ)
         environment["OPENCLAW_STATE_DIR"] = str(self.paths.candidate_state_dir)
         environment["OPENCLAW_CONFIG_PATH"] = str(config_path)
-        environment["OPENCLAW_CANDIDATE_ROOT"] = str(release)
-        result = run_bounded(
-            (str(self.paths.node), "--input-type=module", "--eval", source),
-            self.paths.command_timeout_seconds, cwd=release, env=environment,
-        )
-        self.command_evidence.append(result.evidence("candidate_discord_verification"))
-        if result.returncode != 0 or result.timed_out:
-            raise ActivationError("candidate Discord verification failed")
-        try:
-            receipt = json.loads(result.stdout)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ActivationError("candidate Discord receipt malformed") from exc
+
+        def observe(purpose: str, *arguments: str) -> dict[str, Any]:
+            result = run_bounded(
+                (str(self.paths.node), str(release / "openclaw.mjs"), *arguments),
+                self.paths.command_timeout_seconds, cwd=release, env=environment,
+            )
+            self.command_evidence.append(result.evidence(purpose))
+            if result.returncode != 0 or result.timed_out:
+                raise ActivationError("candidate Discord verification failed")
+            try:
+                report = json.loads(result.stdout)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ActivationError("candidate Discord receipt malformed") from exc
+            if not isinstance(report, dict):
+                raise ActivationError("candidate Discord receipt malformed")
+            return report
+
+        registry = observe("candidate_discord_registry", "plugins", "registry", "--json")
+        current, persisted = registry.get("current"), registry.get("persisted")
+        if (not isinstance(registry.get("state"), str)
+                or registry["state"] not in {"fresh", "stale", "missing"}
+                or not isinstance(current, dict)
+                or type(current.get("version")) is not int or current["version"] != 1
+                or not isinstance(current.get("installRecords"), dict)
+                or any(not isinstance(record, dict) for record in current["installRecords"].values())
+                or "persisted" not in registry
+                or (registry["state"] == "missing") is not (persisted is None)
+                or (persisted is not None and (
+                    not isinstance(persisted, dict)
+                    or type(persisted.get("version")) is not int or persisted["version"] != 1
+                    or not isinstance(persisted.get("installRecords"), dict)
+                    or any(not isinstance(record, dict) for record in persisted["installRecords"].values())))):
+            raise ActivationError("candidate Discord install-record proof drift")
+        # The inspect command deliberately omits ambiguous package ownership.
+        # Only the native registry's full durable maps can prove key absence.
+        if ("discord" in current["installRecords"]
+                or persisted is not None and "discord" in persisted["installRecords"]):
+            raise ActivationError("candidate retains a stale Discord install record")
+        installed_ids = sorted(current["installRecords"])
+        receipt = observe("candidate_discord_verification", "plugins", "inspect", "discord", "--runtime", "--json")
+        plugin = receipt.get("plugin")
         after_payload, _ = read_physical(config_path, "runtime config")
-        installed_ids = receipt.get("installedIds") if isinstance(receipt, dict) else None
-        plugin = receipt.get("plugin") if isinstance(receipt, dict) else None
         expected_source = release / "dist" / "extensions" / "discord" / "index.js"
+        diagnostic_sets = (current.get("diagnostics"), receipt.get("diagnostics"))
         if (before_payload != after_payload
-                or receipt.get("discordInstallRecordAbsent") is not True
-                or not isinstance(installed_ids, list)
-                or any(not isinstance(plugin_id, str) for plugin_id in installed_ids)
-                or installed_ids != sorted(set(installed_ids))
-                or "discord" in installed_ids
-                or not isinstance(plugin, dict) or plugin.get("origin") != "bundled"
+                or not isinstance(plugin, dict) or plugin.get("id") != "discord"
+                or plugin.get("origin") != "bundled"
                 or Path(str(plugin.get("source", ""))) != expected_source
                 or plugin.get("status") != "loaded" or plugin.get("enabled") is not True
                 or plugin.get("error") not in (None, "")
-                or plugin.get("channelIds") != ["discord"]):
+                or plugin.get("channelIds") != ["discord"]
+                or "install" in receipt
+                or any(not isinstance(diagnostics, list) or any(
+                    not isinstance(diagnostic, dict)
+                    or not isinstance(diagnostic.get("level"), str)
+                    or diagnostic["level"] not in {"info", "warn"}
+                    or not isinstance(diagnostic.get("message"), str)
+                    for diagnostic in diagnostics) for diagnostics in diagnostic_sets)):
             raise ActivationError("candidate Discord source selection drift")
         return {"installRecordAbsent": True,
                 "installedIds": installed_ids,
@@ -2555,6 +3066,103 @@ def _release_lock(descriptor: int) -> None:
     os.close(descriptor)
 
 
+def _finalize_stopped_snapshot_archive(
+    paths: ActivationPaths,
+    output_root: Path,
+    manifest_path: Path,
+    backend: ActivationBackend,
+    *,
+    archive_path: Path,
+    archive_sha: str,
+    archive_info: os.stat_result,
+    predecessor: Path,
+    predecessor_record: dict[str, Any],
+    candidate_record: dict[str, Any],
+    plists: dict[str, Any],
+    external_roots: list[dict[str, Any]],
+    pre_capture: list[dict[str, Any]],
+    invariants: dict[str, Any],
+    inspection_release: Path,
+    approvals: dict[str, Any],
+) -> dict[str, Any]:
+    """Finish this captured operation under the caller's existing lock/custody.
+
+    Arguments are the actual retained capture values, not reconstructed receipts.
+    This private tail owns no retry, archive creation, or lifecycle admission.
+    """
+    observed_sha, observed_info = sha256_physical_file(
+        archive_path, "stopped snapshot archive"
+    )
+    if (
+        observed_sha != archive_sha
+        or _screen_capture_file_identity(observed_info)
+        != _screen_capture_file_identity(archive_info)
+        or stat.S_IMODE(observed_info.st_mode) != 0o400
+    ):
+        raise ActivationError("stopped snapshot captured archive binding drift")
+
+    post_start = len(backend.command_evidence)
+    backend.assert_gateway_and_node_stopped()
+    post_capture = list(backend.command_evidence[post_start:])
+    validate_stopped_command_evidence(paths, post_capture, external_roots)
+    post_approvals = backend.inspect_exec_approvals(inspection_release)
+    post_invariants = validate_recovered_invariants(paths)
+    post_plists = validate_plists(paths)
+    if (
+        post_approvals != approvals
+        or recovery_root_inventory(paths) != external_roots
+        or post_approvals["rawCasSha256"] != approvals["rawCasSha256"]
+        or post_invariants != invariants
+        or post_plists != plists
+        or not paths.current_link.is_symlink()
+        or os.readlink(paths.current_link) != str(predecessor)
+    ):
+        raise ActivationError("stopped snapshot protected surface drift")
+
+    g6_path = output_root / "stopped-quiescence.json"
+    g6 = {
+        "schemaVersion": 1,
+        "capturedAt": utc_now(),
+        "archivePath": str(archive_path),
+        "archiveSha256": archive_sha,
+        "preCapture": pre_capture,
+        "postCapture": post_capture,
+    }
+    create_immutable_file(
+        g6_path, json.dumps(g6, indent=2, sort_keys=True).encode() + b"\n"
+    )
+    g6_payload, _ = read_physical(g6_path, "stopped snapshot quiescence")
+    manifest = {
+        "schemaVersion": 4 if browser_recovery_specs(paths) else 3 if external_roots else 2,
+        "tarPath": str(archive_path),
+        "tarSha256": archive_sha,
+        "inventoryCount": 4 + len(external_roots),
+        "g6QuiescencePath": str(g6_path),
+        "g6QuiescenceSha256": sha256_bytes(g6_payload),
+        "predecessorStateDir": str(paths.predecessor_state_dir),
+        "candidateStateDir": str(paths.candidate_state_dir),
+        "currentTarget": str(predecessor),
+        "predecessor": predecessor_record,
+        "recoveredInvariants": invariants,
+        "execApprovalsInspector": exec_approvals_inspector_binding(
+            candidate_record, predecessor_record
+        ),
+        "execApprovals": approvals,
+        "gatewayPlistSha256": plists["gateway"]["sha256"],
+        "nodePlistSha256": plists["node"]["sha256"],
+        **({"recoveryRoots": external_roots} if external_roots else {}),
+    }
+    create_immutable_file(
+        manifest_path,
+        json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n",
+    )
+    observed = load_stopped_snapshot(paths, manifest_path, candidate_record)
+    return {
+        **observed,
+        "commandEvidence": list(backend.command_evidence),
+    }
+
+
 def create_stopped_snapshot(
     paths: ActivationPaths,
     output_root: Path,
@@ -2597,21 +3205,20 @@ def create_stopped_snapshot(
 
         evidence_start = len(backend.command_evidence)
         backend.assert_gateway_and_node_stopped()
+        external_roots = recovery_root_inventory(paths)
         pre_capture = list(backend.command_evidence[evidence_start:])
-        validate_stopped_command_evidence(paths, pre_capture)
+        validate_stopped_command_evidence(paths, pre_capture, external_roots)
         invariants = validate_recovered_invariants(paths)
         inspection_release = stopped_inspection_release(candidate_record, predecessor_record)
         approvals = backend.inspect_exec_approvals(inspection_release)
 
         archive_path = output_root / "stopped-snapshot.tar"
-        members = (
-            paths.predecessor_state_dir,
-            paths.gateway_plist,
-            paths.node_plist,
-            paths.current_link,
-        )
+        members = snapshot_members(paths, external_roots)
         if any(not member.is_absolute() for member in members):
             raise ActivationError("stopped snapshot member path drift")
+        if any(output_root.is_relative_to(member) for member in
+               (paths.predecessor_state_dir, *normalized_recovery_roots(paths))):
+            raise ActivationError("stopped snapshot output is inside a recovery root")
         tar_argv = (
             "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf",
             str(archive_path), "-C", "/", *(str(member).lstrip("/") for member in members),
@@ -2632,64 +3239,21 @@ def create_stopped_snapshot(
         if stat.S_IMODE(archive_info.st_mode) != 0o400:
             raise ActivationError("stopped snapshot archive mode drift")
 
-        post_start = len(backend.command_evidence)
-        backend.assert_gateway_and_node_stopped()
-        post_capture = list(backend.command_evidence[post_start:])
-        validate_stopped_command_evidence(paths, post_capture)
-        post_approvals = backend.inspect_exec_approvals(inspection_release)
-        post_invariants = validate_recovered_invariants(paths)
-        post_plists = validate_plists(paths)
-        if (
-            post_approvals != approvals
-            or post_approvals["rawCasSha256"] != approvals["rawCasSha256"]
-            or post_invariants != invariants
-            or post_plists != plists
-            or not paths.current_link.is_symlink()
-            or os.readlink(paths.current_link) != str(predecessor)
-        ):
-            raise ActivationError("stopped snapshot protected surface drift")
-
-        g6_path = output_root / "stopped-quiescence.json"
-        g6 = {
-            "schemaVersion": 1,
-            "capturedAt": utc_now(),
-            "archivePath": str(archive_path),
-            "archiveSha256": archive_sha,
-            "preCapture": pre_capture,
-            "postCapture": post_capture,
-        }
-        create_immutable_file(
-            g6_path, json.dumps(g6, indent=2, sort_keys=True).encode() + b"\n"
+        return _finalize_stopped_snapshot_archive(
+            paths, output_root, manifest_path, backend,
+            archive_path=archive_path,
+            archive_sha=archive_sha,
+            archive_info=archive_info,
+            predecessor=predecessor,
+            predecessor_record=predecessor_record,
+            candidate_record=candidate_record,
+            plists=plists,
+            external_roots=external_roots,
+            pre_capture=pre_capture,
+            invariants=invariants,
+            inspection_release=inspection_release,
+            approvals=approvals,
         )
-        g6_payload, _ = read_physical(g6_path, "stopped snapshot quiescence")
-        manifest = {
-            "schemaVersion": 2,
-            "tarPath": str(archive_path),
-            "tarSha256": archive_sha,
-            "inventoryCount": len(members),
-            "g6QuiescencePath": str(g6_path),
-            "g6QuiescenceSha256": sha256_bytes(g6_payload),
-            "predecessorStateDir": str(paths.predecessor_state_dir),
-            "candidateStateDir": str(paths.candidate_state_dir),
-            "currentTarget": str(predecessor),
-            "predecessor": predecessor_record,
-            "recoveredInvariants": invariants,
-            "execApprovalsInspector": exec_approvals_inspector_binding(
-                candidate_record, predecessor_record
-            ),
-            "execApprovals": approvals,
-            "gatewayPlistSha256": plists["gateway"]["sha256"],
-            "nodePlistSha256": plists["node"]["sha256"],
-        }
-        create_immutable_file(
-            manifest_path,
-            json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n",
-        )
-        observed = load_stopped_snapshot(paths, manifest_path, candidate_record)
-        return {
-            **observed,
-            "commandEvidence": list(backend.command_evidence),
-        }
     finally:
         _release_lock(descriptor)
 
@@ -3091,6 +3655,208 @@ def retire_terminal_receipts(
         _release_lock(descriptor)
 
 
+def _observe_restore_surfaces(paths: ActivationPaths, surface_paths: tuple[Path, ...],
+                              live_paths: tuple[Path, ...], browser_specs: dict,
+                              external_kinds: dict, lawful_selector_targets: set[str]) -> tuple[dict[str, Any], ...]:
+    observed: list[dict[str, Any]] = []
+    for index, path in enumerate(surface_paths):
+        spec = browser_specs.get(live_paths[index])
+        if spec is not None:
+            # Quarantine/partial names are not new ownership authority.
+            # Normal observation always addresses the declared live path.
+            if path != live_paths[index]:
+                raise ActivationError("owned browser observation path drift")
+            _owned_browser_ancestor(paths, path)
+            if not os.path.lexists(path):
+                observed.append({"path": str(path), "kind": "absent"})
+                continue
+            _, expected_kind = browser_recovery_target(spec)
+            mode, digest = _browser_surface_hash(paths, path, spec, expected_kind)
+            info = path.lstat()
+            observed.append({"path": str(path), "kind": expected_kind,
+                             "device": info.st_dev, "inode": info.st_ino,
+                             "mode": mode, "nlink": info.st_nlink,
+                             "contentSha256": digest})
+            continue
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            raise ActivationError("activation restore live surface unavailable") from exc
+        item: dict[str, Any] = {
+            "path": str(path),
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "mode": stat.S_IMODE(info.st_mode),
+            "nlink": info.st_nlink,
+        }
+        expected_kind = ("directory" if index == 0 else "file" if index in (1, 2)
+                         else "symlink" if index == 3 else external_kinds.get(str(path)))
+        if expected_kind == "directory":
+            if not stat.S_ISDIR(info.st_mode) or path.is_symlink():
+                raise ActivationError("activation restore state root drift")
+            item["kind"] = "directory"
+        elif expected_kind == "file":
+            payload, physical_info = read_physical(
+                path, "activation restore file surface"
+            )
+            if (not stat.S_ISREG(info.st_mode)
+                    or (physical_info.st_dev, physical_info.st_ino)
+                    != (info.st_dev, info.st_ino)):
+                raise ActivationError("activation restore file surface drift")
+            item.update({
+                "kind": "file",
+                "sha256": sha256_bytes(payload),
+                "bytes": len(payload),
+            })
+        elif expected_kind == "symlink":
+            if not path.is_symlink():
+                raise ActivationError("activation restore selector drift")
+            target = os.readlink(path)
+            if target not in lawful_selector_targets:
+                raise ActivationError("activation restore selector target drift")
+            item.update({"kind": "symlink", "target": target})
+        else:
+            raise ActivationError("activation restore recovery root kind drift")
+        observed.append(item)
+    return tuple(observed)
+
+
+
+def _restore_stopped_surfaces(paths: ActivationPaths, snapshot: dict[str, Any], backend: ActivationBackend,
+                              *, live_paths: tuple[Path, ...], browser_specs: dict,
+                              suffix: str, observe_live_preimage, verify_restored,
+                              archive_members: tuple[str, ...] = (),
+                              assert_scope_current=None) -> dict[str, Any]:
+    """One physical restore/compensation engine; callers establish purpose authority.
+
+    The activation caller retains its consumed-start/result fence. The private
+    rehearsal caller supplies one sealed captured directory, never live controls.
+    """
+    quarantines = tuple(item.with_name(f"{item.name}.failed-{suffix}") for item in live_paths)
+    partials = tuple(item.with_name(f"{item.name}.partial-{suffix}") for item in live_paths)
+    # No live preimage, including approvals state, is read until the caller's
+    # stopped seam is independently re-proven inside this locked command.
+    backend.assert_gateway_and_node_stopped()
+    if any(path.exists() or path.is_symlink() for path in (*quarantines, *partials)):
+        raise ActivationError("activation restore quarantine collision")
+    preimage_surfaces, preimage_invariants, preimage_approvals = (
+        observe_live_preimage()
+    )
+
+    processed_indices: list[int] = []
+    moved_indices: list[int] = []
+    restore_applied = False
+    post_extract_stopped = False
+    try:
+        for index, (path, quarantine) in enumerate(zip(live_paths, quarantines)):
+            if assert_scope_current is not None:
+                assert_scope_current()
+            observed = preimage_surfaces[index]
+            if observed["kind"] != "absent":
+                info = path.lstat()
+                if (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_nlink) != (
+                        observed["device"], observed["inode"], observed["mode"], observed["nlink"]):
+                    raise ActivationError("restore physical preimage changed before quarantine")
+            if path in browser_specs:
+                # Recheck the captured candidate identity/content at the
+                # actual rename. Earlier renamed launcher roots must not
+                # force a second manifest dependency lookup here.
+                _owned_browser_ancestor(paths, path)
+                if observed["kind"] == "absent":
+                    if os.path.lexists(path):
+                        raise ActivationError("owned browser preimage appeared before quarantine")
+                else:
+                    info = path.lstat()
+                    if ((info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_nlink)
+                            != (observed["device"], observed["inode"], observed["mode"], observed["nlink"])
+                            or path.is_symlink()):
+                        raise ActivationError("owned browser preimage changed before quarantine")
+                    if observed["kind"] == "directory":
+                        _, digest = _browser_surface_hash(paths, path, browser_specs[path], "directory")
+                    else:
+                        digest = sha256_bytes(_browser_owned_file(paths, path))
+                    if digest != observed["contentSha256"]:
+                        raise ActivationError("owned browser preimage changed before quarantine")
+            if observed["kind"] != "absent":
+                if os.path.lexists(quarantine):
+                    raise ActivationError("activation restore quarantine collision")
+                os.rename(path, quarantine)
+                moved_indices.append(index)
+                # The rename already changed the filesystem. Its following
+                # durability fence can fail, but compensation still owns it.
+                processed_indices.append(index)
+                fsync_directory(path.parent)
+            else:
+                processed_indices.append(index)
+        if assert_scope_current is not None:
+            assert_scope_current()
+        extracted = run_bounded(
+            (
+                "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-xpf",
+                snapshot["tarPath"], "-C", "/", *archive_members,
+            ),
+            SNAPSHOT_TIMEOUT_SECONDS,
+        )
+        backend.command_evidence.append(
+            extracted.evidence("stopped_snapshot_restore")
+        )
+        if extracted.returncode != 0 or extracted.timed_out:
+            raise ActivationError("stopped snapshot extraction failed")
+        backend.assert_gateway_and_node_stopped()
+        post_extract_stopped = True
+        if assert_scope_current is not None:
+            assert_scope_current()
+        verify_restored()
+        restore_applied = True
+    except BaseException:
+        cleanup_failed = False
+        if not post_extract_stopped:
+            try:
+                backend.assert_gateway_and_node_stopped()
+                post_extract_stopped = True
+            except BaseException:
+                cleanup_failed = True
+        if post_extract_stopped:
+            for index in reversed(processed_indices):
+                live = live_paths[index]
+                quarantine = quarantines[index]
+                partial = partials[index]
+                try:
+                    if live.exists() or live.is_symlink():
+                        if os.path.lexists(partial):
+                            raise ActivationError("activation restore partial collision")
+                        os.rename(live, partial)
+                    if index in moved_indices:
+                        if not os.path.lexists(quarantine):
+                            raise ActivationError("activation restore quarantine disappeared")
+                        os.rename(quarantine, live)
+                    if live.parent.exists():
+                        fsync_directory(live.parent)
+                except BaseException:
+                    cleanup_failed = True
+        preimage_confirmed = False
+        if not cleanup_failed:
+            try:
+                backend.assert_gateway_and_node_stopped()
+                observed_surfaces, observed_invariants, observed_approvals = (
+                    observe_live_preimage()
+                )
+                preimage_confirmed = (
+                    observed_surfaces == preimage_surfaces
+                    and observed_invariants == preimage_invariants
+                    and observed_approvals == preimage_approvals
+                )
+            except BaseException:
+                preimage_confirmed = False
+        return {"applied": False, "quarantines": (),
+                "outcome": "restore_failed_preimage_restored" if preimage_confirmed else "restore_failed_preimage_unconfirmed",
+                "error": "snapshot_restore_failed" if preimage_confirmed else "snapshot_restore_failed_preimage_unconfirmed",
+                "preimage_restored": preimage_confirmed}
+
+    return {"applied": True, "quarantines": tuple(quarantines[index] for index in moved_indices),
+            "outcome": "restored_stopped", "error": None, "preimage_restored": None}
+
+
 def restore_failed_activation(
     paths: ActivationPaths,
     candidate: Path,
@@ -3192,64 +3958,17 @@ def restore_failed_activation(
             )
             return receipt
 
-        live_paths = (
-            paths.predecessor_state_dir,
-            paths.gateway_plist,
-            paths.node_plist,
-            paths.current_link,
-        )
+        # Baseline-absent surfaces are still recovery targets: a failed setup
+        # may have created them. They have no archive member to extract.
+        live_paths = (paths.predecessor_state_dir, paths.gateway_plist, paths.node_plist,
+                      paths.current_link, *normalized_recovery_roots(paths))
+        browser_specs = browser_recovery_specs(paths)
+        external_kinds = {row["path"]: row["kind"] for row in snapshot.get("recoveryRoots", [])}
         suffix = expected_commit[:12]
-        quarantines = tuple(
-            item.with_name(f"{item.name}.failed-{suffix}") for item in live_paths
-        )
-        partials = tuple(
-            item.with_name(f"{item.name}.partial-{suffix}") for item in live_paths
-        )
         lawful_selector_targets = {
             str(candidate_record["path"]),
             str(predecessor["path"]),
         }
-
-        def observe_surfaces(surface_paths: tuple[Path, ...]) -> tuple[dict[str, Any], ...]:
-            observed: list[dict[str, Any]] = []
-            for index, path in enumerate(surface_paths):
-                try:
-                    info = os.lstat(path)
-                except OSError as exc:
-                    raise ActivationError("activation restore live surface unavailable") from exc
-                item: dict[str, Any] = {
-                    "path": str(path),
-                    "device": info.st_dev,
-                    "inode": info.st_ino,
-                    "mode": stat.S_IMODE(info.st_mode),
-                    "nlink": info.st_nlink,
-                }
-                if index == 0:
-                    if not stat.S_ISDIR(info.st_mode) or path.is_symlink():
-                        raise ActivationError("activation restore state root drift")
-                    item["kind"] = "directory"
-                elif index in (1, 2):
-                    payload, physical_info = read_physical(
-                        path, "activation restore file surface"
-                    )
-                    if (not stat.S_ISREG(info.st_mode)
-                            or (physical_info.st_dev, physical_info.st_ino)
-                            != (info.st_dev, info.st_ino)):
-                        raise ActivationError("activation restore file surface drift")
-                    item.update({
-                        "kind": "file",
-                        "sha256": sha256_bytes(payload),
-                        "bytes": len(payload),
-                    })
-                else:
-                    if not path.is_symlink():
-                        raise ActivationError("activation restore selector drift")
-                    target = os.readlink(path)
-                    if target not in lawful_selector_targets:
-                        raise ActivationError("activation restore selector target drift")
-                    item.update({"kind": "symlink", "target": target})
-                observed.append(item)
-            return tuple(observed)
 
         def observe_live_preimage() -> tuple[
             tuple[dict[str, Any], ...], dict[str, Any], dict[str, Any]
@@ -3258,44 +3977,14 @@ def restore_failed_activation(
                 # A failed migration may leave mixed schemas or invalid config.
                 # Preserve the complete physical preimage by rename; requiring
                 # either runtime to parse it would make recovery impossible.
-                return observe_surfaces(live_paths), {}, {}
+                return _observe_restore_surfaces(paths, live_paths, live_paths, browser_specs, external_kinds, lawful_selector_targets), {}, {}
             return (
-                observe_surfaces(live_paths),
+                _observe_restore_surfaces(paths, live_paths, live_paths, browser_specs, external_kinds, lawful_selector_targets),
                 validate_recovered_invariants(paths),
                 backend.inspect_exec_approvals(candidate),
             )
 
-        # No live preimage, including approvals state, is read until the caller's
-        # stopped seam is independently re-proven inside this locked command.
-        backend.assert_gateway_and_node_stopped()
-        if any(path.exists() or path.is_symlink() for path in (*quarantines, *partials)):
-            raise ActivationError("activation restore quarantine collision")
-        preimage_surfaces, preimage_invariants, preimage_approvals = (
-            observe_live_preimage()
-        )
-
-        moved_count = 0
-        restore_applied = False
-        post_extract_stopped = False
-        try:
-            for path, quarantine in zip(live_paths, quarantines):
-                os.rename(path, quarantine)
-                moved_count += 1
-                fsync_directory(path.parent)
-            extracted = run_bounded(
-                (
-                    "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-xpf",
-                    snapshot["tarPath"], "-C", "/",
-                ),
-                SNAPSHOT_TIMEOUT_SECONDS,
-            )
-            backend.command_evidence.append(
-                extracted.evidence("stopped_snapshot_restore")
-            )
-            if extracted.returncode != 0 or extracted.timed_out:
-                raise ActivationError("stopped snapshot extraction failed")
-            backend.assert_gateway_and_node_stopped()
-            post_extract_stopped = True
+        def verify_restored() -> None:
             restored_snapshot = load_stopped_snapshot(
                 paths,
                 snapshot_manifest,
@@ -3307,6 +3996,7 @@ def restore_failed_activation(
             restored_approvals = backend.inspect_exec_approvals(
                 stopped_inspection_release(candidate_record, predecessor)
             )
+            validate_restored_browser_inventory(paths, snapshot.get("recoveryRoots", []))
             if (
                 restored_snapshot != snapshot
                 or recovered_invariants_content_view(restored_invariants)
@@ -3319,56 +4009,16 @@ def restore_failed_activation(
                 )
             ):
                 raise ActivationError("restored snapshot binding drift")
-            restore_applied = True
-        except BaseException:
-            cleanup_failed = False
-            if not post_extract_stopped:
-                try:
-                    backend.assert_gateway_and_node_stopped()
-                    post_extract_stopped = True
-                except BaseException:
-                    cleanup_failed = True
-            if post_extract_stopped:
-                for index in range(moved_count - 1, -1, -1):
-                    live = live_paths[index]
-                    quarantine = quarantines[index]
-                    partial = partials[index]
-                    try:
-                        if live.exists() or live.is_symlink():
-                            os.rename(live, partial)
-                        if quarantine.exists() or quarantine.is_symlink():
-                            os.rename(quarantine, live)
-                        fsync_directory(live.parent)
-                    except BaseException:
-                        cleanup_failed = True
-            preimage_confirmed = False
-            if not cleanup_failed:
-                try:
-                    backend.assert_gateway_and_node_stopped()
-                    observed_surfaces, observed_invariants, observed_approvals = (
-                        observe_live_preimage()
-                    )
-                    preimage_confirmed = (
-                        observed_surfaces == preimage_surfaces
-                        and observed_invariants == preimage_invariants
-                        and observed_approvals == preimage_approvals
-                    )
-                except BaseException:
-                    preimage_confirmed = False
-            return terminal(
-                (
-                    "restore_failed_preimage_restored"
-                    if preimage_confirmed
-                    else "restore_failed_preimage_unconfirmed"
-                ),
-                (
-                    "snapshot_restore_failed"
-                    if preimage_confirmed
-                    else "snapshot_restore_failed_preimage_unconfirmed"
-                ),
-                restore_applied=False,
-                preimage_restored=preimage_confirmed,
-            )
+
+        physical = _restore_stopped_surfaces(
+            paths, snapshot, backend, live_paths=live_paths, browser_specs=browser_specs,
+            suffix=suffix, observe_live_preimage=observe_live_preimage, verify_restored=verify_restored,
+        )
+        if not physical["applied"]:
+            return terminal(physical["outcome"], physical["error"], restore_applied=False,
+                            preimage_restored=physical["preimage_restored"])
+        quarantines = physical["quarantines"]
+        restore_applied = True
 
         release = Path(predecessor["path"])
         outcome = "restored"
@@ -3404,6 +4054,315 @@ def restore_failed_activation(
         )
     finally:
         _release_lock(descriptor)
+
+
+PROJECTED_REHEARSAL_BINDING = "projected-rehearsal-binding.json"
+
+
+def _rehearsal_reference(path: Path) -> dict[str, str]:
+    digest, _ = sha256_physical_file(path, "projected rehearsal reference")
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ActivationError("projected rehearsal reference is not physical")
+    return {"path": str(path), "sha256": digest}
+
+
+def _read_rehearsal_reference(reference: Any, label: str) -> dict[str, Any]:
+    if (not isinstance(reference, dict) or set(reference) != {"path", "sha256"}
+            or not isinstance(reference["path"], str)
+            or re.fullmatch(r"[a-f0-9]{64}", str(reference["sha256"])) is None):
+        raise ActivationError(f"{label} reference is invalid")
+    path = Path(reference["path"])
+    if _rehearsal_reference(path) != reference:
+        raise ActivationError(f"{label} reference drift")
+    value, payload, _ = read_json(path, label)
+    if sha256_bytes(payload) != reference["sha256"]:
+        raise ActivationError(f"{label} reference drift")
+    return value
+
+
+def _rehearsal_directory(path: Path, uid: int) -> dict[str, int]:
+    if (not path.is_absolute() or path.resolve(strict=True) != path
+            or path == Path("/") or ".." in path.parts):
+        raise ActivationError("projected rehearsal directory is not physical")
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != uid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ActivationError("projected rehearsal directory custody drift")
+    return {"device": info.st_dev, "inode": info.st_ino, "ownerUid": info.st_uid}
+
+
+def _projected_rehearsal_paths(paths: ActivationPaths, descriptor_ref: dict,
+                               *, expected_root_identity: dict | None = None) -> tuple[ActivationPaths, dict, dict]:
+    descriptor = _read_rehearsal_reference(descriptor_ref, "native rehearsal descriptor")
+    projection = _read_rehearsal_reference(descriptor["nativeProjectionReceipt"], "native projection")
+    root = Path(descriptor["copiedStateRoot"])
+    identity = _rehearsal_directory(root, paths.operator_uid)
+    if (descriptor.get("schemaVersion") != 1
+            or projection.get("schemaVersion") != 1
+            or projection.get("operation") != "prepareUpdateCandidateRehearsal"
+            or projection.get("baselineSnapshot") != descriptor["baselineSnapshot"]
+            or projection.get("candidateSourceCommit") != descriptor["candidateSourceCommit"]
+            or projection.get("result", {}).get("stateDir") != str(root)
+            or identity != (expected_root_identity or descriptor["copyIdentity"])):
+        raise ActivationError("native projection/source baseline binding drift")
+    require_commit(descriptor["candidateSourceCommit"], "native candidate source")
+    home_ids = descriptor.get("expectedHomeIds")
+    homes = descriptor.get("homes")
+    if (not isinstance(home_ids, list) or not home_ids or len(set(home_ids)) != len(home_ids)
+            or not isinstance(homes, list) or len(homes) != len(home_ids)
+            or {home.get("id") for home in homes} != set(home_ids)):
+        raise ActivationError("native projected home set is incomplete")
+    for home in homes:
+        for key in ("copiedCodexHome", "copiedSqliteHome"):
+            copied = Path(home[key])
+            if copied.resolve(strict=True) != copied or root not in copied.parents:
+                raise ActivationError("native projected home escapes copied state")
+        for key in ("originalCodexHome", "originalSqliteHome"):
+            # Original locators are compared lexically, never opened here.
+            original = Path(home[key])
+            if (not original.is_absolute() or ".." in original.parts
+                    or root == original or root.is_relative_to(original) or original.is_relative_to(root)):
+                raise ActivationError("native projection overlaps original home")
+    augmented = replace(paths, recovery_roots=(*paths.recovery_roots, root))
+    if root not in normalized_recovery_roots(augmented) or root in normalized_recovery_roots(paths):
+        raise ActivationError("projected root is not one distinct recovery surface")
+    return augmented, descriptor, identity
+
+
+def _snapshot_member_inventory(paths: ActivationPaths, snapshot: dict) -> dict:
+    return validate_snapshot_archive_members(
+        paths, Path(snapshot["tarPath"]), snapshot["predecessor"]["path"],
+        snapshot.get("recoveryRoots", []), collect_inventory=True,
+    )
+
+
+def _projected_member_inventory(inventory: dict, root: Path) -> dict:
+    name = str(root).lstrip("/")
+    metadata = posixpath.join(posixpath.dirname(name), "._" + posixpath.basename(name))
+    # bsdtar extraction operands are matching patterns. This admission only
+    # supports literal-safe root spellings; spaces remain fully supported.
+    if not name or name.startswith("-") or any(char in name for char in "*?[]\\"):
+        raise ActivationError("projected root cannot be selected literally by tar")
+    selected = {key: fact for key, fact in inventory.items()
+                if key == name or key.startswith(name + "/") or key == metadata}
+    if name not in selected or selected[name]["type"] != tarfile.DIRTYPE.hex():
+        raise ActivationError("projected archive directory is missing")
+    for fact in selected.values():
+        if fact["type"] == tarfile.LNKTYPE.hex() and fact["linkname"] not in selected:
+            raise ActivationError("projected archive hardlink depends on another recovery root")
+    return selected
+
+
+def _archive_rehearsal_inventory(paths: ActivationPaths, snapshot: dict, backend: ActivationBackend,
+                                 proof_parent: Path, selected_root: Path | None = None) -> dict:
+    """Use the existing tar capture/validator owner for a full physical oracle.
+
+    Temporary verification archives are outside all recovery roots. No SQLite
+    connection, resource selection, service start or alternate restore occurs.
+    """
+    _rehearsal_directory(proof_parent, paths.operator_uid)
+    with tempfile.TemporaryDirectory(prefix="projected-verify-", dir=proof_parent) as temporary:
+        archive = Path(temporary) / "inventory.tar"
+        members = (selected_root,) if selected_root is not None else snapshot_members(paths, snapshot.get("recoveryRoots", []))
+        captured = run_bounded(("/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf",
+                                str(archive), "-C", "/", *(str(item).lstrip("/") for item in members)),
+                               SNAPSHOT_TIMEOUT_SECONDS)
+        backend.command_evidence.append(captured.evidence("projected_rehearsal_full_inventory"))
+        if captured.returncode != 0 or captured.timed_out:
+            raise ActivationError("projected rehearsal inventory capture failed")
+        return validate_snapshot_archive_members(
+            paths, archive, snapshot["predecessor"]["path"], snapshot.get("recoveryRoots", []),
+            collect_inventory=True, selected_root=selected_root,
+        )
+
+
+def create_projected_rehearsal_snapshot(paths: ActivationPaths, output_root: Path,
+                                        candidate: Path, expected_commit: str, candidate_seal: Path,
+                                        descriptor_ref: dict, backend: ActivationBackend) -> dict:
+    """Capture N2 through the same owner at actual original + private paths.
+
+    The unchanged native descriptor keeps N1 as baselineSnapshot. This receipt
+    links the additional private-path snapshot; it grants no activation authority.
+    """
+    augmented, native, identity = _projected_rehearsal_paths(paths, descriptor_ref)
+    if native["candidateSourceCommit"] != require_commit(expected_commit, "candidate commit"):
+        raise ActivationError("native projection candidate source does not match sealed runtime candidate")
+    candidate_record = validate_candidate_seal(paths, candidate, expected_commit, candidate_seal)
+    original = load_stopped_snapshot(paths, Path(native["baselineSnapshot"]["path"]), candidate_record)
+    if original["manifestSha256"] != native["baselineSnapshot"]["sha256"]:
+        raise ActivationError("original source snapshot reference drift")
+    manifest = output_root / "stopped-snapshot.json"
+    projected = create_stopped_snapshot(augmented, output_root, manifest, candidate,
+                                        expected_commit, candidate_seal, backend)
+    original_members = _snapshot_member_inventory(paths, original)
+    projected_members = _snapshot_member_inventory(augmented, projected)
+    selected = _projected_member_inventory(projected_members, Path(native["copiedStateRoot"]))
+    common = {key: fact for key, fact in projected_members.items() if key not in selected}
+    if common != original_members:
+        raise ActivationError("original source changed while creating private projection")
+    binding = {"schemaVersion": 1, "operation": "projectedRehearsalSnapshot",
+               "source": _rehearsal_reference(Path(__file__).resolve()),
+               "nativeDescriptor": descriptor_ref, "originalSourceBaseline": native["baselineSnapshot"],
+               "nativeProjectionReceipt": native["nativeProjectionReceipt"],
+               "projectedRecoverySnapshot": _rehearsal_reference(manifest),
+               "copiedStateRoot": native["copiedStateRoot"], "rootIdentityAtCapture": identity,
+               "selectedInventorySha256": sha256_bytes(canonical_json_bytes(selected)),
+               "originalInventorySha256": sha256_bytes(canonical_json_bytes(original_members)),
+               "scope": "private-projected-state-only"}
+    create_immutable_file(output_root / PROJECTED_REHEARSAL_BINDING,
+                          json.dumps(binding, indent=2, sort_keys=True).encode() + b"\n")
+    return {**binding, "binding": _rehearsal_reference(output_root / PROJECTED_REHEARSAL_BINDING)}
+
+
+def _load_projected_rehearsal_binding(paths: ActivationPaths, candidate: Path, expected_commit: str,
+                                      candidate_seal: Path, snapshot_ref: dict, descriptor_ref: dict,
+                                      *, expected_root_identity: dict | None = None) -> tuple:
+    augmented, native, identity = _projected_rehearsal_paths(
+        paths, descriptor_ref, expected_root_identity=expected_root_identity)
+    if native["candidateSourceCommit"] != require_commit(expected_commit, "candidate commit"):
+        raise ActivationError("native projection candidate source does not match sealed runtime candidate")
+    manifest = Path(snapshot_ref["path"])
+    binding_path = manifest.parent / PROJECTED_REHEARSAL_BINDING
+    binding, _, info = read_json(binding_path, "projected rehearsal binding")
+    if (stat.S_IMODE(info.st_mode) != 0o400
+            or binding.get("schemaVersion") != 1
+            or binding.get("operation") != "projectedRehearsalSnapshot"
+            or binding.get("scope") != "private-projected-state-only"
+            or binding.get("source") != _rehearsal_reference(Path(__file__).resolve())
+            or binding.get("projectedRecoverySnapshot") != snapshot_ref
+            or binding.get("nativeDescriptor") != descriptor_ref
+            or binding.get("originalSourceBaseline") != native["baselineSnapshot"]
+            or binding.get("nativeProjectionReceipt") != native["nativeProjectionReceipt"]
+            or binding.get("copiedStateRoot") != native["copiedStateRoot"]
+            or (expected_root_identity is None and binding.get("rootIdentityAtCapture") != identity)):
+        raise ActivationError("projected rehearsal scope/source binding drift")
+    _read_rehearsal_reference(snapshot_ref, "projected recovery snapshot")
+    candidate_record = validate_candidate_seal(paths, candidate, expected_commit, candidate_seal)
+    original = load_stopped_snapshot(paths, Path(native["baselineSnapshot"]["path"]), candidate_record)
+    projected = load_stopped_snapshot(augmented, manifest, candidate_record)
+    if original["manifestSha256"] != native["baselineSnapshot"]["sha256"]:
+        raise ActivationError("original source snapshot reference drift")
+    inventory = _snapshot_member_inventory(augmented, projected)
+    selected = _projected_member_inventory(inventory, Path(native["copiedStateRoot"]))
+    common = {key: fact for key, fact in inventory.items() if key not in selected}
+    if (common != _snapshot_member_inventory(paths, original)
+            or binding["originalInventorySha256"] != sha256_bytes(canonical_json_bytes(common))
+            or binding["selectedInventorySha256"] != sha256_bytes(canonical_json_bytes(selected))):
+        raise ActivationError("projected rehearsal archive inventory drift")
+    return augmented, native, binding, original, projected, selected
+
+
+def restore_projected_rehearsal(paths: ActivationPaths, candidate: Path, expected_commit: str,
+                                 candidate_seal: Path, snapshot_ref: dict, descriptor_ref: dict,
+                                 output: Path, backend: ActivationBackend) -> dict:
+    """Restore one sealed copied state root, never original controls or services."""
+    descriptor = _acquire_lock(paths)
+    try:
+        augmented, native, binding, original, projected, selected = _load_projected_rehearsal_binding(
+            paths, candidate, expected_commit, candidate_seal, snapshot_ref, descriptor_ref)
+        if getattr(backend, "paths", augmented) != augmented:
+            raise ActivationError("projected stopped observer scope drift")
+        proof_parent = Path(snapshot_ref["path"]).parent
+        if (output != proof_parent / "projected-restore-result.json"
+                or output.exists() or output.is_symlink()):
+            raise ActivationError("projected restore output binding drift")
+        root = Path(native["copiedStateRoot"])
+        parent_identity = _rehearsal_directory(root.parent, paths.operator_uid)
+        # The actual serving generation remains stopped and untouched. Capture
+        # every common surface before rename and again after physical restore.
+        backend.assert_gateway_and_node_stopped()
+        original_preimage = _archive_rehearsal_inventory(paths, original, backend, proof_parent)
+        if original_preimage != _snapshot_member_inventory(paths, original):
+            raise ActivationError("original generation changed before private restoration")
+        def observe_private():
+            physical = _observe_restore_surfaces(augmented, (root,), (root,), {}, {}, set())
+            current = _archive_rehearsal_inventory(augmented, projected, backend, proof_parent, root)
+            return physical, {"fullProjectedRoot": sha256_bytes(canonical_json_bytes(current))}, {}
+        def verify_private():
+            if (_rehearsal_directory(root.parent, paths.operator_uid) != parent_identity
+                    or _archive_rehearsal_inventory(augmented, projected, backend, proof_parent, root) != selected
+                    or _archive_rehearsal_inventory(paths, original, backend, proof_parent) != original_preimage):
+                raise ActivationError("projected restore full-content/nonselected-root drift")
+        root_member = str(root).lstrip("/")
+        # bsdtar consumes the validated AppleDouble sibling as metadata for
+        # this logical root. Naming that raw hidden member separately produces
+        # a false "not found" failure; full inventory still verifies its bytes.
+        members = (root_member,)
+        def assert_scope_current():
+            for reference in (binding["source"], descriptor_ref, native["baselineSnapshot"],
+                              native["nativeProjectionReceipt"], snapshot_ref):
+                if _rehearsal_reference(Path(reference["path"])) != reference:
+                    raise ActivationError("projected restore sealed input changed")
+            if sha256_physical_file(Path(projected["tarPath"]), "projected recovery archive")[0] != projected["tarSha256"]:
+                raise ActivationError("projected restore archive changed")
+        physical = _restore_stopped_surfaces(
+            augmented, projected, backend, live_paths=(root,), browser_specs={},
+            suffix=snapshot_ref["sha256"][:12], observe_live_preimage=observe_private,
+            verify_restored=verify_private, archive_members=("--", *members),
+            assert_scope_current=assert_scope_current,
+        )
+        result = {"schemaVersion": 1, "operation": "restoreProjectedRehearsal",
+                  "finishedAt": utc_now(), "outcome": physical["outcome"],
+                  "error": physical["error"], "restoreApplied": physical["applied"],
+                  "preimageRestored": physical["preimage_restored"],
+                  "snapshot": projected, "source": binding["source"],
+                  "nativeDescriptor": descriptor_ref, "originalSourceBaseline": native["baselineSnapshot"],
+                  "nativeProjectionReceipt": native["nativeProjectionReceipt"],
+                  "copiedStateRoot": str(root), "scope": binding["scope"],
+                  "fullProjectedInventorySha256": binding["selectedInventorySha256"] if physical["applied"] else None,
+                  "nonselectedGenerationUnchanged": physical["applied"],
+                  "restoredRootIdentity": _rehearsal_directory(root, paths.operator_uid) if physical["applied"] else None,
+                  "quarantinedFailedSurfaces": [str(item) for item in physical["quarantines"]],
+                  "commandEvidence": list(backend.command_evidence),
+                  "boundary": "projected native/OpenClaw state only; full app/resource/plist/browser generation restore remains separate"}
+        create_immutable_file(output, json.dumps(result, indent=2, sort_keys=True).encode() + b"\n")
+        return result
+    finally:
+        _release_lock(descriptor)
+
+
+def projected_rehearsal_validators(paths: ActivationPaths, candidate: Path, expected_commit: str,
+                                    candidate_seal: Path, backend: ActivationBackend):
+    """Same-owner closures for the external comparison callback; no new registry."""
+    def validate_snapshot(snapshot_ref: dict, descriptor_ref: dict) -> dict:
+        augmented, native, _, _, _, _ = _load_projected_rehearsal_binding(
+            paths, candidate, expected_commit, candidate_seal, snapshot_ref, descriptor_ref)
+        # The backend is constructed for the augmented paths by the caller; its
+        # stopped evidence must cover the exact copied root as well as original.
+        if getattr(backend, "paths", augmented) != augmented:
+            raise ActivationError("projected stopped observer scope drift")
+        backend.assert_gateway_and_node_stopped()
+        return {"projectedRecoverySnapshot": snapshot_ref,
+                "originalSourceBaseline": native["baselineSnapshot"],
+                "nativeProjectionReceipt": native["nativeProjectionReceipt"],
+                "nativeDescriptor": descriptor_ref, "copiedStateRoot": native["copiedStateRoot"],
+                "pathsAreExactCapturedPrivatePaths": True, "stopped": True}
+    def validate_restore(restore_ref: dict, snapshot_ref: dict) -> dict:
+        restored = _read_rehearsal_reference(restore_ref, "projected restore result")
+        augmented, native, binding, original, projected, selected = _load_projected_rehearsal_binding(
+            paths, candidate, expected_commit, candidate_seal, snapshot_ref, restored["nativeDescriptor"],
+            expected_root_identity=restored["restoredRootIdentity"])
+        if (restored.get("operation") != "restoreProjectedRehearsal"
+                or restored.get("outcome") != "restored_stopped" or restored.get("restoreApplied") is not True
+                or restored.get("scope") != "private-projected-state-only"
+                or restored.get("source") != binding["source"] or restored.get("snapshot") != projected
+                or restored.get("originalSourceBaseline") != native["baselineSnapshot"]
+                or restored.get("nativeProjectionReceipt") != native["nativeProjectionReceipt"]
+                or restored.get("nonselectedGenerationUnchanged") is not True
+                or restored.get("fullProjectedInventorySha256") != binding["selectedInventorySha256"]
+                or restored.get("copiedStateRoot") != native["copiedStateRoot"]):
+            raise ActivationError("projected restore result scope drift")
+        if getattr(backend, "paths", augmented) != augmented:
+            raise ActivationError("projected stopped observer scope drift")
+        backend.assert_gateway_and_node_stopped()
+        proof = Path(snapshot_ref["path"]).parent
+        if (_archive_rehearsal_inventory(augmented, projected, backend, proof, Path(native["copiedStateRoot"])) != selected
+                or _archive_rehearsal_inventory(paths, original, backend, proof) != _snapshot_member_inventory(paths, original)):
+            raise ActivationError("projected restored generation is no longer current")
+        return {"restoredSnapshot": snapshot_ref, "originalSourceBaseline": native["baselineSnapshot"],
+                "nativeProjectionReceipt": native["nativeProjectionReceipt"], "restoreReceipt": restore_ref,
+                "restoreApplied": True, "stopped": True}
+    return validate_snapshot, validate_restore
 
 
 def _fence_view(path: Path, bindings: dict[str, Any]) -> dict[str, Any]:
@@ -3686,11 +4645,16 @@ def live_paths() -> ActivationPaths:
     if OPERATOR.require_path("paths.host_home").resolve() != Path(account.pw_dir).resolve():
         raise ActivationError("operator home does not match the configured account")
     uid = account.pw_uid
+    recovery = OPERATOR.get("runtime.recovery_roots", [])
+    if not isinstance(recovery, list):
+        raise ActivationError("runtime.recovery_roots must contain inventoried roots")
+    recovery_inputs = [parse_recovery_root(root) for root in recovery]
     return ActivationPaths(OPERATOR.require_path("paths.runtime_releases_root"), OPERATOR.require_path("paths.runtime_current_link"), OPERATOR.require_path("paths.runtime_package_link"),
                            OPERATOR.require_path("paths.openclaw_cli"), OPERATOR.require_path("paths.gateway_plist"), OPERATOR.require_path("paths.node_plist"),
                            OPERATOR.require_path("paths.node_binary"), OPERATOR.require_path("paths.runtime_node_alias"), OPERATOR.require_path("paths.state_root"),
                            OPERATOR.require_path("paths.state_root"), OPERATOR.require_path("paths.activation_lock"), OPERATOR.require_path("paths.activation_result"), uid,
-                           screen_capture_binding=configured_screen_capture_binding())
+                           screen_capture_binding=configured_screen_capture_binding(),
+                           recovery_roots=tuple(recovery_inputs))
 
 
 def build_parser() -> argparse.ArgumentParser:

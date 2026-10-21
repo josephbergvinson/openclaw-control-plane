@@ -72,11 +72,12 @@ class OpenClawWeeklyArchiveBackupTests(unittest.TestCase):
             raise AssertionError("unsupported session fixture layout")
 
         for name in archive_backup.POLICY_FILES:
+            (workspace / name).parent.mkdir(parents=True, exist_ok=True)
             (workspace / name).write_text(
                 "{} fixture\n".format(name),
                 encoding="utf-8",
             )
-        (workspace / "runbook").mkdir()
+        (workspace / "runbook").mkdir(exist_ok=True)
         (workspace / "runbook/restore.md").write_text(
             "restore fixture\n",
             encoding="utf-8",

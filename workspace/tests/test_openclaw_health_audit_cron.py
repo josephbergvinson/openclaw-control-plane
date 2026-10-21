@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -198,81 +198,15 @@ Health
 │ Discord │ OK │ ok
 '''
 
-TASK_MAINTENANCE_OK = '''{
-  "mode": "apply",
-  "maintenance": {
-    "tasks": {"reconciled": 0, "recovered": 0, "cleanupStamped": 0, "pruned": 0},
-    "taskFlows": {"reconciled": 0, "pruned": 0}
-  },
-  "auditAfter": {
-    "total": 0,
-    "errors": 0,
-    "warnings": 0,
-    "byCode": {"stale_running": 0, "lost": 0, "delivery_failed": 0, "missing_cleanup": 0, "inconsistent_timestamps": 0},
-    "taskFlows": {"total": 0, "errors": 0, "warnings": 0, "byCode": {"stale_running": 0}}
-  }
-}'''
+NATIVE_RUN_HEALTH_OK = "{\"schemaVersion\": 1, \"ok\": true, \"checksRun\": 2, \"checksSkipped\": 0, \"findings\": []}"
 
-TASK_MAINTENANCE_TERMINAL_HISTORY = '''{
-  "mode": "apply",
-  "maintenance": {
-    "tasks": {"reconciled": 0, "recovered": 0, "cleanupStamped": 0, "pruned": 3},
-    "taskFlows": {"reconciled": 0, "pruned": 21}
-  },
-  "auditAfter": {
-    "total": 7,
-    "errors": 4,
-    "warnings": 3,
-    "byCode": {"stale_queued": 0, "stale_running": 0, "lost": 4, "delivery_failed": 1, "missing_cleanup": 0, "inconsistent_timestamps": 2},
-    "taskFlows": {"total": 0, "errors": 0, "warnings": 0, "byCode": {"restore_failed": 0, "stale_running": 0, "stale_waiting": 0, "stale_blocked": 0, "cancel_stuck": 0, "missing_linked_tasks": 0, "blocked_task_missing": 0, "inconsistent_timestamps": 0}}
-  }
-}'''
+NATIVE_RUN_HEALTH_INFORMATIONAL = "{\"schemaVersion\": 1, \"ok\": true, \"checksRun\": 2, \"checksSkipped\": 0, \"findings\": [{\"checkId\": \"core/doctor/gateway-health\", \"severity\": \"info\", \"message\": \"Retained completed history is not active work.\"}]}"
 
-TASK_MAINTENANCE_BLOCKED_FLOWS = '''{
-  "mode": "apply",
-  "maintenance": {
-    "tasks": {"reconciled": 0, "recovered": 0, "cleanupStamped": 0, "pruned": 3},
-    "taskFlows": {"reconciled": 0, "pruned": 21}
-  },
-  "auditAfter": {
-    "total": 16,
-    "errors": 4,
-    "warnings": 12,
-    "byCode": {"stale_queued": 0, "stale_running": 0, "lost": 4, "delivery_failed": 1, "missing_cleanup": 0, "inconsistent_timestamps": 2},
-    "taskFlows": {"total": 9, "errors": 0, "warnings": 9, "byCode": {"restore_failed": 0, "stale_running": 0, "stale_waiting": 0, "stale_blocked": 9, "cancel_stuck": 0, "missing_linked_tasks": 0, "blocked_task_missing": 0, "inconsistent_timestamps": 0}}
-  }
-}'''
+NATIVE_RUN_HEALTH_WARNING = "{\"schemaVersion\": 1, \"ok\": false, \"checksRun\": 2, \"checksSkipped\": 0, \"findings\": [{\"checkId\": \"core/doctor/codex-session-routes\", \"severity\": \"warning\", \"message\": \"Configured harness is unavailable.\"}]}"
 
-TASK_MAINTENANCE_UNKNOWN_CODE = '''{
-  "mode": "apply",
-  "maintenance": {
-    "tasks": {"reconciled": 0, "recovered": 0, "cleanupStamped": 0, "pruned": 0},
-    "taskFlows": {"reconciled": 0, "pruned": 0}
-  },
-  "auditAfter": {
-    "total": 2,
-    "errors": 2,
-    "warnings": 0,
-    "byCode": {"stale_queued": 0, "stale_running": 0, "lost": 0, "delivery_failed": 0, "missing_cleanup": 0, "inconsistent_timestamps": 0, "orphaned_admission": 2},
-    "taskFlows": {"total": 0, "errors": 0, "warnings": 0, "byCode": {"stale_running": 0}}
-  }
-}'''
+NATIVE_RUN_HEALTH_UNKNOWN_FINDING = "{\"schemaVersion\": 1, \"ok\": false, \"checksRun\": 2, \"checksSkipped\": 0, \"findings\": [{\"checkId\": \"future-owner/new-finding\", \"severity\": \"warning\", \"message\": \"Private diagnostic must not escape.\"}]}"
 
-TASK_MAINTENANCE_RESIDUE = '''{
-  "mode": "apply",
-  "maintenance": {
-    "tasks": {"reconciled": 0, "recovered": 0, "cleanupStamped": 0, "pruned": 0},
-    "taskFlows": {"reconciled": 0, "pruned": 0}
-  },
-  "auditAfter": {
-    "total": 436,
-    "errors": 9,
-    "warnings": 427,
-    "byCode": {"stale_running": 1, "lost": 8, "delivery_failed": 1, "missing_cleanup": 0, "inconsistent_timestamps": 426},
-    "taskFlows": {"total": 0, "errors": 0, "warnings": 0, "byCode": {"stale_running": 0}}
-  }
-}'''
-
+NATIVE_RUN_HEALTH_ERROR = "{\"schemaVersion\": 1, \"ok\": false, \"checksRun\": 2, \"checksSkipped\": 0, \"findings\": [{\"checkId\": \"core/doctor/codex-session-routes\", \"severity\": \"error\", \"message\": \"Configured harness failed.\"}]}"
 
 class OpenClawHealthAuditCronTests(unittest.TestCase):
     def setUp(self):
@@ -301,8 +235,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -315,7 +249,7 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
         self.assertEqual(
             output,
             "OpenClaw's daily health audit passed. The gateway and Discord are reachable, "
-            'the security audit found no new unapproved issues, and task-ledger maintenance completed cleanly.',
+            'the security audit found no new unapproved issues, and the native runtime and harness checks completed cleanly.',
         )
         self.assert_public_prose(output)
         self.assertNotIn('WARN Insecure', output)
@@ -325,8 +259,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             cron.CommandResult(1, 'private gateway diagnostic'),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -346,8 +280,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -370,8 +304,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, audit),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
-            cron.CommandResult(0, TASK_MAINTENANCE_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -393,8 +327,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             ('status', '--deep'): STATUS_DEEP_OK,
             ('security', 'audit', '--json'): SECURITY_AUDIT_DISCORD_BROAD_MEMBERS,
             ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_DISCORD_BROAD_MEMBERS,
-            ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
-            ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+            tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
+            tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
             ('cron', 'status', '--json'): json.dumps({'enabled': True, 'triggersEnabled': True}),
             ('cron', 'list', '--all', '--json'): json.dumps({'jobs': [
                 dict(id=job_id, enabled=True, state=dict(
@@ -427,16 +361,16 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                         'broad member access in allowlisted Discord groups (warning). ' + SECURITY_ONLY_OUTCOME,
                     )
                     self.assert_public_prose(output)
-                    self.assertEqual(runner.call_count, 5 + int(weekly) + 2 * int(maintenance))
+                    self.assertEqual(runner.call_count, 4 + int(weekly) + 2 * int(maintenance))
 
-    def test_terminal_history_inside_retention_does_not_alert(self):
+    def test_native_informational_findings_do_not_alert(self):
         """Finished rows waiting out their cleanup window are not the operator's problem."""
         run_results = [
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_TERMINAL_HISTORY),
-            cron.CommandResult(0, TASK_MAINTENANCE_TERMINAL_HISTORY),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_INFORMATIONAL),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_INFORMATIONAL),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -463,8 +397,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                  cron.CommandResult(0, STATUS_DEEP_OK),
                  cron.CommandResult(0, normal),
                  cron.CommandResult(0, deep),
-                 cron.CommandResult(0, TASK_MAINTENANCE_OK),
-                 cron.CommandResult(0, TASK_MAINTENANCE_OK),
+                 cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
+                 cron.CommandResult(0, NATIVE_RUN_HEALTH_OK),
              ]):
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -475,21 +409,15 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
         self.assertNotIn('private', buf.getvalue())
         self.assert_public_prose(buf.getvalue())
 
-    def test_blocked_task_flows_are_reported_because_nothing_prunes_them(self):
-        """A blocked TaskFlow is not history: it is residue that only grows.
-
-        Maintenance prunes a flow only once its status is succeeded, failed,
-        cancelled, or lost. 'blocked' is none of those, so a blocked flow is
-        never pruned and its finding never ages out. Counting it as terminal
-        history would hide a set that can only get larger.
-        """
+    def test_native_runtime_harness_warning_is_reported(self):
+        """A current harness warning must remain visible without a repair loop."""
         run_results = [
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_BLOCKED_FLOWS),
-            cron.CommandResult(0, TASK_MAINTENANCE_BLOCKED_FLOWS),
-            cron.CommandResult(0, TASK_MAINTENANCE_BLOCKED_FLOWS),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_WARNING),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_WARNING),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_WARNING),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -499,8 +427,8 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
 
         output = buf.getvalue().strip()
         self.assertEqual(rc, 1)
-        self.assertIn('task-ledger maintenance left active residue', output)
-        # The finished task rows alongside them are still not named.
+        self.assertIn('native run health check did not complete cleanly', output)
+        # Public reporting names the failed surface without private diagnostics.
         self.assertNotIn('lost=', output)
         self.assert_public_prose(output)
 
@@ -510,9 +438,9 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_UNKNOWN_CODE),
-            cron.CommandResult(0, TASK_MAINTENANCE_UNKNOWN_CODE),
-            cron.CommandResult(0, TASK_MAINTENANCE_UNKNOWN_CODE),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_UNKNOWN_FINDING),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_UNKNOWN_FINDING),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_UNKNOWN_FINDING),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -522,17 +450,17 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
 
         output = buf.getvalue().strip()
         self.assertEqual(rc, 1)
-        self.assertIn('task-ledger maintenance left active residue', output)
+        self.assertIn('native run health check did not complete cleanly', output)
         self.assertNotIn('orphaned_admission', output)
 
-    def test_repairable_residue_after_two_apply_passes_still_alerts(self):
+    def test_native_runtime_harness_error_still_alerts(self):
         run_results = [
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_RESIDUE),
-            cron.CommandResult(0, TASK_MAINTENANCE_RESIDUE),
-            cron.CommandResult(0, TASK_MAINTENANCE_RESIDUE),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_ERROR),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_ERROR),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_ERROR),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results):
@@ -542,19 +470,19 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
 
         output = buf.getvalue().strip()
         self.assertEqual(rc, 1)
-        self.assertIn('task-ledger maintenance left active residue', output)
+        self.assertIn('native run health check did not complete cleanly', output)
         self.assertNotIn('stale_running', output)
         self.assertNotIn('lost=', output)
         self.assertNotIn('inconsistent_timestamps', output)
 
-    def test_second_apply_pass_runs_when_the_first_leaves_repairable_residue(self):
+    def test_native_health_failure_never_runs_an_automatic_repair(self):
         run_results = [
             cron.CommandResult(0, GATEWAY_STATUS_OK),
             cron.CommandResult(0, STATUS_DEEP_OK),
             cron.CommandResult(0, SECURITY_AUDIT_ACCEPTED),
-            cron.CommandResult(0, TASK_MAINTENANCE_RESIDUE),
-            cron.CommandResult(0, TASK_MAINTENANCE_RESIDUE),
-            cron.CommandResult(0, TASK_MAINTENANCE_TERMINAL_HISTORY),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_ERROR),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_ERROR),
+            cron.CommandResult(0, NATIVE_RUN_HEALTH_INFORMATIONAL),
         ]
         with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
              mock.patch.object(cron, 'run', side_effect=run_results) as runner:
@@ -563,12 +491,12 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
                 rc = cron.main([])
 
         output = buf.getvalue().strip()
-        self.assertEqual(rc, 0)
-        self.assertIn("OpenClaw's daily health audit passed", output)
+        self.assertEqual(rc, 1)
+        self.assertIn("native run health check did not complete cleanly", output)
         apply_calls = [
             call for call in runner.call_args_list if '--apply' in call.args[0]
         ]
-        self.assertEqual(len(apply_calls), 2)
+        self.assertEqual(len(apply_calls), 0)
         self.assertNotIn('flow_pruned', output)
 
     def test_missing_openclaw_binary_reports_prereq_missing(self):
@@ -591,16 +519,15 @@ class OpenClawHealthAuditCronTests(unittest.TestCase):
             'status --deep': (0, STATUS_DEEP_OK),
             'security audit --json': (0, SECURITY_AUDIT_LIVE),
             'security audit --deep --json': (0, SECURITY_AUDIT_LIVE),
-            'tasks maintenance --json': (0, TASK_MAINTENANCE_OK),
-            'tasks maintenance --apply --json': (0, TASK_MAINTENANCE_TERMINAL_HISTORY),
+            ' '.join(cron.NATIVE_RUN_HEALTH_ARGS): (0, NATIVE_RUN_HEALTH_INFORMATIONAL),
         }
         cases = [
-            ('accepted warnings and terminal history', None, None, 0, 'health audit passed'),
+            ('accepted security and native informational finding', None, None, 0, 'health audit passed'),
             ('accepted rendered fallback', 'security audit --json', (1, 'private diagnostic'), 0, 'health audit passed'),
             ('Google account failure', None, None, 1, 'Google exact-account refresh rejected'),
             ('gateway failure', 'gateway status', (7, 'private diagnostic'), 1, 'gateway RPC check failed'),
             ('runtime timeout', 'status --deep', (124, 'private diagnostic'), 1, 'full runtime and Discord check did not complete'),
-            ('maintenance failure', 'tasks maintenance --apply --json', (7, 'private diagnostic'), 1, 'task-ledger maintenance did not complete'),
+            ('native health failure', ' '.join(cron.NATIVE_RUN_HEALTH_ARGS), (7, 'private diagnostic'), 1, 'native run health check did not complete cleanly'),
             ('deep audit failure', 'security audit --deep --json', (7, 'private diagnostic'), 1, 'deep security check did not complete'),
             ('intentional shared sessions', 'security audit --json',
              (0, security_audit_json([CROSS_AGENT_SESSIONS] + ACCEPTED_FIVE)),
@@ -811,8 +738,8 @@ class ScopedCompanyAlphaAcceptanceTests(unittest.TestCase):
                         ('status', '--deep'): STATUS_DEEP_OK,
                         ('security', 'audit', '--json'): company_alpha_audit_json(),
                         ('security', 'audit', '--deep', '--json'): company_alpha_audit_json(),
-                        ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
-                        ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+                        tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
+                        tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
                     }[args]
                     return cron.CommandResult(0, response)
                 with mock.patch.object(cron, 'resolve_openclaw_bin', return_value='/bin/openclaw'), \
@@ -1139,16 +1066,16 @@ class SecurityFailurePresentationTests(unittest.TestCase):
         arguments = dict(
             weekly=True, gateway_ok=True, status_ok=True,
             security_problems=['the security audit found issues requiring review'],
-            deep_security_ok=True, task_maintenance_blocker=None,
+            deep_security_ok=True, native_run_health_blocker=None,
         )
         cases = [
             ({'gateway_ok': False}, 'gateway RPC check failed'),
             ({'status_ok': False}, 'full runtime and Discord check did not complete'),
             ({'deep_security_ok': False}, 'deep security check did not complete'),
-            ({'task_maintenance_blocker': 'task_maintenance_apply=private diagnostic'},
-             'task-ledger maintenance did not complete'),
-            ({'task_maintenance_blocker': 'task_ledger_repair_incomplete private diagnostic'},
-             'task-ledger maintenance left active residue'),
+            ({'native_run_health_blocker': 'native_check_failed private diagnostic'},
+             'native run health check did not complete cleanly'),
+            ({'native_run_health_blocker': 'native_run_health_findings private diagnostic'},
+             'native run health check did not complete cleanly'),
             ({'security_problems': []}, 'one or more required checks did not complete'),
         ]
         for changes, problem in cases:
@@ -1410,6 +1337,53 @@ class SecurityFindingsAreNamedAndAcceptedPerSeverity(unittest.TestCase):
         self.assertEqual(blocker, 'security_findings_unavailable')
 
 
+class NativeRunHealthContractTests(unittest.TestCase):
+    def test_uses_only_native_readonly_health_owners_once(self):
+        with mock.patch.object(cron, 'run', return_value=cron.CommandResult(0, NATIVE_RUN_HEALTH_INFORMATIONAL)) as runner:
+            note, blocker = cron.run_native_run_health('/fixture/openclaw')
+        self.assertIsNone(blocker)
+        self.assertIn('checks=2', note)
+        runner.assert_called_once_with(['/fixture/openclaw', *cron.NATIVE_RUN_HEALTH_ARGS], timeout=180)
+
+    def test_native_only_exclusions_do_not_fail_completed_selected_checks(self):
+        original = json.loads(NATIVE_RUN_HEALTH_OK)
+        for skipped in (0, 1, 66):
+            with self.subTest(skipped=skipped), mock.patch.object(
+                cron, 'run', return_value=cron.CommandResult(0, json.dumps({**original, 'checksSkipped': skipped})),
+            ) as runner:
+                note, blocker = cron.run_native_run_health('/fixture/openclaw')
+            self.assertIsNone(blocker)
+            self.assertIn('checks=2', note)
+            runner.assert_called_once_with(['/fixture/openclaw', *cron.NATIVE_RUN_HEALTH_ARGS], timeout=180)
+
+    def test_absent_or_malformed_selected_coverage_never_passes(self):
+        original = json.loads(NATIVE_RUN_HEALTH_OK)
+        invalid = [None, {}, {**original, 'schemaVersion': True},
+                   {**original, 'checksRun': 1}, {**original, 'checksRun': 3}, {**original, 'checksRun': True},
+                   {**original, 'checksSkipped': -1}, {**original, 'checksSkipped': False},
+                   {**original, 'ok': 'true'}, {**original, 'warnings': 'warning'},
+                   {**original, 'findings': [None]},
+                   {**original, 'findings': [{'checkId': 'future/check', 'severity': 'novel', 'message': 'private'}]}]
+        for payload in invalid:
+            with self.subTest(payload=payload), mock.patch.object(cron, 'run', return_value=cron.CommandResult(0, json.dumps(payload))):
+                note, blocker = cron.run_native_run_health('/fixture/openclaw')
+            self.assertEqual('native_run_health_unparseable', blocker)
+            self.assertNotIn('private', note)
+
+    def test_warning_outside_findings_and_nonzero_exit_remain_failures(self):
+        original = json.loads(NATIVE_RUN_HEALTH_OK)
+        warning = {'checkId': 'future/check', 'severity': 'warning', 'message': '/private/provider-detail'}
+        for result in (
+            cron.CommandResult(0, json.dumps({**original, 'warnings': [warning]})),
+            cron.CommandResult(0, json.dumps({**original, 'ok': False})),
+            cron.CommandResult(7, NATIVE_RUN_HEALTH_OK),
+        ):
+            with self.subTest(result=result), mock.patch.object(cron, 'run', return_value=result):
+                note, blocker = cron.run_native_run_health('/fixture/openclaw')
+            self.assertIsNotNone(blocker)
+            self.assertNotIn('provider-detail', note)
+
+
 class JsonCommandFramingTests(unittest.TestCase):
     # The natural 2026-09-29 audit appended this diagnostic shape to valid
     # maintenance JSON. Its nested object made the combined stream unparseable.
@@ -1419,17 +1393,17 @@ class JsonCommandFramingTests(unittest.TestCase):
         'integrityGateOutcome=healthy integrityGateMs=23677'
     )
 
-    def test_maintenance_reads_json_stdout_without_structured_stderr(self):
+    def test_native_health_reads_json_stdout_without_structured_stderr(self):
         with tempfile.TemporaryDirectory() as raw:
             fake_cli = Path(raw) / 'openclaw-fixture'
             fake_cli.write_text(
                 '#!/usr/bin/env python3\nimport sys\n'
-                f'print({TASK_MAINTENANCE_OK!r})\n'
+                f'print({NATIVE_RUN_HEALTH_OK!r})\n'
                 f'print({self.diagnostic!r}, file=sys.stderr)\n',
                 encoding='utf-8',
             )
             fake_cli.chmod(0o700)
-            _, blocker = cron.run_task_ledger_maintenance(str(fake_cli))
+            _, blocker = cron.run_native_run_health(str(fake_cli))
         self.assertIsNone(blocker)
 
     def test_stderr_cannot_supply_missing_or_invalid_json_stdout(self):
@@ -1437,7 +1411,7 @@ class JsonCommandFramingTests(unittest.TestCase):
             with self.subTest(stdout=stdout):
                 result = cron.run([
                     sys.executable, '-c',
-                    f'import sys; print({stdout!r}); print({TASK_MAINTENANCE_OK!r}, file=sys.stderr)',
+                    f'import sys; print({stdout!r}); print({NATIVE_RUN_HEALTH_OK!r}, file=sys.stderr)',
                     '--json',
                 ])
                 self.assertEqual(result.returncode, 0)
@@ -1446,7 +1420,7 @@ class JsonCommandFramingTests(unittest.TestCase):
     def test_failed_json_command_keeps_diagnostics_and_failure(self):
         result = cron.run([
             sys.executable, '-c',
-            f'import sys; print({TASK_MAINTENANCE_OK!r}); print("required write failed", file=sys.stderr); sys.exit(7)',
+            f'import sys; print({NATIVE_RUN_HEALTH_OK!r}); print("required write failed", file=sys.stderr); sys.exit(7)',
             '--json',
         ])
         self.assertEqual(result.returncode, 7)
@@ -1615,8 +1589,8 @@ class GoogleAccountHealthTests(unittest.TestCase):
             ('status', '--deep'): STATUS_DEEP_OK,
             ('security', 'audit', '--json'): SECURITY_AUDIT_ACCEPTED,
             ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_ACCEPTED,
-            ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
-            ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+            tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
+            tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
         }
         for weekly in (False, True):
             with self.subTest(weekly=weekly), \
@@ -1699,8 +1673,8 @@ def test_headroom_attention_keeps_daily_and_weekly_health_audits_failed():
                 ('status', '--deep'): STATUS_DEEP_OK,
                 ('security', 'audit', '--json'): SECURITY_AUDIT_ACCEPTED,
                 ('security', 'audit', '--deep', '--json'): SECURITY_AUDIT_ACCEPTED,
-                ('tasks', 'maintenance', '--json'): TASK_MAINTENANCE_OK,
-                ('tasks', 'maintenance', '--apply', '--json'): TASK_MAINTENANCE_OK,
+                tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
+                tuple(cron.NATIVE_RUN_HEALTH_ARGS): NATIVE_RUN_HEALTH_OK,
                 ('cron', 'status', '--json'): json.dumps({'enabled': True, 'triggersEnabled': True}),
                 ('cron', 'list', '--all', '--json'): json.dumps({'jobs': jobs}),
             }
@@ -1720,7 +1694,7 @@ def test_headroom_attention_keeps_daily_and_weekly_health_audits_failed():
                 assert rc == 1
                 assert output == (
                     f"OpenClaw's {audit_name} needs attention: storage headroom needs attention. "
-                    'Runtime checks and task-ledger maintenance passed.'
+                    'Runtime and native run health checks passed.'
                 )
             else:
                 assert rc == 0
@@ -1728,4 +1702,65 @@ def test_headroom_attention_keeps_daily_and_weekly_health_audits_failed():
                 assert 'needs attention' not in output
             assert 'private diagnostic' not in output
             assert 'fixture-secret' not in output
-            assert runner.call_count == 7 + int(weekly)
+            assert runner.call_count == 6 + int(weekly)
+
+
+class CapabilityProcessEvidenceTests(unittest.TestCase):
+    def read_evidence(self, classification, result=None, *, probe_result=None, check='registered_instance_read'):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            cron.retain_capability_process_evidence(check, classification, result,
+                                                   probe_result=probe_result)
+        self.assertEqual(out.getvalue(), '')
+        self.assertNotIn('fixture-secret', err.getvalue())
+        prefix = 'OPENCLAW_HEALTH_AUDIT_CAPABILITY_RESULT '
+        self.assertTrue(err.getvalue().startswith(prefix))
+        return json.loads(err.getvalue()[len(prefix):])
+
+    def test_retains_only_fixed_enums_and_numeric_exit_status(self):
+        result = capability_resolver.ProbeCommandResult(1, 'fixture-secret stdout',
+                                                       'fixture-secret stderr')
+        evidence = self.read_evidence('probe_failed', result,
+                                      probe_result='blocked_exact_probe_failed')
+        self.assertEqual(evidence, {
+            'check': 'registered_instance_read', 'classifier_result': 'probe_failed',
+            'command_outcome': 'nonzero_exit', 'command_returncode': 1,
+            'probe_result': 'blocked_exact_probe_failed',
+        })
+
+    def test_resolution_and_malformed_results_do_not_copy_untrusted_values(self):
+        evidence = self.read_evidence('resolver_failed')
+        self.assertEqual(evidence['command_outcome'], 'not_observed')
+        for result in (object(), capability_resolver.ProbeCommandResult(True, ''),
+                       capability_resolver.ProbeCommandResult(999999, '')):
+            evidence = self.read_evidence('fixture-secret classifier', result,
+                                          probe_result={'fixture-secret': 'untrusted'},
+                                          check='fixture-secret account')
+            self.assertEqual(evidence['command_outcome'], 'invalid_result')
+            self.assertEqual(evidence['classifier_result'], 'unrecognized_classifier_result')
+            self.assertEqual(evidence['check'], 'unrecognized_check')
+            self.assertEqual(evidence['probe_result'], 'unrecognized_probe_result')
+
+    def test_transport_outcomes_keep_timeout_distinct_from_provider_nonzero(self):
+        for outcome in ('timeout', 'transport_failed', 'custody_failed', 'output_too_large'):
+            result = capability_resolver.ProbeCommandResult(124, '', 'fixture-secret', outcome)
+            evidence = self.read_evidence('probe_failed', result)
+            self.assertEqual(evidence['command_outcome'], outcome)
+        result = capability_resolver.ProbeCommandResult(1, '', '', 'fixture-secret outcome')
+        self.assertEqual(self.read_evidence('probe_failed', result)['command_outcome'],
+                         'unrecognized_outcome')
+
+    def test_existing_google_transport_emits_safe_diagnostics_on_failed_account_probe(self):
+        out, err = io.StringIO(), io.StringIO()
+        result = capability_resolver.ProbeCommandResult(1, '', 'fixture-secret provider text')
+        with mock.patch.object(cron, 'registered_google_accounts', return_value=('operator@example.invalid',)), \
+             mock.patch.object(capability_resolver, 'subprocess_probe_transport', return_value=result) as transport, \
+             mock.patch.object(cron.google_probe, 'probe_account', side_effect=ValueError('fixture-secret parser')), \
+             redirect_stdout(out), redirect_stderr(err):
+            problem = cron.google_account_access_problem()
+        self.assertIn('account_probe_unverified', problem)
+        self.assertEqual(transport.call_count, 1)
+        self.assertNotIn('fixture-secret', out.getvalue() + err.getvalue())
+        evidence = json.loads(err.getvalue().split(' ', 1)[1])
+        self.assertEqual(evidence['check'], 'registered_google_account_read')
+        self.assertEqual(evidence['command_outcome'], 'nonzero_exit')

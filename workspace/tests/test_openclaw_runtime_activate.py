@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import fcntl
 import hashlib
 import importlib.util
@@ -111,6 +112,11 @@ def make_release(
             + "\n"
         )
         (chrome_extension / "background.js").write_text("export {};\n")
+        for entry in ("dist/plugin-sdk/exec-approvals-runtime.js", "dist/plugin-sdk/security-runtime.js",
+                      "dist/commands/doctor.worker.js"):
+            target = release / entry
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("export {};\n")
     ai_package = release / "packages" / "ai"
     ai_dist = ai_package / "dist"
     ai_internal = ai_dist / "internal"
@@ -626,7 +632,7 @@ def restore(fixture: Fixture, backend: StoppedRestoreBackend):
 
 def test_seal_binds_only_required_bundled_extensions(fixture: Fixture):
     seal = json.loads(fixture.seal.read_text())
-    assert set(seal["bundledExtensions"]) == {"discord", "lane-contract"}
+    assert set(seal["bundledExtensions"]) == {"discord", "codex"}
     discord = seal["bundledExtensions"]["discord"]
     assert discord["path"] == str(fixture.candidate / "dist" / "extensions" / "discord")
     assert discord["entrypointSha256"] == hashlib.sha256(
@@ -650,7 +656,7 @@ def test_seal_accepts_complete_ai_runtime_export_closure(fixture: Fixture):
     ).resolve(strict=True).is_file()
 
 
-@pytest.mark.parametrize("plugin_id", ["discord", "lane-contract"])
+@pytest.mark.parametrize("plugin_id", ["discord", "codex"])
 @pytest.mark.parametrize("target", ["../../../node_modules", "../../.."])
 def test_seal_preserves_in_release_bundled_dependency_links(fixture: Fixture, plugin_id: str, target: str):
     root = fixture.candidate / "dist" / "extensions" / plugin_id
@@ -772,12 +778,12 @@ def test_activation_accepts_absent_artifact_retention(fixture: Fixture):
     result = run(fixture)
 
     assert result["outcome"] == "activated"
-    assert result["candidate"]["bundledExtensions"].keys() == {"discord", "lane-contract"}
+    assert result["candidate"]["bundledExtensions"].keys() == {"discord", "codex"}
 
 
 def test_seal_requires_release_native_exec_approvals_inspector(fixture: Fixture):
     inspector = (
-        fixture.candidate / "dist" / "infra" / "exec-approvals-inspection.js"
+        fixture.candidate / "dist" / "plugin-sdk" / "exec-approvals-runtime.js"
     )
     inspector.parent.chmod(0o755)
     inspector.unlink()
@@ -1513,7 +1519,7 @@ def test_terminal_receipt_retirement_restores_pair_on_post_move_failure(
 
 @pytest.mark.parametrize(
     "drift",
-    ["reservation", "goplaces", "profile-order", "load-path", "discord", "lane-contract"],
+    ["reservation", "goplaces", "profile-order", "load-path", "discord", "codex"],
 )
 def test_protected_migrated_invariants_fail_before_selector_or_boot(fixture: Fixture, drift: str):
     paths = fixture.paths
@@ -2357,8 +2363,8 @@ def upgrade_fixture(fixture):
     package = fixture.candidate / "package.json"
     package.write_text(json.dumps({"name": "openclaw", "version": "2026.9.2",
                                    "openclaw": {"schemaVersions": {"state": 15, "agent": 19}}}) + "\n")
-    migration = fixture.candidate / "dist" / "infra" / "runtime-state-migration.js"
-    migration.write_text("export async function migrateRuntimeState() {}\n")
+    migration = fixture.candidate / "dist" / "commands" / "doctor.worker.js"
+    migration.write_text("// Native Doctor owns schema migrations.\n")
     chmod_tree(fixture.candidate, False)
     fixture.seal = fixture.root / "upgrade-seal.json"
     activate_module.create_candidate_seal(fixture.paths, fixture.candidate, CANDIDATE_COMMIT, fixture.seal)
@@ -2560,18 +2566,24 @@ def test_partial_upgrade_restore_extraction_failure_preserves_unreadable_preimag
     assert recovery.gateway_boots == recovery.node_boots == 0
 
 
-@pytest.mark.parametrize("failure", [None, "nonzero", "timeout", "malformed", "wrong-version", "status-only", "extra-field"])
-def test_native_migration_invoker_uses_sealed_export_and_typed_value_free_receipt(monkeypatch, upgrade_fixture, failure):
+@pytest.mark.parametrize("failure", [None, "nonzero", "timeout", "malformed", "advisory", "maintenance-refusal", "config-refusal", "wrong-mode"])
+@pytest.mark.parametrize("tmp_alias", [False, True])
+def test_native_migration_invoker_uses_one_native_doctor_and_protected_result(monkeypatch, upgrade_fixture, failure, tmp_alias):
     fixture, _target = upgrade_fixture
-    report = {"schemaVersion": 1, "status": "completed", "stateSchemaVersion": 15,
-              "agentSchemaVersion": 19, "agentDatabaseCount": 1}
-    expected = dict(report)
-    if failure == "wrong-version":
-        report["agentSchemaVersion"] = 17
-    elif failure == "status-only":
-        report = {"status": "completed"}
-    elif failure == "extra-field":
-        report["privateDiagnostic"] = "must-not-escape"
+    # Native macOS temporary roots may be returned through /tmp -> /private/tmp.
+    # The native writer receives that admitted path; the immutable receipt binds
+    # its physical leaf, rather than rejecting the platform's directory alias.
+    native_tmp = fixture.root
+    if tmp_alias:
+        native_tmp = fixture.root / "native-result-alias"
+        native_tmp.symlink_to(fixture.root, target_is_directory=True)
+    report = {"status": "ok", "configHash": "unchanged"}
+    if failure == "advisory":
+        report["status"] = "advisory"
+    elif failure == "maintenance-refusal":
+        report["maintenanceRefusal"] = {"kind": "data-at-risk", "reason": "active-mutation"}
+    elif failure == "config-refusal":
+        report["configWriteRefusal"] = {"reason": "conflict", "keys": ["agents"]}
     calls = []
     def fake_run(argv, timeout, *, cwd, env):
         calls.append((argv, timeout, cwd, env))
@@ -2579,22 +2591,37 @@ def test_native_migration_invoker_uses_sealed_export_and_typed_value_free_receip
         assert env["OPENCLAW_CONFIG_PATH"] == str(fixture.paths.candidate_state_dir / "openclaw.json")
         assert env["XDG_CACHE_HOME"] == str(fixture.paths.candidate_state_dir / ".cache")
         assert env["OPENCLAW_LOG_LEVEL"] == "silent"
-        assert env["OPENCLAW_MIGRATION_ENTRYPOINT"] == str(fixture.candidate / "dist" / "infra" / "runtime-state-migration.js")
-        assert "migrateRuntimeState" in argv[-1] and "doctor" not in argv[-1]
+        assert env["OPENCLAW_UPDATE_IN_PROGRESS"] == "1"
+        assert "OPENCLAW_MIGRATION_ENTRYPOINT" not in env
+        assert env["OPENCLAW_SUPERVISOR_MODE"] == env["OPENCLAW_SERVICE_REPAIR_POLICY"] == "external"
+        if "OPENCLAW_NATIVE_SECURITY_SDK" in env:
+            assert "resolvePreferredOpenClawTmpDir" in argv[-1]
+            return activate_module.CommandResult(argv, 0, json.dumps({"root": str(native_tmp)}).encode(), b"", 1, False)
+        assert argv == (str(fixture.paths.node), str(fixture.candidate / "openclaw.mjs"),
+                        "doctor", "--repair", "--non-interactive", "--no-workspace-suggestions")
+        target = Path(env["OPENCLAW_UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH"])
+        assert target.parent == native_tmp
+        target.write_bytes(b"malformed" if failure == "malformed" else json.dumps(report).encode())
+        target.chmod(0o644 if failure == "wrong-mode" else 0o600)
         return activate_module.CommandResult(
             argv, 2 if failure == "nonzero" else 0,
-            b"malformed" if failure == "malformed" else json.dumps(report).encode(),
+            b"Doctor diagnostic output is not its success receipt",
             b"private diagnostic never exposed", 1, failure == "timeout",
         )
     monkeypatch.setattr(activate_module, "run_bounded", fake_run)
     backend = activate_module.SystemBackend(fixture.paths)
     if failure is None:
-        assert backend.migrate_state_once(fixture.candidate) == expected
+        observed = backend.migrate_state_once(fixture.candidate)
+        assert observed["status"] == "completed"
+        assert observed["declaredSchemaVersions"] == {"state": 15, "agent": 19}
+        assert observed["doctor"] == report
+        assert Path(observed["doctorResultPath"]).stat().st_mode & 0o777 == 0o400
+        assert Path(observed["doctorResultPath"]).parent == fixture.root
     else:
         with pytest.raises(activate_module.ActivationError) as error:
             backend.migrate_state_once(fixture.candidate)
         assert "private" not in str(error.value)
-    assert len(calls) == 1
+    assert len(calls) == 2
     evidence = json.dumps(backend.command_evidence)
     assert "private diagnostic never exposed" not in evidence
     assert "privateDiagnostic" not in evidence
@@ -3170,6 +3197,116 @@ def test_snapshot_capture_accepts_legacy_predecessor_and_observes_stopped(
     assert stat.S_IMODE(manifest.stat().st_mode) == 0o400
 
 
+@pytest.mark.parametrize("drift", ["none", "protected-state", "archive"])
+def test_snapshot_finalization_after_capture_dependency_failure(
+    monkeypatch, fixture: Fixture, drift: str, *, volume_reader_failure: bool = False
+):
+    backend = FakeBackend(fixture)
+    calls = []
+
+    def fake_run(argv, _timeout, **_kwargs):
+        calls.append(argv)
+        if argv[0] != "/usr/bin/tar":
+            raise AssertionError(f"unexpected command: {argv}")
+        backend.events.append("tar")
+        subprocess.run(argv, check=True, capture_output=True)
+        return command_result(argv)
+
+    monkeypatch.setattr(activate_module, "run_bounded", fake_run)
+    if volume_reader_failure:
+        # Existing private delegation exercises its additional volume-reader tail.
+        guard = activate_module._history_volume_guard()
+        original_reader = guard.read_volume_uuid
+
+        def unavailable_reader(_path):
+            raise FileNotFoundError("test volume-reader dependency unavailable")
+
+        monkeypatch.setattr(guard, "read_volume_uuid", unavailable_reader)
+        restore_dependency = lambda: monkeypatch.setattr(guard, "read_volume_uuid", original_reader)
+        failure_message = "volume UUID is unavailable"
+    else:
+        original_stopped = backend.assert_gateway_and_node_stopped
+
+        def unavailable_post_capture_observer():
+            if backend.stopped_checks == 1:
+                raise activate_module.ActivationError("test post-capture dependency unavailable")
+            original_stopped()
+
+        monkeypatch.setattr(backend, "assert_gateway_and_node_stopped", unavailable_post_capture_observer)
+        restore_dependency = lambda: monkeypatch.setattr(backend, "assert_gateway_and_node_stopped", original_stopped)
+        failure_message = "test post-capture dependency unavailable"
+    output_root = fixture.root / "interrupted-finalization"
+    manifest = output_root / "stopped-snapshot.json"
+    with pytest.raises(activate_module.ActivationError, match=failure_message) as failure:
+        activate_module.create_stopped_snapshot(
+            fixture.paths, output_root, manifest, fixture.candidate,
+            CANDIDATE_COMMIT, fixture.seal, backend,
+        )
+
+    # Retain actual values from this failed operation, without reconstructed evidence.
+    captured = None
+    traceback = failure.value.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_code is activate_module.create_stopped_snapshot.__code__:
+            captured = traceback.tb_frame.f_locals.copy()
+            break
+        traceback = traceback.tb_next
+    assert captured is not None
+    assert captured["archived"].returncode == 0
+    assert not captured["archived"].timed_out
+    assert calls == [captured["tar_argv"]]
+    assert backend.events == ["stopped", "inspect", "tar"]
+    archive = captured["archive_path"]
+    assert archive.stat().st_size > 0
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o400
+    assert not manifest.exists()
+    assert not (output_root / "stopped-quiescence.json").exists()
+
+    restore_dependency()
+    if drift == "protected-state":
+        config = fixture.paths.candidate_state_dir / "openclaw.json"
+        config.write_bytes(config.read_bytes() + b" ")
+    elif drift == "archive":
+        archive.chmod(0o600)
+        with archive.open("ab") as stream:
+            stream.write(b"changed captured archive")
+        archive.chmod(0o400)
+
+    # Failure released create's lock; reacquire the same owner for its exact tail.
+    descriptor = activate_module._acquire_lock(fixture.paths)
+    try:
+        arguments = {
+            key: captured[key]
+            for key in (
+                "paths", "output_root", "manifest_path", "backend",
+                "archive_path", "archive_sha", "archive_info", "predecessor",
+                "predecessor_record", "candidate_record", "plists", "external_roots",
+                "pre_capture", "invariants", "inspection_release", "approvals",
+            )
+        }
+        if drift != "none":
+            message = "captured archive binding drift" if drift == "archive" else "protected surface drift"
+            with pytest.raises(activate_module.ActivationError, match=message):
+                activate_module._finalize_stopped_snapshot_archive(**arguments)
+        else:
+            receipt = activate_module._finalize_stopped_snapshot_archive(**arguments)
+    finally:
+        activate_module._release_lock(descriptor)
+
+    assert calls == [captured["tar_argv"]]
+    if drift != "none":
+        assert not manifest.exists()
+        assert not (output_root / "stopped-quiescence.json").exists()
+        return
+    assert receipt["manifestPath"] == str(manifest)
+    assert receipt["tarSha256"] == captured["archive_sha"]
+    assert backend.events == ["stopped", "inspect", "tar", "stopped", "inspect"]
+    g6 = json.loads((output_root / "stopped-quiescence.json").read_text())
+    assert g6["preCapture"] == captured["pre_capture"]
+    activate_module.validate_stopped_command_evidence(fixture.paths, g6["postCapture"])
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o400
+
+
 def test_snapshot_rejects_raw_cas_drift_before_manifest_publication(
     monkeypatch, fixture: Fixture
 ):
@@ -3709,106 +3846,103 @@ def test_system_exec_approvals_inspector_fails_value_free(
     )
 
 
+def _candidate_discord_cli_reports(fixture):
+    source = fixture.candidate / "dist" / "extensions" / "discord" / "index.js"
+    index = {"version": 1, "installRecords": {"whatsapp": {"source": "npm"}}, "diagnostics": []}
+    return (
+        {"state": "fresh", "current": copy.deepcopy(index), "persisted": copy.deepcopy(index)},
+        {"plugin": {"id": "discord", "origin": "bundled", "source": str(source),
+                    "status": "loaded", "enabled": True, "error": None, "channelIds": ["discord"]},
+         "diagnostics": []},
+    )
+
+
 def test_system_candidate_discord_verifies_bundled_loader_without_mutation(
     monkeypatch, fixture: Fixture
 ):
-    expected_source = fixture.candidate / "dist" / "extensions" / "discord" / "index.js"
-    receipt = {
-        "discordInstallRecordAbsent": True,
-        "installedIds": ["whatsapp"],
-        "plugin": {
-            "id": "discord",
-            "origin": "bundled",
-            "source": str(expected_source),
-            "status": "loaded",
-            "enabled": True,
-            "error": None,
-            "channelIds": ["discord"],
-        },
-    }
-    captured = {}
+    registry, inspection = _candidate_discord_cli_reports(fixture)
+    captured = []
 
     def fake_run(argv, _timeout, *, cwd=None, env=None):
-        captured.update({"argv": argv, "cwd": cwd, "env": env})
-        return command_result(argv, stdout=json.dumps(receipt).encode())
+        captured.append({"argv": argv, "cwd": cwd, "env": env})
+        report = registry if argv[2:] == ("plugins", "registry", "--json") else inspection
+        return command_result(argv, stdout=json.dumps(report).encode())
 
     monkeypatch.setenv("OPENCLAW_CONFIG_PATH", "/private/tmp/poisoned-openclaw.json")
     monkeypatch.setattr(activate_module, "run_bounded", fake_run)
     backend = activate_module.SystemBackend(fixture.paths)
-
     result = backend.verify_candidate_discord(
         fixture.candidate, fixture.paths.candidate_state_dir / "openclaw.json"
     )
-
     assert result == {
         "installRecordAbsent": True,
         "installedIds": ["whatsapp"],
         "configSha256": hashlib.sha256(fixture.config_bytes).hexdigest(),
         "origin": "bundled",
-        "source": str(expected_source),
+        "source": inspection["plugin"]["source"],
     }
-    assert captured["argv"][:2] == (str(fixture.paths.node), "--input-type=module")
-    assert captured["argv"][2] == "--eval"
-    child_source = captured["argv"][3]
-    assert "dist/config/config.js" in child_source
-    assert "dist/plugins/loader.js" in child_source
-    assert "loadPluginRegistryHandle" in child_source
-    assert "commitPluginInstallRecordsOnly" not in child_source
-    assert "removePluginInstallRecordFromRecords" not in child_source
-    assert 'moduleAt("src/' not in child_source
-    assert "tsx" not in child_source
-    assert captured["cwd"] == fixture.candidate
-    assert captured["env"]["OPENCLAW_STATE_DIR"] == str(fixture.paths.candidate_state_dir)
-    assert captured["env"]["OPENCLAW_CONFIG_PATH"] == str(
-        fixture.paths.candidate_state_dir / "openclaw.json"
-    )
-    assert (fixture.paths.candidate_state_dir / "openclaw.json").read_bytes() == fixture.config_bytes
-
-
-@pytest.mark.parametrize("drift", ["source", "status"])
-def test_system_candidate_discord_rejects_noncanonical_bundled_selection(
-    monkeypatch, fixture: Fixture, drift: str
-):
-    expected_source = fixture.candidate / "dist" / "extensions" / "discord" / "index.js"
-    plugin = {
-        "id": "discord",
-        "origin": "bundled",
-        "source": str(expected_source),
-        "status": "loaded",
-        "enabled": True,
-        "error": None,
-        "channelIds": ["discord"],
-    }
-    if drift == "source":
-        plugin["source"] = str(fixture.root / "external-discord" / "index.js")
-    else:
-        plugin["status"] = "failed"
-    receipt = {
-        "discordInstallRecordAbsent": True,
-        "installedIds": ["whatsapp"],
-        "plugin": plugin,
-    }
-
-    def fake_run(argv, _timeout, *, cwd=None, env=None):
-        return command_result(argv, stdout=json.dumps(receipt).encode())
-
-    monkeypatch.setattr(activate_module, "run_bounded", fake_run)
-    backend = activate_module.SystemBackend(fixture.paths)
-
-    with pytest.raises(activate_module.ActivationError, match="source selection drift"):
-        backend.verify_candidate_discord(
-            fixture.candidate, fixture.paths.candidate_state_dir / "openclaw.json"
-        )
-
+    prefix = (str(fixture.paths.node), str(fixture.candidate / "openclaw.mjs"))
+    assert [call["argv"] for call in captured] == [
+        (*prefix, "plugins", "registry", "--json"),
+        (*prefix, "plugins", "inspect", "discord", "--runtime", "--json"),
+    ]
+    assert [row["purpose"] for row in backend.command_evidence] == [
+        "candidate_discord_registry", "candidate_discord_verification",
+    ]
+    for call in captured:
+        assert call["cwd"] == fixture.candidate
+        assert call["env"]["OPENCLAW_STATE_DIR"] == str(fixture.paths.candidate_state_dir)
+        assert call["env"]["OPENCLAW_CONFIG_PATH"] == str(fixture.paths.candidate_state_dir / "openclaw.json")
     assert (fixture.paths.candidate_state_dir / "openclaw.json").read_bytes() == fixture.config_bytes
 
 
 @pytest.mark.parametrize(
-    ("module_suffix", "facade_drift"),
-    [(".js", None), (".mjs", None), (".js", "duplicate"), (".mjs", "wrong-type")],
+    ("drift", "message"),
+    [("source", "source selection drift"), ("status", "source selection drift"),
+     ("ambiguous-install", "source selection drift"), ("runtime-error", "source selection drift"),
+     ("current-record", "stale Discord install record"), ("persisted-record", "stale Discord install record"),
+     ("missing-records", "install-record proof drift"), ("state-shape", "install-record proof drift")],
 )
-def test_system_candidate_discord_executes_read_only_facades_with_real_node(
-    fixture: Fixture, module_suffix: str, facade_drift: str | None
+def test_system_candidate_discord_rejects_noncanonical_bundled_selection(
+    monkeypatch, fixture: Fixture, drift: str, message: str
+):
+    registry, inspection = _candidate_discord_cli_reports(fixture)
+    if drift == "source":
+        inspection["plugin"]["source"] = str(fixture.root / "external-discord" / "index.js")
+    elif drift == "status":
+        inspection["plugin"]["status"] = "failed"
+    elif drift == "ambiguous-install":
+        inspection["install"] = {"source": "npm"}
+    elif drift == "runtime-error":
+        inspection["diagnostics"] = [{"level": "error", "message": "Private diagnostic"}]
+    elif drift == "current-record":
+        registry["current"]["installRecords"]["discord"] = {"source": "npm"}
+    elif drift == "persisted-record":
+        registry["persisted"]["installRecords"]["discord"] = {"source": "npm"}
+    elif drift == "missing-records":
+        registry["current"].pop("installRecords")
+    elif drift == "state-shape":
+        registry["state"] = {}
+
+    calls = []
+    def fake_run(argv, _timeout, *, cwd=None, env=None):
+        calls.append(argv)
+        report = registry if argv[2:] == ("plugins", "registry", "--json") else inspection
+        return command_result(argv, stdout=json.dumps(report).encode())
+
+    monkeypatch.setattr(activate_module, "run_bounded", fake_run)
+    backend = activate_module.SystemBackend(fixture.paths)
+    with pytest.raises(activate_module.ActivationError, match=message):
+        backend.verify_candidate_discord(
+            fixture.candidate, fixture.paths.candidate_state_dir / "openclaw.json"
+        )
+    assert len(calls) == (1 if drift in {"current-record", "persisted-record", "missing-records", "state-shape"} else 2)
+    assert (fixture.paths.candidate_state_dir / "openclaw.json").read_bytes() == fixture.config_bytes
+
+
+@pytest.mark.parametrize("cli_drift", [None, "unsupported", "malformed", "stale-record", "config-change"])
+def test_system_candidate_discord_executes_canonical_cli_with_real_node(
+    fixture: Fixture, cli_drift: str | None
 ):
     pinned_node = activate_module.OPERATOR.require_path("paths.node_binary")
     node = pinned_node if pinned_node.is_file() else Path(shutil.which("node") or "")
@@ -3816,43 +3950,33 @@ def test_system_candidate_discord_executes_read_only_facades_with_real_node(
         pytest.skip("real Node executable unavailable")
 
     chmod_tree(fixture.candidate, True)
-    package_path = fixture.candidate / "package.json"
-    package = json.loads(package_path.read_text())
-    package["type"] = "module"
-    package_path.write_text(json.dumps(package) + "\n")
-    config_module = fixture.candidate / "dist" / "config" / "config.js"
-    config_module.parent.mkdir(parents=True)
-    config_module.write_text(
+    # This confined CLI fixture proves the actual transport and no-write checks;
+    # the built candidate's genuine native plugin owners have a separate gate.
+    cli = fixture.candidate / "openclaw.mjs"
+    cli.write_text(
         'import fs from "node:fs";\n'
-        "export function loadConfig() {\n"
-        '  return JSON.parse(fs.readFileSync(process.env.OPENCLAW_CONFIG_PATH, "utf8"));\n'
-        "}\n"
-    )
-    records_module = (
-        fixture.candidate / "dist" / f"installed-plugin-index-records-test{module_suffix}"
-    )
-    records_module.write_text(
-        'import fs from "node:fs";\n'
-        'const path = `${process.env.OPENCLAW_STATE_DIR}/installed-records.json`;\n'
-        "export async function loadInstalledPluginIndexInstallRecords() {\n"
-        '  return JSON.parse(fs.readFileSync(path, "utf8"));\n'
-        "}\n"
-    )
-    # Split bundles can include an internal chunk beside the public facade.
-    internal_module = fixture.candidate / "dist" / "installed-plugin-index-records-internal.mjs"
-    internal_module.write_text("export function internalReader() {}\n")
-    if facade_drift == "duplicate":
-        internal_module.write_bytes(records_module.read_bytes())
-    elif facade_drift == "wrong-type":
-        records_module.write_text("export const loadInstalledPluginIndexInstallRecords = {};\n")
-    loader_module = fixture.candidate / "dist" / "plugins" / "loader.js"
-    loader_module.parent.mkdir(parents=True, exist_ok=True)
-    loader_module.write_text(
-        "export function loadPluginRegistryHandle() {\n"
-        '  const source = `${process.env.OPENCLAW_CANDIDATE_ROOT}/dist/extensions/discord/index.js`;\n'
-        "  return { diagnostics: [], plugins: [{ id: 'discord', origin: 'bundled', source,\n"
-        "    status: 'loaded', enabled: true, error: null, channelIds: ['discord'] }] };\n"
-        "}\n"
+        'import path from "node:path";\n'
+        'import { fileURLToPath } from "node:url";\n'
+        f'const drift = {json.dumps(cli_drift)};\n'
+        'const root = path.dirname(fileURLToPath(import.meta.url));\n'
+        'const state = process.env.OPENCLAW_STATE_DIR;\n'
+        'const configPath = process.env.OPENCLAW_CONFIG_PATH;\n'
+        'const config = JSON.parse(fs.readFileSync(configPath, "utf8"));\n'
+        'const records = JSON.parse(fs.readFileSync(path.join(state, "installed-records.json"), "utf8"));\n'
+        'const args = process.argv.slice(2);\n'
+        'fs.appendFileSync(path.join(state, "cli-invocations.jsonl"), JSON.stringify(args) + "\\n");\n'
+        'if (drift === "unsupported") process.exit(7);\n'
+        'if (drift === "malformed") { console.log("not JSON"); process.exit(0); }\n'
+        'if (JSON.stringify(args) === JSON.stringify(["plugins", "registry", "--json"])) {\n'
+        '  const installRecords = drift === "stale-record" ? {...records, discord: {source: "npm"}} : records;\n'
+        '  const index = {version: 1, installRecords, diagnostics: []};\n'
+        '  console.log(JSON.stringify({state: "fresh", current: index, persisted: index}));\n'
+        '} else if (JSON.stringify(args) === JSON.stringify(["plugins", "inspect", "discord", "--runtime", "--json"])) {\n'
+        '  if (drift === "config-change") fs.appendFileSync(configPath, " ");\n'
+        '  console.log(JSON.stringify({plugin: {id: "discord", origin: "bundled",\n'
+        '    source: path.join(root, "dist/extensions/discord/index.js"), status: "loaded",\n'
+        '    enabled: config.plugins?.entries?.discord?.enabled !== false, error: null, channelIds: ["discord"]}, diagnostics: []}));\n'
+        '} else process.exit(9);\n'
     )
     records = {"whatsapp": {"source": "npm", "installPath": "/managed/whatsapp"}}
     records_path = fixture.paths.candidate_state_dir / "installed-records.json"
@@ -3865,17 +3989,13 @@ def test_system_candidate_discord_executes_read_only_facades_with_real_node(
     os.environ["OPENCLAW_CONFIG_PATH"] = str(decoy)
     try:
         backend = activate_module.SystemBackend(paths)
-        if facade_drift:
-            with pytest.raises(
-                activate_module.ActivationError, match="candidate Discord verification failed"
-            ):
-                backend.verify_candidate_discord(
-                    fixture.candidate, paths.candidate_state_dir / "openclaw.json"
-                )
+        if cli_drift:
+            message = {"unsupported": "verification failed", "malformed": "receipt malformed",
+                       "stale-record": "stale Discord install record", "config-change": "source selection drift"}[cli_drift]
+            with pytest.raises(activate_module.ActivationError, match=message):
+                backend.verify_candidate_discord(fixture.candidate, paths.candidate_state_dir / "openclaw.json")
         else:
-            receipt = backend.verify_candidate_discord(
-                fixture.candidate, paths.candidate_state_dir / "openclaw.json"
-            )
+            receipt = backend.verify_candidate_discord(fixture.candidate, paths.candidate_state_dir / "openclaw.json")
             assert receipt["installRecordAbsent"] is True
             assert receipt["installedIds"] == ["whatsapp"]
     finally:
@@ -3884,8 +4004,11 @@ def test_system_candidate_discord_executes_read_only_facades_with_real_node(
         else:
             os.environ["OPENCLAW_CONFIG_PATH"] = original_config_path
 
+    invocations = [json.loads(line) for line in (paths.candidate_state_dir / "cli-invocations.jsonl").read_text().splitlines()]
+    assert invocations == ([['plugins', 'registry', '--json'], ['plugins', 'inspect', 'discord', '--runtime', '--json']]
+                           if cli_drift in {None, 'config-change'} else [['plugins', 'registry', '--json']])
     assert records_path.read_bytes() == records_bytes
-    assert (paths.candidate_state_dir / "openclaw.json").read_bytes() == fixture.config_bytes
+    assert (paths.candidate_state_dir / "openclaw.json").read_bytes() == fixture.config_bytes + (b" " if cli_drift == "config-change" else b"")
 
 
 def test_system_stopped_check_requires_exact_launchctl_service_not_found(monkeypatch, fixture: Fixture):
