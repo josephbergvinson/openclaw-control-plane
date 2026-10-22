@@ -20,18 +20,20 @@ ordinary-use acceptance on another host.
 
 ## Source identities
 
-The current source reference includes a lint-only requester-wake fixture correction
-beyond the installed **R43** runtime and Mac companion build **2610000502**.
-Canonical source `a70fbe73d8e8586521f3b19d80251bf02b14a78f` and native distribution
-`fd4f6b0a7610aa92fcc5d4462b7a35e93eb3af31` contain that correction. The installed
+The current source reference includes two test-fixture corrections beyond the
+installed **R43** runtime and Mac companion build **2610000502**. Canonical source
+`7ce69d2a2075231411c00c06a964447abc743c19` and native distribution
+`3917084f508f795900f70470eb40695074b02c2e` contain those corrections. The installed
 runtime and companion retain distribution source
-`f18ba730959787b21b823f7259f064e9a9bd2801`. The successor uses `Array.from` for
-one regression test's existing listener snapshot; all other source blobs and
+`f18ba730959787b21b823f7259f064e9a9bd2801`. The requester-wake fixture uses
+`Array.from` for its existing listener snapshot. The final-edit fixture uses its
+own narrow JSON override shape and required guard braces, keeping Discord
+implementation types outside the core compiler graph. All other source blobs and
 modes, including production and package inputs, are unchanged from the respective
-installed source inputs. This test-only revision did not rebuild either component.
-The companion identity is descriptive: this packet supplies no supported delta
-from the current distribution to that older companion source, so use ordinary
-source or native-distribution reconstruction for this packet.
+installed source inputs. These test-only corrections did not rebuild either
+component. The companion identity is descriptive: this packet supplies no
+supported delta from the current distribution to that older companion source, so
+use ordinary source or native-distribution reconstruction for this packet.
 
 | Identity                                          | Manifest field                                              |
 | ------------------------------------------------- | ----------------------------------------------------------- |

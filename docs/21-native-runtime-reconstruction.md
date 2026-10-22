@@ -28,8 +28,9 @@ deployment or user acceptance.
 ## Optional companion source
 
 The current packet records installed R43 Mac companion build 2610000502 at its
-original source identity. Its canonical/native source reference has a later,
-qualified test-only snapshot-iteration correction. That correction changed no
+original source identity. Its canonical/native source reference has two
+qualified test-only fixture corrections: listener snapshot syntax and the
+final-edit fixture's core type boundary and guard braces. They change no
 production or package inputs and did not rebuild the installed components. The older companion
 has no supported reconstruction delta in this packet; select ordinary source or
 native-distribution mode. The following command applies only to a manifest that

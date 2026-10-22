@@ -73192,13 +73192,10 @@ index 0000000000000000000000000000000000000000..bceff9bba531e3dc81888c69da352196
 +};
 diff --git a/src/agents/tools/message-tool-final-edit.test.ts b/src/agents/tools/message-tool-final-edit.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8d05cc0b3843e6d4b505cd99aafab5709945b8a3
+index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcbe51d3d0a
 --- /dev/null
 +++ b/src/agents/tools/message-tool-final-edit.test.ts
-@@ -0,0 +1,361 @@
-+import type { editMessageDiscord } from "../../../extensions/discord/src/send.messages.js";
-+
-+type APIMessage = Awaited<ReturnType<typeof editMessageDiscord>>;
+@@ -0,0 +1,360 @@
 +import {
 +  createAssistantMessageEventStream,
 +  type AssistantMessage,
@@ -73260,7 +73257,7 @@ index 0000000000000000000000000000000000000000..8d05cc0b3843e6d4b505cd99aafab570
 +    timestamp: 1,
 +  };
 +}
-+function discordMessage(overrides: Partial<APIMessage> = {}): APIMessage {
++function discordMessage(overrides: { id?: string; channel_id?: string } = {}) {
 +  return {
 +    id: messageId,
 +    channel_id: channelId,
@@ -73389,7 +73386,9 @@ index 0000000000000000000000000000000000000000..8d05cc0b3843e6d4b505cd99aafab570
 +  const controls = createToolSearchTools(catalog);
 +  applyToolSearchCatalog({ ...catalog, tools: [...controls, tool] });
 +  const callTool = controls.find((candidate) => candidate.name === "tool_call");
-+  if (!callTool) throw new Error("Missing native tool_call control");
++  if (!callTool) {
++    throw new Error("Missing native tool_call control");
++  }
 +  let providerRequests = 0;
 +  let freshInput = false;
 +  const events: AgentEvent[] = [];

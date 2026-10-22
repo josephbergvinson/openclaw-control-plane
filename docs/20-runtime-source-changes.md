@@ -85,8 +85,8 @@ The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
 reconstruction target without a supported binding. The current R43/app502 packet
-uses that descriptive case while canonical/native source includes a later
-lint-only fixture correction. Every supported reconstruction requires a full
+uses that descriptive case while canonical/native source includes two later
+test-only fixture corrections. Every supported reconstruction requires a full
 target-tree check. Source reconstruction does not install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
