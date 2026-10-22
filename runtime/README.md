@@ -20,6 +20,19 @@ ordinary-use acceptance on another host.
 
 ## Source identities
 
+The current source reference includes a requester-wake test fixture correction
+beyond the installed **R42** runtime and Mac companion build **2610000501**.
+Canonical source `4accea0540e8ff7953c1354c67571a28981caf97` and native distribution
+`94bad27439570861301d1a3b251e6f59e6295a65` contain that correction. The installed
+runtime and companion retain distribution source
+`94bed29b089dc803764c7389f18553092e706984`. The successor changes only the event
+subscription fixture in one regression test; all other source blobs and modes,
+including production and package inputs, are unchanged from the respective
+installed source inputs. This source revision did not rebuild either component.
+The companion identity is descriptive: this packet supplies no supported delta
+from the current distribution to that older companion source, so use ordinary
+source or native-distribution reconstruction for this packet.
+
 | Identity                                          | Manifest field                                              |
 | ------------------------------------------------- | ----------------------------------------------------------- |
 | Official repository, tag and annotated tag object | `upstream.repository`, `upstream.tag`, `upstream.tagObject` |
@@ -138,7 +151,10 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-To reconstruct the declared companion, use a new clean official-tag clone:
+First check the current manifest. This packet records the installed R42/app501
+companion descriptively and does not support `--native-companion`. For a packet
+that supplies one of the supported bindings below, use a new clean official-tag
+clone to reconstruct its declared companion:
 
 ```bash
 git clone --depth 1 --branch "$reference_tag" https://github.com/openclaw/openclaw.git /path/to/openclaw-companion-reference

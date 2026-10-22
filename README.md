@@ -72,11 +72,12 @@ acceptance are separate steps.
 
 This reference targets the official OpenClaw **v2026.10.4** base and the
 managed **Codex 0.160.0** native package. The manifest binds the complete custom source,
-native distribution and companion source, including whether the companion uses
-the distribution's exact source identity or a separately checked finite delta.
-Those inputs can be reconstructed without installing a service. The separate
-installed-reference record does not establish deployment or account access for
-a new adopter.
+native distribution and companion source. The current packet reconstructs the
+canonical and native distribution source; its installed R42 Mac companion build
+2610000501 has a separate descriptive identity. The test-only source revision
+does not rebuild that component. Read the [current source boundaries](runtime/README.md#source-identities)
+before choosing a reconstruction target. The installed-reference record does not
+establish deployment or account access for a new adopter.
 
 ## Find the details
 

@@ -83,8 +83,11 @@ separate checks.
 The Mac companion and bundled worker retain explicit source and build identities.
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
-Every case requires a full target-tree check. Source reconstruction does not
-install or launch the app.
+A descriptive installed companion identity is also permitted; it grants no
+reconstruction target without a supported binding. The current R42/app501 packet
+uses that descriptive case while canonical/native source includes a later
+test-only fixture correction. Every supported reconstruction requires a full
+target-tree check. Source reconstruction does not install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
 the matching native helper, using bounded private pipes and current configuration.

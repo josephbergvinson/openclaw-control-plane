@@ -27,6 +27,14 @@ deployment or user acceptance.
 
 ## Optional companion source
 
+The current packet records installed R42 Mac companion build 2610000501 at its
+original source identity. Its canonical/native source reference has a later,
+qualified test-only fixture correction. That correction changed no production or
+package inputs and did not rebuild the installed components. The older companion
+has no supported reconstruction delta in this packet; select ordinary source or
+native-distribution mode. The following command applies only to a manifest that
+supplies one of the supported companion bindings below.
+
 Select the Mac companion explicitly, from a new clean pinned-upstream clone:
 
 ```sh

@@ -51530,6 +51530,82 @@ index 64507a978a69b2b5524917c8762359fe0a6c46a9..e5da035ce7d902c66e85588b72b5d688
    resolve: (ended: boolean) => void;
    handle?: EmbeddedAgentQueueHandle;
    timer?: NodeJS.Timeout;
+diff --git a/src/agents/embedded-agent-runner/run.compaction-runtime.test-support.ts b/src/agents/embedded-agent-runner/run.compaction-runtime.test-support.ts
+index 71d50c3de88c6308df217e2e643e0458fef2e895..f5f3ac3117f47eb7884c5f805cb368b679e7d3bf 100644
+--- a/src/agents/embedded-agent-runner/run.compaction-runtime.test-support.ts
++++ b/src/agents/embedded-agent-runner/run.compaction-runtime.test-support.ts
+@@ -422,12 +422,23 @@ async function createRecoveryFixture(state: OpenClawTestState, options: FixtureO
+         expect(assertActive).toThrow();
+       }
+     };
+-    const expectNoContinuation = () => {
++    const expectNoContinuation = (compactionCompleted = false) => {
+       for (const retry of retries) {
+         expect(retry).not.toHaveBeenCalled();
+       }
+       expect(armPostCompactionGuard).not.toHaveBeenCalled();
+-      expect(onAgentEvent).not.toHaveBeenCalled();
++      // Progress closes its observation even when recovery may not continue.
++      // Exact calls also reject any unrelated continuation event.
++      expect(onAgentEvent.mock.calls).toEqual([
++        [{ stream: "compaction", data: { phase: "start" }, sessionKey: target.sessionKey }],
++        [
++          {
++            stream: "compaction",
++            data: { phase: "end", completed: compactionCompleted },
++            sessionKey: target.sessionKey,
++          },
++        ],
++      ]);
+     };
+     return {
+       compact,
+diff --git a/src/agents/embedded-agent-runner/run.compaction-runtime.test.ts b/src/agents/embedded-agent-runner/run.compaction-runtime.test.ts
+index aeef4c7bb447b5cc614e1b6e467ff2a88ad6a01e..fefd96d558a122a5c3ac375a13828b58f0bf881d 100644
+--- a/src/agents/embedded-agent-runner/run.compaction-runtime.test.ts
++++ b/src/agents/embedded-agent-runner/run.compaction-runtime.test.ts
+@@ -30,10 +30,10 @@ function expectCompactionAccounting(fixture: RecoveryFixture) {
+   });
+ }
+ 
+-function expectStoppedBeforePublication(fixture: RecoveryFixture) {
++function expectStoppedBeforePublication(fixture: RecoveryFixture, compactionCompleted = false) {
+   expect(fixture.afterHook).not.toHaveBeenCalled();
+   expect(fixture.updates).not.toHaveBeenCalled();
+-  fixture.expectNoContinuation();
++  fixture.expectNoContinuation(compactionCompleted);
+ }
+ 
+ // Only deadline tests control timers; real persistence must reach its checkpoint first.
+@@ -61,8 +61,8 @@ async function recoverAtSafetyDeadline(
+   }
+ }
+ 
+-// These counters observe recovery continuation only, not another model request:
+-// downstream dispatch already has its own authority and cancellation guards.
++// Retry counters observe continuation; balanced compaction progress is separate.
++// Downstream dispatch retains its own authority and cancellation guards.
+ describe("embedded compaction recovery authority", () => {
+   afterEach(() => {
+     vi.restoreAllMocks();
+@@ -390,7 +390,7 @@ describe("embedded compaction recovery authority", () => {
+       expect(committed?.compactionIds).toHaveLength(1);
+       expect.soft(await fixture.snapshot()).toEqual(committed);
+       expectCompactionAccounting(fixture);
+-      expectStoppedBeforePublication(fixture);
++      expectStoppedBeforePublication(fixture, true);
+     },
+   );
+ 
+@@ -409,7 +409,7 @@ describe("embedded compaction recovery authority", () => {
+       expectCompactionAccounting(fixture);
+       expect(fixture.afterHook).toHaveBeenCalledOnce();
+       expect(fixture.updates).not.toHaveBeenCalled();
+-      fixture.expectNoContinuation();
++      fixture.expectNoContinuation(true);
+     },
+   );
+ 
 diff --git a/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts b/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts
 index 226c954060dfcbb24226a4bf43de04b65389473b..54746935d83b06ca67a2a6dbe4697ee45fb62e41 100644
 --- a/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts
@@ -57699,6 +57775,35 @@ index 0000000000000000000000000000000000000000..4d4c76bd9f9cab4f3240d6eeec82ec30
 +      : `Run openclaw mcp login ${identity.serverName}.`;
 +  return new Error(`MCP server "${identity.serverName}" ${reason}. ${guidance}`);
 +}
+diff --git a/src/agents/mcp-oauth-redirect.test.ts b/src/agents/mcp-oauth-redirect.test.ts
+index 4cc6bf0ee198c453457ce2a94cfcf3cdb15d483f..1d0eb455d6fb8ddc34338e0db5551aaec0cb6569 100644
+--- a/src/agents/mcp-oauth-redirect.test.ts
++++ b/src/agents/mcp-oauth-redirect.test.ts
+@@ -1,5 +1,6 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { operatorMcpOAuthIdentity } from "./mcp-oauth-identity.js";
++import { readMcpOAuthStore } from "./mcp-oauth-store.js";
+ import { completeMcpOAuthAuthorization, resolveMcpOAuthAccessToken } from "./mcp-oauth.js";
+ import { withTempHome } from "./mcp-oauth.test-harness.js";
+ import { withMcpOAuthProviderForTest } from "./mcp-oauth.test-support.js";
+@@ -133,12 +134,17 @@ describe("MCP OAuth redirects", () => {
+             expires_in: -1,
+           });
+         });
++        const before = await readMcpOAuthStore(identity.storeKey);
+         const runtimeFetchMock = installRedirectingRuntime(307);
+ 
+         await expect(resolveMcpOAuthAccessToken({ identity })).rejects.toThrow(
+           "Refusing to follow cross-origin redirect for POST request body",
+         );
+         expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
++        const after = await readMcpOAuthStore(identity.storeKey);
++        expect(after.tokens).toEqual(before.tokens);
++        expect(after.tokenExpiresAt).toBe(before.tokenExpiresAt);
++        expect(after.pendingAuthorizationChallenge).toBeUndefined();
+       },
+       {
+         prefix: "openclaw-mcp-oauth-refresh-redirect-",
 diff --git a/src/agents/mcp-oauth-server.test-support.ts b/src/agents/mcp-oauth-server.test-support.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..6a68411ac2565bf01895a26c63bdebed5644e52c
@@ -67694,6 +67799,67 @@ index 488655d36b5f20c3669deffecb948286a36a088b..50c7d67d2fa0568d2e2ec1cf2ad25e7d
            } else {
              await pending;
              expect(subagentRuns.get(runId)).toMatchObject({
+diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
+index d2fc1aa955e0647124f29ef779b643c6ca50ad03..6e2ae3d21003011525042bc91d452fc842e582fc 100644
+--- a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
++++ b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
+@@ -58,7 +58,8 @@ type GatewayResponse = {
+   result?: Partial<EmbeddedAgentRunResult> & { deliveryStatus?: Partial<GatewayDeliveryStatus> };
+ };
+ 
+-let lifecycleHandler: Parameters<typeof onAgentEvent>[0] | undefined;
++type LifecycleHandler = Parameters<typeof onAgentEvent>[0];
++const lifecycleHandlers = new Set<LifecycleHandler>();
+ let agentCallGates = new Map<string, Promise<void>>();
+ let releaseAgentCallGate: (() => void) | undefined;
+ let agentCallObserved = createDeferred();
+@@ -228,8 +229,10 @@ describe("requester settle wake product flow", () => {
+     vi.mocked(callGateway).mockImplementation(callGatewayMock as typeof callGateway);
+     vi.mocked(loadAgentRuntimePluginRegistryHandle).mockReset();
+     vi.mocked(onAgentEvent).mockImplementation((handler) => {
+-      lifecycleHandler = handler;
+-      return () => {};
++      lifecycleHandlers.add(handler);
++      return () => {
++        lifecycleHandlers.delete(handler);
++      };
+     });
+     agentCallGates = new Map();
+     agentCallObserved = createDeferred();
+@@ -312,7 +315,7 @@ describe("requester settle wake product flow", () => {
+         await settleRootWork();
+       }
+     } finally {
+-      lifecycleHandler = undefined;
++      lifecycleHandlers.clear();
+       subagentAnnounceDeliveryTesting.setDepsForTest();
+       subagentAnnounceOutputTesting.setDepsForTest();
+       subagentAnnounceTesting.setDepsForTest();
+@@ -383,10 +386,10 @@ describe("requester settle wake product flow", () => {
+     modelRouteChange?: string,
+   ) => {
+     chatHistoryBySessionKey.set(childSessionKey, [{ role: "assistant", content: text }]);
+-    if (!lifecycleHandler) {
++    if (lifecycleHandlers.size === 0) {
+       throw new Error("Fixture lifecycle listener was not registered before completion");
+     }
+-    lifecycleHandler({
++    const event: Parameters<LifecycleHandler>[0] = {
+       stream: "lifecycle",
+       runId,
+       seq: 1,
+@@ -401,7 +404,10 @@ describe("requester settle wake product flow", () => {
+           ...(modelRouteChange ? { modelRouteChange } : {}),
+         },
+       },
+-    });
++    };
++    for (const handler of [...lifecycleHandlers]) {
++      handler(event);
++    }
+   };
+ 
+   it.each(
 diff --git a/src/agents/subagents/registry/subagent-registry.steer-restart.test.ts b/src/agents/subagents/registry/subagent-registry.steer-restart.test.ts
 index a48614c420a95d9eeaea25b73b68247100e95ac8..38b19bf484280588adc3c5831fd758bed91148e4 100644
 --- a/src/agents/subagents/registry/subagent-registry.steer-restart.test.ts
@@ -70270,6 +70436,67 @@ index a8d9b2cfd617adcfbecd86986e125d665e8a8787..a9a74d8f0b18d2f26548a3ca9d6312e5
    };
    const hint = compactSchemaType(schema, 0, limits);
    return hint.complete && hint.text.length <= limits.maxChars ? hint.text : "unknown";
+diff --git a/src/agents/tool-search.test.ts b/src/agents/tool-search.test.ts
+index 5b70792051ad22c9c12d8df26c4ebb57ea48da7f..f14fb3b1db024d2f11e95e74e52d51e2558b8521 100644
+--- a/src/agents/tool-search.test.ts
++++ b/src/agents/tool-search.test.ts
+@@ -537,28 +537,29 @@ describe("Tool Search", () => {
+   it.each([
+     {
+       scenario: "delegation was never provided",
++      expectedHasOpenClaw: false,
+       agentId: "openclaw",
+       denyOpenClaw: false,
+-      expected:
+-        "Read gateway config/schema. update.run: owner request or operator schedule; automatic restart + completion notice. Never via shell.",
+     },
+     {
+       scenario: "policy removed delegation",
++      expectedHasOpenClaw: false,
+       agentId: "main",
+       denyOpenClaw: true,
+-      expected:
+-        "Read gateway config/schema. update.run: owner request or operator schedule; automatic restart + completion notice. Never via shell.",
+     },
+     {
+       scenario: "delegation remains authorized",
++      expectedHasOpenClaw: true,
+       agentId: "main",
+       denyOpenClaw: false,
+-      expected:
+-        "Read gateway config/schema. update.run: owner request or operator schedule; automatic restart + completion notice. Never via shell. Other system changes: use openclaw tool.",
+     },
+   ])(
+     "keeps gateway guidance consistent across final and deferred surfaces when $scenario",
+-    ({ agentId, denyOpenClaw, expected }) => {
++    ({ agentId, denyOpenClaw, expectedHasOpenClaw }) => {
++      const expected =
++        "Read gateway config/schema. update.run: owner request or operator schedule; automatic restart + completion notice. Do not duplicate an admitted update or bypass an authorization or policy refusal.";
++      const expectedDirectory =
++        "Read gateway config/schema. update.run: owner request or operator schedule; automatic restart + completion notice. Do not duplicate an admitted update or bypass an authorization...";
+       const authorizedTools = filterToolsByPolicy(
+         [createGatewayTool(), ...createOpenClawDelegateToolsForRun({ sessionAgentId: agentId })],
+         denyOpenClaw ? { deny: ["openclaw"] } : undefined,
+@@ -573,9 +574,7 @@ describe("Tool Search", () => {
+         "finalized gateway tool",
+       );
+ 
+-      expect(finalizedTools.some((tool) => tool.name === "openclaw")).toBe(
+-        expected.includes("openclaw"),
+-      );
++      expect(finalizedTools.some((tool) => tool.name === "openclaw")).toBe(expectedHasOpenClaw);
+       expect(gateway.description).toBe(expected);
+ 
+       for (const mode of ["tools", "directory"] as const) {
+@@ -597,7 +596,7 @@ describe("Tool Search", () => {
+         expect(entry.description).toBe(expected);
+         expect(entry.tool.description).toBe(expected);
+         expect(buildToolSchemaDirectoryPrompt({ config, catalogRef })).toContain(
+-          `- gateway (core): ${expected}`,
++          `- gateway (core): ${expectedDirectory}`,
+         );
+         expect(resolveToolSearchCatalogTool({ config, catalogRef }, "gateway")?.description).toBe(
+           expected,
 diff --git a/src/agents/tools/ask-user-tool.test.ts b/src/agents/tools/ask-user-tool.test.ts
 index 6326eef5707fbd4418f7525fe5264198edd222ea..203a6deaa9e21a7f00672ab9fd4fc8d6f53cb87d 100644
 --- a/src/agents/tools/ask-user-tool.test.ts
@@ -93003,6 +93230,27 @@ index 678063dc69e8f289c3c05e7e3d2ee86f169c1395..2c3af513238c5cf68e0263e453863576
      },
      pauseScheduling() {
        schedulingPaused = true;
+diff --git a/src/gateway/server-cron-reconciled.ts b/src/gateway/server-cron-reconciled.ts
+index 8935b8b5ebc075a27bcd9e681b0c92d4a94431f4..800b4af4fc59c7a1176acee0aa670cef61a0f872 100644
+--- a/src/gateway/server-cron-reconciled.ts
++++ b/src/gateway/server-cron-reconciled.ts
+@@ -16,6 +16,8 @@ type GatewayCronReconciliationArmParams = {
+ 
+ export type GatewayCronReconciliation = {
+   arm: (params: GatewayCronReconciliationArmParams) => {
++    /** Cancellation of this exact startup or reload reconciliation, when owner-provided. */
++    signal?: AbortSignal;
+     complete: () => Promise<void>;
+   };
+   invalidate: () => void;
+@@ -50,6 +52,7 @@ export function createGatewayCronReconciliation(params: {
+       let completed = false;
+ 
+       return {
++        signal: abortController.signal,
+         complete: async () => {
+           if (completed) {
+             return;
 diff --git a/src/gateway/server-cron.ts b/src/gateway/server-cron.ts
 index 9bdb6d98d1819e823a40509572ca51963480de9e..e0b310ef889968554db3ee9112217a1e8479713c 100644
 --- a/src/gateway/server-cron.ts
@@ -95252,6 +95500,38 @@ index 8246fe5f667d91b6aac945652a3baa4d0427b830..6d1870f9392052e21525b2ad7528ad5e
      });
      const limited = await listSessions({
        client,
+diff --git a/src/gateway/server-methods/update-owner.test.ts b/src/gateway/server-methods/update-owner.test.ts
+index 288f465549a0c9f7fc7a1818089eebbd91ae1974..97ce0bdd67d5313add17dc6067047c4322c04b87 100644
+--- a/src/gateway/server-methods/update-owner.test.ts
++++ b/src/gateway/server-methods/update-owner.test.ts
+@@ -251,10 +251,24 @@ describe("update.run current owner authority", () => {
+         );
+       }
+       expect(guidance).toContain("only on an explicit owner request");
+-      expect(guidance).toContain("relay the tool's exact recovery instructions");
+-      expect(guidance).toContain("operator to run outside the Gateway service");
++      expect(guidance).toContain("follow the tool's exact recovery instructions");
+       expect(guidance).toContain(
+-        "Never run openclaw update, npm install -g openclaw, swap installations, or stop/restart the gateway service via exec or detached jobs.",
++        "do not bypass an authorization or policy refusal or duplicate an admitted update",
++      );
++      expect(guidance).toContain(
++        "Do not run ad hoc openclaw update, npm install -g openclaw, installation swaps, process kills, or new lifecycle controllers.",
++      );
++      // This fixture advertises Gateway-scoped tools; external exec guidance requires exec.
++      expect(toolNames).not.toContain("exec");
++      expect(guidance).not.toContain("host's existing documented external lifecycle owner");
++      expect(guidance).not.toContain(
++        "normal exec authorization, drain/handoff, resumable work and a verified rollback target",
++      );
++      expect(guidance).not.toContain(
++        "Detached execution is allowed only when that route requires it.",
++      );
++      expect(guidance).toContain(
++        "Reconcile any already admitted update before another transition; never duplicate it with exec or another updater.",
+       );
+     },
+   );
 diff --git a/src/gateway/server-plugin-in-process-authority.ts b/src/gateway/server-plugin-in-process-authority.ts
 index 3f17b005164e0649d1f72bcc335321b13f7af363..b086fe6c7ee2c96dc7c6af6c2365582a072e2fdd 100644
 --- a/src/gateway/server-plugin-in-process-authority.ts
@@ -95659,6 +95939,243 @@ index 0f2b3d274e77b88eb4a4b5380a3bac9cc7bb24e5..8b9eab36918fec03a017d3938faf74e9
                      operatorAuthority: execution.operatorAuthority,
                      systemPrompt: params.extraSystemPrompt ?? "",
                      prompt: params.message,
+diff --git a/src/gateway/server-runtime-services.cron.test-support.ts b/src/gateway/server-runtime-services.cron.test-support.ts
+index db916afececba3d4d9c9da799d8d5c1c03df7d0e..5e8ae55990077a36f1cdd829048f41c3ba02c466 100644
+--- a/src/gateway/server-runtime-services.cron.test-support.ts
++++ b/src/gateway/server-runtime-services.cron.test-support.ts
+@@ -3,6 +3,8 @@ import { expect, it, vi } from "vitest";
+ import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
+ import { AsyncWorkScope, trackAsyncWork } from "../shared/async-work-scope.js";
+ import { createDeferredCore } from "../shared/deferred.js";
++import { withAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
++import { createGatewayCronReconciliation } from "./server-cron-reconciled.js";
+ import {
+   createTestCronReconciliation,
+   createTestCronState,
+@@ -12,6 +14,182 @@ import {
+ export function registerGatewayCronStartupTests(
+   startGatewayCronWithLogging: typeof import("./server-runtime-services.js").startGatewayCronWithLogging,
+ ) {
++  it.each(["prepared", "failed"] as const)(
++    "waits for owned agent inspection and preparation before cron startup (%s)",
++    async (outcome) => {
++      await withAgentDatabaseStartupAdmission(async (admission) => {
++        const inspected = createDeferredCore();
++        const prepared = createDeferredCore();
++        const finished = createDeferredCore();
++        admission.track(inspected.promise);
++        admission.track(prepared.promise);
++        const persistentFailure = new Error("agent database remains unavailable");
++        const cron = {
++          start: vi.fn(async () => {
++            if (outcome === "failed") {
++              throw persistentFailure;
++            }
++          }),
++        };
++        const runHook = vi.fn<Parameters<typeof createGatewayCronReconciliation>[0]["runHook"]>(
++          async () => finished.resolve(),
++        );
++        const cronReconciliation = createGatewayCronReconciliation({
++          port: 18789,
++          workspaceDir: "/tmp/cron-startup-admission-fixture",
++          isClosing: () => false,
++          runHook,
++        });
++        const logCron = { error: vi.fn() };
++        const onStartError = vi.fn(() => finished.resolve());
++        try {
++          startGatewayCronWithLogging({
++            cronState: createTestCronState(cron),
++            cronReconciliation,
++            reason: "startup",
++            config: {},
++            logCron,
++            onStartError,
++          });
++          expect(cron.start).not.toHaveBeenCalled();
++          inspected.resolve();
++          await inspected.promise;
++          expect(cron.start).not.toHaveBeenCalled();
++          if (outcome === "failed") {
++            prepared.reject(persistentFailure);
++          } else {
++            prepared.resolve();
++          }
++          await finished.promise;
++          expect(cron.start).toHaveBeenCalledOnce();
++          if (outcome === "failed") {
++            expect(onStartError).toHaveBeenCalledExactlyOnceWith(persistentFailure);
++            expect(logCron.error).toHaveBeenCalledExactlyOnceWith(
++              "failed to start: Error: agent database remains unavailable",
++            );
++            expect(runHook).not.toHaveBeenCalled();
++          } else {
++            expect(runHook).toHaveBeenCalledOnce();
++            expect(onStartError).not.toHaveBeenCalled();
++            expect(logCron.error).not.toHaveBeenCalled();
++          }
++        } finally {
++          inspected.resolve();
++          prepared.resolve();
++          await Promise.allSettled([inspected.promise, prepared.promise]);
++        }
++      });
++    },
++  );
++
++  it("starts only the current reload after pending agent preparation settles", async () => {
++    await withAgentDatabaseStartupAdmission(async (admission) => {
++      const prepared = createDeferredCore();
++      const finished = createDeferredCore();
++      admission.track(prepared.promise);
++      const runHook = vi.fn<Parameters<typeof createGatewayCronReconciliation>[0]["runHook"]>(
++        async () => finished.resolve(),
++      );
++      const cronReconciliation = createGatewayCronReconciliation({
++        port: 18789,
++        workspaceDir: "/tmp/cron-reload-admission-fixture",
++        isClosing: () => false,
++        runHook,
++      });
++      const previous = { start: vi.fn(async () => {}) };
++      const current = { start: vi.fn(async () => {}) };
++      const logCron = { error: vi.fn() };
++      try {
++        startGatewayCronWithLogging({
++          cronState: createTestCronState(previous),
++          cronReconciliation,
++          reason: "startup",
++          config: {},
++          logCron,
++        });
++        startGatewayCronWithLogging({
++          cronState: createTestCronState(current),
++          cronReconciliation,
++          reason: "reload",
++          config: {},
++          logCron,
++        });
++        expect(previous.start).not.toHaveBeenCalled();
++        expect(current.start).not.toHaveBeenCalled();
++        prepared.resolve();
++        await finished.promise;
++        expect(previous.start).not.toHaveBeenCalled();
++        expect(current.start).toHaveBeenCalledOnce();
++        expect(runHook).toHaveBeenCalledOnce();
++        expect(runHook.mock.calls[0]?.[0]).toMatchObject({ reason: "reload" });
++        expect(logCron.error).not.toHaveBeenCalled();
++      } finally {
++        prepared.resolve();
++        await prepared.promise;
++      }
++    });
++  });
++
++  it("cancels a shutdown startup wait without cancelling owned agent preparation", async () => {
++    await withAgentDatabaseStartupAdmission(async (admission) => {
++      const prepared = createDeferredCore();
++      admission.track(prepared.promise);
++      let preparationSettled = false;
++      void prepared.promise.then(() => {
++        preparationSettled = true;
++      });
++      const cron = { start: vi.fn(async () => {}) };
++      const runHook = vi.fn<Parameters<typeof createGatewayCronReconciliation>[0]["runHook"]>(
++        async () => {},
++      );
++      const cronReconciliation = createGatewayCronReconciliation({
++        port: 18789,
++        workspaceDir: "/tmp/cron-shutdown-admission-fixture",
++        isClosing: () => false,
++        runHook,
++      });
++      const arm = vi.spyOn(cronReconciliation, "arm");
++      const rootCountBeforeStart = getActiveGatewayRootWorkCount();
++      const logCron = { error: vi.fn() };
++      const onStartError = vi.fn();
++      try {
++        startGatewayCronWithLogging({
++          cronState: createTestCronState(cron),
++          cronReconciliation,
++          reason: "startup",
++          config: {},
++          logCron,
++          onStartError,
++        });
++        const armed = arm.mock.results[0];
++        if (armed?.type !== "return") {
++          throw new Error("Expected a native reconciliation arm");
++        }
++        const reconciliationSignal = armed.value.signal;
++        expect(reconciliationSignal).toBeInstanceOf(AbortSignal);
++        const cancelled = expect(
++          admission.waitForPendingPreparation(reconciliationSignal),
++        ).rejects.toMatchObject({ name: "AbortError" });
++        cronReconciliation.invalidate();
++        await cancelled;
++        await waitForFast(() => expect(getActiveGatewayRootWorkCount()).toBe(rootCountBeforeStart));
++        expect(preparationSettled).toBe(false);
++        expect(cron.start).not.toHaveBeenCalled();
++        expect(runHook).not.toHaveBeenCalled();
++        expect(onStartError).not.toHaveBeenCalled();
++        expect(logCron.error).not.toHaveBeenCalled();
++        prepared.resolve();
++        await admission.waitForPendingPreparation();
++        expect(preparationSettled).toBe(true);
++        expect(cron.start).not.toHaveBeenCalled();
++        expect(getActiveGatewayRootWorkCount()).toBe(rootCountBeforeStart);
++      } finally {
++        prepared.resolve();
++        await prepared.promise;
++      }
++    });
++  });
++
+   it("owns cron startup, watcher reconciliation, and completion after the requester closes", async () => {
+     const order: string[] = [];
+     const callerContext = new AsyncLocalStorage<string>();
+diff --git a/src/gateway/server-runtime-services.ts b/src/gateway/server-runtime-services.ts
+index e72d2483734be8026fcaa821b3adf825688f3a03..55c54d52e7f5adf018723cf6514d6a4d0d5cc0de 100644
+--- a/src/gateway/server-runtime-services.ts
++++ b/src/gateway/server-runtime-services.ts
+@@ -26,6 +26,7 @@ import { startSessionUpstreamMonitor } from "../sessions/session-upstream-monito
+ import { runInDetachedAsyncContext } from "../shared/async-work-scope.js";
+ import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+ import { resolveSkillWorkshopConfig } from "../skills/workshop/config.js";
++import { getAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
+ import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
+ import { assertQueuedConversationDeliveryAttemptAuthorized } from "./conversation-route-ownership.js";
+ import {
+@@ -67,6 +68,8 @@ export function startGatewayCronWithLogging(params: {
+   onStartError?: (error: unknown) => void;
+   logCron: { error: (message: string) => void };
+ }): void {
++  // Retain this Gateway's startup owner before the independent root clears async context.
++  const databaseStartupAdmission = getAgentDatabaseStartupAdmission();
+   const reconciliation = params.cronReconciliation.arm({
+     reason: params.reason,
+     config: params.config,
+@@ -75,10 +78,19 @@ export function startGatewayCronWithLogging(params: {
+   void runInDetachedAsyncContext(() =>
+     runWithGatewayIndependentRootWorkAdmission(async () => {
+       try {
++        if (databaseStartupAdmission) {
++          await databaseStartupAdmission.waitForPendingPreparation(reconciliation.signal);
++        }
++        if (reconciliation.signal?.aborted) {
++          return;
++        }
+         await params.cronState.cron.start();
+         await params.afterStart?.();
+         await reconciliation.complete();
+       } catch (err) {
++        if (reconciliation.signal?.aborted) {
++          return;
++        }
+         params.logCron.error(`failed to start: ${String(err)}`);
+         // Recovery callbacks must run before this independent root releases its
+         // admission fence; restart and suspension cannot race past this point.
 diff --git a/src/gateway/server.agent.gateway-server-agent-b.test.ts b/src/gateway/server.agent.gateway-server-agent-b.test.ts
 index bb17eb9a4ea8b8f993ef4d165c78860a707241bf..a09cebc67d0cbcd6b0cdfbc414533ea9c2c141f4 100644
 --- a/src/gateway/server.agent.gateway-server-agent-b.test.ts
@@ -95955,6 +96472,19 @@ index 1d297c4f57aad01792d1425a2406d5f3613b09d0..6e5bc27529232ee9711c6135f31f271e
      sessionEntry: prepared.sessionEntry,
      senderIsOwner: resolveCommandAuthorization({
        ctx,
+diff --git a/src/gateway/worker-environments/computer-transport.connection.test.ts b/src/gateway/worker-environments/computer-transport.connection.test.ts
+index 8a7c30325ef5d68618b47a0ac6713e9eee4545c4..b3ae0a209282f843f57acfffc36eb53d06ae359a 100644
+--- a/src/gateway/worker-environments/computer-transport.connection.test.ts
++++ b/src/gateway/worker-environments/computer-transport.connection.test.ts
+@@ -327,7 +327,7 @@ describe("worker computer connection lifetime", () => {
+             h.state.beforeDispatch = pause;
+           }
+           const failed = tool
+-            .execute("deadline", { action: "type", text: "must not type" })
++            .execute("deadline", { action: "type", text: "must not type", timeoutMs: 1_000 })
+             .catch((error: unknown) => error);
+           await entered.promise;
+           expect(await failed).toMatchObject({ message: "worker computer response timed out" });
 diff --git a/src/infra/agent-run-registry.types.ts b/src/infra/agent-run-registry.types.ts
 index 750b35fd6edfe4c65788202f6339643cc89437e2..692267d9890fb9a8b78a42e43c41a851027c462e 100644
 --- a/src/infra/agent-run-registry.types.ts
@@ -98813,19 +99343,26 @@ index 95e0a55da42b7bd654ac2d3bc582726564745dfd..e84008677554cbe9f1d6ef5e2900edd2
  });
 -/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 diff --git a/src/infra/net/fetch-guard.redirect-policy.test.ts b/src/infra/net/fetch-guard.redirect-policy.test.ts
-index 2455b2f362b226e63f6605be58b5e9f6f127948a..be28c8bcc37686a809675e2cf237b4fd189968b7 100644
+index 2455b2f362b226e63f6605be58b5e9f6f127948a..e8e511ed2a3b010374f5e234bfe16b0a55ee7a05 100644
 --- a/src/infra/net/fetch-guard.redirect-policy.test.ts
 +++ b/src/infra/net/fetch-guard.redirect-policy.test.ts
-@@ -7,6 +7,94 @@ const createPublicLookup = (): LookupFn =>
+@@ -7,32 +7,158 @@ const createPublicLookup = (): LookupFn =>
    vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) as unknown as LookupFn;
  
  describe("fetchWithSsrFGuard redirect policy", () => {
+-  it("rejects unsafe cross-origin redirect bodies before replay when requested", async () => {
+-    const lookupFn = createPublicLookup();
+-    const fetchImpl = vi.fn().mockResolvedValueOnce(
+-      new Response(null, {
 +  it.each(["https://other.example/upload", "http://127.0.0.1/internal", undefined])(
 +    "returns the first validated manual response without following or parsing its target (%s)",
 +    async (location) => {
 +      const lookupFn = createPublicLookup();
 +      const response = new Response("redirect body", {
-+        status: 307,
+         status: 307,
+-        headers: { location: "https://cdn.example.com/upload-2" },
+-      }),
+-    );
 +        headers: location ? { location } : {},
 +      });
 +      const fetchImpl = vi.fn().mockResolvedValueOnce(response);
@@ -98848,7 +99385,7 @@ index 2455b2f362b226e63f6605be58b5e9f6f127948a..be28c8bcc37686a809675e2cf237b4fd
 +      }
 +    },
 +  );
-+
+ 
 +  it("rejects error-mode redirects before a second request and releases the response", async () => {
 +    const cancel = vi.fn();
 +    const response = new Response(new ReadableStream({ cancel }), {
@@ -98856,13 +99393,21 @@ index 2455b2f362b226e63f6605be58b5e9f6f127948a..be28c8bcc37686a809675e2cf237b4fd
 +      headers: { location: "/next" },
 +    });
 +    const fetchImpl = vi.fn().mockResolvedValueOnce(response);
-+    await expect(
-+      fetchWithSsrFGuard({
-+        url: "https://api.example.com/upload",
-+        fetchImpl,
+     await expect(
+       fetchWithSsrFGuard({
+         url: "https://api.example.com/upload",
+         fetchImpl,
+-        lookupFn,
+-        rejectCrossOriginUnsafeRedirectReplay: true,
+-        init: {
+-          method: "POST",
+-          headers: { "Content-Type": "application/json" },
+-          body: '{"secret":"123"}',
+-        },
 +        lookupFn: createPublicLookup(),
 +        redirect: "error",
-+      }),
+       }),
+-    ).rejects.toThrow("Refusing to follow cross-origin redirect for POST request body");
 +    ).rejects.toThrow("Redirect response is not allowed");
 +    expect(fetchImpl).toHaveBeenCalledOnce();
 +    expect(cancel).toHaveBeenCalledOnce();
@@ -98894,7 +99439,8 @@ index 2455b2f362b226e63f6605be58b5e9f6f127948a..be28c8bcc37686a809675e2cf237b4fd
 +      }
 +    },
 +  );
-+
+ 
+-    expect(fetchImpl).toHaveBeenCalledTimes(1);
 +  it("still applies initial SSRF validation before a manual response can be fetched", async () => {
 +    const fetchImpl = vi.fn();
 +    await expect(
@@ -98906,16 +99452,80 @@ index 2455b2f362b226e63f6605be58b5e9f6f127948a..be28c8bcc37686a809675e2cf237b4fd
 +      }),
 +    ).rejects.toThrow(/Blocked/);
 +    expect(fetchImpl).not.toHaveBeenCalled();
-+  });
+   });
+ 
++  it.each(
++    [307, 308].flatMap((status) =>
++      ([undefined, "manual", "follow"] as const).map((redirect) => ({ status, redirect })),
++    ),
++  )(
++    "rejects unsafe cross-origin redirect bodies before replay ($status, $redirect)",
++    async ({ status, redirect }) => {
++      const lookupFn = createPublicLookup();
++      const cancel = vi.fn();
++      const fetchImpl = vi.fn().mockResolvedValueOnce(
++        new Response(new ReadableStream({ cancel }), {
++          status,
++          headers: { location: "https://cdn.example.com/upload-2" },
++        }),
++      );
 +
-   it("rejects unsafe cross-origin redirect bodies before replay when requested", async () => {
-     const lookupFn = createPublicLookup();
-     const fetchImpl = vi.fn().mockResolvedValueOnce(
++      await expect(
++        fetchWithSsrFGuard({
++          url: "https://api.example.com/upload",
++          fetchImpl,
++          lookupFn,
++          redirect,
++          rejectCrossOriginUnsafeRedirectReplay: true,
++          init: {
++            method: "POST",
++            headers: { "Content-Type": "application/json" },
++            body: '{"secret":"123"}',
++          },
++        }),
++      ).rejects.toThrow("Refusing to follow cross-origin redirect for POST request body");
++
++      expect(fetchImpl).toHaveBeenCalledTimes(1);
++      expect(lookupFn).toHaveBeenCalledOnce();
++      expect(cancel).toHaveBeenCalledOnce();
++    },
++  );
++
++  it.each([307, 308])(
++    "retains a same-origin manual OAuth redirect response (%s)",
++    async (status) => {
++      const response = new Response("manual redirect body", {
++        status,
++        headers: { location: "/next" },
++      });
++      const fetchImpl = vi.fn().mockResolvedValueOnce(response);
++      const result = await fetchWithSsrFGuard({
++        url: "https://api.example.com/upload",
++        fetchImpl,
++        lookupFn: createPublicLookup(),
++        redirect: "manual",
++        rejectCrossOriginUnsafeRedirectReplay: true,
++        init: { method: "POST", body: "synthetic-code" },
++      });
++      try {
++        expect(result.response).toBe(response);
++        expect(result.finalUrl).toBe("https://api.example.com/upload");
++        expect(await result.response.text()).toBe("manual redirect body");
++        expect(fetchImpl).toHaveBeenCalledOnce();
++      } finally {
++        await result.release();
++      }
++    },
++  );
++
+   it("rejects contradictory unsafe cross-origin redirect policies before fetching", async () => {
+     const fetchImpl = vi.fn();
+ 
 diff --git a/src/infra/net/fetch-guard.ts b/src/infra/net/fetch-guard.ts
-index ffabbca37d96ef31b03dc9f05ed94c8669573daa..57ebc9edbd77aa690c4b85b52262c3bf0eb26aaa 100644
+index ffabbca37d96ef31b03dc9f05ed94c8669573daa..e3cafc909822cd5fbe28ff6962dffbab507c0aad 100644
 --- a/src/infra/net/fetch-guard.ts
 +++ b/src/infra/net/fetch-guard.ts
-@@ -70,6 +70,8 @@ export type GuardedFetchOptions = {
+@@ -70,13 +70,15 @@ export type GuardedFetchOptions = {
          sensitiveRequestHeaderNames?: readonly string[];
        };
    maxRedirects?: number;
@@ -98924,7 +99534,15 @@ index ffabbca37d96ef31b03dc9f05ed94c8669573daa..57ebc9edbd77aa690c4b85b52262c3bf
    /**
     * Allow replaying unsafe request methods and bodies across cross-origin redirects.
     * Sensitive cross-origin headers (for example Authorization/Cookie) are still stripped.
-@@ -672,7 +674,10 @@ async function fetchWithSsrFGuardInternal(
+    * Defaults to false.
+    */
+   allowCrossOriginUnsafeRedirectReplay?: boolean;
+-  /** Reject cross-origin redirects that would replay an unsafe body. Mutually exclusive with allow. */
++  /** Reject cross-origin unsafe-body redirect responses, including manual responses. Exclusive with allow. */
+   rejectCrossOriginUnsafeRedirectReplay?: boolean;
+   timeoutMs?: number;
+   signal?: AbortSignal;
+@@ -672,7 +674,35 @@ async function fetchWithSsrFGuardInternal(
        params.onResponse?.(response.status);
        void captureAdmission.capture?.({ ...captureParams, response });
  
@@ -98932,10 +99550,56 @@ index ffabbca37d96ef31b03dc9f05ed94c8669573daa..57ebc9edbd77aa690c4b85b52262c3bf
 +      if (isRedirectStatus(response.status) && params.redirect === "error") {
 +        throw new TypeError("Redirect response is not allowed");
 +      }
++      // OAuth clients inspect redirects manually; preserve the explicit body-refusal
++      // policy before their SDK can turn the response into an authorization fallback.
++      const redirectLocation = isRedirectStatus(response.status)
++        ? response.headers.get("location")
++        : null;
++      if (redirectLocation && params.rejectCrossOriginUnsafeRedirectReplay === true) {
++        const nextParsedUrl = new URL(redirectLocation, parsedUrl);
++        const redirectedInit = rewriteRedirectInit({
++          init: currentInit,
++          status: response.status,
++          crossOrigin: false,
++          allowUnsafeReplay: true,
++        });
++        const redirectedMethod = redirectedInit?.method?.toUpperCase() ?? "GET";
++        if (
++          nextParsedUrl.origin !== parsedUrl.origin &&
++          redirectedMethod !== "GET" &&
++          redirectedMethod !== "HEAD" &&
++          redirectedInit?.body != null
++        ) {
++          throw new Error(
++            `Refusing to follow cross-origin redirect for ${redirectedMethod} request body (${parsedUrl.origin} -> ${nextParsedUrl.origin})`,
++          );
++        }
++      }
 +      if (isRedirectStatus(response.status) && params.redirect !== "manual") {
          redirectCount += 1;
          if (redirectCount > maxRedirects) {
            throw new GuardedFetchRedirectError({ status: response.status, maxRedirects });
+@@ -695,20 +725,6 @@ async function fetchWithSsrFGuardInternal(
+           crossOrigin: false,
+           allowUnsafeReplay: true,
+         });
+-        if (crossOrigin) {
+-          const redirectedMethod = methodRedirectInit?.method?.toUpperCase() ?? "GET";
+-          const redirectedBody = methodRedirectInit?.body;
+-          if (
+-            params.rejectCrossOriginUnsafeRedirectReplay === true &&
+-            redirectedMethod !== "GET" &&
+-            redirectedMethod !== "HEAD" &&
+-            redirectedBody != null
+-          ) {
+-            throw new Error(
+-              `Refusing to follow cross-origin redirect for ${redirectedMethod} request body (${parsedUrl.origin} -> ${nextParsedUrl.origin})`,
+-            );
+-          }
+-        }
+         currentInit = rewriteRedirectInit({
+           init: methodRedirectInit,
+           status: response.status,
 diff --git a/src/infra/outbound/message-action-contracts.ts b/src/infra/outbound/message-action-contracts.ts
 index d4f14327af320a0b9da155a0cd5e6ae016664fe6..5ea790b6f094a7302c1bdb40d5f0abfa800bad2f 100644
 --- a/src/infra/outbound/message-action-contracts.ts
@@ -102645,6 +103309,37 @@ index 27ac78ba89780e77c08635b82b4c082e051e6a6e..d048e8b2078e241f91cc341a9731eea2
  export async function waitForGatewayRestartFenceSettlement(): Promise<void> {
    if (!GATEWAY_WORK_ADMISSION_STATE.restartSignalPending) {
      return;
+diff --git a/src/state/agent-database-startup.ts b/src/state/agent-database-startup.ts
+index a6120f7206f6de9b8ffa82669ac79052ed3ee6c0..c2e81ae2e5da4d3186cc9d03b5450adda4d91eff 100644
+--- a/src/state/agent-database-startup.ts
++++ b/src/state/agent-database-startup.ts
+@@ -1,6 +1,7 @@
+ import { AsyncLocalStorage } from "node:async_hooks";
+ import { statSync } from "node:fs";
+ import { cloneEnvWithPlatformSemantics } from "../config/config-env-vars.js";
++import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
+ import { formatErrorMessage } from "../infra/errors.js";
+ import {
+   sameFileMutationFingerprint,
+@@ -141,6 +142,18 @@ class AgentDatabaseStartupAdmission {
+     );
+   }
+ 
++  /** Joins owned inspection and preparation; settled failures remain refused by admission. */
++  async waitForPendingPreparation(signal?: AbortSignal): Promise<void> {
++    const waitSignal = signal ? AbortSignal.any([this.signal, signal]) : this.signal;
++    for (;;) {
++      waitSignal.throwIfAborted();
++      if (this.work.size === 0) {
++        return;
++      }
++      await racePromiseWithAbortSignal(Promise.allSettled(this.work), waitSignal);
++    }
++  }
++
+   scheduling(env: NodeJS.ProcessEnv) {
+     return {
+       signal: this.signal,
 diff --git a/src/state/openclaw-agent-db-readonly-open.ts b/src/state/openclaw-agent-db-readonly-open.ts
 index 095094c10c80d750d09e7c94616fc402839e4da1..4af3d5f6dff0932f00533f6d0f17dd53dcfd15ae 100644
 --- a/src/state/openclaw-agent-db-readonly-open.ts
@@ -110687,6 +111382,19 @@ index c68bc396e104da9eda3d10495c7015ad2ce74984..42e8be1f9b134aae138e9f1fd998d126
  describe.skipIf(process.platform === "win32")("POSIX command fixture output drainage", () => {
    const modes =
      process.platform === "linux"
+diff --git a/test/scripts/eager-import-closure.test.ts b/test/scripts/eager-import-closure.test.ts
+index 307ab526529acb7a82256d4b5e53592c8c7b72a5..def41a0e7984e30f4f360cb085d98a150a82d412 100644
+--- a/test/scripts/eager-import-closure.test.ts
++++ b/test/scripts/eager-import-closure.test.ts
+@@ -81,6 +81,8 @@ it("keeps the PR wrapper inventory closed over runtime imports", () => {
+ it("acquires and releases wrapper leases without the application command runtime", async () => {
+   const root = tempDirs.make("openclaw-pr-lease-bootstrap-");
+   copyPrWrapperSources(root);
++  // Other wrapper commands need this runtime; the lease path must still work without it.
++  rmSync(join(root, "src/state/openclaw-state-worker-runtime.ts"), { force: true });
+   linkPrWrapperDependencies(root);
+   await prepareCopiedSourceModules(root, [
+     "src/state/openclaw-state-lease.ts",
 diff --git a/test/scripts/install-cli.freebsd.test.ts b/test/scripts/install-cli.freebsd.test.ts
 index 839e2e7be21e8e7d67b195018007a222f8f04afb..fba42aeaab59068407817451ac3cf22dae92fc54 100644
 --- a/test/scripts/install-cli.freebsd.test.ts
