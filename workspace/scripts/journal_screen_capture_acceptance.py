@@ -66,6 +66,74 @@ def private_directory(root: Path) -> None:
         raise activation.ActivationError("capture directory must be physical, private and operator-owned")
 
 
+def select_journal_window(root: Path) -> dict:
+    """Pin one observed Journal body; never fall back to a window index."""
+    result = activation.run_bounded(
+        (str(peekaboo_binary()), "list", "windows", "--app", "com.apple.journal",
+         "--include-details", "bounds,ids,off_screen", "--no-remote", "--json"), 10)
+    activation.create_immutable_file(root / "window-list-stdout.json", result.stdout)
+    activation.create_immutable_file(root / "window-list-stderr.log", result.stderr)
+    if result.returncode != 0 or result.timed_out:
+        raise activation.ActivationError("Journal window metadata is unavailable")
+    document = json.loads(result.stdout)
+    data = document.get("data", {}) if isinstance(document, dict) else {}
+    if not isinstance(data, dict):
+        raise activation.ActivationError("Journal window metadata has the wrong application")
+    application = data.get("targetApplication", {})
+    windows = data.get("windows")
+    if (not isinstance(application, dict) or application.get("bundleIdentifier") != "com.apple.journal"
+            or type(application.get("processIdentifier")) is not int
+            or application["processIdentifier"] <= 0 or not isinstance(windows, list)):
+        raise activation.ActivationError("Journal window metadata has the wrong application")
+    candidates = []
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        bounds = window.get("bounds")
+        size = bounds[1] if isinstance(bounds, list) and len(bounds) == 2 else None
+        if (type(window.get("windowID")) is not int or window["windowID"] <= 0
+                or window.get("isMainWindow") is not True or window.get("isMinimized") is not False
+                or window.get("offScreen") is not False or not isinstance(window.get("title"), str)
+                or not window["title"].casefold().startswith("journal")
+                or not isinstance(size, list) or len(size) != 2
+                or any(type(value) not in (int, float) or not 32 < value <= 32768
+                       or not float(value).is_integer() for value in size)):
+            continue
+        candidates.append({"applicationPid": application["processIdentifier"],
+                           "windowId": window["windowID"], "width": int(size[0]), "height": int(size[1])})
+    if len(candidates) != 1:
+        raise activation.ActivationError("Journal body window is not uniquely ready")
+    save(root / "journal-window.json", candidates[0])
+    return candidates[0]
+
+
+def journal_image_evidence(root: Path, image: bytes) -> dict:
+    """Match the producer's actual window and PNG size to the observed body."""
+    target, _, _ = activation.read_json(root / "journal-window.json", "observed Journal window")
+    if (set(target) != {"applicationPid", "windowId", "width", "height"}
+            or any(type(target.get(key)) is not int or target[key] <= 0 for key in target)
+            or not 32 < target["width"] <= 32768 or not 32 < target["height"] <= 32768):
+        raise activation.ActivationError("observed Journal window is invalid")
+    document = json.loads((root / "stage-2-stdout.log").read_text())
+    data = document.get("data", {}) if isinstance(document, dict) else {}
+    files = data.get("files") if isinstance(data, dict) else None
+    if (not isinstance(document, dict) or document.get("success") is not True
+            or not isinstance(files, list) or len(files) != 1
+            or not isinstance(files[0], dict) or type(files[0].get("window_id")) is not int
+            or files[0]["window_id"] != target["windowId"]
+            or files[0].get("path") != str(root / "journal.png")
+            or files[0].get("mime_type") != "image/png"):
+        raise activation.ActivationError("Journal image producer selected a different window")
+    if (len(image) < 24 or not image.startswith(b"\x89PNG\r\n\x1a\n")
+            or image[8:16] != b"\x00\x00\x00\rIHDR"):
+        raise activation.ActivationError("Journal capture did not create a PNG with dimensions")
+    dimensions = {"width": int.from_bytes(image[16:20], "big"),
+                  "height": int.from_bytes(image[20:24], "big")}
+    if any(dimensions[key] != target[key] for key in ("width", "height")):
+        raise activation.ActivationError("Journal PNG dimensions differ from the observed body window")
+    return {"journalWindow": target, "imageDimensions": dimensions, "imageWindowIdVerified": True}
+
+
 def stage(root: Path, number: int) -> None:
     """Preserve recovery -> daily -> driver Python session boundaries."""
     private_directory(root)
@@ -73,9 +141,13 @@ def stage(root: Path, number: int) -> None:
     row = {"stage": number, "pid": pid, "ppid": os.getppid(), "pgid": os.getpgrp(),
            "responsiblePid": responsible(pid), "identity": identity(pid)}
     save(root / f"stage-{number}.json", row)
-    argv = (stage_arguments(root, number + 1) if number < 2 else
-            [str(peekaboo_binary()), "see", "--app", "Journal", "--path", str(root / "journal.png"),
-             "--timeout-seconds", "20", "--json"])
+    if number < 2:
+        argv = stage_arguments(root, number + 1)
+    else:
+        target = select_journal_window(root)
+        argv = [str(peekaboo_binary()), "image", "--app", f"PID:{target['applicationPid']}",
+                "--window-id", str(target["windowId"]), "--mode", "window", "--format", "png",
+                "--path", str(root / "journal.png"), "--no-remote", "--json"]
     with (root / f"stage-{number}-stdout.log").open("xb") as stdout, \
             (root / f"stage-{number}-stderr.log").open("xb") as stderr:
         child = subprocess.Popen(argv, stdout=stdout, stderr=stderr, start_new_session=number < 2)
@@ -200,8 +272,7 @@ def capture(root: Path) -> dict:
             raise activation.ActivationError("capture Python session ancestry differs")
     messages = attribution((root / "tccd.ndjson").read_text(), pid, children[2]["pid"], paths.node)
     image, _ = activation.read_physical(root / "journal.png", "private Journal image")
-    if not image.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise activation.ActivationError("Journal capture did not create a PNG")
+    image_evidence = journal_image_evidence(root, image)
     if files != [activation.screen_capture_code_identity(path) for path in (paths.node, peekaboo_binary())]:
         raise activation.ActivationError("capture executable changed during probe")
     activation.screen_capture_runtime_evidence(
@@ -210,7 +281,7 @@ def capture(root: Path) -> dict:
              "route": activation.SCREEN_CAPTURE_ROUTE, "responsiblePid": pid,
              "responsibleProcessIdentity": current,
              "files": [{**row, "codesignVerified": True} for row in files],
-             **runtime_evidence,
+             **runtime_evidence, **image_evidence,
              "tccdAttributionAndEffectivePermission": messages,
              "imageSha256": activation.sha256_bytes(image), "imagePath": str(root / "journal.png"),
              "manualProbe": True, "temporaryJobRemoved": True,
@@ -227,6 +298,9 @@ def accept(root: Path, reviewed_image_sha256: str) -> dict:
             or reviewed_image_sha256 != proof.get("imageSha256")
             or reviewed_image_sha256 != hashlib.sha256(image).hexdigest()):
         raise activation.ActivationError("visual confirmation does not bind the captured image")
+    image_evidence = journal_image_evidence(root, image)
+    if any(proof.get(key) != value for key, value in image_evidence.items()):
+        raise activation.ActivationError("visual confirmation does not bind the observed Journal window")
     if identity(proof["responsiblePid"]) != proof["responsibleProcessIdentity"]:
         raise activation.ActivationError("process changed; perform a fresh capture")
     paths = activation.live_paths()

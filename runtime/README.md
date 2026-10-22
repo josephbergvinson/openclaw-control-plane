@@ -10,29 +10,63 @@ The [manifest](manifest.json) is the current machine-readable authority. Use the
 [adoption guide](../docs/17-adoption-guide.md) for workspace and host setup.
 Earlier changes are summarized in the [history index](../docs/history/README.md).
 
+The reference uses the official OpenClaw **v2026.10.4** base and the managed
+**Codex 0.160.0** native package. Read exact custom commit/tree identities, patch and archive
+digests, and tool versions from the manifest rather than inferring them from a
+release name. Qualify the exact public commit you adopt; earlier results do not
+qualify changed inputs. The separate `referenceDeployment` field describes an
+installed reference. Reconstructing source does not establish that deployment or
+ordinary-use acceptance on another host.
+
 ## Source identities
 
-| Identity | Manifest field |
-| --- | --- |
+The current source reference includes two test-fixture corrections beyond the
+installed **R43** runtime and Mac companion build **2610000502**. Canonical source
+`7ce69d2a2075231411c00c06a964447abc743c19` and native distribution
+`3917084f508f795900f70470eb40695074b02c2e` contain those corrections. The installed
+runtime and companion retain distribution source
+`f18ba730959787b21b823f7259f064e9a9bd2801`. The requester-wake fixture uses
+`Array.from` for its existing listener snapshot. The final-edit fixture uses its
+own narrow JSON override shape and required guard braces, keeping Discord
+implementation types outside the core compiler graph. All other source blobs and
+modes, including production and package inputs, are unchanged from the respective
+installed source inputs. These test-only corrections did not rebuild either
+component. The companion identity is descriptive: this packet supplies no
+supported delta from the current distribution to that older companion source, so
+use ordinary source or native-distribution reconstruction for this packet.
+
+| Identity                                          | Manifest field                                              |
+| ------------------------------------------------- | ----------------------------------------------------------- |
 | Official repository, tag and annotated tag object | `upstream.repository`, `upstream.tag`, `upstream.tagObject` |
-| Official source commit and tree | `upstream.commit`, `upstream.tree` |
-| Custom reference commit and tree | `source.referenceCommit`, `source.referenceTree` |
-| Public reconstructed source tree | `source.normalizedTree` |
-| Complete patch filename, size and SHA256 | `patch.file`, `patch.bytes`, `patch.sha256` |
-| Exact build tools and platform prerequisite | `toolchain` |
-| Native distribution tree, overlay and archive | `nativeDistribution` |
-| Separately identified native companion | `nativeCompanion` |
-| Scope of the existing installed reference | `referenceDeployment` |
+| Official source commit and tree                   | `upstream.commit`, `upstream.tree`                          |
+| Custom reference commit and tree                  | `source.referenceCommit`, `source.referenceTree`            |
+| Public reconstructed source tree                  | `source.normalizedTree`                                     |
+| Complete patch filename, size and SHA256          | `patch.file`, `patch.bytes`, `patch.sha256`                 |
+| Exact build tools and platform prerequisite       | `toolchain`                                                 |
+| Native distribution tree, overlay and archive     | `nativeDistribution`                                        |
+| Companion source identity and optional finite delta | `nativeCompanion`                                         |
+| Scope of the existing installed reference         | `referenceDeployment`                                       |
 
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
-The manifest describes deliberate fixture normalization. The resulting Git tree,
+The manifest declares any deliberate fixture normalization; its current list is
+empty. The resulting Git tree,
 including file modes, is the comparison point; an adopter's commit ID will depend
 on their own author and timestamp.
 
-Companion and existing-deployment fields identify separate components and scope.
-They neither install a companion nor attest that a new adopter is running it. The
-reconstruction trees and patch/asset bindings remain the actual public inputs.
+Choose the reconstruction target explicitly:
+
+| Target | Options after the clean-checkout path | Final Git tree |
+| --- | --- | --- |
+| Customized runtime source | `--apply` | `source.normalizedTree` |
+| Native distribution | `--apply --native-distribution` | `nativeDistribution.normalizedTree` |
+| Mac companion source | `--apply --native-distribution --native-companion` | `nativeCompanion.sourceTree` |
+
+These are source targets, not three running systems. The companion can share the
+native distribution's exact commit and tree; a separate patch is required only
+for the supported finite difference described below. Every selected target still
+requires full Git tree equality, including file modes. Companion and deployment
+metadata neither install an app nor attest that a new adopter is running it.
 
 ## Prerequisites
 
@@ -79,7 +113,18 @@ git commit -m "Apply the pinned OpenClaw reference runtime"
 
 `git write-tree` must match the manifest's `source.normalizedTree`.
 
+Before dependency installation, the reference workflow checks every literal
+native source/test path against that reconstructed checkout. A missing path is
+a failure requiring a reviewed behavior-to-owner
+mapping; path existence alone does not establish equivalent assertions or a
+passing test. This check does not change any manifest source or deployment
+identity.
+
 ## Optional native distribution
+
+The declared native archive targets **macOS on Apple silicon (Darwin arm64)**.
+The ordinary source-reconstruction path also supports Linux; this native archive
+does not provide a Linux executable.
 
 To reproduce the separately bound distribution instead, start from another clean
 official-tag clone and use:
@@ -105,7 +150,46 @@ commands below run in this native checkout instead of the source-only checkout.
 This mode accesses the declared public release asset. Ordinary source-only mode
 does not fetch it. See [native reconstruction](../docs/21-native-runtime-reconstruction.md)
 for the artifact and failure contracts, and
-[native source and notices](native154/README.md) for provenance and licensing.
+[native source and notices](native160/README.md) for provenance and licensing.
+
+## Optional Mac companion source
+
+First check the current manifest. This packet records the installed R43/app502
+companion descriptively and does not support `--native-companion`. For a packet
+that supplies one of the supported bindings below, use a new clean official-tag
+clone to reconstruct its declared companion:
+
+```bash
+git clone --depth 1 --branch "$reference_tag" https://github.com/openclaw/openclaw.git /path/to/openclaw-companion-reference
+python3 "$reference_root/scripts/reconstruct_runtime.py" /path/to/openclaw-companion-reference --apply --native-distribution --native-companion
+cd /path/to/openclaw-companion-reference
+git write-tree
+git switch -c reference/openclaw-companion
+git commit -m "Apply the pinned OpenClaw Mac companion source"
+```
+
+Before committing, `git write-tree` must match `nativeCompanion.sourceTree`.
+Recording the reconstructed target in `HEAD` lets the validation below compare
+its changes with the official upstream commit, using your own Git identity.
+
+The helper first reconstructs and verifies the native distribution. It admits two
+companion cases:
+
+- **Same source:** omit `nativeCompanion.delta` only when the companion's
+  `sourceCommit` equals `nativeDistribution.referenceCommit` and its `sourceTree`
+  equals both `nativeDistribution.referenceTree` and
+  `nativeDistribution.normalizedTree`. No empty extra patch stands in for this
+  equality.
+- **Finite source delta:** bind the distribution tree and an exact nonempty patch
+  in `nativeCompanion.delta`. The patch must change exactly the four declared
+  macOS Swift source/test paths. Its bytes and SHA-256, base tree and complete
+  final companion tree are checked.
+
+Both cases verify `nativeCompanion.sourceTree` and use the same declared native
+archive. A descriptive companion identity that differs without a valid delta is
+not reconstructable in this mode. Ordinary source and native-distribution modes
+keep their existing targets; do not apply another mode on an already modified
+checkout. This command reconstructs source, not an installed or accepted Mac app.
 
 ## Validate and build
 
@@ -138,10 +222,19 @@ repository, native-check and build jobs feed `reconstruct-and-build`. Its native
 plan adapter only adds bounded full-lint shard selection; it preserves the other
 planned commands and their failures.
 
-The [steering regression workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/steering-regression.yml)
-checks reconstructed queue/ownership behavior. Historical diagnostic overlays
-are not applied on top of current source. Runtime regression tests and workspace
-helper tests have separate owners and retain their actual scope.
+The reference workflow also runs the runtime's native steering, queue and
+publication tests against that same reconstructed source. It uses the runtime's
+normal test runner and fixtures; no diagnostic overlay or copied test harness is
+an installation or qualification step. The assertions cover source ownership,
+FIFO ordering, cancellation, authority changes and provider input custody.
+The existing serial terminal-continuation step also runs
+`src/agents/tools/message-tool-final-edit.test.ts`, covering direct and nested
+final edits, negative controls and a later input. Workspace helper tests retain
+their separate scope.
+
+A changed source target requires the corresponding behavioral assertions to be
+reviewed against its maintained owner before qualification. Retiring an old path
+does not by itself retire the behavior it checked.
 
 Check all required jobs on the exact public commit being adopted. Command plans,
 results and build logs are workflow artifacts; a cancelled run or partial log is

@@ -29,7 +29,7 @@ The profile carries these reference choices:
 | Image understanding | GPT-6.1 Sol in `imageModel`. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
-| Compaction | Safeguard mode, strict identifier preservation, 120,000 recent tokens, six recent turns, quality guard with one retry. |
+| Compaction | Safeguard mode, strict identifier preservation, 48,000 recent tokens, six recent turns, quality guard with one retry. |
 | Compaction trigger | Native context pressure and overflow recovery; the optional active-transcript byte threshold is unset. |
 | Compaction maintenance | 1,800-second timeout; enabled memory flush with the native 4,000-token soft margin and an 8 MiB force-flush threshold. |
 | Visibility | Routine automatic compaction notices are disabled with `notifyUser: false`. Explicit compact commands and actionable turn failures retain their normal responses. |
@@ -70,8 +70,9 @@ Heartbeat has its own `thinking: "max"`; dreaming sets
 `phases.light/deep/rem.execution.thinking` to `max`. These fields require the
 matching reconstructed runtime and compatible companion workers. Active memory
 explicitly uses `max`, and utility calls inherit the GPT-6.1 Sol model's
-`params.thinking: "max"`. All LLM inference now shares one model and default effort.
-Specialized image generation, local embeddings and speech retain their own providers.
+`params.thinking: "max"`. Normal agent, maintenance and utility inference share
+this model and default effort. Realtime voice has its own model configuration;
+specialized image generation, local embeddings and speech also retain their own providers.
 Autonomous heartbeat settings do not override admitted user-task continuations.
 Configured background-model failures retain their selected route and report the
 existing degraded outcome instead of silently changing model or effort.

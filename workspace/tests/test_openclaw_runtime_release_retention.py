@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import stat
+import shlex
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,30 @@ def make_release(root: Path, name: str, marker: str = 'payload') -> Path:
     path.mkdir(parents=True)
     (path / 'marker.txt').write_text(marker, encoding='utf-8')
     return path
+
+
+def write_browser_host(
+    base: Path, state: Path, release: Path, *, profile_arguments: tuple[str, ...] = (),
+) -> tuple[Path, Path]:
+    launcher = state / 'browser' / 'native-messaging' / 'ai.openclaw.browser_bootstrap.0123456789abcdef.sh'
+    launcher.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    manifest = base / 'Chrome' / 'NativeMessagingHosts' / 'ai.openclaw.browser_bootstrap.json'
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    origins = ['chrome-extension://' + 'a' * 32 + '/']
+    manifest.write_text(json.dumps({'name': 'ai.openclaw.browser_bootstrap',
+                                    'description': 'OpenClaw browser extension bootstrap',
+                                    'type': 'stdio', 'path': str(launcher), 'allowed_origins': origins}))
+    manifest.chmod(0o600)
+    command = ['/fake/node', str(release / 'dist/extensions/browser/native-host-entry.js'),
+               '--manifest', str(manifest), '--launcher', str(launcher),
+               '--expected-origin', origins[0]]
+    profile_tail = ''.join(" '" + word.replace("'", "'\"'\"'") + "'" for word in profile_arguments)
+    launcher.write_text('#!/bin/sh\n# OpenClaw native messaging bootstrap v1\n'
+                        + 'export OPENCLAW_STATE_DIR=' + shlex.quote(str(state)) + '\n'
+                        + 'exec ' + ' '.join(shlex.quote(word) for word in command) + profile_tail + ' "$@"\n')
+    launcher.chmod(0o700)
+    return manifest, launcher
+
 
 
 def write_terminalized_active_operation(
@@ -112,6 +137,106 @@ def write_activation_result(path: Path, candidate: Path, rollback: Path) -> None
 
 
 class RuntimeReleaseRetentionTests(unittest.TestCase):
+    def test_registered_profile_native_host_is_collected_as_release_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-profile-host')
+            state = base / 'state'
+            state.mkdir()
+            manifest, _ = write_browser_host(
+                base, state, old, profile_arguments=('--browser-profile', 'work'),
+            )
+            with operator_binding(retention, 'paths.state_root', state), \
+                 operator_binding(retention, 'paths.runtime_current_link', base / 'current'), \
+                 operator_binding(retention, 'paths.cli_root', base / 'cli'), \
+                 operator_binding(retention, 'paths.host_home', base / 'home'), \
+                 operator_binding(retention, 'paths.runtime_releases_root', releases), \
+                 mock.patch.object(retention, 'collect_current_symlink_ref', return_value=[]), \
+                 mock.patch.object(retention, 'collect_activation_result_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_launchagent_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_symlink_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_process_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_promotion_dependency_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_unfinished_release_refs', return_value=[]):
+                refs = retention.collect_references()
+                self.assertEqual([(row.source, row.path) for row in refs],
+                                 [(f'browser-native-host:{manifest}', old)])
+                records = retention.list_release_records(releases)
+                retention.protect_records(records, refs)
+                self.assertTrue(records[0].protected)
+
+    def test_native_host_profile_tail_accepts_legacy_and_native_name_boundaries(self) -> None:
+        for profile in (None, 'a', '9-', 'a--b', 'a' * 64):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as raw:
+                base = Path(raw).resolve()
+                releases = base / 'Releases'
+                old = make_release(releases, 'openclaw-profile-host')
+                state = base / 'state'
+                state.mkdir()
+                arguments = () if profile is None else ('--browser-profile', profile)
+                write_browser_host(base, state, old, profile_arguments=arguments)
+                rows = retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+                self.assertEqual([row['release'] for row in rows], [old])
+
+    def test_native_host_profile_tail_rejects_malformed_or_extra_arguments(self) -> None:
+        cases = (
+            ('--browser-profile',), ('--browser-profile', ''),
+            ('--browser-profile', 'a' * 65), ('--browser-profile', 'Work'),
+            ('--browser-profile', '_work'), ('--browser-profile', '-work'),
+            ('--browser-profile', 'bad/name'), ('--browser-profile', 'two words'),
+            ('--browser-profile', 'work\n'), ('--browser-profile', 'wörk'),
+            ('--unknown', 'work'), ('--browser-profile=work',),
+            ('--browser-profile', 'work', '--browser-profile', 'work'),
+            ('--browser-profile', 'work', '--extra'),
+            ('--browser-profile', 'work', '--expected-origin', 'chrome-extension://' + 'a' * 32 + '/'),
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as raw:
+                base = Path(raw).resolve()
+                releases = base / 'Releases'
+                old = make_release(releases, 'openclaw-profile-host')
+                state = base / 'state'
+                state.mkdir()
+                write_browser_host(base, state, old, profile_arguments=arguments)
+                with self.assertRaisesRegex(ValueError, 'unverifiable owned'):
+                    retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+                self.assertTrue(old.exists())
+
+    def test_profile_launcher_still_requires_exact_origins_and_native_profile_quoting(self) -> None:
+        for defect in ('origins', 'profile_quoting'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as raw:
+                base = Path(raw).resolve()
+                releases = base / 'Releases'
+                old = make_release(releases, 'openclaw-profile-host')
+                state = base / 'state'
+                state.mkdir()
+                manifest, launcher = write_browser_host(
+                    base, state, old, profile_arguments=('--browser-profile', 'work'),
+                )
+                if defect == 'origins':
+                    value = json.loads(manifest.read_text())
+                    value['allowed_origins'] = ['chrome-extension://' + 'b' * 32 + '/']
+                    manifest.write_text(json.dumps(value))
+                else:
+                    original = launcher.read_text()
+                    changed = original.replace(" '--browser-profile' 'work' ", ' --browser-profile work ')
+                    self.assertNotEqual(original, changed)
+                    launcher.write_text(changed)
+                with self.assertRaisesRegex(ValueError, 'unverifiable owned'):
+                    retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+
+    def test_valid_profile_host_outside_release_root_is_not_a_release_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            releases.mkdir()
+            native_app = base / 'native-app-runtime'
+            state = base / 'state'
+            state.mkdir()
+            write_browser_host(base, state, native_app, profile_arguments=('--browser-profile', 'work'))
+            self.assertEqual(retention.read_owned_browser_native_hosts(state, base / 'home', releases), [])
+
     def test_activation_lock_blocks_retention_without_waiting(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             lock_path = Path(raw) / 'activation.lock'
@@ -778,6 +903,10 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
             cli_root = Path(raw) / 'cli'
             cli_root.mkdir()
             with operator_binding(retention, 'paths.cli_root', cli_root), \
+                 operator_binding(retention, 'paths.runtime_current_link', cli_root.parent / 'current'), \
+                 operator_binding(retention, 'paths.state_root', cli_root.parent / 'state'), \
+                 operator_binding(retention, 'paths.host_home', cli_root.parent / 'home'), \
+                 operator_binding(retention, 'paths.runtime_releases_root', cli_root.parent / 'Releases'), \
                  mock.patch.object(retention, 'collect_current_symlink_ref', return_value=[]), \
                  mock.patch.object(retention, 'collect_activation_result_refs', return_value=[]), \
                  mock.patch.object(retention, 'collect_launchagent_refs', return_value=[]), \
@@ -904,7 +1033,7 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
             self.assertEqual(payload['protected'][0]['state'], 'skipped_protected')
             self.assertIn('current-runtime-symlink', payload['protected'][0]['reasons'])
 
-    def test_non_active_unresolved_paths_expire_but_explicit_retention_remains(self) -> None:
+    def test_terminal_unresolved_and_explicit_storage_dispositions_expire(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
             releases = base / 'releases'
@@ -935,12 +1064,8 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
 
             self.assertFalse(by_name[previous.name].protected)
             self.assertFalse(by_name[rollback.name].protected)
-            self.assertTrue(by_name[explicitly_retained.name].protected)
-            self.assertEqual(len(refs), 1)
-            self.assertIn(
-                'promotion-operation-lock:browser-control-runtime-promotion-abc123:stableReleasePath:retain_until_manual_archive_window',
-                by_name[explicitly_retained.name].protected_reasons,
-            )
+            self.assertFalse(by_name[explicitly_retained.name].protected)
+            self.assertEqual(refs, [])
 
     def test_matching_failed_terminal_receipt_reconciles_stale_active_lock_without_permanent_release_ref(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1092,6 +1217,10 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
             (artifact / 'operation.lock.json').write_text('{not-json', encoding='utf-8')
 
             with operator_binding(retention, 'paths.runtime_releases_root', releases), \
+                 operator_binding(retention, 'paths.runtime_current_link', base / 'current'), \
+                 operator_binding(retention, 'paths.cli_root', base / 'cli'), \
+                 operator_binding(retention, 'paths.state_root', base / 'state'), \
+                 operator_binding(retention, 'paths.host_home', base / 'home'), \
                  operator_binding(retention, 'paths.runtime_promotions_root', promotions), \
                  operator_binding(retention, 'paths.runtime_release_retention_artifacts', artifact_root), \
                  operator_binding(retention, 'paths.workspace', base), \
@@ -1647,6 +1776,10 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
             )
 
             with operator_binding(retention, 'paths.runtime_releases_root', releases), \
+                 operator_binding(retention, 'paths.runtime_current_link', base / 'current'), \
+                 operator_binding(retention, 'paths.cli_root', base / 'cli'), \
+                 operator_binding(retention, 'paths.state_root', base / 'state'), \
+                 operator_binding(retention, 'paths.host_home', base / 'home'), \
                  operator_binding(retention, 'paths.runtime_release_retention_artifacts', artifact_root), \
                  operator_binding(retention, 'paths.workspace', base), \
                  mock.patch.object(retention, 'collect_current_symlink_ref', return_value=[]), \
@@ -1747,6 +1880,130 @@ class RuntimeReleaseRetentionTests(unittest.TestCase):
                 'candidate became protected',
                 payload['receipts'][0]['error'],
             )
+
+    def test_registered_native_host_protects_old_release_until_reconciled(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-old')
+            current = make_release(releases, 'openclaw-current')
+            state = base / 'state'
+            state.mkdir()
+            write_browser_host(base, state, old)
+            with operator_binding(retention, 'paths.state_root', state), \
+                 operator_binding(retention, 'paths.runtime_releases_root', releases), \
+                 operator_binding(retention, 'paths.host_home', base / 'home'), \
+                 operator_binding(retention, 'paths.runtime_current_link', base / 'current'), \
+                 operator_binding(retention, 'paths.cli_root', base / 'cli'), \
+                 mock.patch.object(retention, 'collect_current_symlink_ref', return_value=[]), \
+                 mock.patch.object(retention, 'collect_activation_result_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_launchagent_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_symlink_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_process_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_promotion_dependency_refs', return_value=[]), \
+                 mock.patch.object(retention, 'collect_unfinished_release_refs', return_value=[]):
+                records = retention.list_release_records(releases)
+                retention.protect_records(records, retention.collect_references())
+                self.assertEqual({row.path for row in records if row.protected}, {old})
+                write_browser_host(base, state, current)
+                records = retention.list_release_records(releases)
+                retention.protect_records(records, retention.collect_references())
+                self.assertEqual({row.path for row in records if row.protected}, {current})
+
+    def test_native_host_dependency_failure_does_not_discard_protection(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-old')
+            state = base / 'state'
+            state.mkdir()
+            manifest, launcher = write_browser_host(base, state, old)
+            value = json.loads(manifest.read_text())
+            value['allowed_origins'] = ['chrome-extension://' + 'b' * 32 + '/']
+            manifest.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'unverifiable owned'):
+                retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+            self.assertTrue(old.exists())
+            value['path'] = str(launcher.with_name('foreign.sh'))
+            manifest.write_text(json.dumps(value))
+            launcher.write_text(launcher.read_text().replace('# OpenClaw native messaging bootstrap v1', '# Foreign tool'))
+            self.assertEqual(retention.read_owned_browser_native_hosts(state, base / 'home', releases), [])
+
+    def test_registered_native_host_unknown_header_or_manifest_shape_stops_retention(self) -> None:
+        for defect in ('new_header', 'foreign_header', 'empty_launcher', 'truncated_launcher',
+                       'new_entry', 'null_manifest', 'array_manifest'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as raw:
+                base = Path(raw).resolve()
+                releases = base / 'Releases'
+                old = make_release(releases, 'openclaw-old')
+                state = base / 'state'
+                state.mkdir()
+                manifest, launcher = write_browser_host(base, state, old)
+                if defect == 'new_header':
+                    launcher.write_text(launcher.read_text().replace('bootstrap v1', 'bootstrap v2'))
+                elif defect == 'foreign_header':
+                    launcher.write_text(launcher.read_text().replace('# OpenClaw native messaging bootstrap v1', '# Unknown header'))
+                elif defect in ('empty_launcher', 'truncated_launcher'):
+                    launcher.write_text('' if defect == 'empty_launcher' else '#!/bin/sh\n')
+                elif defect == 'new_entry':
+                    launcher.write_text(launcher.read_text().replace('native-host-entry.js', 'future-entry.js'))
+                else:
+                    manifest.write_text('null' if defect == 'null_manifest' else '[]')
+                with self.assertRaisesRegex(ValueError, 'unverifiable owned'):
+                    retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+                self.assertTrue(old.exists())
+
+    def test_registered_native_host_other_state_and_config_still_protect_release(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-old')
+            state = base / 'state'
+            state.mkdir()
+            _, launcher = write_browser_host(base, state, old)
+            lines = launcher.read_text().splitlines()
+            lines[2] = 'export OPENCLAW_STATE_DIR=' + shlex.quote(str(base / 'other-state'))
+            lines.insert(3, 'export OPENCLAW_CONFIG_PATH=' + shlex.quote(str(base / 'other-config.json')))
+            launcher.write_text('\n'.join(lines) + '\n')
+            rows = retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+            self.assertEqual([row['release'] for row in rows], [old])
+
+    def test_native_host_unavailable_scan_and_dangling_root_stop_retention(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-old')
+            state = base / 'state'
+            state.mkdir()
+            _, launcher = write_browser_host(base, state, old)
+            with mock.patch.object(retention.os, 'scandir', side_effect=PermissionError('unavailable')):
+                with self.assertRaises(PermissionError):
+                    retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+            root = launcher.parent
+            launcher.unlink()
+            root.rmdir()
+            root.symlink_to(base / 'absent-directory')
+            with self.assertRaisesRegex(ValueError, 'unsafe browser native-host launcher directory'):
+                retention.read_owned_browser_native_hosts(state, base / 'home', releases)
+            self.assertTrue(old.exists())
+
+    def test_retired_launcher_without_registration_does_not_protect_release(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            releases = base / 'Releases'
+            old = make_release(releases, 'openclaw-old')
+            state = base / 'state'
+            state.mkdir()
+            manifest, launcher = write_browser_host(base, state, old)
+            launcher.write_text(launcher.read_text().replace('bootstrap v1', 'bootstrap v2'))
+            manifest.unlink()
+            self.assertEqual(retention.read_owned_browser_native_hosts(state, base / 'home', releases), [])
+
+
+
+
+
+
 
 
 if __name__ == '__main__':

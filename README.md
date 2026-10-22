@@ -16,7 +16,7 @@ repository checks also have a Linux reconstruction path.
 flowchart TD
     Operator[Operator in chat or app] --> Gateway[OpenClaw gateway]
     Gateway --> Runtime[Model and tool harness]
-    Runtime --> Tasks[Native sessions, tasks and goals]
+    Runtime --> Runs[Native sessions, retained runs and goals]
     Runtime --> Workspace[Policy, memory and capability routing]
     Workspace --> Tools[APIs, browser and device tools]
     Tools --> Effects[Files and provider records]
@@ -70,6 +70,15 @@ reconstruction does not require a private source repository or an existing
 operator's machine. Reconstruction, build, installation and actual user
 acceptance are separate steps.
 
+This reference targets the official OpenClaw **v2026.10.4** base and the
+managed **Codex 0.160.0** native package. The manifest binds the complete custom source,
+native distribution and companion source. The current packet reconstructs the
+canonical and native distribution source; its installed R43 Mac companion build
+2610000502 has a separate descriptive identity. The two test-fixture corrections
+do not rebuild either installed component. Read the [current source boundaries](runtime/README.md#source-identities)
+before choosing a reconstruction target. The installed-reference record does not
+establish deployment or account access for a new adopter.
+
 ## Find the details
 
 | Task | Read |
@@ -114,4 +123,4 @@ message delivery or recoverable backups on another host.
 
 MIT licensed. Retain [LICENSE](LICENSE), the runtime's
 [third-party notices](runtime/THIRD_PARTY_NOTICES.md) and the
-[native resource notices](runtime/native154/README.md).
+[native resource notices](runtime/native160/README.md).

@@ -23,7 +23,7 @@ Routine host maintenance uses native OpenClaw command jobs, with checked helpers
 | Storage headroom | Daily | Measure internal/external capacity, run permitted cleanup when needed, measure again |
 | Launch definition integrity | Daily | Validate managed definitions and repair only supported templates |
 | Gateway health/auto-heal | Daily | Read readiness and supported status; use the configured bounded recovery path when applicable |
-| Health audit | Daily, deeper variant weekly | Combine runtime, delivery and recent maintenance evidence; perform supported task-ledger maintenance |
+| Health audit | Daily, deeper variant weekly | Combine runtime, delivery and recent maintenance evidence with read-only native Gateway/harness checks |
 | Optional cloud backup start | Weekly if adopted | Request fresh scanning/upload through the backup client's supported interface after admission |
 | Optional cloud backup follow-up | Daily if adopted | Observe progress, preserve interruption state and resume only when its admission contract allows |
 
@@ -101,7 +101,7 @@ These inspect the selected daemon. They do not start containers, export volumes 
 
 Developer applications also distinguish data classes. An external Xcode application can have a compatibility link, while DerivedData, compilation caches and distribution archives use Xcode's location preferences. Archives may be valuable signed products even when nearby build caches are disposable. Use supported application settings rather than relocating arbitrary active application databases.
 
-The exported host package also includes the complete Claude stale-worker guard, a Keychain-backed desktop runtime environment helper, and the optional macOS keepawake definition. These are disabled adoption inputs. The worker guard binds signed replacement code, parent/process identity and durable attempt receipts; the environment bridge resolves configured state/cache paths and credential references without storing credential bytes.
+The exported host package also includes the complete Claude stale-worker guard, a runtime environment publisher, and the optional macOS keepawake definition. These are disabled adoption inputs. The worker guard binds signed replacement code, parent/process identity and durable attempt receipts. The environment publisher supplies configured state/cache paths and external supervisor flags without launching an app or service; the native `ai.openclaw.mac` login job owns app startup, and the native configuration bridge handles authentication.
 
 Remote-access tools, shell toolchains and coding-agent applications are adjacent dependencies. Inventory their executable/configuration locations and ownership without publishing credentials, private network coordinates or account-specific state.
 

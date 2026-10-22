@@ -47,8 +47,8 @@ REQUIRED = {
     "docs/17-adoption-guide.md",
     "templates/AGENTS.example.md",
     "templates/TOOLS.example.md",
-    "examples/native-task.example.json",
-    "schemas/native-task.schema.json",
+    "examples/native-run.example.json",
+    "schemas/native-run.schema.json",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
@@ -64,6 +64,16 @@ class Finding:
     def render(self) -> str:
         rel = self.path.relative_to(ROOT)
         return f"{rel}:{self.line}: {self.label}" if self.line else f"{rel}: {self.label}"
+
+
+def companion_uses_native_source(manifest: dict) -> bool:
+    companion, native = manifest.get("nativeCompanion"), manifest.get("nativeDistribution")
+    if not isinstance(companion, dict) or not isinstance(native, dict) or "delta" in companion:
+        return False
+    values = (companion.get("sourceCommit"), companion.get("sourceTree"),
+              native.get("referenceCommit"), native.get("referenceTree"), native.get("normalizedTree"))
+    return (all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) for value in values)
+            and values[0] == values[2] and values[1] == values[3] == values[4])
 
 
 def candidate_files() -> list[Path]:
@@ -253,9 +263,15 @@ def validate_tree() -> list[Finding]:
         findings.append(Finding(manifest_path, f"reconstruction helper unavailable: {error}"))
     else:
         try:
-            runtime = package.load_package(ROOT / "runtime", native_distribution=True)
+            current = json.loads(manifest_path.read_text(encoding="utf-8"))
+            companion = current.get("nativeCompanion")
+            has_companion_source = ((isinstance(companion, dict) and "delta" in companion)
+                                    or companion_uses_native_source(current))
+            runtime = package.load_package(ROOT / "runtime", native_distribution=True,
+                                           native_companion=has_companion_source)
             if runtime.native is not None:
-                findings.extend(validate_native_provenance(runtime.native.artifact))
+                native_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))["nativeDistribution"]
+                findings.extend(validate_native_provenance(runtime.native.artifact, native_manifest.get("provenanceFile")))
         except (package.ReconstructionError, OSError, ValueError, KeyError, TypeError) as error:
             findings.append(Finding(manifest_path, f"invalid reconstruction package: {error}"))
     for path in ROOT.rglob("*"):
@@ -266,9 +282,17 @@ def validate_tree() -> list[Finding]:
     return findings
 
 
-def validate_native_provenance(artifact) -> list[Finding]:
-    path = ROOT / "runtime/native154/native154-provenance.json"
+def validate_native_provenance(artifact, provenance_file: str | None = None) -> list[Finding]:
+    manifest = ROOT / "runtime/manifest.json"
+    if (not isinstance(provenance_file, str) or not provenance_file
+            or Path(provenance_file).is_absolute()
+            or any(part in {"", ".", ".."} for part in provenance_file.split("/"))
+            or Path(provenance_file).suffix != ".json"):
+        return [Finding(manifest, "native provenance must name a confined runtime package JSON file")]
+    path = ROOT / "runtime" / provenance_file
     try:
+        if path.is_symlink() or not path.resolve().is_relative_to((ROOT / "runtime").resolve()):
+            return [Finding(path, "native provenance escapes the runtime package")]
         provenance = json.loads(path.read_text(encoding="utf-8"))
         expected = {
             "archiveName": artifact.file, "publicAssetURL": artifact.url,
@@ -278,7 +302,8 @@ def validate_native_provenance(artifact) -> list[Finding]:
         findings = [Finding(path, f"native provenance differs from reconstruction artifact: {key}")
                     for key, value in expected.items() if provenance["package"].get(key) != value]
         patch = provenance["source"]["patch"]
-        if patch["path"] != "native154-source.patch":
+        if (not isinstance(patch["path"], str) or Path(patch["path"]).name != patch["path"]
+                or not patch["path"].endswith(".patch") or (path.parent / patch["path"]).is_symlink()):
             return findings + [Finding(path, "native source patch must name the adjacent source patch")]
         raw = (path.parent / patch["path"]).read_bytes()
         if len(raw) != patch["bytes"] or hashlib.sha256(raw).hexdigest() != patch["sha256"]:
@@ -288,8 +313,9 @@ def validate_native_provenance(artifact) -> list[Finding]:
         return [Finding(path, "native provenance cannot be verified")]
 
 
-def validate_expected_reference(source_commit: str | None, distribution_commit: str | None) -> list[Finding]:
-    if source_commit is None and distribution_commit is None:
+def validate_expected_reference(source_commit: str | None, distribution_commit: str | None,
+                                companion_commit: str | None = None) -> list[Finding]:
+    if source_commit is None and distribution_commit is None and companion_commit is None:
         return []
     path = ROOT / "runtime/manifest.json"
     try:
@@ -301,6 +327,12 @@ def validate_expected_reference(source_commit: str | None, distribution_commit: 
         ):
             if expected is not None and manifest[section]["referenceCommit"] != expected:
                 findings.append(Finding(path, f"stale {label} reference: expected reviewed commit {expected}"))
+        if companion_commit is not None:
+            companion = manifest.get("nativeCompanion")
+            if not isinstance(companion, dict) or companion.get("sourceCommit") != companion_commit:
+                findings.append(Finding(path, f"stale companion reference: expected reviewed commit {companion_commit}"))
+            elif not isinstance(companion.get("delta"), dict) and not companion_uses_native_source(manifest):
+                findings.append(Finding(path, "expected companion source has no reconstructable delta or exact native identity"))
         return findings
     except (OSError, ValueError, KeyError, TypeError):
         return [Finding(path, "expected release identity cannot be verified")]
@@ -319,6 +351,8 @@ def parse_args() -> argparse.Namespace:
                         help="require the public package to match this reviewed canonical source commit")
     parser.add_argument("--expected-distribution-commit", type=exact_commit, metavar="SHA",
                         help="require the public package to match this reviewed distribution commit")
+    parser.add_argument("--expected-companion-commit", type=exact_commit, metavar="SHA",
+                        help="require the separately reconstructable companion to match this reviewed source commit")
     return parser.parse_args()
 
 
@@ -327,7 +361,8 @@ def main() -> int:
     files = candidate_files()
 
     findings = validate_tree()
-    findings.extend(validate_expected_reference(args.expected_source_commit, args.expected_distribution_commit))
+    findings.extend(validate_expected_reference(args.expected_source_commit, args.expected_distribution_commit,
+                                                args.expected_companion_commit))
     findings.extend(validate_json(files))
     findings.extend(validate_examples_against_schemas())
     findings.extend(validate_links(files))

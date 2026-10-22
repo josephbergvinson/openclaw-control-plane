@@ -81,10 +81,19 @@ must block that route without preventing unrelated configured routes. Registry
 values such as `${operator:identifiers.accounts.personal_google}` resolve as whole
 JSON values; they are not shell expressions. See [configuration](../config/README.md).
 
-Read the installed AGENTS, SOUL, USER and TOOLS files as substantive working
-instructions. Adapt the example companies, source ownership and standing grants to
-the intended operator. Keep current personal facts in private memory and source
-systems. Do not convert examples into assertions that integrations are ready.
+Read the installed `AGENTS.md`, `SOUL.md` and `USER.md` as substantive working
+instructions. Detailed mechanics are installed once at
+`runbook/tools-reference.md` and read deliberately when AGENTS routes there. Adapt
+the example companies, source ownership and standing grants to the intended
+operator. Keep current personal facts in private memory and source systems. Do
+not convert examples into assertions that integrations are ready.
+
+The installer supplies the manual backup owner's required policy files and
+canonical runbook reference. Backup also requires a physical private `memory/`
+directory, the declared storage layout, native state, Git remotes and verified
+volume/headroom bindings. Initialize and verify those prerequisites through their
+existing owners before a manual capture; installing templates does not enable
+backup jobs or establish capture/restore acceptance.
 
 ## 3. Initialize native state and connect a model
 
@@ -262,15 +271,19 @@ applying this first-install recipe over it.
 ### Package and seal the initial release
 
 Choose a new physical `initial_release` directly under `paths.runtime_releases_root`,
-with a name such as `openclaw-2026.9.5-initial`. Set `source_commit` to the complete
-commit recorded after reconstruction, not the original host's commit. This must match
-the build's `dist/build-info.json`. The already completed frozen install and build
+with a descriptive name such as `openclaw-reference-initial`. Set `source_commit`
+to the complete commit recorded after reconstruction, not the original host's
+commit. This must match the build's `dist/build-info.json`. The already completed
+frozen install and build
 must include the full dependencies and required bundled plugins.
 
 Keep the completed source checkout exclusive while staging. The exported staging
 helper requires its clean Git HEAD and `dist/build-info.json` to match `source_commit`.
 It copies the completed build with independent regular-file identities, retaining
 internal relative symlinks and excluding the Git database and known build caches.
+A completed `dist/OpenClaw.app` is copied in full, including cache-named resources
+covered by its signature. If this bundle is present, verify its staged copy with
+`codesign --verify --deep --strict` and accept that result before sealing.
 Generated executable `node_modules/.bin` shims that contain the exact source path
 are relocated to the candidate path; ordinary source files are not rewritten.
 Escaping, absolute or dangling symlinks fail staging.
@@ -413,21 +426,28 @@ from the initialized local gateway configuration; do not paste tokens into a pli
 
 ### Keep one app login owner
 
-The staged `runtime-environment` LaunchAgent is the app login owner: it supplies the
-canonical state/config paths and external supervisor/repair flags, then executes the
-app with its supported `--attach-only` option. Do not enable a second `ai.openclaw.mac`
-login owner alongside it. Preserve the user's autostart preference when replacing an
-existing login owner; retiring its future trigger does not authorize terminating an
-active app or Gateway. Inspect both persisted and loaded definitions at cutover.
+Use the existing native `ai.openclaw.mac` login job as the sole app startup owner.
+It is managed by the app's launch-at-login preference and the normal app install
+procedure. Preserve that preference when replacing the app. The staged
+`runtime-environment` helper only publishes canonical state/config paths and
+external supervisor/repair flags; login or mount events must never make it execute,
+bootstrap, kickstart or otherwise launch the app. It has no app-start fallback when
+the native job is absent or disabled.
+
+Publish and verify the environment before starting the native app job. Retain the
+native job's explicit canonical state/config bindings; separate login jobs have no
+guaranteed launch order. During maintenance inspect the persisted and loaded native
+app job and environment publisher, then preserve their prior enablement states.
+Changing future triggers does not authorize terminating an active app or Gateway.
 
 Keep physical `disable-launchagent` markers in both the default account-home profile
 and canonical state directory before enabling the app. A manual/Finder launch can
 precede login environment setup, and the internal marker must still block native
 Gateway installation when the external volume is absent. These markers express
 lifecycle ownership; they do not create another configuration or account store.
-The loader refuses to create a missing canonical state root or launch against it.
+The publisher refuses to create a missing canonical state root or publish its route.
 
-The loader no longer reads Keychain credentials or exports a global Gateway token.
+The publisher does not read Keychain credentials or export a global Gateway token.
 It clears the obsolete inherited/global variable and uses the native configuration
 auth bridge. Remove the old token-producing login script during migration as well
 as clearing its already-loaded value. Preserve Keychain items and secret references

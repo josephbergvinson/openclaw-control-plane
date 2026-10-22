@@ -5,26 +5,26 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function adaptNativePlan(plan) {
-  if (plan?.summary !== "all" || !Array.isArray(plan.commands) || !plan.commands.length) {
-    throw new Error("Expected a nonempty native all-lane plan");
+  if (typeof plan?.summary !== "string" || !plan.summary || !Array.isArray(plan.commands) || !plan.commands.length) {
+    throw new Error("Expected a nonempty native qualification plan");
   }
   let lintCount = 0;
   const commands = plan.commands.map((command) => {
     if (!command || typeof command.name !== "string" || !command.name
         || !Array.isArray(command.args) || !command.args.every((arg) => typeof arg === "string")
         || (command.bin !== undefined && (typeof command.bin !== "string" || !command.bin))
-        || command.coreTestCheck !== undefined
+        || (command.coreTestCheck !== undefined && !["checkBoundary", "checkTypes"].includes(command.coreTestCheck))
         || (command.env !== undefined && (!command.env || typeof command.env !== "object" || Array.isArray(command.env)))) {
       throw new Error("Unsupported native command shape; refusing an incomplete alternate runner");
     }
     if (command.name !== "lint") return command;
     lintCount += 1;
-    if (command.bin !== undefined || command.args.length !== 1 || command.args[0] !== "lint") {
+    if (command.bin !== undefined || command.coreTestCheck !== undefined || command.args.length !== 1 || command.args[0] !== "lint") {
       throw new Error("Expected the native full-lint package command");
     }
     return { ...command, args: [...command.args, "--split-core", "--threads=1"] };
   });
-  if (lintCount !== 1) throw new Error("Expected exactly one native full-lint command");
+  if (lintCount > 1) throw new Error("Native plan repeats its full-lint command");
   return commands;
 }
 
@@ -35,6 +35,7 @@ function publicCommand(command) {
     args: command.args,
     environmentPassedUnchanged: true,
     environmentValuesRecorded: false,
+    ...(command.coreTestCheck ? { coreTestCheck: command.coreTestCheck } : {}),
   };
 }
 
@@ -42,14 +43,22 @@ export async function executeNativePlan(plan, {
   createPnpmManagedCommand,
   runManagedCommand,
   resolveLocalCheckEnv,
+  coreTestCheck,
   record = () => {},
 }) {
   const commands = adaptNativePlan(plan);
+  if (commands.some((command) => command.coreTestCheck && typeof coreTestCheck?.[command.coreTestCheck] !== "function")) {
+    throw new Error("Native core-test callbacks are unavailable; refusing alternate process execution");
+  }
   record({ kind: "plan", original: plan.commands.map(publicCommand), adapted: commands.map(publicCommand) });
   for (const [index, command] of commands.entries()) {
     const managed = command.bin ? command : createPnpmManagedCommand(command);
-    record({ kind: "started", index, ...publicCommand(command), actualBin: managed.bin, actualArgs: managed.args });
-    const exitCode = await runManagedCommand({ bin: managed.bin, args: managed.args, env: managed.env ?? resolveLocalCheckEnv() });
+    record({ kind: "started", index, ...publicCommand(command),
+      executionKind: command.coreTestCheck ? "native-callback" : "managed-command",
+      ...(!command.coreTestCheck ? { actualBin: managed.bin, actualArgs: managed.args } : {}) });
+    const exitCode = command.coreTestCheck
+      ? await coreTestCheck[command.coreTestCheck]()
+      : await runManagedCommand({ bin: managed.bin, args: managed.args, env: managed.env ?? resolveLocalCheckEnv() });
     if (!Number.isInteger(exitCode) || exitCode < 0 || exitCode > 255) {
       throw new Error("Native managed command returned an invalid exit status");
     }
@@ -85,18 +94,28 @@ async function main() {
     }
     write("source.json", source);
     const nativeImport = (name) => import(pathToFileURL(path.resolve("scripts", name)).href);
-    const { listChangedPathsFromGit, detectChangedLanesForPaths } = await nativeImport("changed-lanes.mts");
+    const { listChangedPathsFromGit, detectChangedLanesForPaths, getChangedCoreTestPaths } = await nativeImport("changed-lanes.mts");
     const { createChangedCheckPlan, createPnpmManagedCommand } = await nativeImport("check-changed.mts");
     const { runManagedCommand } = await nativeImport("lib/managed-child-process.mts");
     const { resolveLocalCheckEnv } = await nativeImport("lib/local-check-runtime.mts");
     const paths = listChangedPathsFromGit({ base, head: "HEAD" });
     const lanes = detectChangedLanesForPaths({ paths, base, head: "HEAD" });
-    const plan = createChangedCheckPlan(lanes, { base, head: "HEAD", env: process.env });
+    const childEnv = resolveLocalCheckEnv(process.env);
+    const plan = createChangedCheckPlan(lanes, { base, head: "HEAD", env: childEnv });
+    let coreTestCheck;
+    if (plan.commands.some((command) => command.coreTestCheck)) {
+      const corePaths = getChangedCoreTestPaths(lanes);
+      if (!corePaths) throw new Error("Native core-test selection is unavailable");
+      const { createChangedCoreTestCheck } = await nativeImport("run-tsgo-core-test-shards.mts");
+      const { createSparseTsgoSkipEnv } = await nativeImport("lib/tsgo-sparse-guard.mts");
+      coreTestCheck = createChangedCoreTestCheck(corePaths, createSparseTsgoSkipEnv(childEnv));
+    }
     write("changed-paths.json", paths);
     exitCode = await executeNativePlan(plan, {
       createPnpmManagedCommand,
       runManagedCommand,
       resolveLocalCheckEnv,
+      coreTestCheck,
       record(event) {
         if (event.kind === "plan") {
           write("command-plan.json", event);

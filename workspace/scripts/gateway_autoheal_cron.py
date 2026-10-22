@@ -36,7 +36,9 @@ SAFE_RESTART_COUNT_FIELDS = (
     'cronRuns',
     'backgroundExecSessions',
     'rootRequests',
-    'activeTasks',
+    'agentRuns',
+    'acpRuns',
+    'mediaRuns',
 )
 SAFE_RESTART_BLOCKER_KINDS = frozenset(
     {
@@ -46,7 +48,9 @@ SAFE_RESTART_BLOCKER_KINDS = frozenset(
         'cron-run',
         'background-exec',
         'root-request',
-        'task',
+        'agent-run',
+        'acp-run',
+        'media-generation',
     }
 )
 
@@ -165,7 +169,7 @@ def request_safe_restart(
         and isinstance(target_pid, int)
         and not isinstance(target_pid, bool)
         and target_pid > 0
-        and restart.get('signal') == 'SIGUSR1'
+        and restart.get('signal') == 'SIGUSR2'
         and restart.get('mode') in {'emit', 'signal'}
         and isinstance(restart_coalesced, bool)
         and restart_coalesced is (result == 'coalesced')

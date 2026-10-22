@@ -21,9 +21,10 @@ import sys
 import tempfile
 
 EXCLUDED_NAMES = {'.git', '.artifacts', '.cache', '.pytest_cache', '__pycache__'}
+PRESERVED_APP_ROOT = 'dist/OpenClaw.app'
 SWIFT_BUILD_CACHE_ROOTS = ('apps/macos/.build', 'apps/macos-mlx-tts/.build')
 AI_IMPORT_EXPRESSION = 'await import("@openclaw/ai/internal/openai-responses-payload-policy")'
-AI_IMPORT_NODE_VERSION = 'v24.16.0'
+AI_IMPORT_NODE_VERSION = 'v24.22.1'
 AI_IMPORT_TIMEOUT_SECONDS = 30
 REQUIRED_FILES = (
     'openclaw.mjs', 'package.json', 'dist/build-info.json',
@@ -31,9 +32,10 @@ REQUIRED_FILES = (
     'dist/extensions/browser/chrome-extension/manifest.json',
     'dist/extensions/browser/chrome-extension/background.js',
     'dist/extensions/discord/index.js', 'dist/extensions/discord/openclaw.plugin.json',
-    'dist/extensions/discord/package.json', 'dist/extensions/lane-contract/index.js',
-    'dist/extensions/lane-contract/openclaw.plugin.json',
-    'dist/extensions/lane-contract/package.json', 'dist/infra/runtime-state-migration.js',
+    'dist/extensions/discord/package.json',
+    'dist/commands/doctor.worker.js',
+    'dist/plugin-sdk/exec-approvals-runtime.js',
+    'dist/plugin-sdk/security-runtime.js',
 )
 REQUIRED_DIRECTORIES = ('dist-runtime', 'packages/ai/dist', 'node_modules')
 PROTECTED_ROOTS = {'src', 'dist', 'dist-runtime', 'packages', 'node_modules', 'extensions',
@@ -99,8 +101,14 @@ def git_identity(source: Path, commit: str, exclude_roots: tuple[str, ...] = ())
             'buildInfoSha256': sha256((source / 'dist/build-info.json').read_bytes())}
 
 
-def excluded_names(root: Path, directory: Path, exclude_roots: tuple[str, ...] = ()) -> set[str]:
-    excluded = EXCLUDED_NAMES | (set(exclude_roots) if directory == root else set())
+def excluded_names(root: Path, directory: Path, names: list[str],
+                   exclude_roots: tuple[str, ...] = ()) -> set[str]:
+    # A completed app's signature can seal members with otherwise excluded cache names.
+    if directory.is_relative_to(root / PRESERVED_APP_ROOT):
+        return set()
+    excluded = EXCLUDED_NAMES | {name for name in names if name.endswith('.tsbuildinfo')}
+    if directory == root:
+        excluded.update(exclude_roots)
     for relative in SWIFT_BUILD_CACHE_ROOTS:
         cache = root / relative
         if directory == cache.parent:
@@ -116,10 +124,11 @@ def snapshot(root: Path, exclude_roots: tuple[str, ...] = (),
         raise StagingError('included source or candidate subtree could not be enumerated') from error
 
     for directory, directories, files in os.walk(root, followlinks=False, onerror=inaccessible):
-        excluded = excluded_names(root, Path(directory), exclude_roots) if source_exclusions else set()
+        excluded = (excluded_names(root, Path(directory), directories + files, exclude_roots)
+                    if source_exclusions else set())
         directories[:] = sorted(name for name in directories if name not in excluded)
         for name in sorted(directories + files):
-            if name in excluded or source_exclusions and name.endswith('.tsbuildinfo'):
+            if name in excluded:
                 continue
             path = Path(directory) / name
             info = path.lstat()
@@ -269,10 +278,8 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
     relocated = []
     try:
         # copy2 creates independent regular files even when source dependencies are hardlinked.
-        default_ignore = shutil.ignore_patterns(*sorted(EXCLUDED_NAMES), '*.tsbuildinfo')
-
         def ignored(directory, names):
-            return default_ignore(directory, names) | excluded_names(source, Path(directory), exclude_roots)
+            return excluded_names(source, Path(directory), names, exclude_roots)
 
         shutil.copytree(source, candidate, symlinks=True, dirs_exist_ok=True, ignore=ignored)
         for row in before:
@@ -344,6 +351,7 @@ def stage(source: Path, candidate: Path, commit: str, receipt: Path,
                  'completedAt': now(), 'source': str(source), 'candidate': str(candidate),
                  'commit': commit, 'sourceIdentity': identity,
                  'exclusions': sorted(EXCLUDED_NAMES) + ['*.tsbuildinfo'],
+                 'preservedArtifactRoots': [PRESERVED_APP_ROOT],
                  'excludedTopLevelRoots': list(exclude_roots),
                  'excludedSwiftBuildCaches': list(SWIFT_BUILD_CACHE_ROOTS),
                  'sourceInventorySha256': sha256(json.dumps(before, sort_keys=True).encode()),
@@ -370,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--exclude-root', action='append', default=[], metavar='NAME',
                         help='Exclude one explicitly identified regenerable top-level cache; repeat as needed')
     parser.add_argument('--verify-ai-import-node', type=Path,
-                        help='Explicit pinned Node 24.16.0 for the fixed offline AI import before hardening')
+                        help='Explicit pinned Node 24.22.1 for the fixed offline AI import before hardening')
     args = parser.parse_args(argv)
     try:
         value = stage(args.source, args.candidate, args.source_commit, args.receipt,

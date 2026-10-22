@@ -68,7 +68,8 @@ def direct_gateway_plist(
     package_link = tmp_path / "package-link"
     working_directory = tmp_path / "operator-home"
     working_directory.mkdir()
-    monkeypatch.setattr(guard, "GATEWAY_NODE", node)
+    monkeypatch.setattr(guard, "live_paths", lambda: type("SelectedPaths", (), {"node": node})(),
+                        raising=False)
     monkeypatch.setattr(guard, "GATEWAY_PACKAGE_LINK", package_link)
     monkeypatch.setattr(guard, "GATEWAY_WORKING_DIRECTORY", working_directory)
     payload: dict[str, object] = {
@@ -901,9 +902,32 @@ def test_declared_expected_labels_are_locked_to_reviewed_inventory() -> None:
     assert 'com.openclaw.unregistered-fixture' not in guard.EXPECTED_MANAGED_LABELS
 
 
-def test_guard_uses_activation_owner_node_pin():
-    from scripts import openclaw_runtime_activate as activation
-    assert guard.GATEWAY_NODE == activation.OPERATOR.require_path('paths.node_binary')
+def test_guard_uses_current_selected_activation_owner_node(tmp_path, monkeypatch):
+    path, payload = direct_gateway_plist(tmp_path, monkeypatch)
+    selected = write_executable(tmp_path / "current-selected-node")
+    observed = []
+    def selection():
+        observed.append(True)
+        return type("SelectedPaths", (), {"node": selected})()
+    monkeypatch.setattr(guard, "live_paths", selection, raising=False)
+    payload["ProgramArguments"][0] = str(selected)
+    write_plist(path, payload)
+    assert guard.check(path) == []
+    assert observed == [True]
+
+
+
+def test_guard_reports_unavailable_selection_without_repairing_gateway(tmp_path, monkeypatch):
+    path, payload = direct_gateway_plist(tmp_path, monkeypatch)
+    write_plist(path, payload)
+    before = path.read_bytes()
+    def unavailable():
+        raise RuntimeError("selected managed owner unavailable")
+    monkeypatch.setattr(guard, "live_paths", unavailable, raising=False)
+    assert "gateway managed Node selection is unavailable or invalid" in guard.check(path)
+    assert guard.repair_from_template(path) is False
+    assert path.read_bytes() == before
+
 
 
 def test_human_report_keeps_diagnostics_private(tmp_path, monkeypatch, capsys):

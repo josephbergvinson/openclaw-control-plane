@@ -452,9 +452,6 @@ X_API_PROBE_ARGV = (
 )
 TRUSTED_OPENCLAW_CLI = _operator_binding('paths.openclaw_cli')
 OPENCLAW_RUNTIME_STATE_DIR = _operator_binding('paths.state_root')
-DISCORD_SOURCE_NODE_BIN = Path(
-    _operator_binding('paths.node_binary')
-)
 # Keep readiness output bounded: beta.3 can exit before a large piped guild
 # inventory flushes. Task-specific lists, reads, and searches remain available.
 DISCORD_SOURCE_ROUTE_PROBES = {
@@ -491,7 +488,6 @@ MERCURY_COMPANY_BETA_DECLARED_PROBE_ARGV = (
 MERCURY_COMPANY_BETA_PROBE_ARGV = (
     "/usr/bin/env",
     f"OPENCLAW_STATE_DIR={OPENCLAW_RUNTIME_STATE_DIR}",
-    str(DISCORD_SOURCE_NODE_BIN),
     TRUSTED_OPENCLAW_CLI,
     *MERCURY_COMPANY_BETA_DECLARED_PROBE_ARGV[1:],
 )
@@ -1563,7 +1559,6 @@ def exact_probe_argv(preferred: dict[str, Any] | None) -> tuple[str, ...] | None
         return (
             "/usr/bin/env",
             f"OPENCLAW_STATE_DIR={OPENCLAW_RUNTIME_STATE_DIR}",
-            str(DISCORD_SOURCE_NODE_BIN),
             TRUSTED_OPENCLAW_CLI,
             *declared[1:],
         )

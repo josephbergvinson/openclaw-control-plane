@@ -17,11 +17,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         try:
-            from scripts.openclaw_runtime_activate import OPERATOR, verify_screen_capture_binding
+            from scripts.openclaw_runtime_activate import live_paths, verify_screen_capture_binding
         except ModuleNotFoundError:
-            from openclaw_runtime_activate import OPERATOR, verify_screen_capture_binding
+            from openclaw_runtime_activate import live_paths, verify_screen_capture_binding
         evidence = verify_screen_capture_binding(args.screen_capture_binding,
-                                                 OPERATOR.require_path("paths.node_binary"),
+                                                 live_paths().node,
                                                  require_current_process=True)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError):
         print(json.dumps({"status": "unknown", "nativeCaptureRequired": True,

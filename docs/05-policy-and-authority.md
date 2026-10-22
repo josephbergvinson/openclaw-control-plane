@@ -9,7 +9,7 @@ In this reference, `AGENTS.md` is the sole loaded authority for behavior, approv
 | File | Job | Boundary |
 |---|---|---|
 | `AGENTS.md` | Behavior, authenticated authority, sources, routing and completion | Owns the reusable behavioral rules |
-| `TOOLS.md` | Detailed execution procedures | Read deliberately when relevant; cannot independently authorize, forbid or override |
+| `runbook/tools-reference.md` | Detailed execution procedures | Read deliberately when relevant; cannot independently authorize, forbid or override |
 | `SOUL.md` | Voice, style and reader-facing presentation | Cannot change facts, authority or delivery destination |
 | `WRITING.md` | Long-form prose and document discipline | Style-only child, read deliberately for applicable work |
 | `USER.md` | Stable working preferences | Does not establish current provider facts or silently grant actions |
@@ -20,7 +20,7 @@ In this reference, `AGENTS.md` is the sole loaded authority for behavior, approv
 ```mermaid
 flowchart TD
   U[Authenticated operator request] --> A[AGENTS: behavioral authority]
-  A --> T[TOOLS: relevant execution mechanics]
+  A --> T[Tool reference: relevant execution mechanics]
   A --> E[Authorized action within the request]
   S[SOUL and WRITING: presentation] -.-> E
   P[USER: durable preferences] -.-> E
@@ -30,7 +30,7 @@ flowchart TD
   E --> O[Verified effect and natural result]
 ```
 
-The [standalone authority diagram](../diagrams/authority-resolution.mmd) shows the same relationships. There is no second normative TOOLS layer that can quietly redefine the approval policy. A detailed procedure can expose a real missing dependency or unsafe operation, but its authority comes from the rules AGENTS owns and the actual system boundary.
+The [standalone authority diagram](../diagrams/authority-resolution.mmd) shows the same relationships. There is no second normative mechanics layer that can quietly redefine the approval policy. A detailed procedure can expose a real missing dependency or unsafe operation, but its authority comes from the rules AGENTS owns and the actual system boundary.
 
 Keep one owner per reusable concept. A mechanics file should point to the approval rule rather than maintain a second version. A generated capability page should cite the registry rather than become a competing inventory. This reduces both prompt size and the chance that an agent selects whichever contradictory paragraph is convenient.
 
@@ -62,7 +62,7 @@ The agent still verifies the real origin, selected account, network and availabl
 
 The final response contains the requested deliverable, not a receipt inventory or a statement that work was performed. Substantial work gets a natural acknowledgment, meaningful updates and one clear result. The parent owns synthesis and external effects even when a source-only worker does the retrieval. No emojis, tool banners, provider-routing chatter or raw lifecycle fields belong in ordinary agent replies.
 
-A concrete scheduling request illustrates why source and output rules belong together. The operator asks to add two calls to Apple Calendar. The agent reads current invitations from the relevant Google accounts, verifies each meeting's end time and joining details, inspects existing Apple entries, and updates or creates only what is needed. It then reads back both events. The destination preference never bans reading another provider's invitation, and one successful event never proves the whole request complete. The full mechanics live in [TOOLS](../templates/TOOLS.example.md#calendar).
+A concrete scheduling request illustrates why source and output rules belong together. The operator asks to add two calls to Apple Calendar. The agent reads current invitations from the relevant Google accounts, verifies each meeting's end time and joining details, inspects existing Apple entries, and updates or creates only what is needed. It then reads back both events. The destination preference never bans reading another provider's invitation, and one successful event never proves the whole request complete. The full mechanics live in the [tool execution reference](../templates/TOOLS.example.md#calendar).
 
 For long-form writing, the agent preserves facts and applies reader-aware prose directly. An isolated writer agent is not required. The [SOUL](../templates/SOUL.example.md) and [WRITING](../templates/WRITING.example.md) files contain the actual presentation rules, including complete answers in chat and deliberate use of a shareable file when appropriate.
 

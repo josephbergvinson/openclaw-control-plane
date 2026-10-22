@@ -42,6 +42,8 @@ TESTS = [
     'test_openclaw_runtime_activate.py', 'test_openclaw_runtime_release_retention.py',
     'test_openclaw_runtime_promotion_retention.py', 'test_openclaw_approval_a_retention.py',
     'test_runtime_activation_portability.py', 'test_screen_capture_continuity.py',
+    'test_node_candidate_filesystem_precondition.py',
+    'test_external_recovery_roots.py', 'test_projected_rehearsal_restore.py',
     'test_screen_capture_retired_receipt.py', 'test_screen_capture_restored_receipt.py',
     'test_journal_screen_capture_acceptance.py',
 ]
@@ -92,7 +94,7 @@ def fixture_contract(root: Path) -> dict:
         'schema_version': 1, 'paths': paths, 'identifiers': {'host_user': 'fixture-user', 'host_name': 'fixture-host'},
         'runtime': {'gateway_label': 'ai.openclaw.gateway', 'gateway_port': 18789,
                     'readyz_url': 'http://127.0.0.1:18789/readyz',
-                    'node_label': 'ai.openclaw.node', 'required_extensions': ['discord', 'lane-contract'],
+                    'node_label': 'ai.openclaw.node', 'required_extensions': ['discord', 'codex'],
                     'launchagent_label_markers': ['openclaw'], 'expected_auth_order_count': 3,
                     'expected_auth_order_sha256': 'f' * 64, 'session_reservations_mode': 'absent'},
         'backup': {'client_executable': str(root / 'bin' / 'bzcli'),

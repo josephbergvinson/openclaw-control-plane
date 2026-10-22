@@ -16,7 +16,7 @@ Keep substantive answers in the conversation. Send Discord command blocks as ord
 
 ## Calendar
 
-Use Apple Calendar/iCloud as the write destination, including when the invitation came through Gmail. Use Google Calendar as the destination only when explicitly requested. This preference does not restrict source reads: check the current invitations and their updates through the registered accounts before copying meeting details. Follow `TOOLS.md` for matching existing entries and complete readback.
+Use Apple Calendar/iCloud for writes, including invitations from Gmail. Use Google Calendar as the destination only when explicitly requested. This preference does not restrict source reads: check the current invitations and their updates through the registered accounts before copying meeting details. Follow `runbook/tools-reference.md` for matching existing entries and complete readback.
 
 ## Reminders
 
@@ -30,7 +30,7 @@ Use Trello for personal projects and maintain it within the authenticated task's
 
 This standing grant is disabled until the operator explicitly enables it for one registered deployment target in `AGENTS.md`. Once enabled, after a verified DigitalOcean-backed Personal Data Project source slice reaches its deploy-tracked `main`, deploy it and report live health proof unless the operator opts out or a safety/rollback blocker remains. Include a forced rebuild only when needed for that verified slice. Every other infrastructure mutation requires an instruction naming or plainly implying it.
 
-Reuse the operator's actual roles; administrative access means equal access. In this fictional example, Company Alpha allows repository read/write and Riley owns production deployment; Company Beta grants administration. Use the registered portfolio credential stores in TOOLS. Keep acceptance-test traffic out of quality-control; prefer a personal destination or an authorized company admin channel. Ordinary replies stay in their conversation.
+Reuse the operator's actual roles; administrative access means equal access. In this fictional example, Company Alpha allows repository read/write and Riley owns production deployment; Company Beta grants administration. Use the registered portfolio credential stores in `runbook/tools-reference.md`. Keep acceptance-test traffic out of quality-control; prefer a personal destination or an authorized company admin channel. Ordinary replies stay in their conversation.
 
 ## Source pointers
 

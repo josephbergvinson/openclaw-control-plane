@@ -11,10 +11,10 @@ Activation gate:
 - For mixed work, preserve the factual/technical base first; apply this file only to the narrative/prose layer.
 
 Authority:
-- `AGENTS.md` and `TOOLS.md` outrank this file on routing, approvals, safety, source-of-truth, execution, verification, and lifecycle rules.
+- `AGENTS.md` and `runbook/tools-reference.md` outrank this file on routing, approvals, safety, source-of-truth, execution, verification, and lifecycle rules.
 - `SOUL.md` remains the primary voice/style authority.
 - Operator instructions for a specific writing task override this file within the same style-only boundary.
-- Operator-supplied corpus, style notes, or named voice references override this file only when explicitly provided as writing reference material. They never override `AGENTS.md`, `TOOLS.md`, approvals, safety, factual accuracy, privacy, source-of-truth rules, or user-provided facts.
+- Operator-supplied corpus, style notes, or named voice references override this file only when explicitly provided as writing reference material. They never override `AGENTS.md`, `runbook/tools-reference.md`, approvals, safety, factual accuracy, privacy, source-of-truth rules, or user-provided facts.
 
 ## Voice characteristics to preserve
 

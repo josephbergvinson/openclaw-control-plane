@@ -1,6 +1,6 @@
 # Goals, workers and continuation
 
-Substantial work should retain its objective and make progress without keeping the operator involved in every internal step. The current implementation uses OpenClaw's native session, task and goal ownership, with the supplied lane-contract integration for the relevant detached channel workflows.
+Substantial work should retain its objective and make progress without keeping the operator involved in every internal step. The implementation uses OpenClaw's native session, retained subagent-run registry, goal accounting and requester continuation. The retired Tasks/TaskFlow APIs and Lane Contract plugin are not installed alongside those owners.
 
 Legacy lane terminology remains useful when describing an owned unit of work. It does not mean that an adopter must build a second scheduler from workspace JSON files.
 
@@ -25,7 +25,7 @@ sequenceDiagram
     participant O as Operator
     participant P as Parent session
     participant W as Worker session
-    participant R as Native task runtime
+    participant R as Native run registry
     O->>P: Ordinary goal request
     P->>R: Create represented worker
     R->>W: Start authorized subtask
@@ -36,7 +36,7 @@ sequenceDiagram
     P->>O: One clear final result
 ```
 
-The [durable work diagram](../diagrams/durable-lane.mmd) shows this ownership path. A yield may omit a separate acknowledgment argument, particularly when progress was already supplied. The patched dispatch path carries pending-continuation ownership through native command settlement so it is not misclassified as an empty failed response.
+The [durable work diagram](../diagrams/durable-lane.mmd) shows this ownership path. Use the native run IDs returned by spawn/list for `subagents` list, wait or cancel. A wait observes those runs; it does not create a second worker or assume delivery ownership. Requester continuation remains bound through native command settlement.
 
 This does not excuse silence throughout a long task. Visible progress is a separate requirement: report material milestones and a real dependency when work cannot advance.
 
@@ -46,7 +46,7 @@ The configured timeout for an initial visible worker must reach the execution ba
 
 Different clocks can still measure different intervals. Approval waits, compaction grace and later turns can affect elapsed wall time. Do not promise that every observed duration will exactly equal the initial configured timeout.
 
-When execution is interrupted, inspect native task/session state, its current handle and the destination effects before restarting anything. An observation request timing out does not prove that the underlying task timed out. A completed child does not prove that its result was externally delivered.
+When execution is interrupted, inspect native run/session state, its current handle and the destination effects before restarting anything. A `subagents` wait timeout does not cancel the child, prove an execution deadline expired or consume its later result. A terminal run with an `ok` outcome can still have pending or failed delivery; see the [run observation example](../examples/native-run.example.json).
 
 ## Follow-up and recovery
 
@@ -60,4 +60,4 @@ A context reset clears the current goal/context boundary as defined by the runti
 
 Test a natural request through the actual channel. Verify worker representation, the yield result, requester continuation, goal completion and the visible final. Add separate tests for deadline expiration, failed children, interrupted admission and ambiguous delivery where those properties are required.
 
-The relevant implementation lives in the runtime patch: `extensions/lane-contract`, native task/harness scope, goal accounting and reply dispatch. [Source changes](20-runtime-source-changes.md) identifies the files; [delivery](13-delivery-and-control-surface.md) explains the external boundary.
+The relevant implementation lives in the native subagent registry, execution harness, requester continuation, goal accounting and reply dispatch. [Source changes](20-runtime-source-changes.md) identifies the files; [delivery](13-delivery-and-control-surface.md) explains the external boundary.

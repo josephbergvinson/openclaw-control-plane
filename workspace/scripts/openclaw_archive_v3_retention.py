@@ -524,7 +524,20 @@ def scan_and_verify(config: RetentionConfig) -> Inventory:
     )
 
 
-def verification_specs() -> tuple[archive_backup.ArchiveSpec, ...]:
+def verification_specs(
+    manifest: dict[str, Any],
+) -> tuple[archive_backup.ArchiveSpec, ...]:
+    legacy_policy_files = (
+        "AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
+        "MEMORY.md", "POLICY_CHANGELOG.md",
+    )
+    source_contract = manifest.get("source_contract", {})
+    require(isinstance(source_contract, dict),
+            "generation policy source contract is malformed")
+    # Older readers accepted omitted metadata; retain only the exact old scope.
+    policy_files = source_contract.get("policy_files", list(legacy_policy_files))
+    require(policy_files in (list(legacy_policy_files), list(archive_backup.POLICY_FILES)),
+            "generation policy file contract is unsupported")
     return (
         archive_backup.ArchiveSpec(
             filename="openclaw-state.tgz",
@@ -549,7 +562,7 @@ def verification_specs() -> tuple[archive_backup.ArchiveSpec, ...]:
             role="policy",
             roots=(),
             required_members=frozenset(
-                {*archive_backup.POLICY_FILES, "runbook", "memory"}
+                {*policy_files, "runbook", "memory"}
             ),
             required_probe_groups=frozenset({"policy"}),
         ),
@@ -789,7 +802,6 @@ def deep_verify_all(
     )
     archive_backup.fsync_dir(probe_parent.parent)
     rows: list[dict[str, Any]] = []
-    specs = verification_specs()
     try:
         receipt.phase(
             "current-probe-created-before-extraction",
@@ -809,6 +821,7 @@ def deep_verify_all(
         )
         for generation in generations:
             manifest = archive_backup.load_manifest(generation)
+            specs = verification_specs(manifest)
             archive_rows = {
                 row["name"]: row for row in manifest["archives"]
             }

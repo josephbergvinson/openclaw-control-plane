@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -35,6 +36,16 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertFalse(receipt["services_started"])
         self.assertTrue((self.destination / "AGENTS.md").is_file())
         self.assertTrue((self.destination / "WRITING.md").is_file())
+        canonical = self.destination / "runbook/tools-reference.md"
+        self.assertTrue(canonical.is_file())
+        self.assertFalse(canonical.is_symlink())
+        self.assertEqual(0o600, canonical.stat().st_mode & 0o777)
+        self.assertEqual(0o700, canonical.parent.stat().st_mode & 0o777)
+        self.assertFalse((self.destination / "TOOLS.md").exists())
+        self.assertLessEqual(len((self.destination / "USER.md").read_text()), 4000)
+        paths = [row["path"] for row in receipt["files"]]
+        self.assertEqual(1, paths.count("runbook/tools-reference.md"))
+        self.assertNotIn("TOOLS.md", paths)
         self.assertTrue((self.destination / "templates/analytical-workbook.md").is_file())
         self.assertTrue((self.destination / "scripts/operator_contract.py").is_file())
         config = json.loads((self.destination / "config/openclaw.json").read_text())
@@ -42,6 +53,55 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual("openai/gpt-image-2.5-flare", config["agents"]["defaults"]["mediaModels"]["image"]["primary"])
         self.assertEqual(0o600, (self.destination / "operator.json").stat().st_mode & 0o777)
         self.assertTrue((self.destination / "installation-manifest.json").is_file())
+
+    def test_installed_policy_files_match_the_manual_backup_contract(self):
+        files = INSTALLER.make_plan(self.destination)
+        INSTALLER.install(self.destination, files)
+        source = files[Path("scripts/openclaw_weekly_archive_backup.py")][0].decode()
+        declaration = next(node for node in ast.parse(source).body
+                           if isinstance(node, ast.Assign)
+                           and any(isinstance(target, ast.Name) and target.id == "POLICY_FILES"
+                                   for target in node.targets))
+        required = ast.literal_eval(declaration.value)
+        self.assertIn("runbook/tools-reference.md", required)
+        self.assertNotIn("TOOLS.md", required)
+        for name in required:
+            selected = self.destination / name
+            with self.subTest(policy=name):
+                self.assertTrue(selected.is_file())
+                self.assertFalse(selected.is_symlink())
+        self.assertTrue((self.destination / "runbook").is_dir())
+        policy = json.loads(files[Path("policy_manifest.json")][0])
+        self.assertEqual(["runbook/tools-reference.md"],
+                         policy["authoritative_layers"]["mechanics_reference"])
+        bootstrap = json.loads(files[Path("policy_bootstrap_manifest.json")][0])
+        mechanics = next(row for row in bootstrap["contracts"]
+                         if row["contract_role"] == "mechanics-reference")
+        self.assertEqual("runbook/tools-reference.md", mechanics["path"])
+        self.assertEqual("never", mechanics["bootstrap_default"])
+        self.assertFalse(mechanics["recognized_by_workspace_loader"])
+
+    def test_canonical_tools_installation_preserves_operator_path_bindings(self):
+        operator = self.root / "operator.json"
+        project_data = self.root / "project-data"
+        legacy_state = self.root / "legacy-state"
+        operator.write_text(json.dumps({"paths": {
+            "workspace": str(self.destination), "project_data_root": str(project_data),
+            "legacy_state_root": str(legacy_state),
+        }}))
+        files = INSTALLER.make_plan(self.destination, operator)
+        agents = files[Path("AGENTS.md")][0].decode()
+        self.assertIn(str(self.destination / "artifacts"), agents)
+        self.assertIn(str(project_data), agents)
+        self.assertIn(str(legacy_state / "exec-approvals.json"), agents)
+        self.assertIn("](runbook/tools-reference.md)", agents)
+        for name in ("AGENTS.md", "runbook/tools-reference.md"):
+            body = files[Path(name)][0].decode()
+            for token in ("<artifact-root>", "<legacy-state-root>", "<project-data-root>"):
+                with self.subTest(policy=name, token=token):
+                    self.assertNotIn(token, body)
+        self.assertNotIn(Path("TOOLS.md"), files)
+        self.assertFalse(self.destination.exists())
 
     def test_rendered_model_policy_uses_one_model_without_fallback(self):
         files = INSTALLER.make_plan(self.destination)
@@ -123,6 +183,8 @@ class WorkspaceInstallTests(unittest.TestCase):
                     self.assertTrue(target in files or any(target in path.parents for path in files), str(target))
         runbook = files[Path("runbooks/runtime-activation.md")][0].decode()
         self.assertIn("](../docs/17-adoption-guide.md)", runbook)
+        mechanics = files[Path("runbook/tools-reference.md")][0].decode()
+        self.assertIn("](../docs/16-security-and-trust-model.md#preserve-credential-bytes-within-the-resolver)", mechanics)
         self.assertIn("](../scripts)", files[Path("docs/09-source-layout-and-artifacts.md")][0].decode())
 
     def test_installed_reconstruction_helper_finds_its_bundled_manifest(self):
@@ -158,7 +220,7 @@ class WorkspaceInstallTests(unittest.TestCase):
                                  input="\n".join(private) + "\n", env=env, capture_output=True, text=True)
         self.assertEqual(0, ignored.returncode, ignored.stderr)
         self.assertEqual(set(private), set(ignored.stdout.splitlines()))
-        source = [".gitignore", "AGENTS.md", "SOUL.md", "TOOLS.md", "WRITING.md", "REFERENCE.md",
+        source = [".gitignore", "AGENTS.md", "SOUL.md", "runbook/tools-reference.md", "WRITING.md", "REFERENCE.md",
                   "scripts/operator_contract.py", "scripts/materialize_host.py", "registry/readers.json",
                   "docs/17-adoption-guide.md", "runtime/manifest.json", "config/openclaw.preferences.json",
                   "config/operator.example.json", "dependencies/requirements.txt", "host-templates.json"]

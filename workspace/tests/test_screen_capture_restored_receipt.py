@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import zlib
 
 import pytest
 
@@ -141,10 +142,23 @@ def test_accept_uses_the_same_bound_restore_owner(fixture, restored_capture, mon
     root = fixture.root / "pending-restored-capture"
     root.mkdir(mode=0o700)
     image = root / "journal.png"
-    image.write_bytes(b"visually reviewed private Journal fixture")
+    dimensions = {"width": 64, "height": 64}
+    window = {"applicationPid": 41, "windowId": 700, **dimensions}
+    def png_chunk(kind, data):
+        payload = kind + data
+        return len(data).to_bytes(4, "big") + payload + zlib.crc32(payload).to_bytes(4, "big")
+    image.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", (64).to_bytes(4, "big") * 2 + b"\x08\x02\x00\x00\x00")
+        + png_chunk(b"IDAT", zlib.compress((b"\x00" + b"\xff" * (64 * 3)) * 64))
+        + png_chunk(b"IEND", b""))
+    probe.save(root / "journal-window.json", window)
+    (root / "stage-2-stdout.log").write_text(json.dumps({"success": True, "data": {"files": [
+        {"window_id": 700, "path": str(image), "mime_type": "image/png"}]}}))
     digest = hashlib.sha256(image.read_bytes()).hexdigest()
     proof = json.loads(source.read_text())
-    proof.update(status="awaiting_visual_acceptance", imageSha256=digest)
+    proof.update(status="awaiting_visual_acceptance", imagePath=str(image), imageSha256=digest,
+                 journalWindow=window, imageDimensions=dimensions, imageWindowIdVerified=True)
     probe.save(root / "capture.json", proof)
     accepted = probe.accept(root, digest)
     assert accepted["scheduledSyncProven"] is False

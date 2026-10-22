@@ -69,7 +69,7 @@ EXPECTED_GENERATION_FILES = frozenset(
 )
 POLICY_FILES = (
     "AGENTS.md",
-    "TOOLS.md",
+    "runbook/tools-reference.md",
     "SOUL.md",
     "USER.md",
     "MEMORY.md",
@@ -2142,7 +2142,10 @@ def build_archive_specs(
             archive_name=PurePosixPath(name),
             expected_device=identity.device,
         )
-        for name in (*POLICY_FILES, "runbook", "memory")
+        for name in dict.fromkeys(
+            PurePosixPath(path).parts[0]
+            for path in (*POLICY_FILES, "runbook", "memory")
+        )
     )
     state_roots: tuple[RootInput, ...] = (
         RootInput(
@@ -2774,7 +2777,9 @@ def verify_member_scope(spec: ArchiveSpec, names: set[str]) -> None:
             "state archive contains a reconstructible runtime cache descendant",
         )
     elif spec.role == "policy":
-        allowed_roots = frozenset({*POLICY_FILES, "runbook", "memory"})
+        allowed_roots = frozenset(
+            name.split("/", 1)[0] for name in spec.required_members
+        )
         require(
             all(name.split("/", 1)[0] in allowed_roots for name in names),
             "policy archive contains an unselected workspace member",
@@ -3223,6 +3228,13 @@ def verify_archive(
                         member.isfile() or member.issym(),
                         "state archive contains the reconstructible runtime "
                         "cache root as a directory",
+                    )
+                if spec.role == "policy" and name in (
+                    spec.required_members - {"runbook", "memory"}
+                ):
+                    require(
+                        member.isfile(),
+                        "required policy archive member is not a regular file: {}".format(name),
                     )
                 full_restore_handle = None
                 if full_restore_root is not None:

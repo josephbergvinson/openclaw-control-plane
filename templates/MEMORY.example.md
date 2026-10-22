@@ -10,7 +10,7 @@ Rules:
 - If a cue needs explanation, move the explanation to its source file and leave only the cue or pointer here.
 
 Cues / pointers:
-- `AGENTS.md` owns behavior and authority. `TOOLS.md` supplies current mechanics on deliberate read.
+- `AGENTS.md` owns behavior and authority. `runbook/tools-reference.md` supplies current mechanics on deliberate read.
 - Resolve source roots through `registry/project_topology.json`; rendered capability views do not override their structured owners or fresh evidence.
 - Company Alpha and Company Beta are distinct portfolios. Retain the source account with retrieved evidence; a multi-account read set never selects a write destination.
 - Apple Calendar is the default event destination. An invitation in another provider is still an authoritative source for times and joining details.

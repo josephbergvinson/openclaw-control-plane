@@ -32,6 +32,7 @@ placeholders. All these paths must describe the same installation:
 | `paths.runtime_node_alias` | Symlink whose literal target is the grandparent of `node_binary`. |
 | `paths.gateway_plist`, `paths.node_plist` | The real service definitions captured with state. |
 | `paths.activation_lock`, `paths.activation_result` | Shared activation lock and immutable terminal receipt path. |
+| `runtime.recovery_roots` | Explicit physical external file/directory roots derived from effective agent/plugin/config bindings and the real native home/SQLite-home environment. Roots already inside `state_root` are covered there; duplicate/nested external roots are normalized. An empty list is valid only when the inventoried installation has no external recovery surfaces. |
 | `paths.legacy_exec_approvals` | Legacy approvals-file location checked for absence; for a new installation use `state_root/exec-approvals.json`. Its parent must match the persisted approvals socket directory. |
 | `paths.session_store`, `paths.session_reservations` | Historical session-store and reservation paths within `state_root`; these identify a preservation constraint, not a newly created store. |
 | `paths.screen_capture_binding` | Private immutable Journal continuity binding. Initially `null` for an installation that has not enrolled this route; set the exact path after acceptance to require the guard on subsequent activations. |
@@ -39,7 +40,7 @@ placeholders. All these paths must describe the same installation:
 
 Set `runtime.gateway_label`, `runtime.node_label`, `runtime.gateway_port` and
 `runtime.required_extensions` to the actual installation. The reference expects
-bundled `discord` and `lane-contract`; Discord must resolve to the bundled plugin,
+bundled `discord` and `codex`; Discord must resolve to the bundled plugin,
 with no stale installed-plugin record shadowing it. The gateway plist must use
 the pinned Node, `runtime_package_link/dist/index.js`, `gateway`, `--port` and the
 configured port, with `WorkingDirectory=host_home`, `RunAtLoad=true` and
@@ -161,11 +162,16 @@ the running gateway's auth view. Do not put an `openai` order override or copied
 OpenAI profile records back into `openclaw.json`. API-key-only deployments do
 not meet this reference's OAuth-account continuity contract.
 
-When a real legacy state migration is required, inspect `doctor` first and use
-`"$NODE" "$OPENCLAW" doctor --repair --non-interactive` for the reviewed native repair.
-Do not run it as a recurring substitute for an unexplained activation failure.
-This can change state, so preserve the existing installation first. The activator
-requires no pending legacy approvals source or doctor claim after migration.
+For a version upgrade the activator invokes the candidate's existing native owner
+once: `doctor --repair --non-interactive --no-workspace-suggestions`. It supplies
+the native protected result-path environment, requires physical command exit zero
+and a native `status: "ok"` result without maintenance/config-write refusal, then
+protects and hashes that receipt. Native Doctor owns schema/plugin migration and
+its readiness admission. Do not add `--json`: on this CLI it selects read-only lint
+and cannot be combined with repair. Do not replace this with a parallel migration
+engine, call the competing updater or retry a consumed migration attempt to obtain
+a passing receipt. Preserve the installation before the reviewed repair; the
+activator also requires no pending legacy approvals source or doctor claim.
 
 Initialize the adopter's host execution policy through the native approvals
 command. Prepare a private JSON policy file with `version: 1`, the adopter's
@@ -194,8 +200,8 @@ installation-specific configuration.
 
 ## Bind the adopter's auth order without copying credentials
 
-The exact runtime contains a read-only approvals/auth inspector at
-`dist/infra/exec-approvals-inspection.js`. Run it against the initialized state
+The runtime exposes the read-only approvals/auth inspector through its declared
+`dist/plugin-sdk/exec-approvals-runtime.js` entrypoint. Run it against the initialized state
 before the stopped snapshot. In the snippet, `$NODE`, `$RELEASE`, `$STATE` and
 `$LEGACY_APPROVALS` are absolute paths read from the private operator contract.
 It emits counts, digests and validity flags, not profile names or credentials.
@@ -203,7 +209,7 @@ It emits counts, digests and validity flags, not profile names or credentials.
 ```sh
 OPENCLAW_STATE_DIR="$STATE" \
 OPENCLAW_LEGACY_EXEC_APPROVALS_PATH="$LEGACY_APPROVALS" \
-OPENCLAW_APPROVALS_INSPECTOR="$RELEASE/dist/infra/exec-approvals-inspection.js" \
+OPENCLAW_APPROVALS_INSPECTOR="$RELEASE/dist/plugin-sdk/exec-approvals-runtime.js" \
 "$NODE" --input-type=module <<'JS'
 import { pathToFileURL } from 'node:url';
 const { inspectExecApprovalsState } = await import(
@@ -256,6 +262,28 @@ Use the candidate and stopped-snapshot command sequence in the
 [adoption guide](../../docs/17-adoption-guide.md), with a unique snapshot directory.
 A version change also requires `--upgrade-config` naming a reviewed immutable
 mode-`0400` target config. A same-version change must omit that argument.
+
+Before capture, inventory every actual external state owner. Include configured
+agent/plugin directories and config includes, native rollout/home and separately
+configured SQLite homes, and the matching companion application. The native
+database inventory must cover all seven database families at their real locations;
+do not infer them from a guessed default home. Record those physical roots in
+`runtime.recovery_roots`. The same helper captures them in its version-3 snapshot
+and rejects a later attempt to reinterpret that generation under different roots.
+
+Settle writer custody before snapshot or restore through the affected native
+application/service owners and retain their lease fences. A stopped Gateway/node
+alone cannot settle a separate native process. The helper's additional open-file
+checks are supplemental observations: an empty `lsof` result does not prevent a
+writer from reopening a file later. Do not stop unrelated applications or projects
+to manufacture quiescence. If required custody cannot be settled, preserve the
+current installation and report the actual missing prerequisite.
+
+Rehearse native migration on copied state and whole-generation restoration before
+the live switch. Restoration must recover the matching code/application, config,
+state, rollout history and every inventoried database family. Selecting old code
+against migrated databases is not rollback. The restore procedure quarantines
+post-upgrade surfaces before extraction and retains failed-state evidence.
 
 A successful candidate consumes a single start fence and writes an immutable
 receipt. Repeating the command reads and verifies that receipt; it does not

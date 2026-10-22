@@ -187,7 +187,7 @@ A timer may fire while another task is building, retaining files or changing a r
 
 Retain enough run identity to distinguish an interrupted attempt from a job that never started. After a restart, reconcile runtime records with any child/process receipt and the observed effect. A missing result is unknown; do not fabricate output or replay a potentially completed mutation simply to produce a cleaner history.
 
-Background completion delivery and crash-resumable execution are distinct capabilities. The [execution chapter](06-execution-and-durable-lanes.md) describes native task and subagent lifecycles. A scheduler entry alone does not make arbitrary child processes safely resumable.
+Background completion delivery and crash-resumable execution are distinct capabilities. The [execution chapter](06-execution-and-durable-lanes.md) describes native run and subagent lifecycles. A scheduler entry alone does not make arbitrary child processes safely resumable.
 
 ## Acceptance sequence
 

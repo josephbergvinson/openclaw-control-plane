@@ -44,7 +44,7 @@ EXPECTED_ARCHIVE_NAMES = (
 )
 POLICY_FILES = (
     "AGENTS.md",
-    "TOOLS.md",
+    "runbook/tools-reference.md",
     "SOUL.md",
     "USER.md",
     "MEMORY.md",
@@ -422,11 +422,12 @@ def create_backup_fixture(root: Path) -> dict[str, Path | str | int]:
     sessions_logical.symlink_to(sessions, target_is_directory=True)
 
     for name in POLICY_FILES:
+        (workspace / name).parent.mkdir(parents=True, exist_ok=True)
         (workspace / name).write_text(
             "{} integration fixture\n".format(name),
             encoding="utf-8",
         )
-    (workspace / "runbook").mkdir()
+    (workspace / "runbook").mkdir(exist_ok=True)
     (workspace / "runbook/restore.md").write_text(
         "restore integration fixture\n",
         encoding="utf-8",

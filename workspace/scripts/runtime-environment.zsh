@@ -9,7 +9,6 @@ umask 077
 : "${PYTEST_DEBUG_TEMPROOT:?required installation binding}"
 : "${NODE_COMPILE_CACHE:?required installation binding}"
 : "${PYTHONPYCACHEPREFIX:?required installation binding}"
-: "${OPENCLAW_RUNTIME_APP:?required installation binding}"
 
 ensure_attach_only_marker() {
     local marker="$1"
@@ -23,7 +22,7 @@ ensure_attach_only_marker() {
     fi
 }
 
-# The native app can be opened by Finder before this login owner runs. Install
+# The native app can be opened by Finder before this environment publisher runs. Install
 # this same physical marker before enabling autostart (see the adoption guide),
 # and retain it on internal storage when the canonical volume is unavailable.
 [[ -d "$HOME" && ! -L "$HOME/.openclaw" ]] || {
@@ -38,9 +37,9 @@ ensure_attach_only_marker "$HOME/.openclaw/disable-launchagent"
 unset OPENCLAW_GATEWAY_TOKEN
 /bin/launchctl unsetenv OPENCLAW_GATEWAY_TOKEN
 
-# Do not create a shadow state directory or launch an app against a missing mount.
+# Do not create a shadow state directory or publish a missing canonical state route.
 [[ -d "$OPENCLAW_STATE_DIR" && -f "$OPENCLAW_STATE_DIR/openclaw.json" ]] || {
-    print -u2 -- "Canonical OpenClaw state is unavailable; app startup deferred"
+    print -u2 -- "Canonical OpenClaw state is unavailable; environment publication deferred"
     exit 1
 }
 ensure_attach_only_marker "$OPENCLAW_STATE_DIR/disable-launchagent"
@@ -57,6 +56,16 @@ do
     /bin/launchctl setenv "$oc_env_key" "${(P)oc_env_key}"
 done
 
-# This loader is the sole app login owner. Manual launches are protected by the
-# persistent native marker too; the app never owns our external Gateway lifecycle.
-exec "$OPENCLAW_RUNTIME_APP" --attach-only
+# Publish explicit operator CA selection for GUI workers without forwarding shell injection options.
+if [[ "${NODE_USE_SYSTEM_CA-}" == 0 && "${SSL_CERT_FILE-}" == /* && \
+      "$SSL_CERT_FILE" != *$'\n'* && "$SSL_CERT_FILE" != *$'\r'* ]]; then
+    /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
+    /bin/launchctl setenv NODE_USE_SYSTEM_CA 0
+    /bin/launchctl setenv NODE_OPTIONS --use-openssl-ca
+    if [[ -n "${NODE_EXTRA_CA_CERTS-}" ]]; then
+        /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+    fi
+fi
+
+# Environment publication never starts an app or a service. The native
+# ai.openclaw.mac login job owns app startup and can remain disabled for maintenance.

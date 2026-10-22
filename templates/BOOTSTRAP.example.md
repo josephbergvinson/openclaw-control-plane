@@ -12,7 +12,7 @@ This file describes intended use and sensitivity. It is not a loader configurati
 | `IDENTITY.md` | Concise assistant identity | Recognized; not in the native `subagent:` allowlist |
 | `MEMORY.md` | Compact cues and pointers | Recognized when present; root memory is removed for native subagents, cron, groups and channels |
 | `BOOTSTRAP.md` | Setup/load reference | Recognized, subject to setup and continuation handling; absent from cron/subagent allowlists |
-| `TOOLS.md` | Deliberate-read mechanics | Not in the recognized bootstrap filename list; read the relevant sections when AGENTS routes there |
+| `runbook/tools-reference.md` | Deliberate-read mechanics | Not in the recognized bootstrap filename list; read the relevant sections when AGENTS routes there |
 | `WRITING.md` | Long-form style child of SOUL | Not in the recognized list; deliberately read for applicable prose |
 | `WORKER.md` | Legacy generated reference, if retained | Not recognized; does not replace AGENTS in a worker |
 | `policy_manifest.json`, `policy_bootstrap_manifest.json` | Advisory metadata | Not runtime loader inputs |

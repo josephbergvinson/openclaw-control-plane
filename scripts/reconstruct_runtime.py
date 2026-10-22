@@ -9,6 +9,8 @@ resets a checkout, or changes the selected runtime.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -26,6 +28,12 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_PATH = "/josephbergvinson/openclaw-control-plane/releases/download/"
 NATIVE_DELTA_PATHS = {"pnpm-lock.yaml", "pnpm-workspace.yaml"}
+NATIVE_COMPANION_DELTA_PATHS = {
+    "apps/macos/Sources/OpenClaw/ConnectionModeCoordinator.swift",
+    "apps/macos/Sources/OpenClaw/NodeServiceManager.swift",
+    "apps/macos/Tests/Fixtures/ConnectionModeCoordinator/Fixture.swift",
+    "apps/macos/Tests/OpenClawIPCTests/NodeServiceManagerTests.swift",
+}
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
 CURRENT_MANIFEST_FIELDS = {
     "schemaVersion", "upstream", "source", "patch", "toolchain",
@@ -60,6 +68,17 @@ class NativeDistribution:
     patch_sha256: str
     patch: bytes
     artifact: NativeArtifact
+    reference_commit: str | None = None
+    reference_tree: str | None = None
+
+
+@dataclass(frozen=True)
+class NativeCompanion:
+    source_commit: str
+    source_tree: str
+    distribution_tree: str
+    patch_sha256: str | None
+    patch: bytes | None
 
 
 @dataclass(frozen=True)
@@ -72,6 +91,7 @@ class SourcePackage:
     patch_sha256: str
     patch: bytes
     native: NativeDistribution | None = None
+    companion: NativeCompanion | None = None
 
 
 def require_digest(value: object, length: int, label: str) -> str:
@@ -122,6 +142,185 @@ def validate_release_url(url: str, filename: str) -> None:
         raise ReconstructionError("Native release URL must name the declared archive exactly")
 
 
+def read_resource_input(path: Path, limit: int) -> bytes:
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ReconstructionError("Native resource input must be a physical absolute path")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise ReconstructionError("Native resource input is not a bounded regular file")
+        payload = stream.read(limit + 1)
+        after = path.lstat()
+        if len(payload) > limit or (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns
+        ) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            raise ReconstructionError("Native resource input changed while being read")
+        return payload
+
+
+def unique_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ReconstructionError("Native provenance has a duplicate JSON key")
+        value[key] = item
+    return value
+
+
+def load_native_provenance(path: Path) -> tuple[NativeArtifact, dict, bytes]:
+    """Read the existing candidate packet; no active runtime manifest is selected."""
+    raw = read_resource_input(path, 256 * 1024)
+    value = json.loads(raw, object_pairs_hook=unique_json_object)
+    if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
+        raise ReconstructionError("Unsupported native provenance schema")
+    package = value.get("package")
+    if (
+        not isinstance(package, dict)
+        or package.get("name") != "@openai/codex"
+        or package.get("platformPackage") != "@openai/codex"
+        or package.get("target") != "aarch64-apple-darwin"
+        or not isinstance(package.get("version"), str)
+        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9.-]+-darwin-arm64",
+                        package["version"]) is None
+        or type(package.get("bytes")) is not int or package["bytes"] <= 0
+    ):
+        raise ReconstructionError("Native provenance package identity or size is invalid")
+    integrity = package.get("integrity")
+    if not isinstance(integrity, str) or not integrity.startswith("sha512-"):
+        raise ReconstructionError("Native provenance requires one canonical SHA-512 SRI")
+    try:
+        digest = base64.b64decode(integrity[7:], validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ReconstructionError("Native provenance SHA-512 SRI is invalid") from error
+    if len(digest) != 64 or "sha512-" + base64.b64encode(digest).decode("ascii") != integrity:
+        raise ReconstructionError("Native provenance requires one canonical SHA-512 SRI")
+    validate_release_url(package.get("publicAssetURL"), package.get("archiveName"))
+    artifact = NativeArtifact(
+        package["archiveName"], package["publicAssetURL"], package["bytes"],
+        require_digest(package.get("sha256"), 64, "native archive SHA-256"), digest.hex(),
+    )
+    return artifact, package, raw
+
+
+def yaml_scalar(value: str) -> str:
+    """Only the ordinary scalar spellings emitted in the admitted pnpm files."""
+    if value.startswith('"'):
+        decoded = json.loads(value)
+        if not isinstance(decoded, str):
+            raise ReconstructionError("Native dependency scalar is not a string")
+        return decoded
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
+    if not value or any(char in value for char in "&*!{}[],#\t\r\n"):
+        raise ReconstructionError("Native dependency uses an unsupported scalar")
+    return value
+
+
+def yaml_mapping_entry(source: str, section: str, key: str) -> tuple[str, list[str]]:
+    """Select one direct entry, refusing duplicate/ambiguous binding spellings.
+
+    This is a narrow admission of pnpm's existing scalar/inline-map form, not a
+    general YAML reader. Frozen pnpm remains the dependency graph owner.
+    """
+    lines = source.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == section + ":"]
+    if len(starts) != 1:
+        raise ReconstructionError("Native dependency mapping is missing or duplicated")
+    start = starts[0] + 1
+    end = next((index for index in range(start, len(lines))
+                if lines[index] and not lines[index].startswith((" ", "#"))), len(lines))
+    found = []
+    for index in range(start, end):
+        line = lines[index]
+        if not line.startswith("  ") or line.startswith(("   ", "  #")) or not line.strip():
+            continue
+        match = re.fullmatch(r"""  ('(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|[^'"\s][^:]*):(?: (.*))?""", line)
+        if match is None:
+            raise ReconstructionError("Native dependency mapping uses an unsupported key")
+        if yaml_scalar(match.group(1)) == key:
+            tail = next((cursor for cursor in range(index + 1, end)
+                         if lines[cursor].startswith("  ") and not lines[cursor].startswith("   ")
+                         and lines[cursor].strip() and not lines[cursor].startswith("  #")), end)
+            found.append((match.group(2) or "", lines[index + 1:tail]))
+    if len(found) != 1:
+        raise ReconstructionError("Native dependency entry is missing or duplicated")
+    return found[0]
+
+
+def pnpm_dependency_document(source: str) -> str:
+    # Same two-document framing as pnpm and the existing source bootstrap owner
+    # scripts/lib/pnpm-lockfile-documents.mjs; never inspect the env document as
+    # the project's package graph.
+    text = source.removeprefix("\ufeff").replace("\r\n", "\n")
+    separator = "\n---\n"
+    if not text.startswith("---\n"):
+        if separator in text:
+            raise ReconstructionError("Native lock has an unexpected document separator")
+        return text
+    boundary = text.find(separator, 4)
+    if boundary < 0 or separator in text[boundary + len(separator):]:
+        raise ReconstructionError("Native lock must have exactly environment and dependency documents")
+    return text[boundary + len(separator):]
+
+
+def validate_native_dependency_binding(checkout: Path, artifact: NativeArtifact, package: dict) -> dict:
+    workspace = read_resource_input(checkout / "pnpm-workspace.yaml", 1024 * 1024)
+    lock = read_resource_input(checkout / "pnpm-lock.yaml", 16 * 1024 * 1024)
+    lock_source = pnpm_dependency_document(lock.decode("utf-8"))
+    version = package["version"].split("-", 1)[0]
+    selector = "@openai/codex@" + version + ">@openai/codex-darwin-arm64"
+    relative = "native-package-artifacts/" + artifact.file
+    for source in (workspace.decode("utf-8"), lock_source):
+        selected, children = yaml_mapping_entry(source, "overrides", selector)
+        if children and any(line.strip() for line in children):
+            raise ReconstructionError("Native override is not a scalar")
+        if yaml_scalar(selected) not in ("file:" + relative, "file:./" + relative):
+            raise ReconstructionError("Native dependency override differs from provenance")
+    selected, children = yaml_mapping_entry(
+        lock_source, "packages", "@openai/codex@file:" + relative)
+    if selected:
+        raise ReconstructionError("Native lock package is not a mapping")
+    values = {}
+    for line in children:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"    ([A-Za-z]+): (.*)", line)
+        if match is None or match.group(1) in values:
+            raise ReconstructionError("Native lock package mapping is ambiguous")
+        values[match.group(1)] = match.group(2)
+    resolution = "{integrity: " + package["integrity"] + ", tarball: file:" + relative + "}"
+    if (
+        values.get("resolution") != resolution
+        or yaml_scalar(values.get("version", "")) != package["version"]
+        or values.get("os") != "[darwin]" or values.get("cpu") != "[arm64]"
+    ):
+        raise ReconstructionError("Native lock resolution, version or platform differs from provenance")
+    selected, children = yaml_mapping_entry(
+        lock_source, "snapshots", "@openai/codex@file:" + relative)
+    if selected or [line.strip() for line in children if line.strip() and not line.lstrip().startswith("#")] != ["optional: true"]:
+        raise ReconstructionError("Native lock snapshot must retain the optional platform package")
+    return {"pnpm-workspace.yaml": hashlib.sha256(workspace).hexdigest(),
+            "pnpm-lock.yaml": hashlib.sha256(lock).hexdigest()}
+
+
+def provision_native_from_provenance(checkout: Path, provenance: Path) -> dict:
+    """Hydrate one bound dependency only; never apply source or select a runtime."""
+    checkout = checkout.expanduser().resolve(strict=True)
+    artifact, package, raw = load_native_provenance(provenance)
+    before = validate_native_dependency_binding(checkout, artifact, package)
+    result = provision_native_artifact(checkout, artifact)
+    if read_resource_input(provenance, 256 * 1024) != raw or (
+        validate_native_dependency_binding(checkout, artifact, package) != before
+    ):
+        raise ReconstructionError("Native resource/dependency binding changed during provisioning")
+    return {"status": "artifact-provisioned-without-source-or-runtime-selection",
+            "provenance": {"path": str(provenance), "sha256": hashlib.sha256(raw).hexdigest()},
+            "dependencyInputs": before, "artifact": result}
+
+
 def load_native_distribution(directory: Path, manifest: dict, source_tree: str) -> NativeDistribution:
     native = manifest.get("nativeDistribution")
     if not isinstance(native, dict):
@@ -150,10 +349,46 @@ def load_native_distribution(directory: Path, manifest: dict, source_tree: str) 
         filename, artifact["url"], artifact["bytes"],
         require_digest(artifact["sha256"], 64, "native archive SHA-256"),
         require_digest(artifact["sha512"], 128, "native archive SHA-512"),
-    ))
+    ), native.get("referenceCommit"), native.get("referenceTree"))
 
 
-def load_package(directory: Path, *, native_distribution: bool = False) -> SourcePackage:
+def load_native_companion(directory: Path, manifest: dict, native: NativeDistribution) -> NativeCompanion:
+    companion = manifest.get("nativeCompanion")
+    if not isinstance(companion, dict) or companion.get("platform") != "darwin-arm64":
+        raise ReconstructionError("The runtime manifest has no bound macOS companion")
+    source_commit = require_digest(companion.get("sourceCommit"), 40, "companion source commit SHA-1")
+    source_tree = require_digest(companion.get("sourceTree"), 40, "companion source tree SHA-1")
+    if "delta" not in companion:
+        if (source_commit != native.reference_commit or source_tree != native.reference_tree
+                or source_tree != native.normalized_tree):
+            raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
+        return NativeCompanion(source_commit, source_tree, native.normalized_tree, None, None)
+    delta = companion["delta"]
+    if not isinstance(delta, dict) or set(delta) != {"distributionTree", "patch"}:
+        raise ReconstructionError("Companion reconstruction requires one bound finite delta")
+    base = require_digest(delta["distributionTree"], 40, "companion distribution tree SHA-1")
+    if base != native.normalized_tree:
+        raise ReconstructionError("Companion base must match the normalized native distribution")
+    patch = delta["patch"]
+    if not isinstance(patch, dict) or set(patch) != {"file", "bytes", "sha256"}:
+        raise ReconstructionError("Companion delta requires one exact patch binding")
+    name = patch["file"]
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.patch", name):
+        raise ReconstructionError("Companion patch must name a file inside the runtime package")
+    path = directory / name
+    if path.is_symlink() or not path.is_file():
+        raise ReconstructionError("Companion patch must be a regular package file")
+    raw = path.read_bytes()
+    digest = require_digest(patch["sha256"], 64, "companion patch SHA-256")
+    if type(patch["bytes"]) is not int or patch["bytes"] <= 0 or patch["bytes"] != len(raw) or hashlib.sha256(raw).hexdigest() != digest:
+        raise ReconstructionError("Companion patch size or SHA-256 does not match the manifest")
+    return NativeCompanion(source_commit, source_tree, base, digest, raw)
+
+
+def load_package(directory: Path, *, native_distribution: bool = False,
+                 native_companion: bool = False) -> SourcePackage:
+    if native_companion and not native_distribution:
+        raise ReconstructionError("Companion reconstruction requires the native distribution")
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     validate_manifest_metadata(manifest, native_distribution=native_distribution)
     upstream = manifest["upstream"]
@@ -184,6 +419,13 @@ def load_package(directory: Path, *, native_distribution: bool = False) -> Sourc
             package.tag, package.tag_object, package.base_commit, package.base_tree,
             package.normalized_tree, package.patch_sha256, package.patch,
             load_native_distribution(directory, manifest, package.normalized_tree),
+        )
+    if native_companion:
+        assert package.native is not None
+        package = SourcePackage(
+            package.tag, package.tag_object, package.base_commit, package.base_tree,
+            package.normalized_tree, package.patch_sha256, package.patch, package.native,
+            load_native_companion(directory, manifest, package.native),
         )
     return package
 
@@ -318,6 +560,8 @@ def git(checkout: Path, *args: str, data: bytes | None = None) -> str:
 
 
 def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) -> dict:
+    if package.companion is not None and package.native is None:
+        raise ReconstructionError("Companion reconstruction requires the native distribution")
     if package.native is not None and not apply:
         raise ReconstructionError("Native distribution requires --apply; no source or archive was changed")
     checkout = checkout.expanduser().resolve(strict=True)
@@ -344,6 +588,30 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             paths.append(fields[2])
         if len(paths) != 2 or set(paths) != NATIVE_DELTA_PATHS:
             raise ReconstructionError("Native delta must change only pnpm-lock.yaml and pnpm-workspace.yaml")
+    if package.companion is not None:
+        companion = package.companion
+        if companion.distribution_tree != package.native.normalized_tree:
+            raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")
+        for value in (companion.source_commit, companion.source_tree):
+            require_digest(value, 40, "companion Git object SHA-1")
+        if companion.patch is None:
+            if (companion.patch_sha256 is not None
+                    or companion.source_commit != package.native.reference_commit
+                    or companion.source_tree != package.native.reference_tree
+                    or companion.source_tree != package.native.normalized_tree):
+                raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
+        else:
+            if not companion.patch or hashlib.sha256(companion.patch).hexdigest() != companion.patch_sha256:
+                raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")
+            changes = git(checkout, "apply", "--numstat", "-z", "-", data=companion.patch).split("\0")
+            paths = []
+            for change in filter(None, changes):
+                fields = change.split("\t")
+                if len(fields) != 3 or not all(value.isdigit() for value in fields[:2]):
+                    raise ReconstructionError("Companion delta must contain ordinary text changes")
+                paths.append(fields[2])
+            if len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
+                raise ReconstructionError("Companion delta must change only the four declared macOS source and fixture files")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
         raise ReconstructionError("Checkout HEAD is not the pinned upstream commit")
     if git(checkout, "rev-parse", "HEAD^{tree}") != package.base_tree:
@@ -376,30 +644,60 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
         if git(checkout, "write-tree") != native.normalized_tree:
             raise ReconstructionError("Native applied tree differs from the manifest; inspect this isolated checkout")
         git(checkout, "diff", "--quiet")
-        artifact = provision_native_artifact(checkout, native.artifact)
-        if git(checkout, "write-tree") != native.normalized_tree:
-            raise ReconstructionError("Native source index changed during provisioning")
-        git(checkout, "diff", "--quiet")
         result["nativeDistribution"] = {
             "normalizedTree": native.normalized_tree, "normalizedTreeVerified": True,
-            "patchSha256": native.patch_sha256, "artifact": artifact,
+            "patchSha256": native.patch_sha256,
         }
+        final_tree = native.normalized_tree
+        if package.companion is not None:
+            companion = package.companion
+            if companion.patch is not None:
+                git(checkout, "apply", "--check", "--index", "--whitespace=error-all", "-", data=companion.patch)
+                git(checkout, "apply", "--index", "--whitespace=error-all", "-", data=companion.patch)
+            if git(checkout, "write-tree") != companion.source_tree:
+                raise ReconstructionError("Companion applied tree differs from the manifest; inspect this isolated checkout")
+            git(checkout, "diff", "--quiet")
+            final_tree = companion.source_tree
+            result["nativeCompanion"] = {
+                "sourceCommit": companion.source_commit, "sourceTree": companion.source_tree,
+                "normalizedTree": final_tree, "normalizedTreeVerified": True,
+            }
+            if companion.patch is not None:
+                result["nativeCompanion"]["patchSha256"] = companion.patch_sha256
+        artifact = provision_native_artifact(checkout, native.artifact)
+        if git(checkout, "write-tree") != final_tree:
+            raise ReconstructionError("Companion source index changed during provisioning" if package.companion is not None
+                                      else "Native source index changed during provisioning")
+        git(checkout, "diff", "--quiet")
+        result["nativeDistribution"]["artifact"] = artifact
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path, help="existing clean standalone clone of the pinned upstream tag")
     parser.add_argument("--apply", action="store_true", help="apply and stage the patch after checking; never commit")
     parser.add_argument("--native-distribution", action="store_true", help="with --apply, stage the native delta and provision its verified public archive")
-    args = parser.parse_args()
+    parser.add_argument("--native-companion", action="store_true",
+                        help="with --apply --native-distribution, verify the bound macOS companion source, applying its finite delta if needed")
+    parser.add_argument("--native-artifact-provenance", type=Path,
+                        help="provision only the existing packet-bound local dependency; never apply source or select a runtime")
+    args = parser.parse_args(argv)
+    if args.native_artifact_provenance is not None and (args.apply or args.native_distribution or args.native_companion):
+        parser.error("--native-artifact-provenance cannot be combined with source reconstruction options")
     if args.native_distribution and not args.apply:
         parser.error("--native-distribution requires --apply")
+    if args.native_companion and not (args.apply and args.native_distribution):
+        parser.error("--native-companion requires --apply and --native-distribution")
     try:
-        result = reconstruct(
-            args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution),
-            apply=args.apply,
-        )
+        if args.native_artifact_provenance is not None:
+            result = provision_native_from_provenance(args.checkout, args.native_artifact_provenance)
+        else:
+            result = reconstruct(
+                args.checkout, load_package(ROOT / "runtime", native_distribution=args.native_distribution,
+                                            native_companion=args.native_companion),
+                apply=args.apply,
+            )
     except (ReconstructionError, OSError, KeyError, TypeError, ValueError) as error:
         print(f"Reconstruction refused: {error}", file=sys.stderr)
         return 1

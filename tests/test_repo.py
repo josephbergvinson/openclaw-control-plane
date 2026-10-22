@@ -63,6 +63,59 @@ class RepositoryTests(unittest.TestCase):
                     self.assertIn(message, result.stderr)
                     self.assertNotIn("checks passed", result.stdout)
 
+    def test_expected_companion_reference_requires_source_and_reconstructable_delta(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "runtime").mkdir()
+            path = root / "runtime/manifest.json"
+            current = {"source": {"referenceCommit": "1" * 40},
+                       "nativeDistribution": {"referenceCommit": "2" * 40},
+                       "nativeCompanion": {"sourceCommit": "3" * 40, "delta": {}}}
+            with patch.object(VALIDATOR, "ROOT", root):
+                path.write_text(json.dumps(current))
+                self.assertEqual([], VALIDATOR.validate_expected_reference("1" * 40, "2" * 40))
+                self.assertEqual([], VALIDATOR.validate_expected_reference("1" * 40, "2" * 40, "3" * 40))
+                findings = VALIDATOR.validate_expected_reference("1" * 40, "2" * 40, "4" * 40)
+                self.assertTrue(any("stale companion" in finding.label for finding in findings))
+                del current["nativeCompanion"]["delta"]
+                path.write_text(json.dumps(current))
+                findings = VALIDATOR.validate_expected_reference("1" * 40, "2" * 40, "3" * 40)
+                self.assertTrue(any("no reconstructable delta" in finding.label for finding in findings))
+                del current["nativeCompanion"]
+                path.write_text(json.dumps(current))
+                findings = VALIDATOR.validate_expected_reference(None, None, "3" * 40)
+                self.assertTrue(any("stale companion" in finding.label for finding in findings))
+
+    def test_expected_identity_companion_requires_the_exact_distribution_commit_and_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "runtime").mkdir()
+            path = root / "runtime/manifest.json"
+            current = {"source": {"referenceCommit": "1" * 40},
+                       "nativeDistribution": {"referenceCommit": "2" * 40, "referenceTree": "3" * 40,
+                                              "normalizedTree": "3" * 40},
+                       "nativeCompanion": {"sourceCommit": "2" * 40, "sourceTree": "3" * 40}}
+            with patch.object(VALIDATOR, "ROOT", root):
+                path.write_text(json.dumps(current))
+                self.assertTrue(VALIDATOR.companion_uses_native_source(current))
+                self.assertEqual([], VALIDATOR.validate_expected_reference("1" * 40, "2" * 40, "2" * 40))
+                invalid = []
+                for section, field in (("nativeCompanion", "sourceCommit"), ("nativeCompanion", "sourceTree"),
+                                       ("nativeDistribution", "referenceCommit"), ("nativeDistribution", "referenceTree"),
+                                       ("nativeDistribution", "normalizedTree")):
+                    for value in ("4" * 40, None, "moving-reference"):
+                        broken = json.loads(json.dumps(current))
+                        broken[section][field] = value
+                        invalid.append(broken)
+                for broken in invalid:
+                    path.write_text(json.dumps(broken))
+                    self.assertFalse(VALIDATOR.companion_uses_native_source(broken))
+                    findings = VALIDATOR.validate_expected_reference("1" * 40, "2" * 40, "2" * 40)
+                    self.assertTrue(findings)
+                broken = json.loads(json.dumps(current))
+                broken["nativeCompanion"]["delta"] = None
+                self.assertFalse(VALIDATOR.companion_uses_native_source(broken))
+
     def test_readme_reaches_the_complete_documentation_index(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("](docs/README.md)", readme)
@@ -74,15 +127,16 @@ class RepositoryTests(unittest.TestCase):
     def test_native_notices_reject_stale_archive_and_source_patch_bindings(self) -> None:
         native = json.loads((ROOT / "runtime/manifest.json").read_text())["nativeDistribution"]
         artifact = SimpleNamespace(**native["artifact"])
-        original = json.loads((ROOT / "runtime/native154/native154-provenance.json").read_text())
-        raw_patch = (ROOT / "runtime/native154/native154-source.patch").read_bytes()
+        provenance = ROOT / "runtime" / native["provenanceFile"]
+        original = json.loads(provenance.read_text())
+        raw_patch = (provenance.parent / original["source"]["patch"]["path"]).read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            packet = root / "runtime/native154"
+            packet = root / "runtime/bound-native"
             packet.mkdir(parents=True)
-            source_patch = packet / "native154-source.patch"
+            source_patch = packet / original["source"]["patch"]["path"]
             source_patch.write_bytes(raw_patch)
-            path = packet / "native154-provenance.json"
+            path = packet / "notice.json"
             with patch.object(VALIDATOR, "ROOT", root):
                 for key, value in (
                     ("archiveName", "old-package.tgz"), ("publicAssetURL", "https://example.com/old"),
@@ -92,12 +146,35 @@ class RepositoryTests(unittest.TestCase):
                         stale = copy.deepcopy(original)
                         stale["package"][key] = value
                         path.write_text(json.dumps(stale))
-                        findings = VALIDATOR.validate_native_provenance(artifact)
+                        findings = VALIDATOR.validate_native_provenance(artifact, "bound-native/notice.json")
                         self.assertTrue(any(key in finding.label for finding in findings))
                 path.write_text(json.dumps(original))
                 source_patch.write_bytes(raw_patch + b"\n")
                 self.assertTrue(any("source patch" in finding.label
-                                    for finding in VALIDATOR.validate_native_provenance(artifact)))
+                                    for finding in VALIDATOR.validate_native_provenance(artifact, "bound-native/notice.json")))
+
+    def test_native_notices_follow_the_bound_packet_without_a_version_specific_path(self) -> None:
+        native = json.loads((ROOT / 'runtime/manifest.json').read_text())['nativeDistribution']
+        artifact = SimpleNamespace(**native['artifact'])
+        provenance = ROOT / 'runtime' / native['provenanceFile']
+        original = json.loads(provenance.read_text())
+        raw_patch = (provenance.parent / original['source']['patch']['path']).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            packet = root / 'runtime/renamed-native'
+            packet.mkdir(parents=True)
+            original['source']['patch']['path'] = 'ported-source.patch'
+            (packet / 'ported-source.patch').write_bytes(raw_patch)
+            notice = packet / 'notice.json'
+            notice.write_text(json.dumps(original))
+            with patch.object(VALIDATOR, 'ROOT', root):
+                self.assertEqual([], VALIDATOR.validate_native_provenance(artifact, 'renamed-native/notice.json'))
+                for invalid in (None, '/notice.json', '../notice.json', 'renamed-native/../notice.json', 'renamed-native/notice.txt'):
+                    with self.subTest(path=invalid):
+                        self.assertTrue(VALIDATOR.validate_native_provenance(artifact, invalid))
+                link = packet / 'linked.json'
+                link.symlink_to(notice)
+                self.assertTrue(VALIDATOR.validate_native_provenance(artifact, 'renamed-native/linked.json'))
 
     def test_capability_provenance_defines_all_four_levels(self) -> None:
         text = (ROOT / "docs" / "03-capability-provenance.md").read_text(encoding="utf-8").casefold()
@@ -117,16 +194,17 @@ class RepositoryTests(unittest.TestCase):
             stem = path.name.split(".example.json")[0]
             self.assertTrue((ROOT / "schemas" / f"{stem}.schema.json").is_file(), stem)
 
-    def test_native_task_example_separates_execution_from_delivery(self) -> None:
-        task = json.loads((ROOT / "examples" / "native-task.example.json").read_text(encoding="utf-8"))
-        schema = json.loads((ROOT / "schemas" / "native-task.schema.json").read_text(encoding="utf-8"))
+    def test_native_run_example_separates_execution_from_delivery(self) -> None:
+        task = json.loads((ROOT / "examples" / "native-run.example.json").read_text(encoding="utf-8"))
+        schema = json.loads((ROOT / "schemas" / "native-run.schema.json").read_text(encoding="utf-8"))
         self.assertEqual([], VALIDATOR.check_instance(task, schema))
-        self.assertEqual("succeeded", task["status"])
+        self.assertEqual("terminal", task["status"])
+        self.assertEqual("ok", task["outcome"]["status"])
         self.assertEqual("pending", task["deliveryStatus"])
 
-    def test_native_task_schema_rejects_invented_runtime_states(self) -> None:
-        task = json.loads((ROOT / "examples" / "native-task.example.json").read_text(encoding="utf-8"))
-        schema = json.loads((ROOT / "schemas" / "native-task.schema.json").read_text(encoding="utf-8"))
+    def test_native_run_schema_rejects_invented_runtime_states(self) -> None:
+        task = json.loads((ROOT / "examples" / "native-run.example.json").read_text(encoding="utf-8"))
+        schema = json.loads((ROOT / "schemas" / "native-run.schema.json").read_text(encoding="utf-8"))
         task["status"] = "complete"
         self.assertTrue(VALIDATOR.check_instance(task, schema))
 
