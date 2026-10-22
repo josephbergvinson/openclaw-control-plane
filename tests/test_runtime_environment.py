@@ -101,6 +101,34 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         self.assertNotIn('OPENCLAW_GATEWAY_TOKEN', published)
         self.assertNotIn('OPENCLAW_RUNTIME_APP', published)
 
+    def test_managed_ca_selection_publishes_only_literal_runtime_option(self):
+        self.env.update({
+            'SSL_CERT_FILE': str(self.root / 'managed-ca.pem'), 'NODE_USE_SYSTEM_CA': '0',
+            'NODE_EXTRA_CA_CERTS': str(self.root / 'company-ca.pem'),
+            'NODE_OPTIONS': '--require=/fixture/untrusted.cjs --inspect=9229',
+        })
+        result = self.run_loader()
+        self.assertEqual(0, result.returncode, result.stderr)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        published = dict((c[1], c[2]) for c in calls if c[0] == 'setenv')
+        self.assertEqual(self.env['SSL_CERT_FILE'], published['SSL_CERT_FILE'])
+        self.assertEqual(self.env['NODE_EXTRA_CA_CERTS'], published['NODE_EXTRA_CA_CERTS'])
+        self.assertEqual('0', published['NODE_USE_SYSTEM_CA'])
+        self.assertEqual('--use-openssl-ca', published['NODE_OPTIONS'])
+        self.assertNotIn('--require', self.calls.read_text())
+        self.assertFalse(self.observed.exists())
+
+    def test_invalid_or_unconfigured_ca_selection_is_not_published(self):
+        for file, mode in [('relative.pem', '0'), ('/fixture/ca.pem\n', '0'), ('/fixture/ca.pem', '1')]:
+            with self.subTest(file=file, mode=mode):
+                self.calls.unlink(missing_ok=True)
+                self.env.update({'SSL_CERT_FILE': file, 'NODE_USE_SYSTEM_CA': mode})
+                result = self.run_loader()
+                self.assertEqual(0, result.returncode, result.stderr)
+                calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+                keys = {c[1] for c in calls if c[0] == 'setenv'}
+                self.assertTrue(keys.isdisjoint({'SSL_CERT_FILE', 'NODE_USE_SYSTEM_CA', 'NODE_OPTIONS'}))
+
     def test_legacy_app_binding_cannot_reopen_app_during_repeated_publication(self):
         self.env['OPENCLAW_RUNTIME_APP'] = str(self.app)
         for _ in range(2):

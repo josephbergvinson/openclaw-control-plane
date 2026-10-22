@@ -27,12 +27,11 @@ and its [workflow history](https://github.com/josephbergvinson/openclaw-control-
 remain in version history. Their results belong to the source generation tested
 at that time. They are not extra installation steps or current-runtime proof.
 
-The prospective stable reference folds those behavioral contracts into the
-runtime's existing adoption, queue, operation-registry and Codex publication
-tests, run by the single reference workflow. Retirement acceptance still
-requires the replacement assertions to pass and the stable manifest to
-reconstruct the qualified source. No earlier result establishes that candidate,
-its native package or an installed runtime.
+The stable reference carries those behavioral contracts in the runtime's
+existing adoption, queue, operation-registry and Codex publication tests, run by
+the single reference workflow. Check the replacement assertions and reconstruct
+the exact source selected by the current manifest. Historical results do not
+qualify that source, its native package or an installed runtime.
 
 Detailed host diagnostics, account records, activation receipts and meeting
 acceptance belong to the operator's private evidence store. They are not inputs to

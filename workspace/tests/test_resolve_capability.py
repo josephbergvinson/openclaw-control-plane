@@ -4173,7 +4173,6 @@ class ResolveCapabilityTests(unittest.TestCase):
         resolver = runpy.run_path(str(RESOLVER))
         result_type = resolver["ProbeCommandResult"]
         trusted_node = _operator_binding('paths.node_binary')
-        discord_node = _operator_binding('paths.node_binary')
         xurl_cli = (
             _operator_binding('paths.routing_cli_js')
         )
@@ -4328,7 +4327,6 @@ class ResolveCapabilityTests(unittest.TestCase):
                 "argv": (
                     "/usr/bin/env",
                     f"OPENCLAW_STATE_DIR={runtime_state_dir}",
-                    discord_node,
                     openclaw_cli,
                     "message",
                     "channel",
@@ -4365,7 +4363,6 @@ class ResolveCapabilityTests(unittest.TestCase):
                 "argv": (
                     "/usr/bin/env",
                     f"OPENCLAW_STATE_DIR={runtime_state_dir}",
-                    discord_node,
                     openclaw_cli,
                     "message",
                     "channel",
@@ -4402,7 +4399,6 @@ class ResolveCapabilityTests(unittest.TestCase):
                 "argv": (
                     "/usr/bin/env",
                     f"OPENCLAW_STATE_DIR={runtime_state_dir}",
-                    discord_node,
                     openclaw_cli,
                     "message",
                     "channel",
@@ -4721,46 +4717,64 @@ class ResolveCapabilityTests(unittest.TestCase):
                 )
             )
 
-    def test_discord_exact_probe_uses_current_managed_node_version(self) -> None:
+    def test_discord_exact_probe_executes_trusted_cli_directly(self) -> None:
         resolver = runpy.run_path(str(RESOLVER))
-        node = Path(resolver["DISCORD_SOURCE_NODE_BIN"])
         state_dir = resolver["OPENCLAW_RUNTIME_STATE_DIR"]
-        self.assertEqual(
-            node,
-            Path(
-                _operator_binding('paths.node_binary')
-            ),
-        )
-        version = subprocess.run(
-            [str(node), "--version"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=5,
-        )
-        self.assertEqual(version.returncode, 0, version.stderr)
-        self.assertGreaterEqual(int(version.stdout.strip().lstrip("v").split(".")[0]), 24)
-
+        expected_cli = _operator_binding('paths.openclaw_cli')
+        self.assertEqual(resolver["TRUSTED_OPENCLAW_CLI"], expected_cli)
         for contract in resolver["DISCORD_SOURCE_ROUTE_PROBES"].values():
-            payload = resolver["resolve"](
-                "discord-source",
-                "read",
-                required_operation="channel-info",
-                requested_principal=contract["principal"],
-                requested_account=contract["guild_id"],
-            )
-            argv = resolver["exact_probe_argv"](payload["preferred_lane"])
-            self.assertIsNotNone(argv)
-            self.assertEqual(
-                argv[:4],
-                (
-                    "/usr/bin/env",
-                    f"OPENCLAW_STATE_DIR={state_dir}",
-                    str(node),
-                    resolver["TRUSTED_OPENCLAW_CLI"],
-                ),
-            )
+            with self.subTest(route=contract["route_id"]):
+                preferred = resolver["resolve"](
+                    "discord-source", "read", required_operation="channel-info",
+                    requested_principal=contract["principal"],
+                    requested_account=contract["guild_id"],
+                )["preferred_lane"]
+                self.assertEqual(resolver["exact_probe_argv"](preferred), (
+                    "/usr/bin/env", f"OPENCLAW_STATE_DIR={state_dir}", expected_cli,
+                    "message", "channel", "info", "--channel", "discord", "--target",
+                    f"channel:{contract['channel_id']}", "--json",
+                ))
+                for key, value in (("required_account", "wrong-account"),
+                                   ("required_principal", "wrong-principal"),
+                                   ("native_lane_kind", "browser"),
+                                   ("probe_safe_lane", "local-read"),
+                                   ("probe_command", preferred["probe_command"] + " --unexpected")):
+                    self.assertIsNone(resolver["exact_probe_argv"](preferred | {key: value}))
+
+    def test_mercury_exact_probe_executes_trusted_cli_directly(self) -> None:
+        resolver = runpy.run_path(str(RESOLVER))
+        preferred = resolver["resolve"](
+            "mercury", "read", requested_principal="company-beta",
+            requested_account=_operator_binding('services.mercury.organization_name'), required_operation="capability-probe",
+        )["preferred_lane"]
+        self.assertEqual(resolver["exact_probe_argv"](preferred), (
+            "/usr/bin/env", f"OPENCLAW_STATE_DIR={resolver['OPENCLAW_RUNTIME_STATE_DIR']}",
+            _operator_binding('paths.openclaw_cli'), "mcp", "probe", "mercury-company-beta", "--json",
+        ))
+        for key, value in (("required_account", "wrong-account"),
+                           ("required_principal", "wrong-principal"),
+                           ("native_lane_kind", "supported_cli"),
+                           ("probe_safe_lane", "local-read"),
+                           ("probe_command", preferred["probe_command"] + " --unexpected")):
+            self.assertIsNone(resolver["exact_probe_argv"](preferred | {key: value}))
+
+    def test_javascript_probes_use_the_single_selected_managed_node(self) -> None:
+        resolver = runpy.run_path(str(RESOLVER))
+        selected_node = _operator_binding('paths.node_binary')
+        self.assertEqual(str(resolver["TRUSTED_OPENCLAW_NODE_BIN"]), selected_node)
+        self.assertEqual(resolver["X_API_PROBE_ARGV"][0], selected_node)
+        self.assertEqual(resolver["COMPANY_ALPHA_WALLETCONNECT_PROBE_ARGV"][0], selected_node)
+        for probe_id, contract in resolver["HEDERA_SIGNER_ROUTE_PROBES"].items():
+            preferred = {
+                "probe_id": probe_id, "route_id": contract["route_id"],
+                "system": contract["system"], "required_principal": "openclaw-testing",
+                "required_account": contract["account_id"], "native_lane_kind": "supported_cli",
+                "probe_safe_lane": "local-read-network-read",
+                "probe_command": f"node {contract['script']} --json",
+            }
+            self.assertEqual(resolver["exact_probe_argv"](preferred),
+                             (selected_node, contract["script"], "--json"))
+            self.assertIsNone(resolver["exact_probe_argv"](preferred | {"required_account": "wrong"}))
 
     def test_probe_transport_keeps_host_token_out_of_state_bound_probe(self) -> None:
         resolver = runpy.run_path(str(RESOLVER))
@@ -4801,6 +4815,10 @@ class ResolveCapabilityTests(unittest.TestCase):
         resolver = runpy.run_path(str(RESOLVER))
         transport = resolver["subprocess_probe_transport"]
         result_type = resolver["ProbeCommandResult"]
+        # The pytest venv may disable user-site entirely. Exercise the same
+        # underlying normal interpreter for both the hostile positive control
+        # and the confined transport, so -s and environment removal stay real.
+        probe_python = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True))
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4813,7 +4831,17 @@ class ResolveCapabilityTests(unittest.TestCase):
                 encoding="utf-8",
             )
             user_base = root / "user-base"
-            user_site = user_base / "lib" / "python" / "site-packages"
+            user_site_result = subprocess.run(
+                [probe_python, "-S", "-c", "import site; print(site.getusersitepackages())"],
+                env={"PATH": os.defpath, "PYTHONUSERBASE": str(user_base)},
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=5,
+            )
+            user_site = Path(user_site_result.stdout.strip())
+            self.assertTrue(user_site.is_absolute())
+            self.assertTrue(user_site.is_relative_to(user_base))
             user_site.mkdir(parents=True)
             user_site_marker = root / "usercustomize-imported"
             (user_site / "usercustomize.py").write_text(
@@ -4828,8 +4856,9 @@ class ResolveCapabilityTests(unittest.TestCase):
             }
             with mock.patch.dict(os.environ, hostile, clear=False):
                 legacy = subprocess.run(
-                    [_operator_binding('paths.python_binary'), "-c", "pass"],
+                    [probe_python, "-c", "pass"],
                     cwd=ROOT,
+                    env={"PATH": os.defpath, **hostile},
                     text=True,
                     capture_output=True,
                     check=False,
@@ -4848,7 +4877,7 @@ class ResolveCapabilityTests(unittest.TestCase):
 
                 child = transport(
                     (
-                        _operator_binding('paths.python_binary'),
+                        probe_python,
                         "-E",
                         "-s",
                         "-c",

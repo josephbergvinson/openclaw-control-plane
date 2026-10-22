@@ -56,5 +56,16 @@ do
     /bin/launchctl setenv "$oc_env_key" "${(P)oc_env_key}"
 done
 
+# Publish explicit operator CA selection for GUI workers without forwarding shell injection options.
+if [[ "${NODE_USE_SYSTEM_CA-}" == 0 && "${SSL_CERT_FILE-}" == /* && \
+      "$SSL_CERT_FILE" != *$'\n'* && "$SSL_CERT_FILE" != *$'\r'* ]]; then
+    /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
+    /bin/launchctl setenv NODE_USE_SYSTEM_CA 0
+    /bin/launchctl setenv NODE_OPTIONS --use-openssl-ca
+    if [[ -n "${NODE_EXTRA_CA_CERTS-}" ]]; then
+        /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+    fi
+fi
+
 # Environment publication never starts an app or a service. The native
 # ai.openclaw.mac login job owns app startup and can remain disabled for maintenance.

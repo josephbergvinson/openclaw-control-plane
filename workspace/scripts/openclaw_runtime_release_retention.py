@@ -579,13 +579,14 @@ def reference_names_a_real_path(ref_path: Path) -> bool:
         raise
 
 
-def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
+def collect_process_refs(*, deadline: float | None = None, reference_root: Path | None = None) -> list[Reference]:
     global LAST_PROCESS_SCAN_REPORT
 
     started = time.monotonic()
     refs: list[Reference] = []
-    root_lexical = Path(os.path.abspath(OPERATOR.require_path("paths.runtime_releases_root")))
-    root_real = realpath(OPERATOR.require_path("paths.runtime_releases_root"))
+    scanned_root = OPERATOR.require_path("paths.runtime_releases_root") if reference_root is None else reference_root
+    root_lexical = Path(os.path.abspath(scanned_root))
+    root_real = realpath(scanned_root)
     lsof_stdout_lines = 0
     lsof_matched_names = 0
     argv_matched_lines = 0
@@ -615,7 +616,7 @@ def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
         if (
             str(root_lexical) in line
             or str(root_real) in line
-            or 'openclaw-runtime/releases/openclaw-' in line
+            or (reference_root is None and 'openclaw-runtime/releases/openclaw-' in line)
         ):
             refs.append(Reference(f'process-argv:{line.strip()[:180]}', Path(line)))
             argv_matched_lines += 1
@@ -636,7 +637,7 @@ def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
         LAST_PROCESS_SCAN_REPORT = {
             'backend': 'lsof',
             'method': OPEN_FILE_SCAN_METHOD,
-            'releases_root': str(OPERATOR.require_path("paths.runtime_releases_root")),
+            'releases_root': str(scanned_root),
             'releases_root_realpath': str(root_real),
             'duration_seconds': round(time.monotonic() - started, 3),
             'timeout_seconds': lsof_timeout_seconds,
@@ -651,7 +652,7 @@ def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
         LAST_PROCESS_SCAN_REPORT = {
             'backend': 'lsof',
             'method': OPEN_FILE_SCAN_METHOD,
-            'releases_root': str(OPERATOR.require_path("paths.runtime_releases_root")),
+            'releases_root': str(scanned_root),
             'releases_root_realpath': str(root_real),
             'duration_seconds': round(time.monotonic() - started, 3),
             'timeout_seconds': lsof_timeout_seconds,
@@ -687,7 +688,7 @@ def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
             LAST_PROCESS_SCAN_REPORT = {
                 'backend': 'lsof',
                 'method': OPEN_FILE_SCAN_METHOD,
-                'releases_root': str(OPERATOR.require_path("paths.runtime_releases_root")),
+                'releases_root': str(scanned_root),
                 'releases_root_realpath': str(root_real),
                 'duration_seconds': round(time.monotonic() - started, 3),
                 'timeout_seconds': lsof_timeout_seconds,
@@ -701,7 +702,7 @@ def collect_process_refs(*, deadline: float | None = None) -> list[Reference]:
     LAST_PROCESS_SCAN_REPORT = {
         'backend': 'lsof',
         'method': OPEN_FILE_SCAN_METHOD,
-        'releases_root': str(OPERATOR.require_path("paths.runtime_releases_root")),
+        'releases_root': str(scanned_root),
         'releases_root_realpath': str(root_real),
         'duration_seconds': round(time.monotonic() - started, 3),
         'timeout_seconds': lsof_timeout_seconds,
@@ -810,24 +811,103 @@ def collect_activation_result_refs(
 
     The activation lock is held shared for the whole retention run, so this
     canonical result cannot be replaced by a concurrent activation after it is
-    validated. Any present-but-invalid result blocks retention rather than
-    silently dropping either rollback reference.
+    validated. After normal retirement, reuse the immutable owner's unique
+    latest receipt bound to the current selection. Invalid or ambiguous current
+    evidence blocks retention; older history gains no rollback protection.
     """
 
     path = result_path if result_path is not None else effective_activation_result_path()
     root = releases_root if releases_root is not None else OPERATOR.require_path("paths.runtime_releases_root")
-    if not os.path.lexists(path):
-        return []
-    path_info = path.lstat()
-    if not stat.S_ISREG(path_info.st_mode) or path_info.st_nlink != 1:
-        raise ValueError(
-            f'activation result must be one physical regular file: {path}'
-        )
-    record = load_json_object(path)
     try:
         from . import openclaw_runtime_activate as activation
     except ImportError:
         import openclaw_runtime_activate as activation
+    identities: dict[str, Any] | None = None
+    source = 'activation-result'
+    if not os.path.lexists(path):
+        if os.path.lexists(path.with_name(activation.START_CONSUMED_NAME)):
+            raise ValueError('activation start exists without a terminal result')
+        if not os.path.lexists(path.parent / 'archive'):
+            return []
+        try:
+            generation, receipt, record, payload = activation.read_latest_retired_activation(path)
+            identities = activation.retirement_release_identities(receipt)
+            if receipt['outcome'] == 'activated':
+                selected = record.get('candidate')
+                if (not isinstance(selected, dict) or record.get('outcome') != 'activated'
+                        or receipt.get('selectedPath') != selected.get('path')
+                        or 'restoreResult' in receipt):
+                    raise ValueError('retired selected activation binding drift')
+            else:
+                # A retired restore has reselected its predecessor; the failed
+                # candidate is not a rollback target of that selected release.
+                snapshot = record.get('snapshot')
+                selected = snapshot.get('predecessor') if isinstance(snapshot, dict) else None
+                restore_ref = receipt.get('restoreResult')
+                if (not isinstance(selected, dict) or receipt.get('selectedPath') != selected.get('path')
+                        or not isinstance(restore_ref, dict)):
+                    raise ValueError('retired selected restore binding drift')
+                restore_path = generation / f"activation-restore-result-{str(snapshot.get('manifestSha256', ''))[:16]}.json"
+                restored, data, info = activation.read_immutable_retirement_json(
+                    restore_path, 'retired activation restore')
+                if (restore_ref.get('sha256') != hashlib.sha256(data).hexdigest()
+                        or not activation.historical_identity_matches(restore_ref, restore_path, info)):
+                    raise ValueError('retired activation restore identity/hash drift')
+                fence, fence_data, _ = activation.read_immutable_retirement_json(
+                    generation / activation.START_CONSUMED_NAME, 'retired activation start fence')
+                bound, _ = activation.terminal_fence_bindings(
+                    record, fence, hashlib.sha256(fence_data).hexdigest(), path,
+                    path.with_name(activation.START_CONSUMED_NAME))
+                if not bound:
+                    raise ValueError('retired activation restore start fence drift')
+                outcome = activation.terminal_restore_outcome(
+                    activation.live_paths(), record, payload, restored, info)
+                if outcome != receipt['outcome']:
+                    raise ValueError('retired activation restore terminal outcome drift')
+                if outcome == 'restored_after_late_verification':
+                    late = receipt.get('lateVerification')
+                    gateway = late.get('gateway') if isinstance(late, dict) else None
+                    node = late.get('node') if isinstance(late, dict) else None
+                    loaded = gateway.get('loaded') if isinstance(gateway, dict) else None
+                    health = gateway.get('health') if isinstance(gateway, dict) else None
+                    if (not isinstance(loaded, dict) or not isinstance(node, dict)
+                            or not isinstance(health, dict)
+                            or any(not isinstance(health.get(endpoint), dict)
+                                   or health[endpoint].get('accepted') is not True
+                                   or health[endpoint].get('statusCode') != 200
+                                   for endpoint in ('healthz', 'readyz'))
+                            or any(owner.get('release') != selected['path']
+                                   or owner.get('releaseDevice') != selected['device']
+                                   or owner.get('releaseInode') != selected['inode']
+                                   or owner.get('bootstrapBinding') != restored['bootstrapBindings'][label]
+                                   for label, owner in ((activation.OPERATOR.require_string("runtime.gateway_label"), loaded),
+                                                        (activation.OPERATOR.require_string("runtime.node_label"), node)))
+                            or not isinstance(late.get('commandEvidence'), list)
+                            or not late['commandEvidence']):
+                        raise ValueError('retired activation late restore verification drift')
+                activation.validate_retired_selected_release(path, selected, identities.get('selected'))
+                # Restoring C after a failed D attempt does not retire C's B
+                # recovery binding. Elect only C's unique latest success.
+                recovery = activation.read_latest_retired_activation(path, candidate_path=selected['path'])
+                if recovery is None:
+                    return []  # This predecessor has no earlier activation-owner binding.
+                generation, receipt, record, payload = recovery
+                identities = activation.retirement_release_identities(receipt)
+                selected = record.get('candidate')
+                if (not isinstance(selected, dict) or receipt.get('selectedPath') != selected.get('path')
+                        or 'restoreResult' in receipt):
+                    raise ValueError('retired recovery activation binding drift')
+            activation.validate_retired_selected_release(path, selected, identities.get('selected'))
+        except (OSError, ValueError, KeyError, TypeError, activation.ActivationError) as exc:
+            raise ValueError(f'current activation retirement is unavailable or invalid: {path}: {exc}') from exc
+        source = 'activation-retirement'
+    else:
+        path_info = path.lstat()
+        if not stat.S_ISREG(path_info.st_mode) or path_info.st_nlink != 1:
+            raise ValueError(
+                f'activation result must be one physical regular file: {path}'
+            )
+        record = load_json_object(path)
     if (
         record.get('outcome') != 'activated'
         or record.get('statesVisited') != ['preflight', 'apply', 'verify', 'terminal']
@@ -862,7 +942,9 @@ def collect_activation_result_refs(
             or type(value.get('inode')) is not int
             # This reader already resolves supported host aliases within the
             # releases root. Preserve that contract without rewriting history.
-            or not activation.historical_identity_matches({**value, 'path': str(release)}, release, release_info)
+            or not (activation.historical_identity_matches({**value, 'path': str(release)}, release, release_info)
+                    if identities is None else
+                    activation.historical_release_identity_matches(value, identities.get(role), release))
         ):
             raise ValueError(
                 f'activation result {role} release identity drifted: {release}'
@@ -903,8 +985,8 @@ def collect_activation_result_refs(
         raise ValueError(f'activation result command evidence is absent: {path}')
 
     return [
-        Reference('activation-result:candidate', bindings['candidate']),
-        Reference('activation-result:rollback', bindings['rollback']),
+        Reference(f'{source}:candidate', bindings['candidate']),
+        Reference(f'{source}:rollback', bindings['rollback']),
     ]
 
 
@@ -953,6 +1035,12 @@ def collect_operation_lock_dependency_refs(
             disposition = entry.get(disposition_field)
             if not dependency_requires_retention(disposition):
                 continue
+            # A validated completed/retired operation is historical evidence,
+            # not authority to keep unused release payloads indefinitely.
+            if classification.get('terminal_state') in PROMOTION_TERMINAL_STATES:
+                if not isinstance(disposition, str) or not disposition.startswith(('retain_', 'optional_cold_archive')):
+                    raise ValueError(f'{lock_path}: unknown terminal dependency disposition')
+                continue
             ref = Reference(
                 f'promotion-operation-lock:{lock_path.parent.name}:{path_field}:{disposition}',
                 dependency,
@@ -966,6 +1054,7 @@ def collect_retention_manifest_dependency_refs(
     manifest_path: Path,
     *,
     releases_root: Path,
+    operation_classification: dict[str, Any] | None = None,
 ) -> list[Reference]:
     payload = load_json_object(manifest_path)
     root_real = realpath(releases_root)
@@ -997,6 +1086,10 @@ def collect_retention_manifest_dependency_refs(
             source=f'{manifest_path}:retain_long_term.path',
             releases_root=releases_root,
         )
+        if (operation_classification or {}).get('terminal_state') in PROMOTION_TERMINAL_STATES:
+            if not isinstance(classification, str) or not classification.startswith(('retain_', 'optional_cold_archive')):
+                raise ValueError(f'{manifest_path}: unresolved terminal release disposition')
+            continue
         classification_text = (
             classification
             if isinstance(classification, str) and classification
@@ -1055,6 +1148,7 @@ def collect_promotion_dependency_refs(
         if child_real.parent != root_real:
             raise ValueError(f'promotion protection directory escapes promotions root: {child} -> {child_real}')
         lock_path = child / 'operation.lock.json'
+        classification = None
         if os.path.lexists(lock_path):
             lock_payload = load_json_object(lock_path)
             classification = classify_operation_lock(lock_path, lock_payload)
@@ -1069,7 +1163,10 @@ def collect_promotion_dependency_refs(
             )
         manifest_path = child / 'retention-manifest.json'
         if os.path.lexists(manifest_path):
-            refs.extend(collect_retention_manifest_dependency_refs(manifest_path, releases_root=release_root))
+            refs.extend(collect_retention_manifest_dependency_refs(
+                manifest_path, releases_root=release_root,
+                operation_classification=classification,
+            ))
     return refs
 
 
@@ -1800,7 +1897,7 @@ def report_payload(
             'keep_latest': keep_latest,
             'min_age_days': min_age_days,
             'orphan_min_age_days': ORPHAN_MIN_AGE_DAYS,
-            'inactive_operation_dependencies': 'ignored unless an explicit retention disposition is present',
+            'inactive_operation_dependencies': 'validated terminal storage dispositions do not retain unused payloads',
             'active_operation_lock': 'hard-block unless a strictly matching terminal receipt proves the lock stale',
         },
         'process_scan': dict(LAST_PROCESS_SCAN_REPORT),

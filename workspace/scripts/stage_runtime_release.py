@@ -24,7 +24,7 @@ EXCLUDED_NAMES = {'.git', '.artifacts', '.cache', '.pytest_cache', '__pycache__'
 PRESERVED_APP_ROOT = 'dist/OpenClaw.app'
 SWIFT_BUILD_CACHE_ROOTS = ('apps/macos/.build', 'apps/macos-mlx-tts/.build')
 AI_IMPORT_EXPRESSION = 'await import("@openclaw/ai/internal/openai-responses-payload-policy")'
-AI_IMPORT_NODE_VERSION = 'v24.16.0'
+AI_IMPORT_NODE_VERSION = 'v24.22.1'
 AI_IMPORT_TIMEOUT_SECONDS = 30
 REQUIRED_FILES = (
     'openclaw.mjs', 'package.json', 'dist/build-info.json',
@@ -378,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--exclude-root', action='append', default=[], metavar='NAME',
                         help='Exclude one explicitly identified regenerable top-level cache; repeat as needed')
     parser.add_argument('--verify-ai-import-node', type=Path,
-                        help='Explicit pinned Node 24.16.0 for the fixed offline AI import before hardening')
+                        help='Explicit pinned Node 24.22.1 for the fixed offline AI import before hardening')
     args = parser.parse_args(argv)
     try:
         value = stage(args.source, args.candidate, args.source_commit, args.receipt,

@@ -34,13 +34,6 @@ NATIVE_COMPANION_DELTA_PATHS = {
     "apps/macos/Tests/Fixtures/ConnectionModeCoordinator/Fixture.swift",
     "apps/macos/Tests/OpenClawIPCTests/NodeServiceManagerTests.swift",
 }
-NATIVE_COMPANION_FIXTURE_DELTA_PATHS = {
-    'test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json',
-    'test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json',
-    'test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff',
-    'test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md',
-    'test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff',
-}
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
 CURRENT_MANIFEST_FIELDS = {
     "schemaVersion", "upstream", "source", "patch", "toolchain",
@@ -595,7 +588,6 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             paths.append(fields[2])
         if len(paths) != 2 or set(paths) != NATIVE_DELTA_PATHS:
             raise ReconstructionError("Native delta must change only pnpm-lock.yaml and pnpm-workspace.yaml")
-    fixture_companion_delta = False
     if package.companion is not None:
         companion = package.companion
         if companion.distribution_tree != package.native.normalized_tree:
@@ -618,12 +610,8 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
                 if len(fields) != 3 or not all(value.isdigit() for value in fields[:2]):
                     raise ReconstructionError("Companion delta must contain ordinary text changes")
                 paths.append(fields[2])
-            if len(paths) == len(NATIVE_COMPANION_FIXTURE_DELTA_PATHS) and set(paths) == NATIVE_COMPANION_FIXTURE_DELTA_PATHS:
-                fixture_companion_delta = True
-                if git(checkout, "apply", "--summary", "-", data=companion.patch):
-                    raise ReconstructionError("Fixture companion delta must preserve regular file types and modes")
-            elif len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
-                raise ReconstructionError("Companion delta must change exactly the four macOS paths or five prompt artifacts")
+            if len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
+                raise ReconstructionError("Companion delta must change only the four declared macOS source and fixture files")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
         raise ReconstructionError("Checkout HEAD is not the pinned upstream commit")
     if git(checkout, "rev-parse", "HEAD^{tree}") != package.base_tree:
@@ -664,12 +652,6 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
         if package.companion is not None:
             companion = package.companion
             if companion.patch is not None:
-                if fixture_companion_delta:
-                    entries = git(checkout, "ls-files", "--stage", "--",
-                                  *sorted(NATIVE_COMPANION_FIXTURE_DELTA_PATHS)).splitlines()
-                    if len(entries) != len(NATIVE_COMPANION_FIXTURE_DELTA_PATHS) or any(
-                            not row.startswith(("100644 ", "100755 ")) for row in entries):
-                        raise ReconstructionError("Fixture companion delta requires five regular source artifacts")
                 git(checkout, "apply", "--check", "--index", "--whitespace=error-all", "-", data=companion.patch)
                 git(checkout, "apply", "--index", "--whitespace=error-all", "-", data=companion.patch)
             if git(checkout, "write-tree") != companion.source_tree:

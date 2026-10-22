@@ -318,7 +318,7 @@ def test_tracked_swift_cache_member_cannot_be_silently_excluded(built_source, tm
     assert not (tmp_path / 'candidate release').exists()
 
 
-def fixed_import_node(tmp_path: Path, *, outcome: str = 'pass', version: str = 'v24.16.0') -> Path:
+def fixed_import_node(tmp_path: Path, *, outcome: str = 'pass', version: str = 'v24.22.1') -> Path:
     """Fixture executable observes the fixed Node argv; it never imports live SDKs."""
     node = tmp_path / 'fixture pinned node'
     node.write_text(f'''#!/bin/sh
@@ -362,7 +362,7 @@ def test_preharden_fixed_ai_import_runs_before_readonly_and_is_recorded(built_so
     assert observed['writableBeforeImport'] is True
     assert observed['candidate'] == result['candidate']
     assert result['offlineAiImport']['status'] == 'passed'
-    assert result['offlineAiImport']['nodeVersion'] == 'v24.16.0'
+    assert result['offlineAiImport']['nodeVersion'] == 'v24.22.1'
     assert result['offlineAiImport']['exitCode'] == 0
     assert result['offlineAiImport']['beforeReadOnly'] is True
     assert result['candidateExecuted'] is True
@@ -399,10 +399,13 @@ def test_preharden_import_cannot_hide_candidate_members_in_source_exclusions(
     assert not (tmp_path / 'staging.json').exists()
 
 
-def test_preharden_import_rejects_a_different_node_version_before_copy(built_source, tmp_path: Path) -> None:
+@pytest.mark.parametrize('version', ['v24.16.0', 'v24.15.0'])
+def test_preharden_import_rejects_a_different_node_version_before_copy(
+    built_source, tmp_path: Path, version: str,
+) -> None:
     source, commit = built_source
-    node = fixed_import_node(tmp_path, version='v24.15.0')
-    with pytest.raises(staging.StagingError, match='Node.*24.16.0'):
+    node = fixed_import_node(tmp_path, version=version)
+    with pytest.raises(staging.StagingError, match='Node.*24.22.1'):
         staging.stage(source, tmp_path / 'candidate release', commit, tmp_path / 'staging.json',
                       verify_ai_import_node=node)
     assert not (tmp_path / 'candidate release').exists()

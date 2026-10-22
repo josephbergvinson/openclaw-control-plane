@@ -190,3 +190,45 @@ After backup changes, retain an independent restoration receipt.
 These distinctions make upgrades slower than replacing a package directory. They also
 make a failure explainable and recovery specific. See [evidence and verification](15-evidence-audit-and-verification.md)
 and [host operations](19-host-operations-and-backups.md).
+
+### Explicit Node security transition
+
+The same activation owner can bind a reviewed Node executable transition to its
+ordinary release activation. A schema5 stopped snapshot then contains eight base
+controls: runtime state, both service plists, the release selector, the existing
+managed Node selector, the two known compatibility aliases and the shell CLI
+wrapper. Configured external recovery roots are added to that inventory without
+changing their ownership or purpose. Ordinary activation retains its four base
+controls. This is one activation and one start fence.
+
+The transition declaration pins both executable hashes, exact predecessor alias
+targets, the wrapper byte/mode identities and a separate candidate ScreenCapture
+precondition. Candidate paths derive from the existing managed selector. Only the
+wrapper's Node exec prefix changes; unrelated PATH entries retain their order and
+duplicates. The exact retired managed22.22 path is normalized to that selector.
+The matching snapshot restores original bytes and alias targets after a partial
+failure; a consumed or ambiguous start restores stopped state.
+
+The precondition proves candidate code identity and its recorded permission only.
+It never proves effective capture. Fresh capture, visual acceptance and enrollment
+under the actually running candidate remain separate post-activation gates. Keep
+those receipts, grant details and operator paths private. Configure any non-default
+managed executable code hashes in `runtime.managed_node_executable_sha256` using
+version-directory names and lowercase SHA-256 values; missing or mismatched code
+never obtains activation authority. Official macOS binary pins are the defaults.
+
+For the current macOS reference, ordinary helper lookup also verifies the two
+compatibility aliases at `<host_home>/.local/bin/node` and
+`<host_home>/.local/opt/node-current`, plus the executable shell CLI wrapper at
+`<host_home>/.local/bin/openclaw`. Provision these known roles with owned physical
+parents before using the helper; the aliases may already point through the sole
+canonical Node selector. Their existence is a setup prerequisite, not permission
+to invent arbitrary paths or to create a second selector. Unchanged compatibility
+roles do not add snapshot members during an ordinary four-control activation.
+
+
+### Candidate access and capture-binding refresh
+
+A new managed Node toolchain needs a schema-v2 precondition that verifies its recorded ScreenCapture and Full Disk Access grants against the exact executable and compiled code requirement. Run the existing `node-toolchain-preflight` before stopping the predecessor; activation checks the grant again before first boot. Recorded grants do not prove effective filesystem access or screen capture. Historical v1 receipts remain readable for recovery, and an ordinary release using the selected Node has no new candidate-grant requirement.
+
+After activation, use the existing private Journal capture and visual-acceptance route. Enrollment remains create-only unless `screen-capture-enroll` receives both `--replace-binding-sha256` and `--replaced-binding-archive` for the configured canonical binding. The explicit refresh takes the existing activation lock, preserves exact predecessor bytes in a new immutable private archive, rechecks current process, code, grant and activation evidence, and atomically publishes the successor. Capture receipts and permission data belong in the adopter's private evidence directory; keep them out of this repository.

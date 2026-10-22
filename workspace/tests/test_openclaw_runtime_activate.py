@@ -64,7 +64,7 @@ def approval_report(
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("scripts.openclaw_activate_test", SCRIPT)
+    spec = importlib.util.spec_from_file_location("openclaw_activate_test", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -112,11 +112,6 @@ def make_release(
             + "\n"
         )
         (chrome_extension / "background.js").write_text("export {};\n")
-        for entry in ("dist/plugin-sdk/exec-approvals-runtime.js", "dist/plugin-sdk/security-runtime.js",
-                      "dist/commands/doctor.worker.js"):
-            target = release / entry
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("export {};\n")
     ai_package = release / "packages" / "ai"
     ai_dist = ai_package / "dist"
     ai_internal = ai_dist / "internal"
@@ -147,11 +142,22 @@ def make_release(
     ai_link.parent.mkdir(parents=True)
     ai_link.symlink_to("../../packages/ai")
     if include_candidate_native_entrypoints:
-        inspector = release / "dist" / "infra" / "exec-approvals-inspection.js"
+        # Match the current sealed SDK/Doctor leaves. Snapshot tests supply the
+        # process boundary through FakeBackend; do not fake migration success.
+        inspector = release / "dist" / "plugin-sdk" / "exec-approvals-runtime.js"
         inspector.parent.mkdir(parents=True)
         inspector.write_text(
             "export function inspectExecApprovalsState() { return "
             f"{json.dumps(approval_report(), separators=(',', ':'))}; }}\n"
+        )
+        (inspector.parent / "security-runtime.js").write_text(
+            "export function resolvePreferredOpenClawTmpDir() { "
+            'throw new Error("synthetic security boundary requires the test backend"); }\n'
+        )
+        doctor = release / "dist" / "commands" / "doctor.worker.js"
+        doctor.parent.mkdir(parents=True)
+        doctor.write_text(
+            'throw new Error("synthetic Doctor boundary requires the test backend");\n'
         )
     for plugin_id in activate_module.required_bundled_extensions():
         extension = release / "dist" / "extensions" / plugin_id
@@ -781,10 +787,14 @@ def test_activation_accepts_absent_artifact_retention(fixture: Fixture):
     assert result["candidate"]["bundledExtensions"].keys() == {"discord", "codex"}
 
 
-def test_seal_requires_release_native_exec_approvals_inspector(fixture: Fixture):
-    inspector = (
-        fixture.candidate / "dist" / "plugin-sdk" / "exec-approvals-runtime.js"
-    )
+@pytest.mark.parametrize(
+    "relative",
+    ["plugin-sdk/exec-approvals-runtime.js", "plugin-sdk/security-runtime.js", "commands/doctor.worker.js"],
+)
+def test_seal_requires_release_native_exec_approvals_inspector(
+    fixture: Fixture, relative: str
+):
+    inspector = fixture.candidate / "dist" / relative
     inspector.parent.chmod(0o755)
     inspector.unlink()
     inspector.parent.chmod(0o555)
@@ -941,8 +951,8 @@ def test_openai_auth_order_attestation_is_value_free_in_reports_and_receipts(
         (
             fixture.candidate
             / "dist"
-            / "infra"
-            / "exec-approvals-inspection.js"
+            / "plugin-sdk"
+            / "exec-approvals-runtime.js"
         ).read_text(),
     )
     assert all(
@@ -1116,8 +1126,21 @@ def test_daily_retention_reaches_children_after_legacy_remount_retirement(fixtur
     results = cron.run_steps(apply=True)
     assert {row.name for row in results} == {"host_storage", "runtime_releases", "runtime_promotions", "approval_a"}
     assert len(calls) == 4 and all(row.returncode == 0 for row in results)
-    assert "ACTIVATION_RETIREMENT_REPORT:" in results[1].stdout
     assert not fixture.paths.result.exists()
+
+
+def _bind_public_retention_fixture(retention, fixture, monkeypatch):
+    from scripts.operator_contract import OperatorContract
+    configured = {name: retention.OPERATOR.get(name, {}) for name in ("paths", "runtime", "identifiers")}
+    configured["paths"].update({
+        "runtime_releases_root": str(fixture.paths.releases_root),
+        "runtime_current_link": str(fixture.paths.current_link),
+        "cli_root": str(fixture.root / "cli"), "state_root": str(fixture.paths.candidate_state_dir),
+        "host_home": str(fixture.root / "home"), "activation_result": str(fixture.paths.result),
+        "activation_lock": str(fixture.paths.lock), "runtime_promotions_root": str(fixture.root / "promotions"),
+        "runtime_release_retention_artifacts": str(fixture.root / "retention-reports"),
+    })
+    monkeypatch.setattr(retention, "OPERATOR", OperatorContract(configured))
 
 
 def test_release_retention_consumes_durable_retirement_identity(fixture, monkeypatch):
@@ -1127,10 +1150,7 @@ def test_release_retention_consumes_durable_retirement_identity(fixture, monkeyp
     activate_module.retire_terminal_receipts(fixture.paths, archive)
     simulate_release_remount(fixture, monkeypatch)
     monkeypatch.setattr(retention, "effective_activation_result_path", lambda: fixture.paths.result)
-    from scripts.operator_contract import OperatorContract
-    configured = {section: retention.OPERATOR.get(section, {}) for section in ("paths", "runtime", "identifiers")}
-    configured["paths"]["runtime_releases_root"] = str(fixture.paths.releases_root)
-    monkeypatch.setattr(retention, "OPERATOR", OperatorContract(configured))
+    _bind_public_retention_fixture(retention, fixture, monkeypatch)
     monkeypatch.setattr(retention, "LAST_PROMOTION_OPERATION_CLASSIFICATIONS", [])
     assert retention.collect_unfinished_release_refs() == []
     assert retention.LAST_TERMINAL_ARCHIVE_NOTES == []
@@ -1141,6 +1161,246 @@ def test_release_retention_consumes_durable_retirement_identity(fixture, monkeyp
     refs = retention.collect_unfinished_release_refs()
     assert {row.path for row in refs} == {fixture.candidate, fixture.predecessor}
     assert retention.LAST_TERMINAL_ARCHIVE_NOTES
+
+
+class RetentionBackend(FakeBackend):
+    def verify(self, release, device, inode):
+        value = super().verify(release, device, inode)
+        value["loaded"]["argumentsObservedExact"] = True
+        return value
+
+
+def classify_retired_fixture(fixture, monkeypatch):
+    from scripts import openclaw_runtime_release_retention as retention
+    from scripts import openclaw_runtime_activate as live_owner
+    monkeypatch.setattr(live_owner, "live_paths", lambda: fixture.paths)
+    _bind_public_retention_fixture(retention, fixture, monkeypatch)
+    monkeypatch.setattr(retention.Path, "home", lambda: fixture.root / "home")
+    # Environmental host observations only; use the real source classification,
+    # locks, symlink references, immutable archive reader and report writer.
+    monkeypatch.setattr(retention, "collect_launchagent_refs", lambda: [])
+    monkeypatch.setattr(retention, "collect_process_refs", lambda **kwargs: [])
+    rc, _, _, report_path = retention.run(apply=False, keep_latest=0, min_age_days=0)
+    return rc, json.loads(report_path.read_text())
+
+
+def test_retired_fixture_keeps_browser_dependency_validation_fail_closed(fixture, monkeypatch):
+    run(fixture, RetentionBackend(fixture))
+    retire_fixture_daily(fixture, monkeypatch)
+    native_root = fixture.paths.candidate_state_dir / "browser" / "native-messaging"
+    native_root.mkdir(parents=True, mode=0o700)
+    launcher = native_root / "ai.openclaw.browser_bootstrap.invalid.sh"
+    launcher.write_text(
+        "#!/bin/sh\n# OpenClaw native messaging bootstrap v1\nexec /unverifiable\n"
+    )
+    launcher.chmod(0o700)
+    rc, report = classify_retired_fixture(fixture, monkeypatch)
+    assert rc == 1 and report["state"] == "classification_blocked"
+    assert any("unverifiable owned browser native-host dependency" in row["error"]
+               for row in report["errors"])
+    assert all(path.exists() for path in (fixture.candidate, fixture.predecessor))
+
+
+def retire_fixture_daily(fixture, monkeypatch):
+    from scripts import openclaw_retention_cleanup_cron as cron
+    from scripts import openclaw_runtime_activate as live_owner
+    monkeypatch.setattr(live_owner, "live_paths", lambda: fixture.paths)
+    receipt_path = cron.retire_completed_activation(apply=True)
+    assert receipt_path is not None and not fixture.paths.result.exists()
+    return Path(receipt_path)
+
+
+def next_retention_fixture(fixture, name):
+    candidate = make_release(fixture.paths.releases_root, name, CANDIDATE_COMMIT)
+    seal = fixture.root / f"{name}-seal.json"
+    activate_module.create_candidate_seal(fixture.paths, candidate, CANDIDATE_COMMIT, seal)
+    snapshot = json.loads(fixture.snapshot.read_text())
+    snapshot["currentTarget"] = str(fixture.candidate)
+    snapshot["predecessor"] = activate_module.validate_release(
+        fixture.paths, fixture.candidate, CANDIDATE_COMMIT,
+        require_candidate_native_entrypoints=False)
+    snapshot["execApprovalsInspector"] = activate_module.exec_approvals_inspector_binding(
+        activate_module.validate_candidate_seal(fixture.paths, candidate, CANDIDATE_COMMIT, seal),
+        snapshot["predecessor"])
+    archive = fixture.root / f"{name}-snapshot.tar"
+    subprocess.run([
+        "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf", str(archive), "-C", "/",
+        *[str(path).lstrip("/") for path in (
+            fixture.paths.predecessor_state_dir, fixture.paths.gateway_plist,
+            fixture.paths.node_plist, fixture.paths.current_link)],
+    ], check=True, capture_output=True)
+    archive.chmod(0o400)
+    quiescence = json.loads(Path(snapshot["g6QuiescencePath"]).read_text())
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    quiescence.update(archivePath=str(archive), archiveSha256=digest)
+    quiescence_path = fixture.root / f"{name}-quiescence.json"
+    quiescence_path.write_text(json.dumps(quiescence))
+    quiescence_path.chmod(0o400)
+    snapshot.update(tarPath=str(archive), tarSha256=digest,
+                    g6QuiescencePath=str(quiescence_path),
+                    g6QuiescenceSha256=hashlib.sha256(quiescence_path.read_bytes()).hexdigest())
+    snapshot_path = fixture.root / f"{name}-snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot))
+    snapshot_path.chmod(0o400)
+    return replace(fixture, predecessor=fixture.candidate, candidate=candidate,
+                        seal=seal, snapshot=snapshot_path)
+
+
+def test_daily_retirement_classification_preserves_only_current_rollback(fixture, monkeypatch):
+    run(fixture, RetentionBackend(fixture))
+    historical = retire_fixture_daily(fixture, monkeypatch)
+    successor = next_retention_fixture(fixture, "openclaw-next")
+    candidate = successor.candidate
+    try:
+        assert run(successor, RetentionBackend(successor))["outcome"] == "activated"
+        current = retire_fixture_daily(successor, monkeypatch)
+        assert historical != current
+        rc, report = classify_retired_fixture(successor, monkeypatch)
+        assert rc == 0
+        rows = {row["name"]: row for row in report["receipts"]}
+        assert rows[candidate.name]["state"] == "skipped_protected"
+        assert rows[fixture.candidate.name]["state"] == "skipped_protected"
+        assert "activation-retirement:rollback" in rows[fixture.candidate.name]["protection_reasons"]
+        assert rows[fixture.predecessor.name]["state"] == "would_remove"
+        assert all(path.exists() for path in (candidate, fixture.candidate, fixture.predecessor))
+    finally:
+        chmod_tree(candidate, True)
+
+
+@pytest.mark.parametrize("corruption", [
+    "missing-receipt", "missing-result", "missing-fence", "tampered-result", "tampered-fence",
+    "pending-fence", "receipt-mode", "result-mode", "rollback-volume",
+    "selected-changed", "selected-identity", "rollback-identity", "ambiguous", "new-live-invalid",
+])
+def test_retired_current_binding_mismatch_blocks_normal_classification(fixture, monkeypatch, corruption):
+    run(fixture, RetentionBackend(fixture))
+    receipt_path = retire_fixture_daily(fixture, monkeypatch)
+    generation = receipt_path.parent
+    receipt = json.loads(receipt_path.read_text())
+    if corruption == "missing-receipt":
+        receipt_path.unlink()
+    elif corruption == "missing-result":
+        (generation / fixture.paths.result.name).unlink()
+    elif corruption == "missing-fence":
+        (generation / activate_module.START_CONSUMED_NAME).unlink()
+    elif corruption == "pending-fence":
+        fixture.paths.result.with_name(activate_module.START_CONSUMED_NAME).write_text("{}")
+    elif corruption == "receipt-mode":
+        receipt_path.chmod(0o600)
+    elif corruption == "result-mode":
+        (generation / fixture.paths.result.name).chmod(0o600)
+    elif corruption == "rollback-volume":
+        receipt["releaseIdentities"]["rollback"]["volumeUuid"] = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+        receipt_path.chmod(0o600)
+        receipt_path.write_text(json.dumps(receipt))
+        receipt_path.chmod(0o400)
+    elif corruption in {"tampered-result", "tampered-fence"}:
+        name = fixture.paths.result.name if corruption == "tampered-result" else activate_module.START_CONSUMED_NAME
+        path = generation / name
+        path.chmod(0o600); path.write_bytes(path.read_bytes() + b" "); path.chmod(0o400)
+    elif corruption == "selected-changed":
+        fixture.paths.current_link.unlink(); fixture.paths.current_link.symlink_to(fixture.predecessor)
+    elif corruption in {"selected-identity", "rollback-identity"}:
+        role = "selected" if corruption == "selected-identity" else "rollback"
+        receipt["releaseIdentities"][role]["inode"] += 1
+        receipt_path.chmod(0o600); receipt_path.write_text(json.dumps(receipt)); receipt_path.chmod(0o400)
+    elif corruption == "ambiguous":
+        other = generation.parent / "same-time-owner"
+        other.mkdir(mode=0o700)
+        (other / activate_module.RETIREMENT_RECEIPT_NAME).write_text(json.dumps(receipt))
+        (other / activate_module.RETIREMENT_RECEIPT_NAME).chmod(0o400)
+    elif corruption == "new-live-invalid":
+        fixture.paths.result.write_text(json.dumps({"outcome": "pending"}))
+        fixture.paths.result.chmod(0o400)
+    rc, report = classify_retired_fixture(fixture, monkeypatch)
+    assert rc == 1
+    assert report["state"] == "classification_blocked"
+    assert all(path.exists() for path in (fixture.candidate, fixture.predecessor))
+
+
+def test_retired_current_rollback_survives_supported_volume_remount(fixture, monkeypatch):
+    run(fixture, RetentionBackend(fixture))
+    retire_fixture_daily(fixture, monkeypatch)
+    simulate_release_remount(fixture, monkeypatch)
+    rc, report = classify_retired_fixture(fixture, monkeypatch)
+    assert rc == 0
+    rows = {row["name"]: row for row in report["receipts"]}
+    assert all(row["state"] == "skipped_protected" for row in rows.values())
+    assert "activation-retirement:rollback" in rows[fixture.predecessor.name]["protection_reasons"]
+
+
+def test_retired_restore_does_not_protect_failed_candidate_as_rollback(fixture, monkeypatch):
+    assert run(fixture, FakeBackend(fixture, gateway_failure=True))["outcome"] == "snapshot_restore_required"
+    assert restore(fixture, StoppedRestoreBackend(fixture))["outcome"] == "restored"
+    archive = fixture.paths.result.parent / "archive" / "restored-history"
+    activate_module.retire_terminal_receipts(fixture.paths, archive)
+    rc, report = classify_retired_fixture(fixture, monkeypatch)
+    assert rc == 0
+    rows = {row["name"]: row for row in report["receipts"]}
+    assert rows[fixture.predecessor.name]["state"] == "skipped_protected"
+    assert rows[fixture.candidate.name]["state"] == "would_remove"
+
+
+
+@pytest.mark.parametrize("corruption", [None, "not-applied", "failed-hash", "snapshot", "node",
+                                        "error", "outcome", "bootstrap", "fence", "recovery-ambiguous",
+                                        "health", "loaded", "node-owner"])
+def test_nested_retired_restore_preserves_selected_release_recovery(fixture, monkeypatch, corruption):
+    run(fixture, RetentionBackend(fixture))
+    retire_fixture_daily(fixture, monkeypatch)
+    selected = next_retention_fixture(fixture, "openclaw-selected")
+    failed = None
+    try:
+        assert run(selected, RetentionBackend(selected))["outcome"] == "activated"
+        recovery_receipt_path = retire_fixture_daily(selected, monkeypatch)
+        failed = next_retention_fixture(selected, "openclaw-failed")
+        assert run(failed, FakeBackend(failed, gateway_failure=True))["outcome"] == "snapshot_restore_required"
+        assert restore(failed, StoppedRestoreBackend(failed))["outcome"] == "restored"
+        archive = failed.paths.result.parent / "archive" / "nested-restored"
+        receipt = activate_module.retire_terminal_receipts(failed.paths, archive)
+        if corruption == "recovery-ambiguous":
+            duplicate = archive.parent / "ambiguous-selected-recovery"
+            duplicate.mkdir(mode=0o700)
+            duplicate_receipt = duplicate / activate_module.RETIREMENT_RECEIPT_NAME
+            duplicate_receipt.write_bytes(recovery_receipt_path.read_bytes())
+            duplicate_receipt.chmod(0o400)
+        elif corruption is not None:
+            path = Path(receipt["restoreResult"]["path"])
+            value = json.loads(path.read_text())
+            if corruption == "not-applied": value["restoreApplied"] = False
+            elif corruption == "failed-hash": value["failedActivationResultSha256"] = "0" * 64
+            elif corruption == "snapshot": value["snapshot"]["manifestSha256"] = "0" * 64
+            elif corruption == "node": value["verification"]["node"] = None
+            elif corruption == "error": value["error"] = "predecessor_boot_failed"
+            elif corruption == "outcome": value["outcome"] = "restored_boot_failed"
+            elif corruption == "bootstrap": value["bootstrapBindings"][activate_module.OPERATOR.require_string('runtime.gateway_label')]["selectorInode"] += 1
+            elif corruption == "health": value["verification"]["gateway"]["health"]["readyz"]["accepted"] = False
+            elif corruption == "loaded": value["verification"]["gateway"]["loaded"]["releaseInode"] += 1
+            elif corruption == "node-owner": value["verification"]["node"]["releaseInode"] += 1
+            elif corruption == "fence":
+                path = archive / activate_module.START_CONSUMED_NAME
+                value = json.loads(path.read_text())
+                value["candidateSealSha256"] = "0" * 64
+            path.chmod(0o600); path.write_text(json.dumps(value)); path.chmod(0o400)
+            key = "startFence" if corruption == "fence" else "restoreResult"
+            receipt[key]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            receipt_path = archive / activate_module.RETIREMENT_RECEIPT_NAME
+            receipt_path.chmod(0o600); receipt_path.write_text(json.dumps(receipt)); receipt_path.chmod(0o400)
+        rc, report = classify_retired_fixture(failed, monkeypatch)
+        if corruption is not None:
+            assert rc == 1 and report["state"] == "classification_blocked"
+        else:
+            assert rc == 0
+            rows = {row["name"]: row for row in report["receipts"]}
+            assert rows[selected.candidate.name]["state"] == "skipped_protected"
+            assert rows[selected.predecessor.name]["state"] == "skipped_protected"
+            assert "activation-retirement:rollback" in rows[selected.predecessor.name]["protection_reasons"]
+            assert rows[fixture.predecessor.name]["state"] == "would_remove"
+            assert rows[failed.candidate.name]["state"] == "would_remove"
+        assert all(path.exists() for path in (fixture.predecessor, fixture.candidate, selected.candidate, failed.candidate))
+    finally:
+        chmod_tree(selected.candidate, True)
+        if failed is not None: chmod_tree(failed.candidate, True)
 
 
 def test_terminal_receipt_retirement_archives_historical_different_profile_binding(
@@ -1175,7 +1435,7 @@ def test_terminal_receipt_retirement_archives_historical_different_profile_bindi
     result_path.chmod(0o600)
     result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     result_path.chmod(0o400)
-    archive_dir = result_path.parent / "archive" / "historical-five-profile"
+    archive_dir = result_path.parent / "archive" / "historical-different-profile"
 
     receipt = activate_module.retire_terminal_receipts(
         fixture.paths,
@@ -1525,7 +1785,7 @@ def test_protected_migrated_invariants_fail_before_selector_or_boot(fixture: Fix
     paths = fixture.paths
     approval_reports = None
     if drift == "reservation":
-        path = paths.candidate_state_dir / activate_module.OPERATOR.require_path("paths.session_reservations")
+        path = paths.candidate_state_dir / activate_module.SESSION_QUARANTINE_RESERVATIONS
         path.write_text('{"storePath":"/wrong"}\n')
     elif drift == "profile-order":
         report = approval_report()
@@ -1825,7 +2085,39 @@ def test_activated_result_replay_rejects_openai_auth_order_drift(
     assert backend.gateway_boots == backend.node_boots == 0
 
 
-def test_failed_activation_restore_quarantines_and_boots_predecessor_once(fixture: Fixture):
+@pytest.mark.parametrize("snapshot_format", ["legacy-raw", "fresh-gzip"])
+def test_failed_activation_restore_quarantines_and_boots_predecessor_once(
+    fixture: Fixture, snapshot_format: str
+):
+    if snapshot_format == "fresh-gzip":
+        output_root = fixture.root / "compressed-restore-snapshot"
+        manifest = output_root / "stopped-snapshot.json"
+        activate_module.create_stopped_snapshot(
+            fixture.paths, output_root, manifest, fixture.candidate,
+            CANDIDATE_COMMIT, fixture.seal, FakeBackend(fixture),
+        )
+        fixture = replace(fixture, snapshot=manifest)
+    snapshot = activate_module.load_stopped_snapshot(
+        fixture.paths, fixture.snapshot, sealed_candidate(fixture)
+    )
+    archive = Path(snapshot["tarPath"])
+    with archive.open("rb") as stream:
+        assert (stream.read(2) == b"\x1f\x8b") is (snapshot_format == "fresh-gzip")
+    assert snapshot["tarSha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert archive.name == "stopped-snapshot.tar"
+    expected_files = {}
+    for path in (
+        fixture.paths.predecessor_state_dir / "openclaw.json", fixture.external_marker,
+        fixture.paths.gateway_plist, fixture.paths.node_plist,
+    ):
+        info = path.stat()
+        expected_files[path] = (
+            path.read_bytes(), stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid,
+        )
+    gateway_xattr = subprocess.run(
+        ["/usr/bin/xattr", "-p", "com.openclaw.snapshot-test", str(fixture.paths.gateway_plist)],
+        check=True, capture_output=True,
+    ).stdout
     external_runtime_assets = fixture.root / "external-runtime-assets"
     external_runtime_sentinel = external_runtime_assets / "sentinel.txt"
     sentinel_before = (
@@ -1873,6 +2165,15 @@ def test_failed_activation_restore_quarantines_and_boots_predecessor_once(fixtur
     )
     assert len(receipt["quarantinedFailedSurfaces"]) == 4
     assert all("exec-approvals.json" not in path for path in receipt["quarantinedFailedSurfaces"])
+    for path, expected in expected_files.items():
+        info = path.stat()
+        assert (
+            path.read_bytes(), stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid,
+        ) == expected
+    assert subprocess.run(
+        ["/usr/bin/xattr", "-p", "com.openclaw.snapshot-test", str(fixture.paths.gateway_plist)],
+        check=True, capture_output=True,
+    ).stdout == gateway_xattr
 
 
 def test_historical_different_profile_snapshot_cannot_start_activation(
@@ -2363,8 +2664,9 @@ def upgrade_fixture(fixture):
     package = fixture.candidate / "package.json"
     package.write_text(json.dumps({"name": "openclaw", "version": "2026.9.2",
                                    "openclaw": {"schemaVersions": {"state": 15, "agent": 19}}}) + "\n")
-    migration = fixture.candidate / "dist" / "commands" / "doctor.worker.js"
-    migration.write_text("// Native Doctor owns schema migrations.\n")
+    # The current candidate already carries its Doctor leaf; the existing
+    # UpgradeBackend owns synthetic migration behavior, not a retired export.
+    assert (fixture.candidate / "dist" / "commands" / "doctor.worker.js").is_file()
     chmod_tree(fixture.candidate, False)
     fixture.seal = fixture.root / "upgrade-seal.json"
     activate_module.create_candidate_seal(fixture.paths, fixture.candidate, CANDIDATE_COMMIT, fixture.seal)
@@ -2566,7 +2868,7 @@ def test_partial_upgrade_restore_extraction_failure_preserves_unreadable_preimag
     assert recovery.gateway_boots == recovery.node_boots == 0
 
 
-@pytest.mark.parametrize("failure", [None, "nonzero", "timeout", "malformed", "advisory", "maintenance-refusal", "config-refusal", "wrong-mode"])
+@pytest.mark.parametrize("failure", [None, "nonzero", "timeout", "malformed", "advisory", "maintenance-refusal", "config-refusal", "wrong-mode", "stdout-only", "non-object"])
 @pytest.mark.parametrize("tmp_alias", [False, True])
 def test_native_migration_invoker_uses_one_native_doctor_and_protected_result(monkeypatch, upgrade_fixture, failure, tmp_alias):
     fixture, _target = upgrade_fixture
@@ -2584,6 +2886,8 @@ def test_native_migration_invoker_uses_one_native_doctor_and_protected_result(mo
         report["maintenanceRefusal"] = {"kind": "data-at-risk", "reason": "active-mutation"}
     elif failure == "config-refusal":
         report["configWriteRefusal"] = {"reason": "conflict", "keys": ["agents"]}
+    if failure == "non-object":
+        report = []
     calls = []
     def fake_run(argv, timeout, *, cwd, env):
         calls.append((argv, timeout, cwd, env))
@@ -2595,37 +2899,76 @@ def test_native_migration_invoker_uses_one_native_doctor_and_protected_result(mo
         assert "OPENCLAW_MIGRATION_ENTRYPOINT" not in env
         assert env["OPENCLAW_SUPERVISOR_MODE"] == env["OPENCLAW_SERVICE_REPAIR_POLICY"] == "external"
         if "OPENCLAW_NATIVE_SECURITY_SDK" in env:
+            assert env["OPENCLAW_NATIVE_SECURITY_SDK"] == str(
+                fixture.candidate / "dist" / "plugin-sdk" / "security-runtime.js"
+            )
+            assert argv[:3] == (str(fixture.paths.node), "--input-type=module", "--eval")
             assert "resolvePreferredOpenClawTmpDir" in argv[-1]
             return activate_module.CommandResult(argv, 0, json.dumps({"root": str(native_tmp)}).encode(), b"", 1, False)
         assert argv == (str(fixture.paths.node), str(fixture.candidate / "openclaw.mjs"),
                         "doctor", "--repair", "--non-interactive", "--no-workspace-suggestions")
         target = Path(env["OPENCLAW_UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH"])
         assert target.parent == native_tmp
-        target.write_bytes(b"malformed" if failure == "malformed" else json.dumps(report).encode())
-        target.chmod(0o644 if failure == "wrong-mode" else 0o600)
+        if failure != "stdout-only":
+            target.write_bytes(b"malformed" if failure == "malformed" else json.dumps(report).encode())
+            target.chmod(0o644 if failure == "wrong-mode" else 0o600)
         return activate_module.CommandResult(
             argv, 2 if failure == "nonzero" else 0,
-            b"Doctor diagnostic output is not its success receipt",
+            (json.dumps({"status": "ok"}).encode() if failure == "stdout-only" else
+             b"Doctor stdout privateDiagnostic must-not-escape is not its success receipt"),
             b"private diagnostic never exposed", 1, failure == "timeout",
         )
     monkeypatch.setattr(activate_module, "run_bounded", fake_run)
     backend = activate_module.SystemBackend(fixture.paths)
     if failure is None:
         observed = backend.migrate_state_once(fixture.candidate)
+        assert observed["schemaVersion"] == 2
         assert observed["status"] == "completed"
         assert observed["declaredSchemaVersions"] == {"state": 15, "agent": 19}
         assert observed["doctor"] == report
         assert Path(observed["doctorResultPath"]).stat().st_mode & 0o777 == 0o400
         assert Path(observed["doctorResultPath"]).parent == fixture.root
+        assert observed["doctorResultSha256"] == hashlib.sha256(
+            Path(observed["doctorResultPath"]).read_bytes()
+        ).hexdigest()
     else:
         with pytest.raises(activate_module.ActivationError) as error:
             backend.migrate_state_once(fixture.candidate)
-        assert "private" not in str(error.value)
+        for sensitive_text in ("private diagnostic never exposed", "privateDiagnostic", "must-not-escape"):
+            assert sensitive_text not in str(error.value)
     assert len(calls) == 2
+    assert len(backend.command_evidence) == 2
+    for command_evidence, call in zip(backend.command_evidence, calls):
+        assert set(command_evidence) == activate_module.COMMAND_EVIDENCE_KEYS
+        # Keep the original value-free command envelope checks for both owners.
+        assert command_evidence["executable"] == call[0][0]
     evidence = json.dumps(backend.command_evidence)
     assert "private diagnostic never exposed" not in evidence
     assert "privateDiagnostic" not in evidence
     assert "must-not-escape" not in evidence
+
+
+@pytest.mark.parametrize("declared_version", [0, True, "19"])
+def test_native_migration_invoker_rejects_invalid_declared_schema_before_commands(
+    monkeypatch, upgrade_fixture, declared_version
+):
+    fixture, _target = upgrade_fixture
+    package = fixture.candidate / "package.json"
+    package.chmod(0o644)
+    value = json.loads(package.read_text())
+    value["openclaw"]["schemaVersions"]["agent"] = declared_version
+    package.write_text(json.dumps(value, sort_keys=True) + "\n")
+    package.chmod(0o444)
+    calls = []
+    def unexpected_run(argv, _timeout, **_kwargs):
+        calls.append(argv)
+        raise AssertionError("invalid declared schema must fail before native commands")
+    monkeypatch.setattr(activate_module, "run_bounded", unexpected_run)
+    backend = activate_module.SystemBackend(fixture.paths)
+    with pytest.raises(activate_module.ActivationError, match="native state migration contract drift"):
+        backend.migrate_state_once(fixture.candidate)
+    assert calls == []
+    assert backend.command_evidence == []
 
 
 def test_reduced_source_has_no_initial_cutover_migration_or_plugin_install_contract():
@@ -3180,7 +3523,15 @@ def test_snapshot_capture_accepts_legacy_predecessor_and_observes_stopped(
     )
 
     assert receipt["manifestPath"] == str(manifest)
+    assert receipt["tarVolumeUuid"] == "11111111-2222-3333-4444-555555555555"
+    assert json.loads(manifest.read_text())["tarVolumeUuid"] == receipt["tarVolumeUuid"]
     assert [item[0] for item in calls] == ["/usr/bin/tar"]
+    assert calls[0][4] == "-czpf"
+    archive = output_root / "stopped-snapshot.tar"
+    with archive.open("rb") as stream:
+        assert stream.read(2) == b"\x1f\x8b"
+    assert receipt["tarPath"] == str(archive)
+    assert receipt["tarSha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
     assert calls[0][8:] == (
         str(fixture.paths.predecessor_state_dir).lstrip("/"),
         str(fixture.paths.gateway_plist).lstrip("/"),
@@ -3197,114 +3548,32 @@ def test_snapshot_capture_accepts_legacy_predecessor_and_observes_stopped(
     assert stat.S_IMODE(manifest.stat().st_mode) == 0o400
 
 
-@pytest.mark.parametrize("drift", ["none", "protected-state", "archive"])
-def test_snapshot_finalization_after_capture_dependency_failure(
-    monkeypatch, fixture: Fixture, drift: str, *, volume_reader_failure: bool = False
-):
-    backend = FakeBackend(fixture)
-    calls = []
+@pytest.mark.parametrize("with_uuid", [False, True])
+def test_snapshot_old_and_uuid_shapes_keep_activation_and_restore_equality(fixture: Fixture, with_uuid: bool):
+    if with_uuid:
+        value = json.loads(fixture.snapshot.read_text())
+        value["tarVolumeUuid"] = "11111111-2222-3333-4444-555555555555"
+        fixture.snapshot.chmod(0o600)
+        fixture.snapshot.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        fixture.snapshot.chmod(0o400)
+    observed = activate_module.load_stopped_snapshot(fixture.paths, fixture.snapshot, sealed_candidate(fixture))
+    assert ("tarVolumeUuid" in observed) is with_uuid
+    failed = run(fixture, FakeBackend(fixture, gateway_failure=True))
+    assert failed["outcome"] == "snapshot_restore_required"
+    assert failed["snapshot"] == observed
+    restored = restore(fixture, StoppedRestoreBackend(fixture))
+    assert restored["outcome"] == "restored"
 
-    def fake_run(argv, _timeout, **_kwargs):
-        calls.append(argv)
-        if argv[0] != "/usr/bin/tar":
-            raise AssertionError(f"unexpected command: {argv}")
-        backend.events.append("tar")
-        subprocess.run(argv, check=True, capture_output=True)
-        return command_result(argv)
 
-    monkeypatch.setattr(activate_module, "run_bounded", fake_run)
-    if volume_reader_failure:
-        # Existing private delegation exercises its additional volume-reader tail.
-        guard = activate_module._history_volume_guard()
-        original_reader = guard.read_volume_uuid
-
-        def unavailable_reader(_path):
-            raise FileNotFoundError("test volume-reader dependency unavailable")
-
-        monkeypatch.setattr(guard, "read_volume_uuid", unavailable_reader)
-        restore_dependency = lambda: monkeypatch.setattr(guard, "read_volume_uuid", original_reader)
-        failure_message = "volume UUID is unavailable"
-    else:
-        original_stopped = backend.assert_gateway_and_node_stopped
-
-        def unavailable_post_capture_observer():
-            if backend.stopped_checks == 1:
-                raise activate_module.ActivationError("test post-capture dependency unavailable")
-            original_stopped()
-
-        monkeypatch.setattr(backend, "assert_gateway_and_node_stopped", unavailable_post_capture_observer)
-        restore_dependency = lambda: monkeypatch.setattr(backend, "assert_gateway_and_node_stopped", original_stopped)
-        failure_message = "test post-capture dependency unavailable"
-    output_root = fixture.root / "interrupted-finalization"
-    manifest = output_root / "stopped-snapshot.json"
-    with pytest.raises(activate_module.ActivationError, match=failure_message) as failure:
-        activate_module.create_stopped_snapshot(
-            fixture.paths, output_root, manifest, fixture.candidate,
-            CANDIDATE_COMMIT, fixture.seal, backend,
-        )
-
-    # Retain actual values from this failed operation, without reconstructed evidence.
-    captured = None
-    traceback = failure.value.__traceback__
-    while traceback is not None:
-        if traceback.tb_frame.f_code is activate_module.create_stopped_snapshot.__code__:
-            captured = traceback.tb_frame.f_locals.copy()
-            break
-        traceback = traceback.tb_next
-    assert captured is not None
-    assert captured["archived"].returncode == 0
-    assert not captured["archived"].timed_out
-    assert calls == [captured["tar_argv"]]
-    assert backend.events == ["stopped", "inspect", "tar"]
-    archive = captured["archive_path"]
-    assert archive.stat().st_size > 0
-    assert stat.S_IMODE(archive.stat().st_mode) == 0o400
-    assert not manifest.exists()
-    assert not (output_root / "stopped-quiescence.json").exists()
-
-    restore_dependency()
-    if drift == "protected-state":
-        config = fixture.paths.candidate_state_dir / "openclaw.json"
-        config.write_bytes(config.read_bytes() + b" ")
-    elif drift == "archive":
-        archive.chmod(0o600)
-        with archive.open("ab") as stream:
-            stream.write(b"changed captured archive")
-        archive.chmod(0o400)
-
-    # Failure released create's lock; reacquire the same owner for its exact tail.
-    descriptor = activate_module._acquire_lock(fixture.paths)
-    try:
-        arguments = {
-            key: captured[key]
-            for key in (
-                "paths", "output_root", "manifest_path", "backend",
-                "archive_path", "archive_sha", "archive_info", "predecessor",
-                "predecessor_record", "candidate_record", "plists", "external_roots",
-                "pre_capture", "invariants", "inspection_release", "approvals",
-            )
-        }
-        if drift != "none":
-            message = "captured archive binding drift" if drift == "archive" else "protected surface drift"
-            with pytest.raises(activate_module.ActivationError, match=message):
-                activate_module._finalize_stopped_snapshot_archive(**arguments)
-        else:
-            receipt = activate_module._finalize_stopped_snapshot_archive(**arguments)
-    finally:
-        activate_module._release_lock(descriptor)
-
-    assert calls == [captured["tar_argv"]]
-    if drift != "none":
-        assert not manifest.exists()
-        assert not (output_root / "stopped-quiescence.json").exists()
-        return
-    assert receipt["manifestPath"] == str(manifest)
-    assert receipt["tarSha256"] == captured["archive_sha"]
-    assert backend.events == ["stopped", "inspect", "tar", "stopped", "inspect"]
-    g6 = json.loads((output_root / "stopped-quiescence.json").read_text())
-    assert g6["preCapture"] == captured["pre_capture"]
-    activate_module.validate_stopped_command_evidence(fixture.paths, g6["postCapture"])
-    assert stat.S_IMODE(manifest.stat().st_mode) == 0o400
+@pytest.mark.parametrize("uuid_value", ["invalid", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"])
+def test_snapshot_uuid_shape_rejects_invalid_or_different_volume(fixture: Fixture, uuid_value: str):
+    value = json.loads(fixture.snapshot.read_text())
+    value["tarVolumeUuid"] = uuid_value
+    fixture.snapshot.chmod(0o600)
+    fixture.snapshot.write_text(json.dumps(value) + "\n")
+    fixture.snapshot.chmod(0o400)
+    with pytest.raises(activate_module.ActivationError, match="snapshot.*(binding|volume).*drift"):
+        activate_module.load_stopped_snapshot(fixture.paths, fixture.snapshot, sealed_candidate(fixture))
 
 
 def test_snapshot_rejects_raw_cas_drift_before_manifest_publication(
@@ -3468,7 +3737,8 @@ def test_snapshot_archive_accepts_appledouble_for_exact_surface(
     )
 
 
-def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture):
+@pytest.mark.parametrize("tar_flags", ["-cpf", "-czpf"])
+def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture, tar_flags: str):
     state = fixture.paths.predecessor_state_dir
     regular = state / "hardlink-source"
     linked = state / "hardlink-copy"
@@ -3481,7 +3751,7 @@ def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture):
     archive = fixture.root / "native-hardlink-snapshot.tar"
     subprocess.run(
         [
-            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", "-cpf",
+            "/usr/bin/tar", "--xattrs", "--acls", "--fflags", tar_flags,
             str(archive), "-C", "/",
             *(str(path).lstrip("/") for path in (
                 state, fixture.paths.gateway_plist,
@@ -3521,6 +3791,97 @@ def test_snapshot_archive_preserves_native_state_hardlinks(fixture: Fixture):
     assert restored_regular.stat().st_ino == restored_linked.stat().st_ino
     for path in (relative_link, absolute_link, fixture.paths.current_link):
         assert os.readlink(restored / str(path).lstrip("/")) == os.readlink(path)
+
+
+def test_snapshot_archive_large_valid_inventory_has_depth_bounded_work(fixture: Fixture):
+    state = str(fixture.paths.predecessor_state_dir).lstrip("/")
+    archive = fixture.root / "large-valid-inventory.tar"
+    entries = [
+        (state, tarfile.DIRTYPE, ""),
+        (str(fixture.paths.gateway_plist).lstrip("/"), tarfile.REGTYPE, ""),
+        (str(fixture.paths.node_plist).lstrip("/"), tarfile.REGTYPE, ""),
+        (str(fixture.paths.current_link).lstrip("/"), tarfile.SYMTYPE, str(fixture.predecessor)),
+    ]
+    for index in range(1_000):
+        entries.extend([
+            (f"{state}/branch-{index}/regular", tarfile.REGTYPE, ""),
+            (f"{state}/branch-{index}/alias", tarfile.SYMTYPE, "/private/metadata-target"),
+        ])
+    with tarfile.open(archive, "w") as output:
+        for name, kind, target in entries:
+            member = tarfile.TarInfo(name)
+            member.type = kind
+            member.linkname = target
+            output.addfile(member)
+
+    # Count executed validator operations, not elapsed time. Stop a regressed
+    # Cartesian scan early rather than turning the regression into a slow test.
+    budget = 32 * sum(name.count("/") + 1 for name, _, _ in entries)
+    operations = 0
+    validator_file = activate_module.validate_snapshot_archive_members.__code__.co_filename
+
+    def count_work(frame, event, arg):
+        nonlocal operations
+        if event == "line" and frame.f_code.co_filename == validator_file:
+            operations += 1
+            assert operations <= budget, "archive validation exceeded total-path-depth work bound"
+        return count_work
+
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(count_work)
+        activate_module.validate_snapshot_archive_members(
+            fixture.paths, archive, str(fixture.predecessor)
+        )
+    finally:
+        sys.settrace(previous_trace)
+    assert operations > 0
+
+
+@pytest.mark.parametrize("case", ["link-first", "descendant-first", "duplicate"])
+def test_snapshot_archive_rejects_unordered_link_descendants_and_duplicates(
+    fixture: Fixture, case: str,
+):
+    state = str(fixture.paths.predecessor_state_dir).lstrip("/")
+    archive = fixture.root / "unordered-symlink-descendant.tar"
+    link = (f"{state}/alias", tarfile.SYMTYPE, "/private/metadata-target")
+    child = (f"{state}/alias/deep/child", tarfile.REGTYPE, "")
+    entries = [
+        (state, tarfile.DIRTYPE, ""),
+        (str(fixture.paths.gateway_plist).lstrip("/"), tarfile.REGTYPE, ""),
+        (str(fixture.paths.node_plist).lstrip("/"), tarfile.REGTYPE, ""),
+        (str(fixture.paths.current_link).lstrip("/"), tarfile.SYMTYPE, str(fixture.predecessor)),
+        *([child, child] if case == "duplicate" else
+          [child, link] if case == "descendant-first" else [link, child]),
+    ]
+    with tarfile.open(archive, "w") as output:
+        for name, kind, target in entries:
+            member = tarfile.TarInfo(name)
+            member.type = kind
+            member.linkname = target
+            output.addfile(member)
+    with pytest.raises(activate_module.ActivationError, match="archive inventory drift"):
+        activate_module.validate_snapshot_archive_members(
+            fixture.paths, archive, str(fixture.predecessor)
+        )
+
+
+def test_snapshot_archive_link_prefix_sibling_is_not_a_descendant(fixture: Fixture):
+    state = fixture.paths.predecessor_state_dir
+    (state / "alias").symlink_to("/private/metadata-target")
+    sibling = state / "alias-sibling"
+    sibling.mkdir()
+    (sibling / "child").write_text("ordinary state\n")
+    archive = fixture.root / "link-prefix-sibling.tar"
+    with tarfile.open(archive, "w") as output:
+        for path in (
+            state, fixture.paths.gateway_plist, fixture.paths.node_plist, fixture.paths.current_link,
+        ):
+            output.add(path, arcname=str(path).lstrip("/"), recursive=True)
+    activate_module.validate_snapshot_archive_members(
+        fixture.paths, archive, str(fixture.predecessor)
+    )
+
 
 @pytest.mark.parametrize(
     "case",
@@ -3610,7 +3971,7 @@ def test_snapshot_archive_rejects_unsafe_state_hardlinks(fixture: Fixture, case:
 @pytest.mark.parametrize(
     ("target", "accepted"),
     [
-        ("/Users/operator/.ssh", True),
+        ("/example/forbidden/.ssh", True),
         ("../../outside-state", False),
         ("nested/target.txt", True),
     ],
@@ -3663,7 +4024,7 @@ def test_snapshot_archive_rejects_member_beneath_absolute_state_symlink(
     fixture: Fixture,
 ):
     state_link = fixture.paths.predecessor_state_dir / "state-link"
-    state_link.symlink_to("/Users/operator/.ssh")
+    state_link.symlink_to("/example/forbidden/.ssh")
     archive = fixture.root / "state-symlink-descendant-snapshot.tar"
     with tarfile.open(archive, "w") as output:
         for path in (
@@ -3737,9 +4098,20 @@ def test_snapshot_rejects_retired_schema_v1(fixture: Fixture):
         )
 
 
+@pytest.mark.parametrize("inspector_kind", ["native-sdk", "historical-infra"])
 def test_system_exec_approvals_inspector_uses_exact_candidate_and_private_paths(
-    monkeypatch, fixture: Fixture
+    monkeypatch, fixture: Fixture, inspector_kind: str
 ):
+    inspector = fixture.candidate / "dist" / "plugin-sdk" / "exec-approvals-runtime.js"
+    if inspector_kind == "historical-infra":
+        # Historical releases remain readable through the existing fallback;
+        # default current candidates must exercise the published SDK path.
+        legacy = fixture.candidate / "dist" / "infra" / "exec-approvals-inspection.js"
+        chmod_tree(fixture.candidate, True)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(inspector.read_bytes())
+        chmod_tree(fixture.candidate, False)
+        inspector = legacy
     calls: list[tuple[tuple[str, ...], Path | None, dict[str, str] | None]] = []
     monkeypatch.setenv(
         "OPENCLAW_UNRELATED_PRIVATE_VALUE",
@@ -3773,9 +4145,9 @@ def test_system_exec_approvals_inspector_uses_exact_candidate_and_private_paths(
     assert environment["OPENCLAW_STATE_DIR"] == str(
         fixture.paths.candidate_state_dir
     )
-    assert environment["OPENCLAW_APPROVALS_INSPECTOR"] == str(
-        fixture.candidate / "dist" / "infra" / "exec-approvals-inspection.js"
-    )
+    assert environment["OPENCLAW_APPROVALS_INSPECTOR"] == str(inspector)
+    assert 'typeof module.inspectExecApprovalsState !== "function"' in argv[3]
+    assert "module.inspectExecApprovalsState({" in argv[3]
     assert environment["OPENCLAW_LEGACY_EXEC_APPROVALS_PATH"] == str(
         fixture.legacy_exec_approvals_path
     )
@@ -3889,6 +4261,9 @@ def test_system_candidate_discord_verifies_bundled_loader_without_mutation(
     assert [row["purpose"] for row in backend.command_evidence] == [
         "candidate_discord_registry", "candidate_discord_verification",
     ]
+    # The native CLI owns these reads; no retired inline module/facade loader.
+    assert all("--eval" not in call["argv"] and "--input-type=module" not in call["argv"]
+               for call in captured)
     for call in captured:
         assert call["cwd"] == fixture.candidate
         assert call["env"]["OPENCLAW_STATE_DIR"] == str(fixture.paths.candidate_state_dir)
@@ -3944,7 +4319,7 @@ def test_system_candidate_discord_rejects_noncanonical_bundled_selection(
 def test_system_candidate_discord_executes_canonical_cli_with_real_node(
     fixture: Fixture, cli_drift: str | None
 ):
-    pinned_node = activate_module.OPERATOR.require_path("paths.node_binary")
+    pinned_node = activate_module.OPERATOR.require_path('paths.node_binary')
     node = pinned_node if pinned_node.is_file() else Path(shutil.which("node") or "")
     if not node.is_file():
         pytest.skip("real Node executable unavailable")
@@ -4617,19 +4992,773 @@ def test_system_gateway_verification_rejects_generation_that_never_stabilizes(
         backend.verify(fixture.candidate, 1, 2)
 
 
-def test_daily_retention_rejects_invalid_terminal_without_starting_children(fixture, monkeypatch):
-    from scripts import openclaw_retention_cleanup_cron as cron
-    from scripts import openclaw_runtime_activate as live_owner
-    run(fixture)
-    result = json.loads(fixture.paths.result.read_text())
-    result["outcome"] = "snapshot_restore_required"
-    fixture.paths.result.chmod(0o600)
-    fixture.paths.result.write_text(json.dumps(result))
-    fixture.paths.result.chmod(0o400)
-    monkeypatch.setattr(live_owner, "live_paths", lambda: fixture.paths)
-    calls = []
-    monkeypatch.setattr(cron, "run_child", lambda *args, **kwargs: calls.append(args))
-    results = cron.run_steps(apply=True)
-    assert len(results) == 4 and all(row.returncode == 1 for row in results)
-    assert all("activation retirement blocked" in row.stderr for row in results)
-    assert calls == [] and fixture.paths.result.exists()
+# Explicit Node transitions use the existing snapshot/fence/activation/restore
+# owner. Only OS ScreenCapture facts are isolated; filesystem effects are real
+# within the disposable fixture, with no real launchctl or Node process.
+_node_transition_system_backend = activate_module.SystemBackend
+
+
+class NodeTransitionBackend(StoppedRestoreBackend):
+    def __init__(self, fixture, *, paths=None, **kwargs):
+        super().__init__(fixture, **kwargs)
+        self.paths = fixture.paths if paths is None else paths
+        self.boot_nodes = []
+
+    def use_runtime_paths(self, paths):
+        _node_transition_system_backend.use_runtime_paths(self, paths)
+
+    def verify_screen_capture_continuity(self):
+        return _node_transition_system_backend.verify_screen_capture_continuity(self)
+
+    def bootstrap_gateway_once(self):
+        plists = activate_module.validate_plists(self.paths)
+        assert all(plists[label]["sha256"] for label in ("gateway", "node"))
+        activate_module.validate_support_links(self.paths)
+        self.boot_nodes.append(self.paths.node)
+        super().bootstrap_gateway_once()
+
+    def bootstrap_node_once(self):
+        self.boot_nodes.append(self.paths.node)
+        super().bootstrap_node_once()
+
+
+@pytest.fixture
+def node_transition_fixture(fixture, monkeypatch):
+    predecessor_node = fixture.paths.node
+    candidate_node = predecessor_node.parent.parent.parent / "node-v24.22.1" / "bin" / "node"
+    candidate_node.parent.mkdir(parents=True)
+    candidate_node.write_text("#!/bin/sh\nprintf 'candidate-node-fixture\\n'\n")
+    candidate_node.chmod(0o555)
+    binding = fixture.paths.predecessor_state_dir / "screen-capture-binding.json"
+    binding.write_text('{"syntheticPredecessor":true}\n')
+    binding.chmod(0o400)
+    prior_sha = hashlib.sha256(binding.read_bytes()).hexdigest()
+    new_sha = hashlib.sha256(candidate_node.read_bytes()).hexdigest()
+    precondition = fixture.root / "candidate-screen-capture-precondition.json"
+    precondition.write_text(json.dumps({
+        "schemaVersion": 2,
+        "kind": "node_toolchain_screen_capture_precondition",
+        "predecessorNode": str(predecessor_node),
+        "predecessorBinding": {"path": str(binding), "sha256": prior_sha},
+        "candidateNode": str(candidate_node), "candidateSha256": new_sha,
+        "effectiveCaptureVerified": False, "scheduledSyncProven": False,
+        "effectiveFilesystemAccessVerified": False,
+        "filesystemPermission": {"service": "kTCCServiceSystemPolicyAllFiles", "authValue": 2},
+        "tccMutated": False,
+    }, sort_keys=True) + "\n")
+    precondition.chmod(0o400)
+    precondition_sha = hashlib.sha256(precondition.read_bytes()).hexdigest()
+
+    def old_binding(path, node, **_):
+        assert path == binding and node == predecessor_node
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == prior_sha
+        return {"bindingSha256": prior_sha, "effectiveCaptureVerified": True}
+
+    fixture.node_transition_precondition_calls = []
+    def candidate_precondition(path, node, *, expected_sha256):
+        fixture.node_transition_precondition_calls.append({
+            "path": path, "node": node, "sha256": expected_sha256,
+            "fenceExists": activate_module._start_fence_path(fixture.paths).exists(),
+            "selected": fixture.paths.current_link.resolve()})
+        assert path == precondition and node == candidate_node
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
+            raise activate_module.ActivationError("fixture candidate precondition digest drift")
+        return {
+            "kind": "node_toolchain_screen_capture_precondition",
+            "preconditionSha256": expected_sha256, "candidateNodeSha256": new_sha,
+            "predecessorBindingSha256": prior_sha,
+            "candidateCodeIdentityVerified": True,
+            "recordedCandidatePermissionVerified": True,
+            "recordedCandidateFilesystemPermissionVerified": True,
+            "effectiveFilesystemAccessVerified": False,
+            "effectiveCaptureVerified": False, "scheduledSyncProven": False,
+        }
+
+    monkeypatch.setattr(activate_module, "verify_screen_capture_binding", old_binding)
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition",
+                        candidate_precondition, raising=False)
+    node_command_alias = fixture.root / ".local/bin/node"
+    node_prefix_alias = fixture.root / ".local/opt/node-current"
+    node_command_alias.parent.mkdir(parents=True)
+    node_prefix_alias.parent.mkdir(parents=True)
+    node_command_alias.symlink_to(predecessor_node)
+    node_prefix_alias.symlink_to(predecessor_node.parent.parent)
+    cli_wrapper = fixture.root / ".local/bin/openclaw"
+    cli_wrapper.write_text(f'#!/bin/sh\nexec {predecessor_node} "{fixture.root}/host-cli-fixture.mjs" "$@"\n')
+    cli_wrapper.chmod(0o755)
+    wrapper_before = cli_wrapper.read_bytes()
+    wrapper_after = wrapper_before.replace(
+        ("exec " + str(predecessor_node) + " ").encode(),
+        ("exec " + str(fixture.paths.node_alias / "bin/node") + " ").encode(), 1)
+    transition_type = getattr(activate_module, "NodeToolchainTransition", SimpleNamespace)
+    transition = transition_type(candidate=candidate_node,
+        predecessor_sha256=hashlib.sha256(predecessor_node.read_bytes()).hexdigest(),
+        candidate_sha256=new_sha, candidate_screen_capture_precondition=precondition,
+        candidate_screen_capture_precondition_sha256=precondition_sha,
+        compatibility_aliases=((node_command_alias, str(predecessor_node)),
+                               (node_prefix_alias, str(predecessor_node.parent.parent))),
+        cli_wrapper_predecessor_sha256=hashlib.sha256(wrapper_before).hexdigest(),
+        cli_wrapper_candidate_sha256=hashlib.sha256(wrapper_after).hexdigest(),
+        cli_wrapper_mode=0o755)
+    fixture.paths = replace(fixture.paths, screen_capture_binding=binding, operator_home=fixture.root)
+    if "node_toolchain_transition" in activate_module.ActivationPaths.__dataclass_fields__:
+        fixture.paths = replace(fixture.paths, node_toolchain_transition=transition)
+    else:
+        # RED uses the original normal owner, which ignores this test-only
+        # declaration. It must capture/boot normally, then fail on observed
+        # four-base inventory and old executable, not on an absent new API.
+        object.__setattr__(fixture.paths, "node_toolchain_transition", transition)
+    for plist in (fixture.paths.gateway_plist, fixture.paths.node_plist):
+        value = plistlib.loads(plist.read_bytes())
+        value["EnvironmentVariables"]["PATH"] = f"{predecessor_node.parent}:/usr/bin:/bin"
+        value["EnvironmentVariables"]["UNRELATED_SENTINEL"] = "preserve"
+        plist.write_bytes(plistlib.dumps(value))
+    fixture.node_transition_original = {
+        "gateway": fixture.paths.gateway_plist.read_bytes(),
+        "node": fixture.paths.node_plist.read_bytes(),
+        "predecessorNode": predecessor_node.read_bytes(),
+        "candidateNode": candidate_node.read_bytes(),
+        "alias": os.readlink(fixture.paths.node_alias),
+        "compatibilityAliases": {str(node_command_alias): os.readlink(node_command_alias),
+                                 str(node_prefix_alias): os.readlink(node_prefix_alias)},
+        "wrapper": wrapper_before, "wrapperAfter": wrapper_after,
+    }
+    output = fixture.root / "node-transition-snapshot"
+    fixture.snapshot = output / "stopped-snapshot.json"
+    activate_module.create_stopped_snapshot(
+        fixture.paths, output, fixture.snapshot, fixture.candidate,
+        CANDIDATE_COMMIT, fixture.seal, NodeTransitionBackend(fixture))
+    return fixture
+
+
+
+def test_node_transition_snapshot_is_fifth_base_member(node_transition_fixture):
+    item = node_transition_fixture
+    snapshot = json.loads(item.snapshot.read_text())
+    assert snapshot["schemaVersion"] == 5 and snapshot["inventoryCount"] == 8
+    assert snapshot["recoveryRoots"] == []
+    assert activate_module.snapshot_members(item.paths)[4] == item.paths.node_alias
+    with tarfile.open(snapshot["tarPath"]) as archive:
+        member = archive.getmember(str(item.paths.node_alias).lstrip("/"))
+        assert member.issym() and member.linkname == item.node_transition_original["alias"]
+    assert snapshot["nodeToolchain"]["candidatePlists"]["gateway"]["predecessorSha256"] == snapshot["gatewayPlistSha256"]
+    assert len(activate_module.snapshot_members(item.paths)) == 8
+    assert set(snapshot["nodeToolchain"]["cliWrapper"]) == {"path", "mode", "predecessorSha256", "sha256"}
+    with tarfile.open(snapshot["tarPath"]) as archive:
+        for path, target in item.node_transition_original["compatibilityAliases"].items():
+            member = archive.getmember(path.lstrip("/"))
+            assert member.issym() and member.linkname == target
+        member = archive.getmember(str(item.root / ".local/bin/openclaw").lstrip("/"))
+        assert member.isfile() and archive.extractfile(member).read() == item.node_transition_original["wrapper"]
+
+
+def test_node_transition_applies_one_matched_pair_and_idempotent_receipt(node_transition_fixture):
+    item = node_transition_fixture
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    new_node = item.paths.node_toolchain_transition.candidate
+    assert result["outcome"] == "activated"
+    assert backend.boot_nodes == [new_node, new_node]
+    assert (backend.gateway_boots, backend.node_boots) == (1, 1)
+    assert os.readlink(item.paths.node_alias) == str(new_node.parent.parent)
+    assert item.paths.node.read_bytes() == item.node_transition_original["predecessorNode"]
+    assert new_node.read_bytes() == item.node_transition_original["candidateNode"]
+    for plist in (item.paths.gateway_plist, item.paths.node_plist):
+        value = plistlib.loads(plist.read_bytes())
+        assert value["ProgramArguments"][0] == str(new_node)
+        assert value["EnvironmentVariables"]["PATH"] == f"{new_node.parent}:/usr/bin:/bin"
+        assert value["EnvironmentVariables"]["UNRELATED_SENTINEL"] == "preserve"
+    assert result["verification"]["screenCaptureContinuityPending"] is True
+    assert result["verification"]["screenCapturePrecondition"]["effectiveCaptureVerified"] is False
+    assert "screenCaptureContinuity" not in result["verification"]
+    calls = item.node_transition_precondition_calls
+    assert calls[0]["fenceExists"] is False and calls[0]["selected"] == item.predecessor
+    assert calls[-1]["fenceExists"] is True and calls[-1]["selected"] == item.candidate
+    assert all(row["sha256"] == item.paths.node_toolchain_transition.candidate_screen_capture_precondition_sha256
+               for row in calls)
+    controlled = [item.paths.node_alias, item.root / ".local/bin/node",
+                  item.root / ".local/opt/node-current", item.root / ".local/bin/openclaw"]
+    inodes = [path.lstat().st_ino for path in controlled]
+    assert run(item, backend) == result
+    assert [path.lstat().st_ino for path in controlled] == inodes
+    assert (backend.gateway_boots, backend.node_boots) == (1, 1)
+    assert (item.root / ".local/bin/openclaw").read_bytes() == item.node_transition_original["wrapperAfter"]
+    assert os.readlink(item.root / ".local/bin/node") == str(item.paths.node_alias / "bin/node")
+    assert os.readlink(item.root / ".local/opt/node-current") == str(item.paths.node_alias)
+
+
+@pytest.mark.parametrize("drift", ["old-digest", "new-digest", "alias", "plist", "precondition"])
+def test_node_transition_rejects_drift_before_start_fence(node_transition_fixture, drift):
+    item = node_transition_fixture
+    transition = item.paths.node_toolchain_transition
+    if drift == "old-digest":
+        item.paths = replace(item.paths, node_toolchain_transition=replace(transition, predecessor_sha256="0" * 64))
+    elif drift == "new-digest":
+        item.paths = replace(item.paths, node_toolchain_transition=replace(transition, candidate_sha256="0" * 64))
+    elif drift == "alias":
+        item.paths.node_alias.unlink()
+        item.paths.node_alias.symlink_to(transition.candidate.parent.parent)
+    elif drift == "plist":
+        value = plistlib.loads(item.paths.node_plist.read_bytes())
+        value["EnvironmentVariables"]["UNRELATED_SENTINEL"] = "drift"
+        item.paths.node_plist.write_bytes(plistlib.dumps(value))
+    else:
+        item.paths = replace(item.paths, node_toolchain_transition=replace(
+            transition, candidate_screen_capture_precondition_sha256="0" * 64))
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "failed_before_apply"
+    assert (backend.gateway_boots, backend.node_boots) == (0, 0)
+    assert not activate_module._start_fence_path(item.paths).exists()
+    assert item.paths.current_link.resolve() == item.predecessor
+
+
+@pytest.mark.parametrize("failure", ["gateway", "node"])
+def test_node_transition_boot_failure_restores_old_pair_without_replay(node_transition_fixture, failure):
+    item = node_transition_fixture
+    backend = NodeTransitionBackend(item, gateway_failure=failure == "gateway",
+                                    node_bootstrap_failure=failure == "node")
+    result = run(item, backend)
+    assert result["outcome"] == "snapshot_restore_required"
+    recovery = NodeTransitionBackend(item)
+    restored = restore(item, recovery)
+    assert restored["outcome"] == "restored_stopped"
+    assert (recovery.gateway_boots, recovery.node_boots) == (0, 0)
+    assert os.readlink(item.paths.node_alias) == item.node_transition_original["alias"]
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert item.paths.node_plist.read_bytes() == item.node_transition_original["node"]
+    assert item.paths.current_link.resolve() == item.predecessor
+
+
+def test_node_transition_permission_loss_does_not_block_snapshot_rollback(node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    assert run(item, NodeTransitionBackend(item))["outcome"] == "activated"
+    def revoked(*args, **kwargs):
+        raise activate_module.ActivationError("candidate grant revoked after boot")
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition", revoked)
+    recovery = NodeTransitionBackend(item)
+    restored = activate_module.restore_failed_activation(
+        item.paths, item.candidate, CANDIDATE_COMMIT, item.seal, item.snapshot,
+        restore_result_path(item), recovery, after_success=True)
+    assert restored["outcome"] == "restored_stopped"
+    assert restored["afterSuccessfulUpgrade"] is True
+    assert recovery.boot_nodes == []
+    assert os.readlink(item.paths.node_alias) == item.node_transition_original["alias"]
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert activate_module.terminal_restore_outcome(
+        item.paths, json.loads(item.paths.result.read_text()), item.paths.result.read_bytes(),
+        restored, restore_result_path(item).stat()) == "restored_stopped"
+
+
+def test_node_transition_partial_apply_reuses_exact_old_snapshot(node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    native = activate_module.atomic_symlink
+    def fail_alias(link, target):
+        if link == item.paths.node_alias:
+            raise activate_module.ActivationError("candidate alias write failed")
+        return native(link, target)
+    monkeypatch.setattr(activate_module, "atomic_symlink", fail_alias)
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "snapshot_restore_required"
+    assert backend.boot_nodes == []
+    monkeypatch.setattr(activate_module, "atomic_symlink", native)
+    recovery = NodeTransitionBackend(item)
+    restored = restore(item, recovery)
+    assert restored["restoreApplied"] is True
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert item.paths.node_plist.read_bytes() == item.node_transition_original["node"]
+    assert os.readlink(item.paths.node_alias) == item.node_transition_original["alias"]
+
+
+def test_node_transition_fence_binds_toolchain_and_no_second_start(node_transition_fixture):
+    item = node_transition_fixture
+    first = run(item, NodeTransitionBackend(item))
+    fence_path = activate_module._start_fence_path(item.paths)
+    fence = json.loads(fence_path.read_text())
+    valid, _ = activate_module.terminal_fence_bindings(
+        first, fence, hashlib.sha256(fence_path.read_bytes()).hexdigest(), item.paths.result, fence_path)
+    assert valid is True
+    tampered = copy.deepcopy(fence)
+    tampered["nodeToolchain"]["candidate"]["sha256"] = "0" * 64
+    valid, _ = activate_module.terminal_fence_bindings(
+        first, tampered, hashlib.sha256(fence_path.read_bytes()).hexdigest(), item.paths.result, fence_path)
+    assert valid is False
+    item.paths.result.unlink()
+    resumed_backend = NodeTransitionBackend(item)
+    resumed = run(item, resumed_backend)
+    assert resumed["outcome"] == "snapshot_restore_required"
+    assert resumed["firstBootAttempted"] is None
+    assert resumed_backend.boot_nodes == []
+
+
+def test_legacy_same_node_snapshot_keeps_four_base_members(fixture):
+    assert json.loads(fixture.snapshot.read_text())["schemaVersion"] == 2
+    assert len(activate_module.snapshot_members(fixture.paths)) == 4
+    assert fixture.paths.node_alias not in activate_module.snapshot_members(fixture.paths)
+    assert run(fixture)["outcome"] == "activated"
+
+
+
+def test_node_transition_keeps_original_32_external_declarations(node_transition_fixture):
+    item = node_transition_fixture
+    roots = []
+    for index in range(32):
+        root = item.root / f"recovery-{index:02d}.private.txt"
+        root.write_text(f"preserve original declaration {index}\n")
+        root.chmod(0o600)
+        roots.append(root)
+    item.paths = replace(item.paths, recovery_roots=tuple(roots))
+    output = item.root / "node-transition-32-roots-snapshot"
+    item.snapshot = output / "stopped-snapshot.json"
+    activate_module.create_stopped_snapshot(
+        item.paths, output, item.snapshot, item.candidate, CANDIDATE_COMMIT,
+        item.seal, NodeTransitionBackend(item))
+    snapshot = json.loads(item.snapshot.read_text())
+    assert snapshot["inventoryCount"] == 40
+    assert [row["path"] for row in snapshot["recoveryRoots"]] == sorted(map(str, roots))
+    assert str(item.paths.node_alias) not in [row["path"] for row in snapshot["recoveryRoots"]]
+    assert len(activate_module.snapshot_members(item.paths)) == 40
+
+
+def test_node_transition_permission_preflight_refuses_before_mutation(node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    def denied(*args, **kwargs):
+        raise activate_module.ActivationError("candidate exact path has no recorded grant")
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition", denied)
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "failed_before_apply"
+    assert backend.boot_nodes == []
+    assert not activate_module._start_fence_path(item.paths).exists()
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert os.readlink(item.paths.node_alias) == item.node_transition_original["alias"]
+
+
+def test_node_transition_archive_rejects_unrelated_alias_target(node_transition_fixture):
+    item = node_transition_fixture
+    manifest = json.loads(item.snapshot.read_text())
+    modified = item.root / "wrong-node-alias.tar"
+    with tarfile.open(manifest["tarPath"]) as source, tarfile.open(modified, "w") as output:
+        for original in source:
+            member = copy.copy(original)
+            if member.name == str(item.paths.node_alias).lstrip("/"):
+                member.linkname = str(item.root / "unrelated-toolchain")
+            output.addfile(member, source.extractfile(original) if original.isfile() else None)
+    with pytest.raises(activate_module.ActivationError, match="symlink|alias"):
+        activate_module.validate_snapshot_archive_members(
+            item.paths, modified, str(item.predecessor), manifest["recoveryRoots"])
+
+
+
+def test_node_transition_precondition_never_claims_native_acceptance(tmp_path, monkeypatch):
+    path = tmp_path / "precondition.json"
+    facts = {
+        "schemaVersion": 1, "kind": "node_toolchain_screen_capture_precondition",
+        "status": "candidate_code_identity_and_recorded_permission_verified",
+        "predecessorNode": "/synthetic/old/bin/node",
+        "predecessorBinding": {"path": "/synthetic/old-binding.json", "sha256": "a" * 64},
+        "candidateNode": "/synthetic/new/bin/node", "candidateSha256": "b" * 64,
+        "candidateCodeIdentity": {"sha256": "b" * 64},
+        "permission": {"database": "/synthetic/TCC.db"},
+        "effectiveCaptureVerified": False, "scheduledSyncProven": False, "tccMutated": False,
+    }
+    receipt = {**facts, "enrolledAt": "2026-10-21T00:00:00Z"}
+    path.write_text(json.dumps(receipt))
+    path.chmod(0o400)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(activate_module, "_node_toolchain_screen_capture_precondition_facts",
+                        lambda *args: facts)
+    verified = activate_module.verify_node_toolchain_screen_capture_precondition(
+        path, Path(facts["candidateNode"]), expected_sha256=digest)
+    assert verified["kind"] == "node_toolchain_screen_capture_precondition"
+    assert verified["effectiveCaptureVerified"] is False and verified["scheduledSyncProven"] is False
+    assert "bindingSha256" not in verified
+    with pytest.raises(activate_module.ActivationError, match="native|binding|schema|version"):
+        activate_module.verify_screen_capture_binding(path, Path(facts["candidateNode"]))
+
+
+@pytest.mark.parametrize("drift", ["digest", "mutable", "replacement", "facts", "effective"])
+def test_node_transition_precondition_pins_immutable_facts(tmp_path, monkeypatch, drift):
+    path = tmp_path / "precondition.json"
+    facts = {
+        "schemaVersion": 1, "kind": "node_toolchain_screen_capture_precondition",
+        "status": "candidate_code_identity_and_recorded_permission_verified",
+        "predecessorNode": "/synthetic/old/bin/node",
+        "predecessorBinding": {"path": "/synthetic/old-binding.json", "sha256": "a" * 64},
+        "candidateNode": "/synthetic/new/bin/node", "candidateSha256": "b" * 64,
+        "candidateCodeIdentity": {"sha256": "b" * 64},
+        "permission": {"database": "/synthetic/TCC.db"},
+        "effectiveCaptureVerified": False, "scheduledSyncProven": False, "tccMutated": False,
+    }
+    receipt = {**facts, "enrolledAt": "2026-10-21T00:00:00Z"}
+    path.write_text(json.dumps(receipt))
+    path.chmod(0o400)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if drift == "digest":
+        digest = "0" * 64
+    elif drift == "mutable":
+        path.chmod(0o600)
+    elif drift in ("replacement", "effective"):
+        path.chmod(0o600)
+        receipt["effectiveCaptureVerified" if drift == "effective" else "candidateSha256"] = True if drift == "effective" else "c" * 64
+        path.write_text(json.dumps(receipt)); path.chmod(0o400)
+        if drift == "effective":
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    else:
+        facts = {**facts, "candidateCodeIdentity": {"sha256": "c" * 64}}
+    monkeypatch.setattr(activate_module, "_node_toolchain_screen_capture_precondition_facts",
+                        lambda *args: facts)
+    with pytest.raises(activate_module.ActivationError, match="precondition|permission"):
+        activate_module.verify_node_toolchain_screen_capture_precondition(
+            path, Path(receipt["candidateNode"]), expected_sha256=digest)
+
+
+
+@pytest.fixture
+def managed_node_live_paths_fixture(node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    from scripts.operator_contract import OperatorContract
+    configured = {name: activate_module.OPERATOR.get(name, {}) for name in ("paths", "runtime", "identifiers")}
+    configured["paths"].update({
+        "runtime_releases_root": str(item.paths.releases_root), "runtime_current_link": str(item.paths.current_link),
+        "runtime_package_link": str(item.paths.package_link), "openclaw_cli": str(item.paths.bin_link),
+        "gateway_plist": str(item.paths.gateway_plist), "node_plist": str(item.paths.node_plist),
+        "node_binary": str(item.paths.node), "runtime_node_alias": str(item.paths.node_alias),
+        "state_root": str(item.paths.candidate_state_dir), "activation_lock": str(item.paths.lock),
+        "activation_result": str(item.paths.result), "screen_capture_binding": str(item.paths.screen_capture_binding),
+        "host_home": str(item.root),
+    })
+    configured["runtime"]["recovery_roots"] = []
+    monkeypatch.setattr(activate_module, "OPERATOR", OperatorContract(configured))
+    monkeypatch.setattr(activate_module.pwd, "getpwnam",
+                        lambda _: SimpleNamespace(pw_uid=item.paths.operator_uid, pw_dir=str(item.root)))
+    transition = item.paths.node_toolchain_transition
+    monkeypatch.setattr(activate_module, "MANAGED_NODE_EXECUTABLE_SHA256", {
+        item.paths.node.parent.parent.name: transition.predecessor_sha256,
+        transition.candidate.parent.parent.name: transition.candidate_sha256})
+    declaration = item.root / "node-transition-declaration.json"
+    declaration.write_text(json.dumps({
+        "schemaVersion": 1,
+        "predecessor": {"path": str(item.paths.node), "sha256": transition.predecessor_sha256},
+        "candidate": {"path": str(transition.candidate), "sha256": transition.candidate_sha256},
+        "candidateScreenCapturePrecondition": {
+            "path": str(transition.candidate_screen_capture_precondition),
+            "sha256": transition.candidate_screen_capture_precondition_sha256},
+        "compatibilityAliases": [{"path": str(path), "predecessorTarget": target}
+                                 for path, target in transition.compatibility_aliases],
+        "cliWrapper": {"path": str(item.root / ".local/bin/openclaw"),
+                       "mode": transition.cli_wrapper_mode,
+                       "predecessorSha256": transition.cli_wrapper_predecessor_sha256,
+                       "sha256": transition.cli_wrapper_candidate_sha256},
+    }, sort_keys=True) + "\n")
+    declaration.chmod(0o400)
+    item.node_transition_declaration = declaration
+    item.node_transition_declaration_sha = hashlib.sha256(declaration.read_bytes()).hexdigest()
+    return item
+
+
+def test_node_transition_live_paths_tracks_alias_cutover_and_rollback(managed_node_live_paths_fixture):
+    item = managed_node_live_paths_fixture
+    assert activate_module.live_paths().node == item.paths.node
+    assert run(item, NodeTransitionBackend(item))["outcome"] == "activated"
+    new_node = item.paths.node_toolchain_transition.candidate
+    ordinary = activate_module.live_paths()
+    assert ordinary.node == new_node and ordinary.node_toolchain_transition is None
+    declared = activate_module.live_paths(
+        node_toolchain_transition=item.node_transition_declaration,
+        node_toolchain_transition_sha256=item.node_transition_declaration_sha)
+    assert declared.node == item.paths.node and declared.node_toolchain_transition == item.paths.node_toolchain_transition
+    restored = activate_module.restore_failed_activation(
+        declared, item.candidate, CANDIDATE_COMMIT, item.seal, item.snapshot,
+        restore_result_path(item), NodeTransitionBackend(item, paths=declared), after_success=True)
+    assert restored["outcome"] == "restored_stopped"
+    assert activate_module.live_paths().node == item.paths.node
+
+
+@pytest.mark.parametrize("drift", ["unknown-toolchain", "wrong-binary", "plist-mismatch"])
+def test_node_transition_live_paths_fails_closed_on_unsupported_or_mixed_pair(managed_node_live_paths_fixture, drift):
+    item = managed_node_live_paths_fixture
+    if drift == "unknown-toolchain":
+        target = item.paths.node_alias.parent / "node-v99.0.0"
+        target.mkdir()
+        item.paths.node_alias.unlink(); item.paths.node_alias.symlink_to(target)
+    elif drift == "wrong-binary":
+        monkeypatch_target = item.paths.node
+        monkeypatch_target.chmod(0o755)
+        monkeypatch_target.write_text("#!/bin/sh\n# modified executable\nexit 0\n")
+        monkeypatch_target.chmod(0o555)
+    else:
+        item.paths.node_alias.unlink()
+        item.paths.node_alias.symlink_to(item.paths.node_toolchain_transition.candidate.parent.parent)
+    with pytest.raises(activate_module.ActivationError, match="managed Node|plist"):
+        activate_module.live_paths()
+
+
+def test_node_transition_cli_declaration_restores_explicit_old_paths_after_partial_apply(managed_node_live_paths_fixture):
+    item = managed_node_live_paths_fixture
+    transition = item.paths.node_toolchain_transition
+    value = plistlib.loads(item.paths.gateway_plist.read_bytes())
+    value["ProgramArguments"][0] = str(transition.candidate)
+    item.paths.gateway_plist.write_bytes(plistlib.dumps(value))
+    with pytest.raises(activate_module.ActivationError, match="plist"):
+        activate_module.live_paths()
+    declared = activate_module.live_paths(
+        node_toolchain_transition=item.node_transition_declaration,
+        node_toolchain_transition_sha256=item.node_transition_declaration_sha)
+    assert declared.node == item.paths.node
+    assert declared.node_toolchain_transition.candidate == transition.candidate
+
+
+@pytest.mark.parametrize("mode", ["snapshot", "activate", "restore", "node-toolchain-preflight"])
+def test_node_transition_cli_modes_share_same_pinned_declaration(managed_node_live_paths_fixture, mode):
+    item = managed_node_live_paths_fixture
+    argv = ["--node-toolchain-transition", str(item.node_transition_declaration),
+            "--node-toolchain-transition-sha256", item.node_transition_declaration_sha, mode]
+    if mode != "node-toolchain-preflight":
+        argv += ["--candidate-release", str(item.candidate), "--expected-commit", CANDIDATE_COMMIT,
+                 "--candidate-seal", str(item.seal)]
+    if mode == "snapshot":
+        argv += ["--output-root", str(item.root / "next-snapshot"),
+                 "--manifest", str(item.root / "next-snapshot/stopped-snapshot.json")]
+    elif mode in ("activate", "restore"):
+        argv += ["--stopped-snapshot-manifest", str(item.snapshot)]
+        if mode == "restore":
+            argv += ["--output", str(restore_result_path(item))]
+    args = activate_module.build_parser().parse_args(argv)
+    assert args.node_toolchain_transition == item.node_transition_declaration
+    assert args.node_toolchain_transition_sha256 == item.node_transition_declaration_sha
+    declared = activate_module.live_paths(node_toolchain_transition=args.node_toolchain_transition,
+        node_toolchain_transition_sha256=args.node_toolchain_transition_sha256)
+    assert declared.node == item.paths.node
+    assert declared.node_toolchain_transition == item.paths.node_toolchain_transition
+
+
+def test_node_transition_supported_cli_preflight_is_read_only(managed_node_live_paths_fixture, capsys):
+    item = managed_node_live_paths_fixture
+    before = (os.readlink(item.paths.node_alias), item.paths.gateway_plist.read_bytes(),
+              item.paths.node_plist.read_bytes(), os.readlink(item.paths.current_link))
+    assert activate_module.main([
+        "--node-toolchain-transition", str(item.node_transition_declaration),
+        "--node-toolchain-transition-sha256", item.node_transition_declaration_sha,
+        "node-toolchain-preflight"]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "node_toolchain_preflight_accepted_no_effects"
+    assert receipt["effectiveCandidateCaptureVerified"] is False
+    assert before == (os.readlink(item.paths.node_alias), item.paths.gateway_plist.read_bytes(),
+                      item.paths.node_plist.read_bytes(), os.readlink(item.paths.current_link))
+    assert not activate_module._start_fence_path(item.paths).exists()
+
+
+
+@pytest.mark.parametrize("live_binding_state", ["new-enrollment", "missing"])
+def test_node_transition_rollback_restores_archived_binding_after_live_enrollment_change(
+    managed_node_live_paths_fixture, monkeypatch, live_binding_state,
+):
+    item = managed_node_live_paths_fixture
+    assert run(item, NodeTransitionBackend(item))["outcome"] == "activated"
+    old_binding = item.paths.screen_capture_binding
+    original = old_binding.read_bytes()
+    if live_binding_state == "new-enrollment":
+        old_binding.chmod(0o600)
+        old_binding.write_text('{"newCandidateNativeAcceptance":true}\n')
+        old_binding.chmod(0o400)
+    else:
+        old_binding.unlink()
+    def no_current_candidate_admission(*args, **kwargs):
+        raise activate_module.ActivationError("candidate static permission/binding no longer current")
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition",
+                        no_current_candidate_admission)
+    declared = activate_module.live_paths(
+        node_toolchain_transition=item.node_transition_declaration,
+        node_toolchain_transition_sha256=item.node_transition_declaration_sha)
+    recovery = NodeTransitionBackend(item, paths=declared)
+    restored = activate_module.restore_failed_activation(
+        declared, item.candidate, CANDIDATE_COMMIT, item.seal, item.snapshot,
+        restore_result_path(item), recovery, after_success=True)
+    assert restored["outcome"] == "restored_stopped" and recovery.boot_nodes == []
+    assert old_binding.read_bytes() == original
+    assert activate_module.live_paths().node == item.paths.node
+    assert activate_module.terminal_restore_outcome(
+        declared, json.loads(item.paths.result.read_text()), item.paths.result.read_bytes(),
+        restored, restore_result_path(item).stat()) == "restored_stopped"
+
+
+
+def _assert_original_node_compatibility_controls(item):
+    for path, target in item.node_transition_original["compatibilityAliases"].items():
+        assert os.readlink(path) == target
+    wrapper = item.root / ".local/bin/openclaw"
+    assert wrapper.read_bytes() == item.node_transition_original["wrapper"]
+    assert stat.S_IMODE(wrapper.stat().st_mode) == 0o755
+
+
+@pytest.mark.parametrize("control", ["command-alias", "prefix-alias", "wrapper-bytes", "wrapper-postimage", "unowned-alias"])
+def test_node_transition_rejects_compatibility_control_drift_before_fence(node_transition_fixture, control):
+    item = node_transition_fixture
+    transition = item.paths.node_toolchain_transition
+    if control in ("command-alias", "prefix-alias"):
+        alias = item.root / (".local/bin/node" if control == "command-alias" else ".local/opt/node-current")
+        alias.unlink(); alias.symlink_to(item.root / "unowned-node")
+    elif control == "wrapper-bytes":
+        wrapper = item.root / ".local/bin/openclaw"
+        wrapper.write_bytes(wrapper.read_bytes() + b"# unexpected change\n")
+    elif control == "wrapper-postimage":
+        item.paths = replace(item.paths, node_toolchain_transition=replace(
+            transition, cli_wrapper_candidate_sha256="0" * 64))
+    else:
+        item.paths = replace(item.paths, node_toolchain_transition=replace(
+            transition, compatibility_aliases=((item.root / "other/node", str(item.paths.node)),
+                                               transition.compatibility_aliases[1])))
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "failed_before_apply"
+    assert backend.boot_nodes == [] and not activate_module._start_fence_path(item.paths).exists()
+    assert item.paths.current_link.resolve() == item.predecessor
+
+
+@pytest.mark.parametrize("alias_index", [0, 1])
+def test_node_transition_partial_compatibility_alias_apply_restores_exact_preimages(
+    node_transition_fixture, monkeypatch, alias_index,
+):
+    item = node_transition_fixture
+    target_alias = item.paths.node_toolchain_transition.compatibility_aliases[alias_index][0]
+    native = activate_module.atomic_symlink
+    def fail_compatibility(link, target):
+        if link == target_alias:
+            raise activate_module.ActivationError("fixture compatibility alias replacement failed")
+        return native(link, target)
+    monkeypatch.setattr(activate_module, "atomic_symlink", fail_compatibility)
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "snapshot_restore_required" and backend.boot_nodes == []
+    monkeypatch.setattr(activate_module, "atomic_symlink", native)
+    restored = restore(item, NodeTransitionBackend(item))
+    assert restored["restoreApplied"] is True
+    _assert_original_node_compatibility_controls(item)
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert item.paths.node_plist.read_bytes() == item.node_transition_original["node"]
+
+
+def test_node_transition_partial_wrapper_apply_uses_same_snapshot_restore(node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    wrapper = item.root / ".local/bin/openclaw"
+    native = activate_module.os.replace
+    def fail_wrapper(source, target):
+        if Path(target) == wrapper and ".node-transition-" in Path(source).name:
+            raise OSError("fixture wrapper replace failure")
+        return native(source, target)
+    monkeypatch.setattr(activate_module.os, "replace", fail_wrapper)
+    backend = NodeTransitionBackend(item)
+    assert run(item, backend)["outcome"] == "snapshot_restore_required"
+    assert backend.boot_nodes == []
+    monkeypatch.setattr(activate_module.os, "replace", native)
+    restored = restore(item, NodeTransitionBackend(item))
+    assert restored["restoreApplied"] is True
+    _assert_original_node_compatibility_controls(item)
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+
+
+def test_node_transition_consolidated_aliases_and_cli_use_single_selected_executable(
+    managed_node_live_paths_fixture,
+):
+    item = managed_node_live_paths_fixture
+    wrapper = item.root / ".local/bin/openclaw"
+    assert run(item, NodeTransitionBackend(item))["outcome"] == "activated"
+    environment = {"PATH": f"{item.root}/.local/bin:{item.root}/.local/opt/node-current/bin:/usr/bin:/bin"}
+    # These are fixture-only shell stubs, not any real Node/Gateway or UI route.
+    shell = subprocess.run(["/bin/sh", "-c", "command -v node; node --version"],
+                           env=environment, check=True, capture_output=True, text=True)
+    assert shell.stdout.splitlines() == [str(item.root / ".local/bin/node"), "candidate-node-fixture"]
+    cli = subprocess.run(["/bin/sh", str(wrapper), "--version"], env=environment,
+                         check=True, capture_output=True, text=True)
+    assert cli.stdout.strip() == "candidate-node-fixture"
+    assert (item.root / ".local/bin/node").resolve() == item.paths.node_toolchain_transition.candidate
+    assert (item.root / ".local/opt/node-current/bin/node").resolve() == item.paths.node_toolchain_transition.candidate
+    assert activate_module.live_paths().node == item.paths.node_toolchain_transition.candidate
+    restored = activate_module.restore_failed_activation(
+        item.paths, item.candidate, CANDIDATE_COMMIT, item.seal, item.snapshot,
+        restore_result_path(item), NodeTransitionBackend(item), after_success=True)
+    assert restored["outcome"] == "restored_stopped"
+    _assert_original_node_compatibility_controls(item)
+    assert (item.root / ".local/bin/node").resolve() == item.paths.node
+    assert (item.root / ".local/opt/node-current/bin/node").resolve() == item.paths.node
+    assert activate_module.live_paths().node == item.paths.node
+
+
+@pytest.mark.parametrize("canonical_first", [False, True])
+def test_node_transition_normalizes_only_known_legacy_path_and_restores_original_bytes(
+    node_transition_fixture, canonical_first,
+):
+    item = node_transition_fixture
+    canonical = str(item.paths.node_alias / "bin")
+    legacy = item.paths.node_alias.parent / "node-v22.22.0" / "bin"
+    legacy.mkdir(parents=True)
+    legacy_node = legacy / "node"
+    legacy_node.write_text("#!/bin/sh\nexit 99\n")
+    legacy_node.chmod(0o755)
+    assert os.access(legacy_node, os.X_OK)
+    first = str(item.root / "unrelated-first")
+    last = str(item.root / "unrelated-last")
+    managed = [canonical, str(legacy)] if canonical_first else [str(legacy), canonical]
+    originals = {}
+    for path in (item.paths.gateway_plist, item.paths.node_plist):
+        value = plistlib.loads(path.read_bytes())
+        value["EnvironmentVariables"]["PATH"] = ":".join([
+            str(item.paths.node.parent), first, *managed, last, first, "/usr/bin", "/bin",
+        ])
+        path.write_bytes(plistlib.dumps(value))
+        originals[path] = path.read_bytes()
+    output = item.root / "legacy-path-snapshot"
+    item.snapshot = output / "stopped-snapshot.json"
+    activate_module.create_stopped_snapshot(
+        item.paths, output, item.snapshot, item.candidate,
+        CANDIDATE_COMMIT, item.seal, NodeTransitionBackend(item))
+    assert run(item, NodeTransitionBackend(item))["outcome"] == "activated"
+    expected = [str(item.paths.node_toolchain_transition.candidate.parent),
+                first, canonical, last, first, "/usr/bin", "/bin"]
+    for path in originals:
+        parts = plistlib.loads(path.read_bytes())["EnvironmentVariables"]["PATH"].split(":")
+        assert parts == expected and str(legacy) not in parts and parts.count(canonical) == 1
+    restored = activate_module.restore_failed_activation(
+        item.paths, item.candidate, CANDIDATE_COMMIT, item.seal, item.snapshot,
+        restore_result_path(item), NodeTransitionBackend(item), after_success=True)
+    assert restored["outcome"] == "restored_stopped"
+    assert all(path.read_bytes() == original for path, original in originals.items())
+
+
+def test_legacy_node_precondition_cannot_admit_a_new_first_boot(
+        node_transition_fixture, monkeypatch):
+    item = node_transition_fixture
+    verify = activate_module.verify_node_toolchain_screen_capture_precondition
+    def legacy(*args, **kwargs):
+        return {**verify(*args, **kwargs), "recordedCandidateFilesystemPermissionVerified": False}
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition", legacy)
+    backend = NodeTransitionBackend(item)
+    result = run(item, backend)
+    assert result["outcome"] == "failed_before_apply"
+    assert backend.boot_nodes == [] and not activate_module._start_fence_path(item.paths).exists()
+    assert item.paths.gateway_plist.read_bytes() == item.node_transition_original["gateway"]
+    assert os.readlink(item.paths.node_alias) == item.node_transition_original["alias"]
+
+
+
+def test_legacy_node_precondition_fails_forward_cli_before_any_stop_or_write(
+        managed_node_live_paths_fixture, monkeypatch, capsys):
+    item = managed_node_live_paths_fixture
+    verify = activate_module.verify_node_toolchain_screen_capture_precondition
+    def legacy(*args, **kwargs):
+        return {**verify(*args, **kwargs), "recordedCandidateFilesystemPermissionVerified": False}
+    monkeypatch.setattr(activate_module, "verify_node_toolchain_screen_capture_precondition", legacy)
+    before = (os.readlink(item.paths.node_alias), item.paths.gateway_plist.read_bytes(),
+              item.paths.node_plist.read_bytes(), os.readlink(item.paths.current_link))
+    with pytest.raises(SystemExit) as rejected:
+        activate_module.main([
+            "--node-toolchain-transition", str(item.node_transition_declaration),
+            "--node-toolchain-transition-sha256", item.node_transition_declaration_sha,
+            "node-toolchain-preflight"])
+    assert rejected.value.code == 2
+    assert "Full Disk Access" in capsys.readouterr().err
+    assert before == (os.readlink(item.paths.node_alias), item.paths.gateway_plist.read_bytes(),
+                      item.paths.node_plist.read_bytes(), os.readlink(item.paths.current_link))
+    assert not activate_module._start_fence_path(item.paths).exists()

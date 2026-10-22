@@ -369,9 +369,10 @@ def test_status_contract_rejects_unbound_screen_capture_hints(reference):
 def test_capability_reference_requires_exact_receipt_digest(fixture, capture_binding, monkeypatch):
     path, _, _, _, _ = capture_binding
     values = {section: activation.OPERATOR.get(section, {}) for section in ("paths", "runtime", "identifiers")}
-    values["paths"]["node_binary"] = str(fixture.paths.node)
+    values["paths"]["node_binary"] = str(fixture.root / "obsolete-compatibility-node")
     from scripts.operator_contract import OperatorContract
     monkeypatch.setattr(activation, "OPERATOR", OperatorContract(values))
+    monkeypatch.setattr(activation, "live_paths", lambda: fixture.paths)
     with pytest.raises(activation.ActivationError, match="binding changed"):
         activation.verify_screen_capture_capability({"path": str(path), "sha256": "f" * 64})
     result = activation.verify_screen_capture_capability({
@@ -395,3 +396,201 @@ def test_unresolved_adopter_binding_cannot_silently_disable_guard(monkeypatch, u
     monkeypatch.setattr(activation, "OPERATOR", OperatorContract({"paths": {"screen_capture_binding": unresolved}}))
     with pytest.raises(ValueError):
         activation.configured_screen_capture_binding()
+
+
+def _canonical_refresh(fixture, capture_binding):
+    path, _, database, source, active = capture_binding
+    paths = replace(fixture.paths, result=active, screen_capture_binding=path)
+    archive_root = fixture.root / "capture-predecessor-custody"
+    archive_root.mkdir(mode=0o700)
+    archive = archive_root / "old-binding.json"
+    before = path.read_bytes()
+    proof = json.loads(source.read_text())
+    current = {"outcome": "activated", "restoreRequired": False, "verification": {"loaded": {
+        "pid": proof["responsiblePid"], "startToken": proof["responsibleProcessIdentity"][0],
+        "executable": str(paths.node)}}}
+    active.write_text(json.dumps(current))
+    proof["activationReceiptSha256"] = hashlib.sha256(active.read_bytes()).hexdigest()
+    proof["verifiedAt"] = "2026-10-22T01:00:00Z"
+    source.write_text(json.dumps(proof))
+    return paths, source, database, archive, before
+
+
+def _refresh(paths, source, database, archive, before):
+    return activation.enroll_screen_capture_binding(
+        paths, source, hashlib.sha256(source.read_bytes()).hexdigest(), database,
+        paths.screen_capture_binding, replace_binding_sha256=hashlib.sha256(before).hexdigest(),
+        replaced_binding_archive=archive)
+
+
+def test_explicit_canonical_capture_refresh_archives_exact_old_bytes_and_current_grant(
+        fixture, capture_binding):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    grant_before = database.read_bytes()
+    result = _refresh(paths, source, database, archive, before)
+    assert archive.read_bytes() == before
+    assert archive.stat().st_mode & 0o777 == 0o400
+    assert paths.screen_capture_binding.stat().st_mode & 0o777 == 0o400
+    assert result["replacedBinding"] == {
+        "path": str(paths.screen_capture_binding), "sha256": hashlib.sha256(before).hexdigest(),
+        "archivePath": str(archive), "archiveSha256": hashlib.sha256(before).hexdigest()}
+    assert json.loads(paths.screen_capture_binding.read_text()) == result
+    assert paths.screen_capture_binding.read_bytes() != before
+    assert database.read_bytes() == grant_before
+    assert activation.verify_screen_capture_binding(
+        paths.screen_capture_binding, paths.node, require_current_process=True
+    )["effectiveCaptureVerifiedForCurrentProcess"] is True
+
+
+def test_default_enrollment_still_cannot_overwrite_existing_canonical_binding(fixture, capture_binding):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    with pytest.raises(activation.ActivationError, match="already exists"):
+        activation.enroll_screen_capture_binding(
+            paths, source, hashlib.sha256(source.read_bytes()).hexdigest(), database,
+            paths.screen_capture_binding)
+    assert paths.screen_capture_binding.read_bytes() == before and not archive.exists()
+
+
+@pytest.mark.parametrize("mutation", ["stale_sha", "noncanonical", "missing_sha", "missing_archive",
+                                      "symlink", "writable", "archive_exists"])
+def test_canonical_capture_refresh_rejects_bad_custody_before_replacement(
+        fixture, capture_binding, mutation):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    output, expected = paths.screen_capture_binding, hashlib.sha256(before).hexdigest()
+    if mutation == "stale_sha": expected = "0" * 64
+    elif mutation == "noncanonical": output = fixture.root / "other-binding.json"
+    elif mutation == "missing_sha": expected = None
+    elif mutation == "missing_archive": archive = None
+    elif mutation == "symlink":
+        original = output.with_name("original-capture-binding.json")
+        output.rename(original)
+        output.symlink_to(original)
+    elif mutation == "writable": output.chmod(0o600)
+    elif mutation == "archive_exists": activation.create_immutable_file(archive, b"retained earlier custody")
+    with pytest.raises(activation.ActivationError):
+        activation.enroll_screen_capture_binding(
+            paths, source, hashlib.sha256(source.read_bytes()).hexdigest(), database, output,
+            replace_binding_sha256=expected, replaced_binding_archive=archive)
+    assert paths.screen_capture_binding.read_bytes() == before
+    if archive is not None and mutation != "archive_exists": assert not archive.exists()
+
+
+@pytest.mark.parametrize("mutation", ["process", "permission", "activation", "code", "gateway"])
+def test_canonical_capture_refresh_rejects_stale_fresh_capture_without_replacing(
+        fixture, capture_binding, monkeypatch, mutation):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    if mutation == "process":
+        monkeypatch.setattr(activation, "process_identity", lambda pid: ("darwin:21:1", paths.node, 1))
+    elif mutation == "permission":
+        with sqlite3.connect(database) as connection:
+            connection.execute("UPDATE access SET auth_value=0")
+    elif mutation == "gateway":
+        current = json.loads(paths.result.read_text())
+        current["verification"]["loaded"]["pid"] = 999
+        paths.result.write_text(json.dumps(current))
+        proof = json.loads(source.read_text())
+        proof["activationReceiptSha256"] = hashlib.sha256(paths.result.read_bytes()).hexdigest()
+        source.write_text(json.dumps(proof))
+    elif mutation == "activation": paths.result.write_text(json.dumps({"outcome": "activated", "later": True}))
+    elif mutation == "code": capture_binding[1][str(paths.node)]["sha256"] = "0" * 64
+    with pytest.raises(activation.ActivationError):
+        _refresh(paths, source, database, archive, before)
+    assert paths.screen_capture_binding.read_bytes() == before and not archive.exists()
+
+
+def test_canonical_capture_refresh_honors_existing_activation_lock(fixture, capture_binding):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    descriptor = activation._acquire_lock(paths)
+    try:
+        with pytest.raises(activation.ActivationError, match="another activator"):
+            _refresh(paths, source, database, archive, before)
+    finally:
+        activation._release_lock(descriptor)
+    assert paths.screen_capture_binding.read_bytes() == before and not archive.exists()
+
+
+@pytest.mark.parametrize("mutation", ["preimage", "lock", "grant", "successor"])
+def test_canonical_capture_refresh_rechecks_cas_lock_and_grant_before_atomic_publication(
+        fixture, capture_binding, monkeypatch, mutation):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    create = activation.create_immutable_file
+    observed = []
+    def gated_create(path, payload):
+        create(path, payload)
+        if path.name.startswith("." + paths.screen_capture_binding.name + ".capture-enroll-"):
+            observed.append(path)
+            if mutation == "preimage":
+                paths.screen_capture_binding.chmod(0o600)
+                paths.screen_capture_binding.write_bytes(before + b" ")
+                paths.screen_capture_binding.chmod(0o400)
+            elif mutation == "lock":
+                paths.lock.unlink()
+                paths.lock.write_bytes(b"different lock inode")
+                paths.lock.chmod(0o600)
+            elif mutation == "successor":
+                path.chmod(0o600)
+                path.write_bytes(b"unadmitted staged replacement")
+                path.chmod(0o400)
+            else:
+                monkeypatch.setattr(activation, "screen_capture_permission", lambda *args: {"grant": "changed"})
+    monkeypatch.setattr(activation, "create_immutable_file", gated_create)
+    with pytest.raises(activation.ActivationError, match="changed|drift"):
+        _refresh(paths, source, database, archive, before)
+    assert len(observed) == 1 and not observed[0].exists()
+    assert archive.read_bytes() == before and archive.stat().st_mode & 0o777 == 0o400
+    assert paths.screen_capture_binding.read_bytes() == before + (b" " if mutation == "preimage" else b"")
+
+
+def test_enrollment_cli_exposes_only_explicit_paired_canonical_refresh_options():
+    args = activation.build_parser().parse_args([
+        "screen-capture-enroll", "--acceptance", "/fixture/proof.json", "--acceptance-sha256", "a" * 64,
+        "--permission-database", "/fixture/permission.sqlite", "--output", "/fixture/canonical.json",
+        "--replace-binding-sha256", "b" * 64, "--replaced-binding-archive", "/fixture/archive/old.json"])
+    assert args.replace_binding_sha256 == "b" * 64
+    assert args.replaced_binding_archive == Path("/fixture/archive/old.json")
+
+
+def test_canonical_capture_refresh_does_not_overwrite_drift_during_final_native_proof(
+        fixture, capture_binding, monkeypatch):
+    paths, source, database, archive, before = _canonical_refresh(fixture, capture_binding)
+    create, permission = activation.create_immutable_file, activation.screen_capture_permission
+    staged, mutated = [], []
+    def observe_staging(path, payload):
+        create(path, payload)
+        if path.name.startswith("." + paths.screen_capture_binding.name + ".capture-enroll-"):
+            staged.append(path)
+    def grant_with_concurrent_preimage_change(*args):
+        grant = permission(*args)
+        if staged and not mutated:
+            paths.screen_capture_binding.chmod(0o600)
+            paths.screen_capture_binding.write_bytes(before + b" ")
+            paths.screen_capture_binding.chmod(0o400)
+            mutated.append(True)
+        return grant
+    monkeypatch.setattr(activation, "create_immutable_file", observe_staging)
+    monkeypatch.setattr(activation, "screen_capture_permission", grant_with_concurrent_preimage_change)
+    with pytest.raises(activation.ActivationError, match="predecessor changed before publication"):
+        _refresh(paths, source, database, archive, before)
+    assert mutated == [True] and len(staged) == 1 and not staged[0].exists()
+    assert archive.read_bytes() == before and archive.stat().st_mode & 0o777 == 0o400
+    assert paths.screen_capture_binding.read_bytes() == before + b" "
+
+
+def test_focused_capability_runner_uses_the_same_selected_node(
+        fixture, capture_binding, monkeypatch, capsys):
+    from scripts import capability_validation_runner as runner
+    path = capture_binding[0]
+    monkeypatch.setitem(sys.modules, "scripts.openclaw_runtime_activate", activation)
+    configured_path = activation.OPERATOR.require_path
+    def stale_seed(key):
+        if key == "paths.node_binary":
+            return fixture.root / "obsolete-compatibility-node"
+        return configured_path(key)
+    monkeypatch.setattr(activation.OPERATOR, "require_path", stale_seed)
+    monkeypatch.setattr(activation, "live_paths", lambda: fixture.paths)
+    monkeypatch.setattr(sys, "argv", ["capability-validation", "--screen-capture-binding", str(path)])
+    assert runner.main() == 0
+    value = json.loads(capsys.readouterr().out)
+    assert value["status"] == "verified"
+    assert value["effectiveCaptureVerifiedForCurrentProcess"] is True
+    assert value["scheduledSyncProven"] is False

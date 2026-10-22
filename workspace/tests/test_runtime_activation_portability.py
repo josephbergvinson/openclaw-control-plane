@@ -146,6 +146,19 @@ def test_live_paths_use_adopter_home_node_and_cli_bindings(fixture, monkeypatch)
         'node_binary': str(paths.node), 'runtime_node_alias': str(paths.node_alias),
         'activation_lock': str(paths.lock), 'activation_result': str(paths.result),
     })
+    import hashlib
+    values['runtime']['managed_node_executable_sha256'] = {
+        paths.node.parent.parent.name: hashlib.sha256(paths.node.read_bytes()).hexdigest(),
+    }
+    command_alias = fixture.root / '.local/bin/node'
+    prefix_alias = fixture.root / '.local/opt/node-current'
+    command_alias.parent.mkdir(parents=True)
+    prefix_alias.parent.mkdir(parents=True)
+    command_alias.symlink_to(paths.node_alias / 'bin/node')
+    prefix_alias.symlink_to(paths.node_alias)
+    wrapper = fixture.root / '.local/bin/openclaw'
+    wrapper.write_text(f'#!/bin/sh\nexec {paths.node_alias / "bin/node"} fixture-cli "$@"\n')
+    wrapper.chmod(0o755)
     monkeypatch.setattr(activate_module, 'OPERATOR', OperatorContract(values))
     monkeypatch.setattr(activate_module.pwd, 'getpwnam', lambda name: SimpleNamespace(
         pw_uid=os.getuid(), pw_dir=str(fixture.root)) if name == 'fixture-account' else None)

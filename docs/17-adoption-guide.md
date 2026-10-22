@@ -271,9 +271,10 @@ applying this first-install recipe over it.
 ### Package and seal the initial release
 
 Choose a new physical `initial_release` directly under `paths.runtime_releases_root`,
-with a name such as `openclaw-2026.9.5-initial`. Set `source_commit` to the complete
-commit recorded after reconstruction, not the original host's commit. This must match
-the build's `dist/build-info.json`. The already completed frozen install and build
+with a descriptive name such as `openclaw-reference-initial`. Set `source_commit`
+to the complete commit recorded after reconstruction, not the original host's
+commit. This must match the build's `dist/build-info.json`. The already completed
+frozen install and build
 must include the full dependencies and required bundled plugins.
 
 Keep the completed source checkout exclusive while staging. The exported staging

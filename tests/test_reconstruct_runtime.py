@@ -101,44 +101,6 @@ class RuntimeReconstructionTests(unittest.TestCase):
         )
         return replace(package, companion=companion), contents
 
-    def fixture_maintenance_companion_package(self, *, symlinks=False):
-        RUNTIME.reconstruct(self.checkout, self.package, apply=True)
-        for name in sorted(RUNTIME.NATIVE_COMPANION_FIXTURE_DELTA_PATHS):
-            path = self.checkout / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if symlinks:
-                path.symlink_to("current-generated-artifact")
-            else:
-                path.write_text("current generated artifact\n", encoding="utf-8")
-            self.run_git("add", "--", name)
-        source_tree = self.run_git("write-tree")
-        source_raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index")
-        package = replace(self.package, normalized_tree=source_tree,
-                          patch_sha256=hashlib.sha256(source_raw).hexdigest(), patch=source_raw)
-        (self.checkout / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\nnative: true\n")
-        (self.checkout / "pnpm-workspace.yaml").write_text("packages: []\nnative: true\n")
-        self.run_git("add", "pnpm-lock.yaml", "pnpm-workspace.yaml")
-        distribution_tree = self.run_git("write-tree")
-        native_raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index", source_tree)
-        for name in sorted(RUNTIME.NATIVE_COMPANION_FIXTURE_DELTA_PATHS):
-            path = self.checkout / name
-            if symlinks:
-                path.unlink()
-                path.symlink_to("retained-companion-artifact")
-            else:
-                path.write_text("retained companion artifact\n", encoding="utf-8")
-            self.run_git("add", "--", name)
-        companion_tree = self.run_git("write-tree")
-        companion_raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index", distribution_tree)
-        self.run_git("restore", "--staged", "--worktree", "--source=HEAD", "--", ".")
-        artifact, contents = self.native_artifact()
-        native = RUNTIME.NativeDistribution(source_tree, distribution_tree,
-                    hashlib.sha256(native_raw).hexdigest(), native_raw, artifact,
-                    "5" * 40, distribution_tree)
-        companion = RUNTIME.NativeCompanion("6" * 40, companion_tree, distribution_tree,
-                    hashlib.sha256(companion_raw).hexdigest(), companion_raw)
-        return replace(package, native=native, companion=companion), contents
-
     def identity_companion_package(self):
         package, contents = self.native_package()
         native = replace(package.native, reference_commit="5" * 40,
@@ -226,74 +188,6 @@ class RuntimeReconstructionTests(unittest.TestCase):
 
     def test_wrong_companion_tree_never_downloads_or_discards_staged_evidence(self) -> None:
         package, _ = self.companion_package()
-        invalid = replace(package, companion=replace(package.companion, source_tree="0" * 40))
-        with patch.object(RUNTIME, "build_opener") as opener:
-            with self.assertRaisesRegex(RUNTIME.ReconstructionError, "Companion applied tree differs"):
-                RUNTIME.reconstruct(self.checkout, invalid, apply=True)
-            opener.assert_not_called()
-        self.assertEqual(package.companion.source_tree, self.run_git("write-tree"))
-        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
-        self.assertFalse((self.checkout / "native-package-artifacts").exists())
-
-    def test_fixture_maintenance_retains_exact_companion_tree_and_one_archive(self) -> None:
-        package, contents = self.fixture_maintenance_companion_package()
-        opener = Mock()
-        opener.open.return_value = io.BytesIO(contents)
-        with patch.object(RUNTIME, "build_opener", return_value=opener):
-            result = RUNTIME.reconstruct(self.checkout, package, apply=True)
-        self.assertEqual(package.normalized_tree, result["normalizedTree"])
-        self.assertEqual(package.native.normalized_tree, result["nativeDistribution"]["normalizedTree"])
-        self.assertEqual(package.companion.source_tree, self.run_git("write-tree"))
-        self.assertEqual(package.companion.source_commit, result["nativeCompanion"]["sourceCommit"])
-        self.assertTrue(result["nativeCompanion"]["normalizedTreeVerified"])
-        self.assertEqual(package.companion.patch_sha256, result["nativeCompanion"]["patchSha256"])
-        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
-        for name in RUNTIME.NATIVE_COMPANION_FIXTURE_DELTA_PATHS:
-            self.assertEqual("retained companion artifact\n", (self.checkout / name).read_text())
-        self.assertEqual("reference\n", (self.checkout / "runtime.txt").read_text())
-        opener.open.assert_called_once()
-        self.assertEqual(contents, (self.checkout / result["nativeDistribution"]["artifact"]["path"]).read_bytes())
-
-    def test_fixture_maintenance_does_not_change_ordinary_native_target(self) -> None:
-        package, _ = self.fixture_maintenance_companion_package()
-        with patch.object(RUNTIME, "provision_native_artifact", return_value={"verified": True}):
-            result = RUNTIME.reconstruct(self.checkout, replace(package, companion=None), apply=True)
-        self.assertEqual(package.native.normalized_tree, self.run_git("write-tree"))
-        self.assertNotIn("nativeCompanion", result)
-        for name in RUNTIME.NATIVE_COMPANION_FIXTURE_DELTA_PATHS:
-            self.assertEqual("current generated artifact\n", (self.checkout / name).read_text())
-
-    def test_fixture_maintenance_rejects_missing_extra_mixed_duplicate_and_mode_changes(self) -> None:
-        package, _ = self.fixture_maintenance_companion_package()
-        raw = package.companion.patch
-        blocks = [b"diff --git " + part for part in raw.split(b"diff --git ")[1:]]
-        first = sorted(RUNTIME.NATIVE_COMPANION_FIXTURE_DELTA_PATHS)[0].encode()
-        swift = sorted(RUNTIME.NATIVE_COMPANION_DELTA_PATHS)[0].encode()
-        mode_change = raw.replace(b"\nindex ", b"\nold mode 100644\nnew mode 100755\nindex ", 1)
-        invalid = [b"".join(blocks[:-1]), raw + package.patch, raw.replace(first, swift),
-                   raw + blocks[0], mode_change]
-        with patch.object(RUNTIME, "build_opener") as opener:
-            for changed in invalid:
-                with self.subTest(patch_sha256=hashlib.sha256(changed).hexdigest()):
-                    value = replace(package, companion=replace(package.companion, patch=changed,
-                                              patch_sha256=hashlib.sha256(changed).hexdigest()))
-                    with self.assertRaises(RUNTIME.ReconstructionError):
-                        RUNTIME.reconstruct(self.checkout, value, apply=True)
-                    self.assertEqual("", self.run_git("status", "--porcelain"))
-                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
-            opener.assert_not_called()
-
-    def test_fixture_maintenance_rejects_symlink_artifacts_before_archive_access(self) -> None:
-        package, _ = self.fixture_maintenance_companion_package(symlinks=True)
-        with patch.object(RUNTIME, "build_opener") as opener:
-            with self.assertRaisesRegex(RUNTIME.ReconstructionError, "five regular source artifacts"):
-                RUNTIME.reconstruct(self.checkout, package, apply=True)
-            opener.assert_not_called()
-        self.assertEqual(package.native.normalized_tree, self.run_git("write-tree"))
-        self.assertFalse((self.checkout / "native-package-artifacts").exists())
-
-    def test_fixture_maintenance_wrong_tree_preserves_evidence_and_never_downloads(self) -> None:
-        package, _ = self.fixture_maintenance_companion_package()
         invalid = replace(package, companion=replace(package.companion, source_tree="0" * 40))
         with patch.object(RUNTIME, "build_opener") as opener:
             with self.assertRaisesRegex(RUNTIME.ReconstructionError, "Companion applied tree differs"):

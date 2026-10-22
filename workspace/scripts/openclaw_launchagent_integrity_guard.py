@@ -43,7 +43,10 @@ PREFIXES = ("com.openclaw.", "ai.openclaw.")
 PAYLOAD_KIND = "openclaw.launchagent-integrity-guard.v1"
 GATEWAY_LABEL = OPERATOR.require_string('runtime.gateway_label')
 GATEWAY_PORT = OPERATOR.require_int('runtime.gateway_port')
-GATEWAY_NODE = OPERATOR.require_path('paths.node_binary')
+try:
+    from .openclaw_runtime_activate import live_paths
+except ImportError:
+    from openclaw_runtime_activate import live_paths
 GATEWAY_PACKAGE_LINK = OPERATOR.require_path('paths.runtime_package_link')
 GATEWAY_WORKING_DIRECTORY = OPERATOR.require_path('paths.host_home')
 SOURCE_ROOT = OPERATOR.require_path('paths.workspace')
@@ -166,8 +169,13 @@ def _program_problems(data: dict[str, object]) -> list[str]:
 
 
 def _gateway_direct_owner_problems(data: dict[str, object]) -> list[str]:
+    # Resolve through the activation owner's one managed selector, never at import.
+    try:
+        node = live_paths().node
+    except (OSError, RuntimeError, ValueError):
+        return ["gateway managed Node selection is unavailable or invalid"]
     expected_arguments = [
-        str(GATEWAY_NODE),
+        str(node),
         str(GATEWAY_PACKAGE_LINK / "dist" / "index.js"),
         "gateway",
         "--port",
@@ -187,6 +195,7 @@ def _gateway_direct_owner_problems(data: dict[str, object]) -> list[str]:
             "gateway direct owner requires RunAtLoad=true and KeepAlive=true"
         )
     return problems
+
 
 
 def _operative_start_interval(value: object) -> bool:
