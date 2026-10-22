@@ -20,15 +20,15 @@ ordinary-use acceptance on another host.
 
 ## Source identities
 
-The current source reference includes a requester-wake test fixture correction
-beyond the installed **R42** runtime and Mac companion build **2610000501**.
-Canonical source `4accea0540e8ff7953c1354c67571a28981caf97` and native distribution
-`94bad27439570861301d1a3b251e6f59e6295a65` contain that correction. The installed
+The current source reference includes a lint-only requester-wake fixture correction
+beyond the installed **R43** runtime and Mac companion build **2610000502**.
+Canonical source `a70fbe73d8e8586521f3b19d80251bf02b14a78f` and native distribution
+`fd4f6b0a7610aa92fcc5d4462b7a35e93eb3af31` contain that correction. The installed
 runtime and companion retain distribution source
-`94bed29b089dc803764c7389f18553092e706984`. The successor changes only the event
-subscription fixture in one regression test; all other source blobs and modes,
-including production and package inputs, are unchanged from the respective
-installed source inputs. This source revision did not rebuild either component.
+`f18ba730959787b21b823f7259f064e9a9bd2801`. The successor uses `Array.from` for
+one regression test's existing listener snapshot; all other source blobs and
+modes, including production and package inputs, are unchanged from the respective
+installed source inputs. This test-only revision did not rebuild either component.
 The companion identity is descriptive: this packet supplies no supported delta
 from the current distribution to that older companion source, so use ordinary
 source or native-distribution reconstruction for this packet.
@@ -47,7 +47,8 @@ source or native-distribution reconstruction for this packet.
 
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
-The manifest describes deliberate fixture normalization. The resulting Git tree,
+The manifest declares any deliberate fixture normalization; its current list is
+empty. The resulting Git tree,
 including file modes, is the comparison point; an adopter's commit ID will depend
 on their own author and timestamp.
 
@@ -151,7 +152,7 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-First check the current manifest. This packet records the installed R42/app501
+First check the current manifest. This packet records the installed R43/app502
 companion descriptively and does not support `--native-companion`. For a packet
 that supplies one of the supported bindings below, use a new clean official-tag
 clone to reconstruct its declared companion:
@@ -224,7 +225,10 @@ publication tests against that same reconstructed source. It uses the runtime's
 normal test runner and fixtures; no diagnostic overlay or copied test harness is
 an installation or qualification step. The assertions cover source ownership,
 FIFO ordering, cancellation, authority changes and provider input custody.
-Workspace helper tests retain their separate scope.
+The existing serial terminal-continuation step also runs
+`src/agents/tools/message-tool-final-edit.test.ts`, covering direct and nested
+final edits, negative controls and a later input. Workspace helper tests retain
+their separate scope.
 
 A changed source target requires the corresponding behavioral assertions to be
 reviewed against its maintained owner before qualification. Retiring an old path

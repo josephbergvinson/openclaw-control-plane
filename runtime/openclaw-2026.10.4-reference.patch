@@ -67800,7 +67800,7 @@ index 488655d36b5f20c3669deffecb948286a36a088b..50c7d67d2fa0568d2e2ec1cf2ad25e7d
              await pending;
              expect(subagentRuns.get(runId)).toMatchObject({
 diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
-index d2fc1aa955e0647124f29ef779b643c6ca50ad03..6e2ae3d21003011525042bc91d452fc842e582fc 100644
+index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f3088785301 100644
 --- a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
 @@ -58,7 +58,8 @@ type GatewayResponse = {
@@ -67854,7 +67854,7 @@ index d2fc1aa955e0647124f29ef779b643c6ca50ad03..6e2ae3d21003011525042bc91d452fc8
        },
 -    });
 +    };
-+    for (const handler of [...lifecycleHandlers]) {
++    for (const handler of Array.from(lifecycleHandlers)) {
 +      handler(event);
 +    }
    };
@@ -72722,7 +72722,7 @@ index 87fc9f5d9d274957bab05722007a286c286d4ddf..155fdd64be64603609607818f27aec3d
 -  );
 -});
 diff --git a/src/agents/tools/message-tool-execution.ts b/src/agents/tools/message-tool-execution.ts
-index 9503ccbc0660c3cd6d9c6ae03a6794bb91d2916f..9a9b4633a3b6aaa1e4dd2c9a678a4c2b43ab66b7 100644
+index 9503ccbc0660c3cd6d9c6ae03a6794bb91d2916f..35e3703db1d175f95a6cb4ab3c5cb2681b863023 100644
 --- a/src/agents/tools/message-tool-execution.ts
 +++ b/src/agents/tools/message-tool-execution.ts
 @@ -2,19 +2,13 @@ import {
@@ -73086,7 +73086,7 @@ index 9503ccbc0660c3cd6d9c6ae03a6794bb91d2916f..9a9b4633a3b6aaa1e4dd2c9a678a4c2b
            decisions.recordActionResult(
              result,
              resolveTrustedDecisionChannel(result.channel, preparedMessageToolCatalog),
-@@ -702,25 +719,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
+@@ -702,35 +719,24 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
              pollEchoSessionKey &&
              sourceReplySinkDeliveryMode === "message_tool_only"
            ) {
@@ -73113,6 +73113,24 @@ index 9503ccbc0660c3cd6d9c6ae03a6794bb91d2916f..9a9b4633a3b6aaa1e4dd2c9a678a4c2b
            }
            const response = toolResult ?? jsonResult(result.payload);
            const notice =
+             result.kind === "send" && !result.dryRun ? result.normalization?.notice : undefined;
+-          return embeddedMessageDelivery.attachEmbeddedMessageDeliveryFact(
++          const deliveredResponse = embeddedMessageDelivery.attachEmbeddedMessageDeliveryFact(
+             notice
+               ? { ...response, content: [...response.content, { type: "text", text: notice }] }
+               : response,
+             messageDelivery,
+           );
++          // The edit has delivered this answer. Use the native terminal result so
++          // direct, Tool Search and Code Mode calls cannot author a second final.
++          return action === "edit" &&
++            requestedSourceReplyFinal === true &&
++            messageDelivery?.sourceReplyDelivered === true
++            ? { ...deliveredResponse, terminate: true }
++            : deliveredResponse;
+         },
+         signal,
+       );
 diff --git a/src/agents/tools/message-tool-execution.types.ts b/src/agents/tools/message-tool-execution.types.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..bceff9bba531e3dc81888c69da352196668a7c8c
@@ -73172,6 +73190,373 @@ index 0000000000000000000000000000000000000000..bceff9bba531e3dc81888c69da352196
 +  conversationReadOrigin?: ConversationReadInvocationOrigin;
 +  workspaceDir?: string;
 +};
+diff --git a/src/agents/tools/message-tool-final-edit.test.ts b/src/agents/tools/message-tool-final-edit.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d05cc0b3843e6d4b505cd99aafab5709945b8a3
+--- /dev/null
++++ b/src/agents/tools/message-tool-final-edit.test.ts
+@@ -0,0 +1,361 @@
++import type { editMessageDiscord } from "../../../extensions/discord/src/send.messages.js";
++
++type APIMessage = Awaited<ReturnType<typeof editMessageDiscord>>;
++import {
++  createAssistantMessageEventStream,
++  type AssistantMessage,
++  type Model,
++} from "openclaw/plugin-sdk/llm";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type {
++  ChannelMessageActionContext,
++  ChannelPlugin,
++} from "../../channels/plugins/types.public.js";
++import {
++  mintMessageActionTurnCapability,
++  revokeMessageActionTurnCapability,
++} from "../../gateway/message-action-turn-capability.js";
++import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
++import {
++  createChannelTestPluginBase,
++  createTestRegistry,
++} from "../../test-utils/channel-plugins.js";
++import { createSubscribedToolSearchExecutor } from "../embedded-agent-runner/run/attempt-tool-search-executor.js";
++import { buildEmbeddedRunPayloads } from "../embedded-agent-runner/run/payloads.js";
++import { createSubscribedSessionHarness } from "../embedded-agent-subscribe.e2e-harness.js";
++import { Agent, type AgentEvent, type AgentTool } from "../runtime/index.js";
++import { SessionManager } from "../sessions/session-manager.js";
++import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
++import {
++  applyToolSearchCatalog,
++  clearToolSearchCatalog,
++  createToolSearchCatalogRef,
++  createToolSearchTools,
++} from "../tool-search.js";
++import { jsonResult } from "./common.js";
++import { createMessageTool } from "./message-tool-execution.js";
++import { messageToolSecretDeps } from "./message-tool-execution.test-support.js";
++
++const channelId = "123456789012345678";
++const messageId = "223456789012345678";
++const model: Model = {
++  id: "test-model",
++  name: "Test Model",
++  api: "openai-responses",
++  provider: "test-provider",
++  baseUrl: "https://example.invalid",
++  reasoning: false,
++  input: ["text"],
++  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++  contextWindow: 1000,
++  maxTokens: 1000,
++};
++function assistant(content: AssistantMessage["content"]): AssistantMessage {
++  return {
++    role: "assistant",
++    content,
++    api: model.api,
++    provider: model.provider,
++    model: model.id,
++    usage: createZeroUsageFixture(),
++    stopReason: content.some((part) => part.type === "toolCall") ? "toolUse" : "stop",
++    timestamp: 1,
++  };
++}
++function discordMessage(overrides: Partial<APIMessage> = {}): APIMessage {
++  return {
++    id: messageId,
++    channel_id: channelId,
++    type: 0,
++    content: "The corrected final answer.",
++    author: {
++      id: "323456789012345678",
++      username: "test-bot",
++      discriminator: "0000",
++      avatar: null,
++      global_name: null,
++    },
++    timestamp: "2026-01-01T00:00:00.000Z",
++    edited_timestamp: "2026-01-01T00:00:01.000Z",
++    tts: false,
++    mention_everyone: false,
++    mentions: [],
++    mention_roles: [],
++    attachments: [],
++    embeds: [],
++    pinned: false,
++    ...overrides,
++  };
++}
++
++type Scenario = {
++  direct?: boolean;
++  action?: "edit" | "send";
++  final?: boolean;
++  dryRun?: boolean;
++  failure?: boolean;
++  partial?: boolean;
++  returnedId?: string;
++  returnedChannel?: string;
++  target?: string;
++  accountId?: string;
++  threadId?: string;
++  currentThreadId?: string;
++  commentary?: boolean;
++};
++async function runScenario(scenario: Scenario) {
++  const config = {
++    channels: {
++      discord: { token: "synthetic-token", accounts: { other: { token: "synthetic-other" } } },
++    },
++    tools: {
++      toolSearch: { enabled: true, mode: "tools" as const },
++      message: { crossContext: { allowWithinProvider: true } },
++    },
++  };
++  const handleAction = vi.fn(async ({ params }: ChannelMessageActionContext) =>
++    jsonResult({
++      ok: !scenario.failure,
++      message: discordMessage({
++        id: scenario.returnedId ?? messageId,
++        channel_id: scenario.returnedChannel ?? String(params.to),
++      }),
++      ...(scenario.partial ? { sentBeforeError: true } : {}),
++    }),
++  );
++  const plugin: ChannelPlugin = {
++    ...createChannelTestPluginBase({
++      id: "discord",
++      config: {
++        listAccountIds: () => ["default", "other"],
++        resolveAccount: () => ({ enabled: true }),
++        isConfigured: () => true,
++      },
++    }),
++    messaging: { normalizeTarget: (raw) => raw.replace(/^channel:/, "") || undefined },
++    outbound: { deliveryMode: "direct", sendText: async () => ({ channel: "discord", messageId }) },
++    actions: { describeMessageTool: () => ({ actions: ["edit", "send"] }), handleAction },
++  };
++  setActivePluginRegistry(createTestRegistry([{ pluginId: "discord", source: "test", plugin }]));
++  const identity = {
++    agentId: "main",
++    runId: "terminal-edit-run",
++    sessionKey: `agent:main:discord:channel:${channelId}`,
++  };
++  const source = {
++    currentChannelProvider: "discord",
++    currentChatType: "channel" as const,
++    currentChannelId: channelId,
++    currentMessagingTarget: channelId,
++    currentMessageId: "423456789012345678",
++    ...(scenario.currentThreadId ? { currentThreadTs: scenario.currentThreadId } : {}),
++  };
++  const capability = mintMessageActionTurnCapability({
++    ...identity,
++    requesterAccountId: "default",
++    toolContext: source,
++  });
++  const tool = createMessageTool({
++    config,
++    ...source,
++    ...identity,
++    agentSessionKey: identity.sessionKey,
++    agentAccountId: "default",
++    messageActionTurnCapability: capability,
++    sourceReplyDeliveryMode: "automatic",
++    ...messageToolSecretDeps,
++  });
++  const manager = SessionManager.inMemory();
++  const harness = createSubscribedSessionHarness({
++    runId: identity.runId,
++    sessionKey: identity.sessionKey,
++    messageChannel: "discord",
++    currentAccountId: "default",
++    currentChannelId: channelId,
++    currentMessagingTarget: channelId,
++    sourceReplyDeliveryMode: "automatic",
++    sessionExtras: { sessionManager: manager },
++  });
++  const controller = new AbortController();
++  const executor = createSubscribedToolSearchExecutor({
++    attempt: identity,
++    runSignal: controller.signal,
++    sessionManager: manager,
++    subscription: harness.subscription,
++    isCurrent: () => true,
++    isReplaySafeTool: () => false,
++    nestedToolActivityState: { scopeId: "terminal-edit-scope", successfulToolNames: new Set() },
++  });
++  const catalogRef = createToolSearchCatalogRef();
++  const catalog = { config, catalogRef, executeTool: executor, runId: identity.runId };
++  const controls = createToolSearchTools(catalog);
++  applyToolSearchCatalog({ ...catalog, tools: [...controls, tool] });
++  const callTool = controls.find((candidate) => candidate.name === "tool_call");
++  if (!callTool) throw new Error("Missing native tool_call control");
++  let providerRequests = 0;
++  let freshInput = false;
++  const events: AgentEvent[] = [];
++  const messageArgs = {
++    action: scenario.action ?? "edit",
++    channel: "discord",
++    accountId: scenario.accountId ?? "default",
++    target: scenario.target ?? `channel:${channelId}`,
++    messageId,
++    message: "The corrected final answer.",
++    ...(scenario.final !== undefined ? { final: scenario.final } : {}),
++    ...(scenario.dryRun ? { dryRun: true } : {}),
++    ...(scenario.threadId ? { threadId: scenario.threadId } : {}),
++  };
++  const agent = new Agent({
++    initialState: { model, tools: [scenario.direct ? tool : callTool] as AgentTool[] },
++    streamFn: () => {
++      providerRequests += 1;
++      const response = freshInput
++        ? assistant([{ type: "text", text: "Fresh input complete." }])
++        : providerRequests === 1
++          ? assistant([
++              ...(scenario.commentary
++                ? [
++                    {
++                      type: "text" as const,
++                      text: "Updating the existing final.",
++                      textSignature: JSON.stringify({
++                        v: 1,
++                        id: "commentary",
++                        phase: "commentary",
++                      }),
++                    },
++                  ]
++                : []),
++              {
++                type: "toolCall",
++                id: "outer-edit",
++                name: scenario.direct ? "message" : "tool_call",
++                arguments: scenario.direct
++                  ? messageArgs
++                  : { id: "openclaw:core:message", args: messageArgs },
++              },
++            ])
++          : assistant([{ type: "text", text: "Separate automatic final." }]);
++      const stream = createAssistantMessageEventStream();
++      queueMicrotask(() => {
++        stream.push({
++          type: "done",
++          reason: response.stopReason === "toolUse" ? "toolUse" : "stop",
++          message: response,
++        });
++        stream.end();
++      });
++      return stream;
++    },
++  });
++  agent.subscribe((event) => {
++    events.push(event);
++    harness.emit(event);
++  });
++  try {
++    await agent.prompt("Correct the existing final answer in place.");
++    await harness.subscription.waitForPendingEvents();
++    const payloads = buildEmbeddedRunPayloads({
++      assistantTexts: harness.subscription.assistantTexts.slice(),
++      answerSegments: harness.subscription.answerSegments,
++      keptAnswer: harness.subscription.getKeptAnswer(),
++      assistantMessageIndex: harness.subscription.getLastAssistantTextMessageIndex(),
++      lastAssistant: agent.state.messages.findLast(
++        (message): message is AssistantMessage => message.role === "assistant",
++      ),
++      currentAssistant: harness.subscription.getCurrentAttemptAssistant(),
++      didDeliverSourceReplyViaMessageTool:
++        harness.subscription.getSourceReplyDeliveryState() === "delivered",
++      messagingToolSentTargets: harness.subscription.getMessagingToolSentTargets(),
++      messagingToolSourceReplyPayloads: harness.subscription.getMessagingToolSourceReplyPayloads(),
++      sessionKey: identity.sessionKey,
++      sourceReplyDeliveryMode: "automatic",
++    });
++    return {
++      providerRequests,
++      handleAction,
++      events,
++      payloads,
++      sourceDelivery: harness.subscription.getSourceReplyDeliveryState(),
++      async nextInput() {
++        freshInput = true;
++        await agent.prompt("Answer this separate new input.");
++        return { providerRequests, last: agent.state.messages.at(-1) };
++      },
++    };
++  } finally {
++    harness.subscription.unsubscribe();
++    clearToolSearchCatalog(catalog);
++    revokeMessageActionTurnCapability(capability);
++  }
++}
++
++afterEach(() => resetPluginRuntimeStateForTest());
++
++describe("native final edit completion through nested tool_call", () => {
++  it.each([
++    { direct: false, commentary: false },
++    { direct: false, commentary: true },
++    { direct: true, commentary: false },
++    { direct: true, commentary: true },
++  ])(
++    "adopts the settled edit without a duplicate final (direct=$direct, commentary=$commentary)",
++    async ({ direct, commentary }) => {
++      const result = await runScenario({ final: true, direct, commentary });
++      expect(result.handleAction).toHaveBeenCalledTimes(1);
++      expect(result.providerRequests).toBe(1);
++      expect(result.sourceDelivery).toBe("delivered");
++      expect(result.payloads).toEqual([]);
++      expect(result.events.findLast((event) => event.type === "tool_execution_end")).toMatchObject({
++        result: { terminate: true },
++      });
++      expect(await result.nextInput()).toMatchObject({
++        providerRequests: 2,
++        last: { role: "assistant", content: [{ type: "text", text: "Fresh input complete." }] },
++      });
++    },
++  );
++  it.each([
++    { label: "progress edit", final: false },
++    { label: "ordinary edit without final" },
++    { label: "failed edit", final: true, failure: true },
++    { label: "partial edit", final: true, partial: true },
++    { label: "dry-run edit", final: true, dryRun: true },
++    { label: "wrong returned message ID", final: true, returnedId: "523456789012345678" },
++    {
++      label: "contradictory returned Discord channel",
++      final: true,
++      returnedChannel: "623456789012345678",
++    },
++    { label: "another channel", final: true, target: "channel:623456789012345678" },
++    { label: "another account", final: true, accountId: "other" },
++    {
++      label: "another thread",
++      final: true,
++      threadId: "723456789012345678",
++      currentThreadId: "823456789012345678",
++    },
++    { label: "ordinary automatic final send", action: "send" as const, final: true },
++  ])("retains normal provider continuation for $label", async ({ label: _label, ...scenario }) => {
++    const result = await runScenario(scenario);
++    if (
++      !(
++        scenario.accountId ||
++        scenario.target ||
++        scenario.currentThreadId ||
++        scenario.dryRun ||
++        scenario.action === "send"
++      )
++    ) {
++      expect(result.handleAction).toHaveBeenCalledTimes(1);
++    }
++    expect(result.providerRequests).toBe(2);
++    expect(result.payloads.some((payload) => payload.text === "Separate automatic final.")).toBe(
++      true,
++    );
++    expect(
++      result.events.findLast((event) => event.type === "tool_execution_end"),
++    ).not.toMatchObject({ result: { terminate: true } });
++  });
++});
 diff --git a/src/agents/tools/message-tool-idempotency.ts b/src/agents/tools/message-tool-idempotency.ts
 index 7c3cb8408da1b9beea7d703ad6a9a989346a5b15..93187f6a725cb24906c89ee15972eede1f7786e5 100644
 --- a/src/agents/tools/message-tool-idempotency.ts
@@ -99723,6 +100108,38 @@ index 44cef0b91f0ced8978fdee66aaf0cc09f09a1dec..4920aea8b6f75b4f0142f516a45ae3a9
    "event-list": "none",
    "event-create": "none",
    timeout: "none",
+diff --git a/src/infra/outbound/source-reply-mirror.ts b/src/infra/outbound/source-reply-mirror.ts
+index 6628bf725fe7874ab1266fbdbcf8969182ac6d22..cf4c9d0c16930d3de527f686974c5cc69ebd65dd 100644
+--- a/src/infra/outbound/source-reply-mirror.ts
++++ b/src/infra/outbound/source-reply-mirror.ts
+@@ -493,6 +493,27 @@ function resolveDeliveredCurrentSourceReply(
+     return false;
+   }
+   switch (params.action.trim().toLowerCase()) {
++    case "edit": {
++      // Editing a completed source answer is itself the reply only when the
++      // caller explicitly marks it final and transport confirms that exact edit.
++      const messageId = normalizeMessageIdValue(params.actionParams.messageId);
++      const editedMessage = asRecord(asRecord(params.deliveredPayload)?.message);
++      const deliveredChannelId = normalizeOptionalString(editedMessage?.channel_id);
++      return (
++        params.sourceReplyFinal === true &&
++        deliveryFact?.status === "settled" &&
++        !deliveryFact.partialDelivery &&
++        messageId !== undefined &&
++        deliveryFact.primaryPlatformMessageId === messageId &&
++        (!deliveredChannelId ||
++          matchesDeliveredSourceTargets(params, {
++            ...deliveryFact,
++            deliveredTargets: [deliveredChannelId],
++          })) &&
++        Boolean(readTrimmedStringAlias(params.actionParams, ["message", "content", "text"])) &&
++        isExactCurrentSourceConversation({ ...params, action: "send" })
++      );
++    }
+     case "react":
+       return (
+         params.sourceReplyFinal === true &&
 diff --git a/src/infra/restart.deferral-timeout.test.ts b/src/infra/restart.deferral-timeout.test.ts
 index b50c0595f43735f540b9497fa82b1bd892ef68e5..bd02fa118fb68cddf616232526849f08ef78a5b9 100644
 --- a/src/infra/restart.deferral-timeout.test.ts

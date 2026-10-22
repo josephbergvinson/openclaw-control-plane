@@ -64,7 +64,7 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | --- | --- |
 | Channel routing | Discord/Telegram adapters preserve the intended account, channel and thread. Exact-message reads return that message or an error instead of substituting general history. |
 | Progress | When status-card progress is enabled, reply presentation updates the current card across long work and legitimate yields, preserving authored milestones; final delivery is a separate message. Other modes retain their configured behavior. For quiet progress cards, internal file-change counters remain structured state rather than visible status text. Optional tool narration is distinct from useful commentary. |
-| Final ownership | Direct replies, command settlement, workers and resumed runs share native delivery ownership. Implicit reply references follow the configured route while explicit targets and source checks remain binding. |
+| Final ownership | Direct replies, command settlement, workers and resumed runs share native delivery ownership. Implicit reply references follow the configured route while explicit targets and source checks remain binding. A settled successful explicit final edit of the exact current source records completion through the per-tool terminal hook, including nested message actions. Wrong targets, dry runs, partial delivery and failed edits do not suppress the separate final. |
 | Delivery reconciliation | A model result, internal terminal record and provider-visible message are distinct observations. Unknown sends require inspection before retry; an unconditional exactly-once guarantee is not implied. |
 | Voice identity and context | `extensions/discord/src/voice` resolves the authenticated speaker and whole selected primary/room policy and profile before admitting speech. Explicitly selected owner records retain required-file checks and native memory audience filtering; guests retain room context without the owner's private additions. |
 | Wake name and task handoff | Room/guild voice settings control when the bot responds and whether it may consult the normal agent for records or actions. A spoken acknowledgment and eventual result keep the original request's owner. Same-room follow requests reuse the pending join and voice generation; late agent consults obtain fresh admission through the existing Gateway work owner, retaining caller, room and cancellation checks. |
@@ -84,9 +84,9 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The current R42/app501 packet
+reconstruction target without a supported binding. The current R43/app502 packet
 uses that descriptive case while canonical/native source includes a later
-test-only fixture correction. Every supported reconstruction requires a full
+lint-only fixture correction. Every supported reconstruction requires a full
 target-tree check. Source reconstruction does not install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
