@@ -91503,6 +91503,292 @@ index 6180d59bfdc7bc860c55b13605a0c9f5e8af1042..6885a15103b0dbbf47cc4a140443b917
      },
    );
    if (result && removed) {
+diff --git a/src/config/sessions/session-accessor.sqlite-artifact-cleanup.ts b/src/config/sessions/session-accessor.sqlite-artifact-cleanup.ts
+index 1e22d2afa9640c4f8cb2d371bb4b7d3e1728e0fa..046dfd0816860bccb7a55035624c665c0b60d958 100644
+--- a/src/config/sessions/session-accessor.sqlite-artifact-cleanup.ts
++++ b/src/config/sessions/session-accessor.sqlite-artifact-cleanup.ts
+@@ -77,51 +77,56 @@ export async function cleanupSessionLifecycleArtifactsCore(
+       }
+     };
+     const artifactPreparation: SqliteSessionArtifactPreparationDiagnostics = {};
+-    const cleanupPlan = await runExclusiveSqliteSessionWrite(
+-      resolved,
+-      async () => {
++    const preparePlan = async () => {
++      assertSourceCurrent();
++      const input = {
++        ...(params.agentId !== undefined ? { agentId: resolved.agentId } : {}),
++        archiveRemovedEntryTranscripts: params.archiveRemovedEntryTranscripts !== false,
++        archiveDirectory: resolveSqliteTranscriptArchiveDirectory(resolved),
++        ...(pluginOwnerId ? { pluginOwnerId } : {}),
++        sessionKeySegmentPrefix,
++        transcriptContentMarker,
++        orphanTranscriptMinAgeMs: params.orphanTranscriptMinAgeMs,
++        nowMs: params.nowMs ?? Date.now(),
++        diagnostics: artifactPreparation,
++      };
++      if (!source) {
++        return prepareSessionLifecycleArtifactCleanup(databaseOptions, input);
++      }
++      const continuation = opened ? captureCanonicalSessionReaderContinuation(opened) : undefined;
++      try {
+         assertSourceCurrent();
+-        const input = {
+-          ...(params.agentId !== undefined ? { agentId: resolved.agentId } : {}),
+-          archiveRemovedEntryTranscripts: params.archiveRemovedEntryTranscripts !== false,
+-          archiveDirectory: resolveSqliteTranscriptArchiveDirectory(resolved),
+-          ...(pluginOwnerId ? { pluginOwnerId } : {}),
+-          sessionKeySegmentPrefix,
+-          transcriptContentMarker,
+-          orphanTranscriptMinAgeMs: params.orphanTranscriptMinAgeMs,
+-          nowMs: params.nowMs ?? Date.now(),
+-          diagnostics: artifactPreparation,
+-        };
+-        if (!source) {
+-          return prepareSessionLifecycleArtifactCleanup(databaseOptions, input);
+-        }
+-        const continuation = opened ? captureCanonicalSessionReaderContinuation(opened) : undefined;
+-        try {
+-          assertSourceCurrent();
+-          const result = await withSessionHistoryWorkerDatabase(
+-            databaseOptions,
+-            (owner) =>
+-              owner.readLifecycleArtifactPlan(
+-                {
+-                  env: resolved.env,
+-                  input: { ...input, continuation: continuation?.receipt },
+-                  expectedSource: source,
+-                },
+-                signal,
+-              ),
+-            maintenanceLane,
+-          );
+-          assertSourceCurrent();
+-          continuation?.assertCurrent();
+-          Object.assign(artifactPreparation, result.diagnostics);
+-          return result.plan;
+-        } finally {
+-          continuation?.release();
+-        }
+-      },
+-      "session.lifecycle.artifacts-prepare",
+-      { artifactPreparation },
+-    );
++        const result = await withSessionHistoryWorkerDatabase(
++          databaseOptions,
++          (owner) =>
++            owner.readLifecycleArtifactPlan(
++              {
++                env: resolved.env,
++                input: { ...input, continuation: continuation?.receipt },
++                expectedSource: source,
++              },
++              signal,
++            ),
++          maintenanceLane,
++        );
++        assertSourceCurrent();
++        continuation?.assertCurrent();
++        Object.assign(artifactPreparation, result.diagnostics);
++        return result.plan;
++      } finally {
++        continuation?.release();
++      }
++    };
++    // The worker reads one snapshot; reclamation revalidates its selected rows
++    // under write admission. A read-only scan must not hold up other transcripts.
++    const cleanupPlan = source
++      ? await preparePlan()
++      : await runExclusiveSqliteSessionWrite(
++          resolved,
++          preparePlan,
++          "session.lifecycle.artifacts-prepare",
++          { artifactPreparation },
++        );
+     assertSourceCurrent();
+     if (cleanupPlan.entries.length === 0 && cleanupPlan.deletePlans.length === 0) {
+       // Startup probes need no reclamation Worker, but previously committed archives
+diff --git a/src/config/sessions/session-accessor.sqlite-artifact-planning.test.ts b/src/config/sessions/session-accessor.sqlite-artifact-planning.test.ts
+index 16c450cdc2ecf50bc39a11cc18a7810cfaca8cf2..ad72f44a9b8ee8cdbcb794d12aa0d4477023aefd 100644
+--- a/src/config/sessions/session-accessor.sqlite-artifact-planning.test.ts
++++ b/src/config/sessions/session-accessor.sqlite-artifact-planning.test.ts
+@@ -21,7 +21,10 @@ import { loadSessionEntryReadOnly } from "./session-accessor.sqlite-entry.js";
+ import * as artifactPlanning from "./session-accessor.sqlite-lifecycle-artifacts.js";
+ import { loadTranscriptEventsSync } from "./session-accessor.sqlite-read.js";
+ import { runExclusiveSqliteSessionWrite } from "./session-accessor.sqlite-scope.js";
+-import { replaceTranscriptEvents } from "./session-accessor.sqlite-transcript-write.js";
++import {
++  appendTranscriptEventSync,
++  replaceTranscriptEvents,
++} from "./session-accessor.sqlite-transcript-write.js";
+ import * as workerReaders from "./session-transcript-worker-readers.js";
+ 
+ let state: OpenClawTestState;
+@@ -50,7 +53,61 @@ afterEach(async () => {
+   await state.cleanup();
+ });
+ 
+-it.each(["rejected", "admitted", "revoked", "referenced"] as const)(
++it("does not reserve the writer while a no-op artifact plan is being read", async () => {
++  const reached = createDeferred();
++  const release = createDeferred();
++  let planReleased = false;
++  const createReaders = workerReaders.createSessionHistoryWorkerReaders;
++  vi.spyOn(workerReaders, "createSessionHistoryWorkerReaders").mockImplementation((run) =>
++    createReaders(async (...args) => {
++      const input = args[0]();
++      const result = await run(...args);
++      if (input.kind === "lifecycle-artifact-plan") {
++        expect(result).toMatchObject({ plan: { entries: [], deletePlans: [] } });
++        reached.resolve();
++        await release.promise;
++        planReleased = true;
++      }
++      return result;
++    }),
++  );
++  const cleanup = cleanupSessionLifecycleArtifactsCore({
++    storePath,
++    sessionKeySegmentPrefix: "absent-artifact-",
++    transcriptContentMarker: "artifact-plan-marker",
++    orphanTranscriptMinAgeMs: 0,
++    archiveRemovedEntryTranscripts: false,
++  });
++  let append: Promise<void> | undefined;
++  let appendBeforePlanReleased = false;
++  const foregroundEvent = { type: "metadata", runId: "foreground-append" };
++  try {
++    await awaitGateBeforeSettlement(reached.promise, cleanup, "Artifact worker read was bypassed");
++    append = runExclusiveSqliteSessionWrite(
++      options,
++      async () => {
++        appendBeforePlanReleased = !planReleased;
++        expect(
++          appendTranscriptEventSync({ storePath, sessionKey, sessionId }, foregroundEvent),
++        ).toEqual({ ok: true, value: true });
++      },
++      "session.transcript.event-append",
++    );
++    expect(
++      SQLITE_SESSION_WRITER_QUEUES.get(fs.realpathSync(options.path))?.pending ?? [],
++    ).toHaveLength(0);
++    await append;
++    expect(appendBeforePlanReleased).toBe(true);
++    expect(loadTranscriptEventsSync({ storePath, sessionId })).toEqual([event, foregroundEvent]);
++  } finally {
++    release.resolve();
++    await append;
++    await cleanup;
++  }
++  expect(await cleanup).toEqual({ removedEntries: 0, archivedTranscriptArtifacts: 0 });
++});
++
++it.each(["rejected", "admitted", "revoked", "referenced", "updated", "appended"] as const)(
+   "preserves session state when a delayed artifact plan is %s",
+   async (outcome) => {
+     const reached = createDeferred();
+@@ -104,28 +161,61 @@ it.each(["rejected", "admitted", "revoked", "referenced"] as const)(
+       } else if (outcome === "revoked") {
+         closing = closeOpenClawAgentDatabaseByPathAsync(options.path);
+       } else if (outcome === "referenced") {
+-        runOpenClawAgentWriteTransaction(
+-          (database) =>
+-            writeSessionEntry(database, "agent:main:survivor", {
+-              sessionId: "survivor",
+-              previousSessionId: sessionId,
+-              updatedAt: 2,
+-            }),
+-          options,
+-        );
+         let followingEntered = false;
+         following = runExclusiveSqliteSessionWrite(
+           options,
+           async () => {
+-            expect(planReleased).toBe(true);
++            expect(planReleased).toBe(false);
++            runOpenClawAgentWriteTransaction(
++              (database) =>
++                writeSessionEntry(database, "agent:main:survivor", {
++                  sessionId: "survivor",
++                  previousSessionId: sessionId,
++                  updatedAt: 2,
++                }),
++              options,
++            );
+             followingEntered = true;
+           },
+           "session.transcript.batch",
+         );
+         expect(
+-          SQLITE_SESSION_WRITER_QUEUES.get(fs.realpathSync(options.path))?.pending,
+-        ).toHaveLength(1);
+-        expect(followingEntered).toBe(false);
++          SQLITE_SESSION_WRITER_QUEUES.get(fs.realpathSync(options.path))?.pending ?? [],
++        ).toHaveLength(0);
++        await following;
++        expect(followingEntered).toBe(true);
++      } else if (outcome === "updated" || outcome === "appended") {
++        following = runExclusiveSqliteSessionWrite(
++          options,
++          async () => {
++            if (outcome === "updated") {
++              runOpenClawAgentWriteTransaction(
++                (database) =>
++                  writeSessionEntry(database, sessionKey, {
++                    ...entry,
++                    label: "updated-during-plan",
++                  }),
++                options,
++              );
++            } else {
++              expect(
++                appendTranscriptEventSync(
++                  { storePath, sessionKey, sessionId },
++                  {
++                    type: "metadata",
++                    runId: "candidate-appended-during-plan",
++                  },
++                ),
++              ).toEqual({ ok: true, value: true });
++            }
++          },
++          "session.transcript.batch",
++        );
++        expect(
++          SQLITE_SESSION_WRITER_QUEUES.get(fs.realpathSync(options.path))?.pending ?? [],
++        ).toHaveLength(0);
++        await following;
++        expect(planReleased).toBe(false);
+       }
+       release.resolve();
+       if (outcome === "referenced") {
+@@ -142,6 +232,8 @@ it.each(["rejected", "admitted", "revoked", "referenced"] as const)(
+           rejected: "artifact planning rejected",
+           admitted: "competing work is in flight",
+           revoked: "revoked",
++          updated: "lifecycle cleanup entry changed",
++          appended: "session state changed before deletion",
+         }[outcome];
+         expect(await settled).toMatchObject({
+           error: { message: expect.stringContaining(message) },
+@@ -154,9 +246,15 @@ it.each(["rejected", "admitted", "revoked", "referenced"] as const)(
+       if (outcome === "referenced") {
+         expect(retainedEntry).toBeUndefined();
+       } else {
+-        expect(retainedEntry).toMatchObject(entry);
++        expect(retainedEntry).toMatchObject(
++          outcome === "updated" ? { ...entry, label: "updated-during-plan" } : entry,
++        );
+       }
+-      expect(loadTranscriptEventsSync({ storePath, sessionId })).toEqual([event]);
++      expect(loadTranscriptEventsSync({ storePath, sessionId })).toEqual(
++        outcome === "appended"
++          ? [event, { type: "metadata", runId: "candidate-appended-during-plan" }]
++          : [event],
++      );
+     } finally {
+       release.resolve();
+       admission?.release();
 diff --git a/src/config/sessions/session-entry-projection.ts b/src/config/sessions/session-entry-projection.ts
 index cb36ef2574c332fab5923feee392001bf212d63a..9c50a9b458634539a48c4ebf163f09701fdf1450 100644
 --- a/src/config/sessions/session-entry-projection.ts

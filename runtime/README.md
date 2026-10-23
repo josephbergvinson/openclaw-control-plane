@@ -44,6 +44,9 @@ current source includes these targeted reliability repairs:
   deadlines and orphaned work retain their recovery paths.
 - Compaction retries carry earlier confirmed delivery facts forward once.
   Progress stays distinct from a final answer, preserving pending child completion.
+- Read-only lifecycle artifact planning runs in the existing worker without
+  reserving the transcript writer. Reclamation still rechecks selected state and
+  native deletion authority before committing.
 - Gateway start notification waits for both runner entry and live admission, so
   fast child completion can reach the final reply owed to its requester.
 - Command cleanup and Gateway settlement still await required terminal saves.

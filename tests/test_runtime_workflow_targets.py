@@ -57,6 +57,7 @@ class RuntimeWorkflowTargetsTests(unittest.TestCase):
                        "src/logging/diagnostic-stuck-session-exec-deadline.test.ts",
                        "src/agents/subagents/registry/subagent-registry-read-snapshot.test.ts",
                        "src/agents/embedded-agent-runner/run.compaction-delivery.integration.test.ts",
+                       "src/config/sessions/session-accessor.sqlite-artifact-planning.test.ts",
                        "src/gateway/agent-turn/agent-run-dispatch.owner.test.ts",
                        "src/auto-reply/reply/dispatch-from-config.continuation-settlement.native.test.ts",
                        "src/auto-reply/reply/waiting-status.delivery.test.ts",
