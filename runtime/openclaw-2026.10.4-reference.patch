@@ -73630,10 +73630,10 @@ index 0000000000000000000000000000000000000000..bceff9bba531e3dc81888c69da352196
 +};
 diff --git a/src/agents/tools/message-tool-final-edit.test.ts b/src/agents/tools/message-tool-final-edit.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..ca624afa916cec68093f56e66bc28c42d446ef2f
+index 0000000000000000000000000000000000000000..18e8199e8f6c60d646fa46b7f8f9a9a3072d7838
 --- /dev/null
 +++ b/src/agents/tools/message-tool-final-edit.test.ts
-@@ -0,0 +1,515 @@
+@@ -0,0 +1,517 @@
 +import {
 +  createAssistantMessageEventStream,
 +  type AssistantMessage,
@@ -74002,7 +74002,9 @@ index 0000000000000000000000000000000000000000..ca624afa916cec68093f56e66bc28c42
 +      messagingToolSentTargets: harness.subscription.getMessagingToolSentTargets(),
 +      messagingToolSourceReplyPayloads: harness.subscription.getMessagingToolSourceReplyPayloads(),
 +      lastToolError: harness.subscription.getLastToolError(),
-+      toolMetas: harness.subscription.toolMetas.slice(),
++      toolMetas: harness.subscription.toolMetas.flatMap(({ toolName, ...entry }) =>
++        typeof toolName === "string" && toolName.trim().length > 0 ? [{ ...entry, toolName }] : [],
++      ),
 +    });
 +    const payloads = buildEmbeddedRunPayloads({
 +      assistantTexts: harness.subscription.assistantTexts.slice(),
