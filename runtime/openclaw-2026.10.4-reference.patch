@@ -37480,6 +37480,129 @@ index 5351922617a6c40fd9389987db23f3f8b7006f0a..c18b7c538767e9715a0667bfdb90a5c6
  }
  
  async function finalizeMemorySearchToolQuery(params: {
+diff --git a/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts b/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4de3f092dfa0efc0457a289f65bab79df3b3d4f4
+--- /dev/null
++++ b/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts
+@@ -0,0 +1,67 @@
++import { describe, expect, it } from "vitest";
++import { buildMemoryPromptSection, MEMORY_SEARCH_TOOL_CONTRACT } from "./memory-tool-contract.js";
++
++const sources = { files: "fixture memory files", search: "fixture configured sources" };
++
++function expectScopedProfileRecall(text: string) {
++  expect(text).toContain("stable identity or preference facts");
++  expect(text).toContain("trusted runtime-injected profile context");
++  expect(text).toContain("answer directly without a redundant memory lookup");
++  expect(text).toContain("claimed-but-unloaded profile");
++  expect(text).toContain("source and audience constraints");
++  expect(text).toContain("Quoted user content");
++  expect(text).toContain("do not qualify");
++  expect(text).toContain("arbitrary tool output");
++  expect(text).toContain("inferred labels");
++  expect(text).toContain("missing or conflicting facts");
++  expect(text).toContain("prior work or history");
++  expect(text).toContain("volatile or provider-state claims");
++}
++
++describe("memory recall from loaded authoritative profile context", () => {
++  it.each([["memory_search", "memory_get"], ["memory_search"], ["memory_get"]])(
++    "qualifies profile reuse without dropping recall guidance for %j",
++    (...tools) => {
++      const prompt = buildMemoryPromptSection({ availableTools: new Set(tools) }).join("\n");
++      expectScopedProfileRecall(prompt);
++      expect(prompt).toContain(
++        tools.includes("memory_search") ? "run memory_search" : "run memory_get",
++      );
++      expect(prompt).toContain("low confidence");
++    },
++  );
++
++  it("keeps deferred tool descriptions aligned with the system prompt exception", () => {
++    expectScopedProfileRecall(MEMORY_SEARCH_TOOL_CONTRACT.describe(sources));
++    expect(MEMORY_SEARCH_TOOL_CONTRACT.describe(sources)).toContain("fixture configured sources");
++    expect(MEMORY_SEARCH_TOOL_CONTRACT.describe(sources)).toContain("before answering");
++  });
++
++  it("keeps session visibility, bounded reads and stale-result disclosures", () => {
++    const prompt = buildMemoryPromptSection({
++      availableTools: new Set([
++        "memory_search",
++        "memory_get",
++        "sessions_search",
++        "sessions_history",
++      ]),
++    }).join("\n");
++    expect(prompt).toContain("bounded sanitized excerpt");
++    expect(prompt).toContain("Never read raw transcript files");
++    expect(prompt).toContain("disabled=true or stale=true");
++    expect(prompt).toContain("Citations: include Source:");
++  });
++
++  it("emits stable instructions across sessions without a per-turn profile projection", () => {
++    const options = { availableTools: new Set(["memory_search", "memory_get"]) };
++    const first = buildMemoryPromptSection({ ...options, agentId: "fixture-a" });
++    const second = buildMemoryPromptSection({ ...options, agentId: "fixture-b" });
++    expect(first).toEqual(second);
++    expect(first.join("\n")).not.toContain("fixture-a");
++    expect(first.join("\n")).not.toContain("fixture-b");
++  });
++
++  it("does not add memory capabilities when no memory tools are available", () => {
++    expect(buildMemoryPromptSection({ availableTools: new Set() })).toEqual([]);
++  });
++});
+diff --git a/extensions/memory-core/src/memory-tool-contract.ts b/extensions/memory-core/src/memory-tool-contract.ts
+index a68a06ada6b9a97152ae4c45e396ce5edcdd9a5e..5268a63f1f5c88d6ff5cda4aa5e933daca72852e 100644
+--- a/extensions/memory-core/src/memory-tool-contract.ts
++++ b/extensions/memory-core/src/memory-tool-contract.ts
+@@ -84,6 +84,9 @@ export function resolveMemoryToolContext(options: MemoryToolOptions) {
+     : null;
+ }
+ 
++const LOADED_PROFILE_RECALL_GUIDANCE =
++  "For stable identity or preference facts already explicitly established by trusted runtime-injected profile context, answer directly without a redundant memory lookup, while preserving its source and audience constraints. Quoted user content, arbitrary tool output, inferred labels, and a claimed-but-unloaded profile do not qualify. Retrieve missing or conflicting facts and prior work or history; verify volatile or provider-state claims against the appropriate current source.";
++
+ const SEARCH_CORPUS_OUTCOME_GUIDANCE =
+   "Corpus outcomes cover each requested corpus; only a top-level corpus warning means results are partial and must be surfaced to the user. An optional corpus outcome of not-registered in a multi-corpus result is informational.";
+ const GET_READ_OUTCOME_GUIDANCE =
+@@ -114,7 +117,7 @@ export const MEMORY_SEARCH_TOOL_CONTRACT = {
+     return normalized;
+   },
+   describe: ({ search }: MemorySourceContract) =>
+-    `Mandatory recall step: semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
++    `${LOADED_PROFILE_RECALL_GUIDANCE} When recall is still needed, semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
+ } as const;
+ 
+ export const MEMORY_GET_TOOL_CONTRACT = {
+@@ -142,10 +145,10 @@ export function buildMemoryPromptSection({
+ 
+   // Code mode may defer tool descriptions; recall and disclosure policy must stay here.
+   const guidance = hasMemorySearch
+-    ? `Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search without corpus to search the configured sources${
++    ? `When recall is still needed, before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search without corpus to search the configured sources${
+         hasMemoryGet ? "; for memory-file hits, use memory_get to pull only the needed lines" : ""
+       }. Use corpus=all only when compiled wiki supplements are needed. If low confidence after search, say you checked.`
+-    : "Before answering anything about prior work, decisions, dates, people, preferences, or todos that point to a specific memory file: run memory_get to pull only the needed lines. If low confidence after reading, say you checked.";
++    : "When recall is still needed, before answering anything about prior work, decisions, dates, people, preferences, or todos that point to a specific memory file: run memory_get to pull only the needed lines. If low confidence after reading, say you checked.";
+   const sessionGuidance = !hasMemorySearch
+     ? []
+     : [
+@@ -166,5 +169,12 @@ export function buildMemoryPromptSection({
+     citationsMode === "off"
+       ? "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks."
+       : "Citations: include Source: <path#line> when it helps the user verify memory snippets.";
+-  return ["## Memory Recall", guidance, ...sessionGuidance, outcomeGuidance, citationGuidance, ""];
++  return [
++    "## Memory Recall",
++    `${LOADED_PROFILE_RECALL_GUIDANCE} ${guidance}`,
++    ...sessionGuidance,
++    outcomeGuidance,
++    citationGuidance,
++    "",
++  ];
+ }
 diff --git a/extensions/memory-core/src/memory/manager-close-observation-lifecycle.test.ts b/extensions/memory-core/src/memory/manager-close-observation-lifecycle.test.ts
 index b598127fa34684e27a4b44e026aacb1b5a1116ab..99f2d030f80d701f75c8858c3c4ecf7f1da6a9a4 100644
 --- a/extensions/memory-core/src/memory/manager-close-observation-lifecycle.test.ts
@@ -54091,30 +54214,40 @@ index b435e0e941f76d95be055f67a70f6d9af1637b86..11c97926c353737748fa0b22783085b8
      "disables server compaction overrides only for memory flushes (configured=%s)",
      async (compaction) => {
 diff --git a/src/agents/embedded-agent-runner/run/attempt-terminal-evidence.ts b/src/agents/embedded-agent-runner/run/attempt-terminal-evidence.ts
-index 6fdae7df15838bfb0ac159fd418d808eab3e9c59..8674423fceabf83f1d7743e09800d57a997c976e 100644
+index 6fdae7df15838bfb0ac159fd418d808eab3e9c59..74f04b6c08d793403917895859358224b841e8c3 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-terminal-evidence.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-terminal-evidence.ts
-@@ -156,6 +156,7 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
+@@ -156,6 +156,16 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
    run: AcceptedSessionSpawnContinuationRun;
  }): boolean {
    const { attempt, run } = params;
 +  const hasCompletionChildren = hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns);
++  // The native yield owner aborts only the prompt unwind. Its canonical outcome
++  // is a successful handoff, but the raw attempt intentionally retains that abort.
++  const cleanExplicitYield =
++    hasCompletionChildren &&
++    attempt.yieldDetected === true &&
++    attempt.terminal.kind === "aborted" &&
++    attempt.terminal.source === "yield_cleanup" &&
++    !attempt.terminal.failure &&
++    !attempt.terminal.timeoutObservation;
    // Only an in-flight media run still owes this turn its result.
    const delegatedToMediaRun =
      resolveSourceReplyDelivery(attempt) === "missing" &&
-@@ -165,9 +166,9 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
+@@ -165,9 +175,9 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
        return operation !== undefined && !isTerminalMediaGenerationStatus(operation.status);
      });
    if (
 -    !(hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns) || delegatedToMediaRun) ||
-+    !(hasCompletionChildren || delegatedToMediaRun) ||
-     attempt.terminal.kind !== "ok" ||
+-    attempt.terminal.kind !== "ok" ||
 -    attempt.yieldDetected === true ||
++    !(hasCompletionChildren || delegatedToMediaRun) ||
++    (attempt.terminal.kind !== "ok" && !cleanExplicitYield) ||
 +    (attempt.yieldDetected === true && !hasCompletionChildren) ||
      run.replyOperation?.turnKind !== "visible" ||
      run.currentInboundEventKind === "room_event" ||
      run.silentExpected === true ||
-@@ -182,9 +183,12 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
+@@ -182,9 +192,12 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
    ) {
      return false;
    }
@@ -55462,10 +55595,10 @@ index 80ed05850441489f7a1309b534b333871926bc0c..339bdd51fddf69c798bf5792ffc1e589
      ? activePreparedAuthPlan.forwardedAuthProfileId
 diff --git a/src/agents/embedded-agent-runner/run/terminal-resolution.accepted-children.cases.ts b/src/agents/embedded-agent-runner/run/terminal-resolution.accepted-children.cases.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0fbf4040197932902a9e6366c2d2de6c642de9ee
+index 0000000000000000000000000000000000000000..ec35163b99a59f46be48d339e1af8207f7da730d
 --- /dev/null
 +++ b/src/agents/embedded-agent-runner/run/terminal-resolution.accepted-children.cases.ts
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,178 @@
 +import { expect, it, onTestFinished } from "vitest";
 +import { createReplyOperation } from "../../../auto-reply/reply/reply-run-registry.js";
 +import { makeEmbeddedRunnerAttempt } from "../../test-helpers/embedded-agent-runner-e2e-fixtures.js";
@@ -55491,7 +55624,11 @@ index 0000000000000000000000000000000000000000..0fbf4040197932902a9e6366c2d2de6c
 +      const replyOperation = createVisibleReplyOperation();
 +      const attempt = makeEmbeddedRunnerAttempt({
 +        ...(yielded
-+          ? { yieldDetected: true, yieldAcknowledgment: "Waiting for verification." }
++          ? {
++              terminal: { kind: "aborted", source: "yield_cleanup" },
++              yieldDetected: true,
++              yieldAcknowledgment: "Waiting for verification.",
++            }
 +          : {}),
 +        acceptedSessionSpawns: [
 +          {
@@ -55600,6 +55737,45 @@ index 0000000000000000000000000000000000000000..0fbf4040197932902a9e6366c2d2de6c
 +      ).toBe(false);
 +    }
 +  });
++
++  it.each([
++    { terminal: { kind: "aborted", source: "runtime" } },
++    { terminal: { kind: "aborted", source: "external" } },
++    {
++      terminal: {
++        kind: "aborted",
++        source: "yield_cleanup",
++        failure: { source: "prompt", error: new Error("failed") },
++      },
++    },
++    {
++      terminal: { kind: "aborted", source: "yield_cleanup", timeoutObservation: "tool_execution" },
++    },
++    { terminal: { kind: "timeout", phase: "prompt", source: "runtime" } },
++    { terminal: { kind: "failed", source: "prompt", error: new Error("failed") } },
++    { terminal: { kind: "aborted", source: "yield_cleanup" }, yieldDetected: false },
++  ] satisfies Parameters<typeof makeEmbeddedRunnerAttempt>[0][])(
++    "does not adopt a child reply after an interrupted or unproven yield: %j",
++    (fields) => {
++      const replyOperation = createVisibleReplyOperation();
++      expect(
++        shouldContinueInteractiveAcceptedSessionSpawns({
++          attempt: makeEmbeddedRunnerAttempt({
++            yieldDetected: true,
++            acceptedSessionSpawns: [
++              {
++                runId: "child-run",
++                childSessionKey: "agent:main:subagent:child",
++                expectsCompletionMessage: true,
++              },
++            ],
++            ...fields,
++          }),
++          run: { replyOperation },
++        }),
++      ).toBe(false);
++    },
++  );
 +}
 diff --git a/src/agents/embedded-agent-runner/run/terminal-resolution.test.ts b/src/agents/embedded-agent-runner/run/terminal-resolution.test.ts
 index 8e8d3f703e28b19abbba8e71ff0fa5e68ed8db63..d173554f4354311daf006be14c02bd8ddda930e2 100644
@@ -58021,6 +58197,207 @@ index 06f69b9f535dde15dc8cc1a446179216cb899eb3..863679e3351443b1ad412709ef7c2a7d
    | {
        kind: "authorizationRedirect";
        authorizationUrl: string;
+diff --git a/src/agents/mcp-oauth.fresh-token.test.ts b/src/agents/mcp-oauth.fresh-token.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b5c1d8a0c88588161d491489b2bff555314e111
+--- /dev/null
++++ b/src/agents/mcp-oauth.fresh-token.test.ts
+@@ -0,0 +1,195 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { createDeferred } from "../../test/helpers/promise.js";
++import type { McpOAuthStore } from "./mcp-oauth-store.types.js";
++
++const mocks = vi.hoisted(() => ({
++  store: {} as McpOAuthStore,
++  read: vi.fn<() => Promise<McpOAuthStore>>(),
++  lease: vi.fn(),
++  auth: vi.fn(),
++  admission: vi.fn(),
++}));
++
++vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({ auth: mocks.auth }));
++vi.mock("../state/openclaw-state-worker-context.js", () => ({
++  captureOpenClawStateWorkerContext: () => ({ admission: { assertCurrent: mocks.admission } }),
++}));
++vi.mock("../state/openclaw-state-lease.js", () => ({
++  withOpenClawStateLeaseAsync: mocks.lease,
++}));
++vi.mock("./mcp-oauth-store.js", () => ({
++  readMcpOAuthStore: mocks.read,
++  mutateMcpOAuthStore: vi.fn(async () => ({ applied: true })),
++}));
++vi.mock("./mcp-oauth-provider.js", () => ({
++  createMcpOAuthClientProvider: async () => ({ tokens: async () => mocks.store.tokens }),
++  withMcpOAuthLeaseSignal: (fetchFn: unknown) => fetchFn,
++}));
++
++import { operatorMcpOAuthIdentity } from "./mcp-oauth-identity.js";
++import { resolveMcpOAuthAccessToken } from "./mcp-oauth.js";
++
++const identity = operatorMcpOAuthIdentity("fixture", "https://mcp.example.test/rpc");
++const fetchFn = vi.fn();
++const fresh = (): McpOAuthStore => ({
++  tokens: {
++    access_token: "fixture-current",
++    refresh_token: "fixture-refresh",
++    token_type: "Bearer",
++  },
++  tokenExpiresAt: Date.now() + 60_000,
++});
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.store = fresh();
++  mocks.read.mockImplementation(async () => mocks.store);
++  mocks.lease.mockImplementation(async (_options, context, operation) =>
++    operation({ assertOwned: async () => {}, signal: new AbortController().signal }, context),
++  );
++  mocks.auth.mockImplementation(async () => {
++    mocks.store = fresh();
++    mocks.store.tokens = {
++      access_token: "fixture-rotated",
++      refresh_token: "fixture-refresh",
++      token_type: "Bearer",
++    };
++    return "AUTHORIZED";
++  });
++});
++
++describe("current MCP OAuth bearer admission", () => {
++  it("returns a fresh bearer while another flow owns the lease", async () => {
++    mocks.lease.mockRejectedValue(new Error("fixture flow lease is busy"));
++    await expect(resolveMcpOAuthAccessToken({ identity })).resolves.toBe("fixture-current");
++    expect(mocks.lease).not.toHaveBeenCalled();
++    expect(mocks.auth).not.toHaveBeenCalled();
++  });
++
++  it.each([29_999, 30_000])("renews at the expiry skew boundary (%i ms)", async (remainingMs) => {
++    mocks.store.tokenExpiresAt = Date.now() + remainingMs;
++    await expect(resolveMcpOAuthAccessToken({ identity, fetchFn })).resolves.toBe(
++      "fixture-rotated",
++    );
++    expect(mocks.lease).toHaveBeenCalledOnce();
++    expect(mocks.auth).toHaveBeenCalledOnce();
++  });
++
++  it("renews a rejected bearer even if its recorded expiry is fresh", async () => {
++    await expect(
++      resolveMcpOAuthAccessToken({
++        identity,
++        fetchFn,
++        rejectedAccessToken: "fixture-current",
++        authorizationChallenge: true,
++      }),
++    ).resolves.toBe("fixture-rotated");
++    expect(mocks.lease).toHaveBeenCalledOnce();
++    expect(mocks.auth).toHaveBeenCalledOnce();
++  });
++
++  it("uses a newer bearer instead of refreshing the one another request rejected", async () => {
++    await expect(
++      resolveMcpOAuthAccessToken({
++        identity,
++        rejectedAccessToken: "fixture-older",
++        authorizationChallenge: true,
++      }),
++    ).resolves.toBe("fixture-current");
++    expect(mocks.lease).not.toHaveBeenCalled();
++  });
++
++  it("does not return a fresh bearer with a persisted consent requirement", async () => {
++    mocks.store.pendingAuthorizationChallenge = { requiresAuthorization: true };
++    await expect(resolveMcpOAuthAccessToken({ identity })).rejects.toThrow(
++      "requires additional OAuth authorization",
++    );
++    expect(mocks.auth).not.toHaveBeenCalled();
++  });
++
++  it("rereads after lease admission and consumes a concurrently renewed bearer", async () => {
++    mocks.store.tokenExpiresAt = 0;
++    mocks.lease.mockImplementationOnce(async (_options, context, operation) => {
++      mocks.store = fresh();
++      return operation(
++        { assertOwned: async () => {}, signal: new AbortController().signal },
++        context,
++      );
++    });
++    await expect(resolveMcpOAuthAccessToken({ identity, fetchFn })).resolves.toBe(
++      "fixture-current",
++    );
++    expect(mocks.read).toHaveBeenCalledTimes(2);
++    expect(mocks.auth).not.toHaveBeenCalled();
++  });
++
++  it.each([true, false])(
++    "preserves unknown-expiry live versus projection semantics (%s)",
++    async (acceptUnknownExpiry) => {
++      delete mocks.store.tokenExpiresAt;
++      await expect(
++        resolveMcpOAuthAccessToken({ identity, fetchFn, acceptUnknownExpiry }),
++      ).resolves.toBe(acceptUnknownExpiry ? "fixture-current" : "fixture-rotated");
++      expect(mocks.lease).toHaveBeenCalledTimes(acceptUnknownExpiry ? 0 : 1);
++    },
++  );
++
++  it("does not retain an earlier bearer across the awaited current read", async () => {
++    const read = createDeferred<McpOAuthStore>();
++    mocks.read.mockReturnValueOnce(read.promise);
++    const resolving = resolveMcpOAuthAccessToken({ identity });
++    read.resolve({ ...fresh(), pendingAuthorizationChallenge: { requiresAuthorization: true } });
++    mocks.store.pendingAuthorizationChallenge = { requiresAuthorization: true };
++    await expect(resolving).rejects.toThrow("requires additional OAuth authorization");
++  });
++
++  it("rejects cancellation during the current read before returning credentials", async () => {
++    const controller = new AbortController();
++    const read = createDeferred<McpOAuthStore>();
++    mocks.read.mockReturnValueOnce(read.promise);
++    const resolving = resolveMcpOAuthAccessToken({ identity, signal: controller.signal });
++    controller.abort(new Error("fixture request closed"));
++    read.resolve(fresh());
++    await expect(resolving).rejects.toThrow("fixture request closed");
++    expect(mocks.lease).not.toHaveBeenCalled();
++  });
++  it("rejects a retired database admission after the current read", async () => {
++    mocks.admission.mockImplementationOnce(() => {
++      throw new Error("fixture database retired");
++    });
++    await expect(resolveMcpOAuthAccessToken({ identity })).rejects.toThrow(
++      "fixture database retired",
++    );
++    expect(mocks.lease).not.toHaveBeenCalled();
++  });
++
++  it("serializes concurrent renewal and rereads the winner's token", async () => {
++    mocks.store.tokenExpiresAt = 0;
++    const renewing = createDeferred();
++    const finishRenewal = createDeferred();
++    let tail = Promise.resolve();
++    mocks.lease.mockImplementation((_options, context, operation) => {
++      const current = tail.then(() =>
++        operation({ assertOwned: async () => {}, signal: new AbortController().signal }, context),
++      );
++      tail = current.then(() => undefined);
++      return current;
++    });
++    mocks.auth.mockImplementationOnce(async () => {
++      renewing.resolve();
++      await finishRenewal.promise;
++      mocks.store = fresh();
++      mocks.store.tokens = { access_token: "fixture-rotated", token_type: "Bearer" };
++      return "AUTHORIZED";
++    });
++    const first = resolveMcpOAuthAccessToken({ identity, fetchFn });
++    await renewing.promise;
++    const second = resolveMcpOAuthAccessToken({ identity, fetchFn });
++    finishRenewal.resolve();
++    await expect(Promise.all([first, second])).resolves.toEqual([
++      "fixture-rotated",
++      "fixture-rotated",
++    ]);
++    expect(mocks.auth).toHaveBeenCalledOnce();
++  });
++});
 diff --git a/src/agents/mcp-oauth.test.ts b/src/agents/mcp-oauth.test.ts
 index 2b12ea05d318703cacd9ac745fe4d66c4403f236..90d2f151af383aaff67fca8168e4ce733c014468 100644
 --- a/src/agents/mcp-oauth.test.ts
@@ -58236,7 +58613,7 @@ index 2b12ea05d318703cacd9ac745fe4d66c4403f236..90d2f151af383aaff67fca8168e4ce73
      await withTempHome(
        async () => {
 diff --git a/src/agents/mcp-oauth.ts b/src/agents/mcp-oauth.ts
-index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8a478bc60 100644
+index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..41624a79977913a4ac0d87819a797457e5274bc6 100644
 --- a/src/agents/mcp-oauth.ts
 +++ b/src/agents/mcp-oauth.ts
 @@ -16,6 +16,10 @@ import {
@@ -58271,7 +58648,56 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
  type ResolveMcpOAuthAccessTokenParams = {
    identity: McpOAuthIdentity;
    config?: McpOAuthConfig;
-@@ -133,23 +130,27 @@ export async function resolveMcpOAuthAccessToken(
+@@ -92,7 +89,29 @@ type ResolveMcpOAuthAccessTokenParams = {
+   signal?: AbortSignal;
+ };
+ 
+-/** Returns a current MCP-native OAuth token under one cross-process flow lease. */
++function reusableMcpOAuthAccessToken(
++  store: McpOAuthStore,
++  params: ResolveMcpOAuthAccessTokenParams,
++): string | undefined {
++  const tokens = store.tokens;
++  if (
++    !tokens?.access_token ||
++    store.pendingAuthorizationChallenge?.requiresAuthorization === true ||
++    params.rejectedAccessToken === tokens.access_token
++  ) {
++    return undefined;
++  }
++  const tokenIsFresh =
++    store.tokenExpiresAt !== undefined &&
++    store.tokenExpiresAt > Date.now() + MCP_OAUTH_TOKEN_EXPIRY_SKEW_MS;
++  return tokenIsFresh ||
++    (store.tokenExpiresAt === undefined &&
++      (params.acceptUnknownExpiry === true || !tokens.refresh_token))
++    ? tokens.access_token
++    : undefined;
++}
++
++/** Reads current bearers directly; refresh and consent retain one cross-process flow lease. */
+ export function resolveMcpOAuthAccessToken(
+   params: ResolveMcpOAuthAccessTokenParams & { allowMissingToken: true },
+ ): Promise<string | undefined>;
+@@ -103,6 +122,17 @@ export async function resolveMcpOAuthAccessToken(
+   params: ResolveMcpOAuthAccessTokenParams,
+ ): Promise<string | undefined> {
+   const storeKey = params.identity.storeKey;
++  const capturedContext = captureOpenClawStateWorkerContext();
++  params.signal?.throwIfAborted();
++  // This actor read observes canonical state, not a retained discovery snapshot
++  // or cached bearer. Returning an unchanged token needs no exclusive flow lease.
++  const current = await readMcpOAuthStore(storeKey, capturedContext);
++  capturedContext.admission.assertCurrent();
++  params.signal?.throwIfAborted();
++  const currentBearer = reusableMcpOAuthAccessToken(current, params);
++  if (currentBearer !== undefined) {
++    return currentBearer;
++  }
+   return await withMcpOAuthLease(
+     storeKey,
+     async (lease, context) => {
+@@ -133,35 +163,32 @@ export async function resolveMcpOAuthAccessToken(
          params.interactiveAuthorizationRequired === true &&
          challengeAppliesToCurrentState
        ) {
@@ -58298,15 +58724,21 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
 +        throw mcpOAuthAuthorizationError(params.identity, "requires OAuth authorization");
        }
  
-       const tokenIsFresh =
-         store.tokenExpiresAt !== undefined &&
+-      const tokenIsFresh =
+-        store.tokenExpiresAt !== undefined &&
 -        store.tokenExpiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
-+        store.tokenExpiresAt > Date.now() + MCP_OAUTH_TOKEN_EXPIRY_SKEW_MS;
-       if (
-         !rejectedCurrentToken &&
-         (tokenIsFresh ||
-@@ -159,9 +160,7 @@ export async function resolveMcpOAuthAccessToken(
-         return tokens.access_token;
+-      if (
+-        !rejectedCurrentToken &&
+-        (tokenIsFresh ||
+-          (store.tokenExpiresAt === undefined &&
+-            (params.acceptUnknownExpiry === true || !tokens.refresh_token)))
+-      ) {
+-        return tokens.access_token;
++      // A different flow may have renewed or rejected this bearer while this
++      // caller waited. Recheck the freshly read row under the original lease.
++      const reusable = reusableMcpOAuthAccessToken(store, params);
++      if (reusable !== undefined) {
++        return reusable;
        }
        if (!tokens.refresh_token) {
 -        throw new Error(
@@ -58316,7 +58748,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
        }
  
        const pendingChallenge = store.pendingAuthorizationChallenge;
-@@ -211,9 +210,7 @@ export async function resolveMcpOAuthAccessToken(
+@@ -211,13 +238,12 @@ export async function resolveMcpOAuthAccessToken(
        await lease.assertOwned();
        const refreshedTokens = await provider.tokens();
        if (result !== "AUTHORIZED" || !refreshedTokens?.access_token) {
@@ -58327,7 +58759,12 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
        }
        return refreshedTokens.access_token;
      },
-@@ -325,6 +322,8 @@ async function runMcpOAuthAuthorizationAttempt(
+     params.signal,
++    capturedContext,
+   );
+ }
+ 
+@@ -325,6 +351,8 @@ async function runMcpOAuthAuthorizationAttempt(
      resourceMetadataUrl?: URL;
      scope?: string;
      suppressStoredTokens?: boolean;
@@ -58336,7 +58773,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
      login?: McpOAuthLoginLifecycle;
    },
    lease: OpenClawStateAsyncLeaseContext,
-@@ -336,6 +335,8 @@ async function runMcpOAuthAuthorizationAttempt(
+@@ -336,6 +364,8 @@ async function runMcpOAuthAuthorizationAttempt(
      config: params.config,
      allowAuthorizationRedirect: true,
      suppressStoredTokens: params.suppressStoredTokens,
@@ -58345,7 +58782,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
      lease,
      login: params.login,
      storeContext: context,
-@@ -357,7 +358,7 @@ async function runMcpOAuthAuthorizationAttempt(
+@@ -357,7 +387,7 @@ async function runMcpOAuthAuthorizationAttempt(
  export async function startMcpOAuthAuthorization(
    identity: McpOAuthIdentity,
    config: ResolvedHttpMcpTransportConfig,
@@ -58354,7 +58791,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
  ): Promise<McpOAuthAuthorizationStartResult> {
    const storeKey = identity.storeKey;
    return await withMcpOAuthLease(
-@@ -370,10 +371,11 @@ export async function startMcpOAuthAuthorization(
+@@ -370,10 +400,11 @@ export async function startMcpOAuthAuthorization(
        opts.login?.assertCurrent();
        if (
          opts.login &&
@@ -58367,7 +58804,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
        ) {
          return { status: "authorized" };
        }
-@@ -386,6 +388,14 @@ export async function startMcpOAuthAuthorization(
+@@ -386,6 +417,14 @@ export async function startMcpOAuthAuthorization(
          ...config.oauth,
          ...(configuredRedirectUrl ? { redirectUrl: configuredRedirectUrl } : {}),
        };
@@ -58382,7 +58819,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
        const attempt = {
          identity,
          config: oauthConfig,
-@@ -393,8 +403,11 @@ export async function startMcpOAuthAuthorization(
+@@ -393,8 +432,11 @@ export async function startMcpOAuthAuthorization(
          resourceMetadataUrl: pendingChallenge?.resourceMetadataUrl
            ? new URL(pendingChallenge.resourceMetadataUrl)
            : undefined,
@@ -58396,7 +58833,7 @@ index bc4bda2e6a4fa41cf4e59f5d603678338b51cce7..e263e82524d48a78a91978d6dc332ff8
          login: opts.login,
        };
        let result: "authorized" | "redirect";
-@@ -498,7 +511,8 @@ async function completeMcpOAuthAuthorizationUnderLease(
+@@ -498,7 +540,8 @@ async function completeMcpOAuthAuthorizationUnderLease(
          ? new URL(pendingChallenge.resourceMetadataUrl)
          : undefined,
        scope: normalizeOptionalString(pendingChallenge?.scope),
@@ -66067,7 +66504,7 @@ index 0000000000000000000000000000000000000000..d871bbe29ab40f03bc5fae90a0817a90
 +};
 diff --git a/src/agents/subagents/registry/subagent-registry-progress.test.ts b/src/agents/subagents/registry/subagent-registry-progress.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..78dd888424a4f2236aad922cfd3a381e1d3e755c
+index 0000000000000000000000000000000000000000..fb206902d6cdbe14e533194e8759e18b31e3e660
 --- /dev/null
 +++ b/src/agents/subagents/registry/subagent-registry-progress.test.ts
 @@ -0,0 +1,771 @@
@@ -66113,13 +66550,13 @@ index 0000000000000000000000000000000000000000..78dd888424a4f2236aad922cfd3a381e
 +    expect(f.publish).toHaveBeenCalledTimes(2);
 +    await f.owner.reset();
 +  });
-+  it("requests one overdue checkpoint under revocable exact-run custody", async () => {
++  it("requests one authored checkpoint at forty-five seconds under revocable exact-run custody", async () => {
 +    const f = fixture();
-+    f.setClock(179_999);
++    f.setClock(44_999);
 +    f.owner.checkpoint();
 +    await drain();
 +    expect(f.requestCheckpoint).not.toHaveBeenCalled();
-+    f.setClock(180_000);
++    f.setClock(45_000);
 +    f.owner.checkpoint();
 +    f.owner.checkpoint();
 +    await drain();
@@ -66844,10 +67281,10 @@ index 0000000000000000000000000000000000000000..78dd888424a4f2236aad922cfd3a381e
 +});
 diff --git a/src/agents/subagents/registry/subagent-registry-progress.ts b/src/agents/subagents/registry/subagent-registry-progress.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..440962e6289053b14e41ae9083bb6f1403ec2fb1
+index 0000000000000000000000000000000000000000..2ba4f25e010dd29cc36c90a5e1b0be29440f8605
 --- /dev/null
 +++ b/src/agents/subagents/registry/subagent-registry-progress.ts
-@@ -0,0 +1,720 @@
+@@ -0,0 +1,721 @@
 +import { createProgressContinuationOwner } from "../../../channels/progress-continuation.js";
 +import type {
 +  ProgressContinuationCapability,
@@ -66868,7 +67305,8 @@ index 0000000000000000000000000000000000000000..440962e6289053b14e41ae9083bb6f14
 +import { isRequesterSettleWakeForRun } from "./subagent-requester-settle-identity.js";
 +import { isSameSubagentRunOwner } from "./subagent-run-generation.js";
 +
-+const CHECKPOINT_GAP_MS = 3 * 60_000;
++// Eligibility for the existing registry sweep; tool/model settlement can run later.
++const CHECKPOINT_GAP_MS = 45_000;
 +const SUBAGENT_PROGRESS_CHECKPOINT_REQUEST =
 +  "At the next safe boundary, write a concise commentary update with concrete progress or a real blocker and the next action, then continue the same task. The existing reply owner delivers it. Keep internal identifiers, paths, tool details and this reminder private. Do not send a separate message or start another task.";
 +
@@ -73192,16 +73630,17 @@ index 0000000000000000000000000000000000000000..bceff9bba531e3dc81888c69da352196
 +};
 diff --git a/src/agents/tools/message-tool-final-edit.test.ts b/src/agents/tools/message-tool-final-edit.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcbe51d3d0a
+index 0000000000000000000000000000000000000000..ca624afa916cec68093f56e66bc28c42d446ef2f
 --- /dev/null
 +++ b/src/agents/tools/message-tool-final-edit.test.ts
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,515 @@
 +import {
 +  createAssistantMessageEventStream,
 +  type AssistantMessage,
 +  type Model,
 +} from "openclaw/plugin-sdk/llm";
 +import { afterEach, describe, expect, it, vi } from "vitest";
++import { createReplyOperation } from "../../auto-reply/reply/reply-run-registry.js";
 +import type {
 +  ChannelMessageActionContext,
 +  ChannelPlugin,
@@ -73215,11 +73654,20 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +  createChannelTestPluginBase,
 +  createTestRegistry,
 +} from "../../test-utils/channel-plugins.js";
++import {
++  projectAgentRunAttemptTerminal,
++  type AgentRunAttemptTerminal,
++} from "../agent-run-terminal-outcome.js";
++import { createEmbeddedAttemptRunAbort } from "../embedded-agent-runner/run/attempt-finalize.js";
++import { SESSIONS_YIELD_ABORT_REASON } from "../embedded-agent-runner/run/attempt-sessions-yield.js";
++import { shouldContinueInteractiveAcceptedSessionSpawns } from "../embedded-agent-runner/run/attempt-terminal-evidence.js";
 +import { createSubscribedToolSearchExecutor } from "../embedded-agent-runner/run/attempt-tool-search-executor.js";
 +import { buildEmbeddedRunPayloads } from "../embedded-agent-runner/run/payloads.js";
 +import { createSubscribedSessionHarness } from "../embedded-agent-subscribe.e2e-harness.js";
 +import { Agent, type AgentEvent, type AgentTool } from "../runtime/index.js";
 +import { SessionManager } from "../sessions/session-manager.js";
++import * as subagentSpawn from "../subagents/spawn/subagent-spawn.js";
++import { makeEmbeddedRunnerAttempt } from "../test-helpers/embedded-agent-runner-e2e-fixtures.js";
 +import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
 +import {
 +  applyToolSearchCatalog,
@@ -73230,6 +73678,10 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +import { jsonResult } from "./common.js";
 +import { createMessageTool } from "./message-tool-execution.js";
 +import { messageToolSecretDeps } from "./message-tool-execution.test-support.js";
++import { createSessionsSpawnTool } from "./sessions-spawn-tool.js";
++import { createSessionsYieldTool } from "./sessions-yield-tool.js";
++
++vi.mock("../subagents/spawn/subagent-spawn.js", { spy: true });
 +
 +const channelId = "123456789012345678";
 +const messageId = "223456789012345678";
@@ -73297,6 +73749,7 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +  threadId?: string;
 +  currentThreadId?: string;
 +  commentary?: boolean;
++  yieldWithChild?: boolean;
 +};
 +async function runScenario(scenario: Scenario) {
 +  const config = {
@@ -73361,6 +73814,7 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +    ...messageToolSecretDeps,
 +  });
 +  const manager = SessionManager.inMemory();
++  let sourceReplyDelivered = false;
 +  const harness = createSubscribedSessionHarness({
 +    runId: identity.runId,
 +    sessionKey: identity.sessionKey,
@@ -73368,10 +73822,45 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +    currentAccountId: "default",
 +    currentChannelId: channelId,
 +    currentMessagingTarget: channelId,
++    currentMessageId: source.currentMessageId,
 +    sourceReplyDeliveryMode: "automatic",
++    onDeliveredMessageToolOnlySourceReply: () => {
++      sourceReplyDelivered = true;
++    },
 +    sessionExtras: { sessionManager: manager },
 +  });
 +  const controller = new AbortController();
++  const abortState: { terminal: AgentRunAttemptTerminal } = { terminal: { kind: "ok" } };
++  let yielded = false;
++  const child = {
++    status: "accepted" as const,
++    context: "isolated" as const,
++    childSessionKey: "agent:main:subagent:progress-child",
++    runId: "progress-child-run",
++    expectsCompletionMessage: true,
++    completionTarget: "parent" as const,
++  };
++  const spawn = createSessionsSpawnTool({
++    config,
++    agentSessionKey: identity.sessionKey,
++    requesterRunId: identity.runId,
++    agentChannel: "discord",
++    agentAccountId: "default",
++    currentChannelId: channelId,
++    currentMessagingTarget: channelId,
++  });
++  if (scenario.yieldWithChild) {
++    vi.mocked(subagentSpawn.spawnSubagentDirect).mockResolvedValueOnce(child);
++  }
++  const yieldTool = createSessionsYieldTool({
++    sessionId: "progress-parent-session",
++    claimYield: () => true,
++    onYield: () => {
++      yielded = true;
++      controller.abort(SESSIONS_YIELD_ABORT_REASON);
++      abortRun();
++    },
++  });
 +  const executor = createSubscribedToolSearchExecutor({
 +    attempt: identity,
 +    runSignal: controller.signal,
@@ -73384,7 +73873,7 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +  const catalogRef = createToolSearchCatalogRef();
 +  const catalog = { config, catalogRef, executeTool: executor, runId: identity.runId };
 +  const controls = createToolSearchTools(catalog);
-+  applyToolSearchCatalog({ ...catalog, tools: [...controls, tool] });
++  applyToolSearchCatalog({ ...catalog, tools: [...controls, tool, spawn] });
 +  const callTool = controls.find((candidate) => candidate.name === "tool_call");
 +  if (!callTool) {
 +    throw new Error("Missing native tool_call control");
@@ -73404,36 +73893,66 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +    ...(scenario.threadId ? { threadId: scenario.threadId } : {}),
 +  };
 +  const agent = new Agent({
-+    initialState: { model, tools: [scenario.direct ? tool : callTool] as AgentTool[] },
++    initialState: {
++      model,
++      tools: [
++        scenario.direct ? tool : callTool,
++        ...(scenario.yieldWithChild ? [yieldTool] : []),
++      ] as AgentTool[],
++    },
 +    streamFn: () => {
 +      providerRequests += 1;
 +      const response = freshInput
 +        ? assistant([{ type: "text", text: "Fresh input complete." }])
-+        : providerRequests === 1
++        : scenario.yieldWithChild && providerRequests === 1
 +          ? assistant([
-+              ...(scenario.commentary
-+                ? [
-+                    {
-+                      type: "text" as const,
-+                      text: "Updating the existing final.",
-+                      textSignature: JSON.stringify({
-+                        v: 1,
-+                        id: "commentary",
-+                        phase: "commentary",
-+                      }),
-+                    },
-+                  ]
-+                : []),
 +              {
 +                type: "toolCall",
-+                id: "outer-edit",
-+                name: scenario.direct ? "message" : "tool_call",
-+                arguments: scenario.direct
-+                  ? messageArgs
-+                  : { id: "openclaw:core:message", args: messageArgs },
++                id: "outer-spawn",
++                name: "tool_call",
++                arguments: {
++                  id: "openclaw:core:sessions_spawn",
++                  args: {
++                    task: "Check the synthetic source manifest.",
++                    completionTarget: "parent",
++                  },
++                },
 +              },
 +            ])
-+          : assistant([{ type: "text", text: "Separate automatic final." }]);
++          : scenario.yieldWithChild && providerRequests === 3
++            ? assistant([
++                {
++                  type: "toolCall",
++                  id: "yield-parent",
++                  name: "sessions_yield",
++                  arguments: { message: "Wait for the accepted child." },
++                },
++              ])
++            : providerRequests === (scenario.yieldWithChild ? 2 : 1)
++              ? assistant([
++                  ...(scenario.commentary
++                    ? [
++                        {
++                          type: "text" as const,
++                          text: "Updating the existing final.",
++                          textSignature: JSON.stringify({
++                            v: 1,
++                            id: "commentary",
++                            phase: "commentary",
++                          }),
++                        },
++                      ]
++                    : []),
++                  {
++                    type: "toolCall",
++                    id: "outer-edit",
++                    name: scenario.direct ? "message" : "tool_call",
++                    arguments: scenario.direct
++                      ? messageArgs
++                      : { id: "openclaw:core:message", args: messageArgs },
++                  },
++                ])
++              : assistant([{ type: "text", text: "Separate automatic final." }]);
 +      const stream = createAssistantMessageEventStream();
 +      queueMicrotask(() => {
 +        stream.push({
@@ -73446,6 +73965,22 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +      return stream;
 +    },
 +  });
++  const abortRun = createEmbeddedAttemptRunAbort({
++    abortActiveSession: async (reason) => {
++      agent.abort(reason);
++    },
++    activeSession: { abortCompaction: () => {}, isCompacting: false },
++    attempt: {
++      ...identity,
++      sessionId: "progress-parent-session",
++      sessionFile: "synthetic-session",
++    },
++    getQueueHandle: () => undefined,
++    isProbeSession: true,
++    log: { warn: () => {} },
++    runAbortController: controller,
++    state: abortState,
++  });
 +  agent.subscribe((event) => {
 +    events.push(event);
 +    harness.emit(event);
@@ -73453,6 +73988,22 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +  try {
 +    await agent.prompt("Correct the existing final answer in place.");
 +    await harness.subscription.waitForPendingEvents();
++    const observedAttempt = makeEmbeddedRunnerAttempt({
++      terminal: abortState.terminal,
++      acceptedSessionSpawns: harness.subscription.getAcceptedSessionSpawns(),
++      assistantTexts: harness.subscription.assistantTexts.slice(),
++      yieldDetected: yielded,
++      didSendViaMessagingTool: harness.subscription.didSendViaMessagingTool(),
++      didDeliverSourceReplyViaMessageTool: sourceReplyDelivered,
++      sourceReplyDeliveryState: harness.subscription.getSourceReplyDeliveryState(),
++      sourceReplyDelivered: harness.subscription.getSourceReplyDelivered(),
++      messagingToolSentTexts: harness.subscription.getMessagingToolSentTexts(),
++      messagingToolSentMediaUrls: harness.subscription.getMessagingToolSentMediaUrls(),
++      messagingToolSentTargets: harness.subscription.getMessagingToolSentTargets(),
++      messagingToolSourceReplyPayloads: harness.subscription.getMessagingToolSourceReplyPayloads(),
++      lastToolError: harness.subscription.getLastToolError(),
++      toolMetas: harness.subscription.toolMetas.slice(),
++    });
 +    const payloads = buildEmbeddedRunPayloads({
 +      assistantTexts: harness.subscription.assistantTexts.slice(),
 +      answerSegments: harness.subscription.answerSegments,
@@ -73473,6 +74024,7 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +      providerRequests,
 +      handleAction,
 +      events,
++      observedAttempt,
 +      payloads,
 +      sourceDelivery: harness.subscription.getSourceReplyDeliveryState(),
 +      async nextInput() {
@@ -73491,6 +74043,47 @@ index 0000000000000000000000000000000000000000..f26f4698b76603d161e70a331530cbcb
 +afterEach(() => resetPluginRuntimeStateForTest());
 +
 +describe("native final edit completion through nested tool_call", () => {
++  it("retains accepted-child continuation after a real nested progress edit and explicit yield", async () => {
++    const result = await runScenario({ final: false, commentary: true, yieldWithChild: true });
++    const replyOperation = createReplyOperation({
++      sessionKey: "agent:main:discord:channel:progress-parent",
++      sessionId: "progress-parent-session",
++      resetTriggered: false,
++      turnKind: "visible",
++    });
++    try {
++      expect(result.observedAttempt.acceptedSessionSpawns).toMatchObject([
++        { runId: "progress-child-run" },
++      ]);
++      expect(result.observedAttempt.yieldDetected).toBe(true);
++      expect(result.observedAttempt.terminal).toEqual({ kind: "aborted", source: "yield_cleanup" });
++      expect(projectAgentRunAttemptTerminal(result.observedAttempt.terminal)).toMatchObject({
++        aborted: false,
++        cleanupYieldAborted: true,
++        failed: false,
++        timedOut: false,
++      });
++      expect(result.observedAttempt.assistantTexts).toEqual([]);
++      expect(result.observedAttempt.didDeliverSourceReplyViaMessageTool).toBe(false);
++      expect(result.observedAttempt.messagingToolSentTexts).toEqual([]);
++      expect(result.observedAttempt.messagingToolSentTargets).toEqual([]);
++      expect(result.observedAttempt.lastToolError).toBeUndefined();
++      expect(
++        shouldContinueInteractiveAcceptedSessionSpawns({
++          attempt: { ...result.observedAttempt, terminal: { kind: "ok" } },
++          run: { replyOperation },
++        }),
++      ).toBe(true);
++      expect(
++        shouldContinueInteractiveAcceptedSessionSpawns({
++          attempt: result.observedAttempt,
++          run: { replyOperation },
++        }),
++      ).toBe(true);
++    } finally {
++      replyOperation.complete();
++    }
++  });
 +  it.each([
 +    { direct: false, commentary: false },
 +    { direct: false, commentary: true },
@@ -92223,11 +92816,564 @@ index d7130b2431da45699eddcd67ac5155d6111ebbd6..1a64fdf80ad10f9f03dda2a82d458e43
    restoredCronContinuationLifecycleRevision?: string;
    lifecycleStorePath: string;
    resolvedThreadId?: string | number;
+diff --git a/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts b/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
+index 00dfd92d078924db620ec0f4abc9dc1ec9a94014..aca8cfd1a37b4f60b58300612cb44779bb5673a8 100644
+--- a/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
++++ b/src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts
+@@ -3,7 +3,10 @@ import { collectNestedErrorCandidates } from "@openclaw/normalization-core/error
+ import { expectDefined } from "@openclaw/normalization-core/expect";
+ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
+-import { createOperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
++import {
++  createOperationalRunInstanceRef,
++  prepareAgentRunAdmission,
++} from "../../agents/admitted-run-context.js";
+ import { resolveAgentRunContext } from "../../agents/command/run-context.js";
+ import {
+   getPreparedModelRuntimeBorrowedSnapshot,
+@@ -47,6 +50,7 @@ import { replayAgentTurnIfCached } from "./agent-dedupe.js";
+ import { resolveAgentDeliveryPhase } from "./agent-delivery-phase.js";
+ import * as agentHandlerHelpers from "./agent-handler-helpers.js";
+ import { startAgentRunExecution } from "./agent-run-execution-phase.js";
++import { createExecution } from "./agent-run-execution-phase.test-support.js";
+ import type { AgentTurnPrincipal } from "./types.js";
+ 
+ const { dispatchAgentRunFromGateway, agentCommand } = vi.hoisted(() => ({
+@@ -62,96 +66,6 @@ vi.mock("./agent-run-dispatch.js", () => ({
+   dispatchAgentRunFromGateway,
+ }));
+ 
+-function createExecution(
+-  options: {
+-    aborted?: boolean;
+-    assertContextCurrent?: () => void;
+-    pendingInputSettlement?: () => Promise<void>;
+-  } = {},
+-) {
+-  const abortCleanup = vi.fn();
+-  const gatewayRelease = vi.fn();
+-  const callerRelease = vi.fn();
+-  const { promise: runtimeReleased, resolve: resolveRuntimeReleased } = createDeferred();
+-  const runtimeRelease = vi.fn(async () => resolveRuntimeReleased());
+-  const controller = new AbortController();
+-  if (options.aborted) {
+-    controller.abort();
+-  }
+-  return {
+-    abortCleanup,
+-    gatewayRelease,
+-    callerRelease,
+-    runtimeRelease,
+-    runtimeReleased,
+-    params: {
+-      assertContextCurrent: options.assertContextCurrent,
+-      prepared: {
+-        releaseCallerAuthority: callerRelease,
+-        activeGatewayWorkAdmission: {
+-          release: gatewayRelease,
+-          run: async (run: () => Promise<void>) => await run(),
+-        },
+-        activeRunAbort: {
+-          cleanup: abortCleanup,
+-          controller,
+-          registered: false,
+-        },
+-        effectiveAllowModelOverride: false,
+-        lifecycleStorePath: "",
+-        operationalRunInstance: {},
+-        preparedModelRuntimeLease: { [Symbol.asyncDispose]: runtimeRelease, snapshot: {} },
+-        replyDispatchRuntime: {
+-          config: { runtime: "A" },
+-          pluginGeneration: "generation-A",
+-        },
+-        unpersistedOffloadedRefs: [],
+-        userTurn: {
+-          recorder: options.pendingInputSettlement
+-            ? { waitForPendingInputSettlement: options.pendingInputSettlement }
+-            : undefined,
+-          execApprovalFollowupHandoffClaimId: "claim",
+-          message: "continue",
+-          senderIsOwner: false,
+-          suppressPromptPersistence: false,
+-        },
+-        workspaceOverride: "/workspace/A",
+-      },
+-      request: {},
+-      cfg: {},
+-      activeSessionAgentId: "main",
+-      delivery: {},
+-      isNewSession: false,
+-      isRawModelRun: true,
+-      isOneShotModelRun: true,
+-      isRestartRecoveryResumeRun: false,
+-      suppressVisibleSessionEffects: true,
+-      images: [],
+-      imageOrder: [],
+-      media: [],
+-      runId: "owner-test",
+-      agentDedupeKeys: [],
+-      bestEffortDeliver: false,
+-      lifecycleGeneration: "test",
+-      preserveUserFacingSessionModelState: false,
+-      skipAgentInitialSessionTouch: true,
+-      canUseInternalRuntimeHandoff: false,
+-      client: null,
+-      context: {
+-        getSessionEventSubscriberConnIds: () => new Set(),
+-        dedupe: new Map(),
+-        deps: {},
+-        logGateway: { error: vi.fn(), warn: vi.fn() },
+-      },
+-      io: {
+-        emitAcceptance: vi.fn(),
+-        emitFinal: vi.fn(),
+-      },
+-      releaseCronContinuationClaimWithRecovery: async () => true,
+-    } as unknown as Parameters<typeof startAgentRunExecution>[0],
+-  };
+-}
+-
+ function createVisibleExecution() {
+   const execution = createExecution();
+   const sessionKey = "agent:main:task-access-liveness";
+@@ -560,6 +474,10 @@ describe("startAgentRunExecution Gateway ownership", () => {
+     async (isNewSession) => {
+       const execution = createVisibleExecution();
+       execution.params.isNewSession = isNewSession;
++      execution.params.lifecycleGeneration = getAgentEventLifecycleGeneration();
++      execution.params.prepared.operationalRunInstance = createOperationalRunInstanceRef(
++        execution.params.runId,
++      );
+       const publish = sessionChange.emitSessionsChanged;
+       const notices: Array<{ reason: string; accessChanges: number }> = [];
+       const publisher = vi
+@@ -573,8 +491,23 @@ describe("startAgentRunExecution Gateway ownership", () => {
+           });
+         });
+       dispatchAgentRunFromGateway.mockImplementationOnce(async (dispatch) => {
+-        await dispatch.ingressOpts.onExecutionStarted();
+-        dispatch.cleanupAbortController();
++        const admission = prepareAgentRunAdmission({
++          cfg: {},
++          operationalRunInstance: execution.params.prepared.operationalRunInstance,
++          facts: {
++            runId: execution.params.runId,
++            agentId: "main",
++            ingress: { kind: "system", boundary: "liveness-test", state: "present" },
++          },
++          onAdmitted: dispatch.ingressOpts.onAdmittedRunContext,
++        });
++        try {
++          await dispatch.ingressOpts.onExecutionStarted();
++          await admission.admit("embedded");
++          dispatch.cleanupAbortController();
++        } finally {
++          admission.close();
++        }
+       });
+ 
+       try {
+diff --git a/src/gateway/agent-turn/agent-run-execution-phase.start-admission.test.ts b/src/gateway/agent-turn/agent-run-execution-phase.start-admission.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..90f69259dd1c0760d743b52f9f9164e863e82727
+--- /dev/null
++++ b/src/gateway/agent-turn/agent-run-execution-phase.start-admission.test.ts
+@@ -0,0 +1,282 @@
++import { expectDefined } from "@openclaw/normalization-core/expect";
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import {
++  createOperationalRunInstanceRef,
++  prepareAgentRunAdmission,
++} from "../../agents/admitted-run-context.js";
++import type { AgentCommandOpts } from "../../agents/command/types.js";
++import { registerChatAbortController, type ChatAbortControllerEntry } from "../chat-abort.js";
++import { startAgentRunExecution } from "./agent-run-execution-phase.js";
++import { createExecution } from "./agent-run-execution-phase.test-support.js";
++
++const { dispatchAgentRunFromGateway, agentCommand } = vi.hoisted(() => ({
++  dispatchAgentRunFromGateway: vi.fn(),
++  agentCommand: vi.fn(),
++}));
++vi.mock("../../commands/agent.js", () => ({ agentCommandFromGatewayIngress: agentCommand }));
++vi.mock("./agent-run-dispatch.js", () => ({ dispatchAgentRunFromGateway }));
++
++function createStartExecution() {
++  const execution = createExecution();
++  const controllers = new Map<string, ChatAbortControllerEntry>();
++  const instance = createOperationalRunInstanceRef(execution.params.runId);
++  const registration = registerChatAbortController({
++    chatAbortControllers: controllers,
++    runId: execution.params.runId,
++    sessionKey: "agent:main:requester-synthesis",
++    sessionId: "requester-synthesis",
++    operationalRunInstance: instance,
++    kind: "agent",
++    timeoutMs: 60_000,
++  });
++  const entry = expectDefined(registration.entry, "requester synthesis registration");
++  execution.params.prepared.activeRunAbort = registration;
++  execution.params.prepared.operationalRunInstance = instance;
++  execution.params.lifecycleGeneration = expectDefined(entry.lifecycleGeneration, "run generation");
++  execution.params.context.chatAbortControllers = controllers;
++  execution.params.prepared.activeGatewayWorkAdmission.isActive = () => true;
++  return { execution, controllers, instance, registration, entry };
++}
++
++describe("Gateway execution-start admission", () => {
++  beforeEach(() => {
++    dispatchAgentRunFromGateway.mockReset();
++    agentCommand.mockReset();
++  });
++
++  it.each(["runner-first", "admission-first"] as const)(
++    "attaches requester synthesis to its canonical producer after %s admission",
++    async (order) => {
++      const { execution, instance, entry } = createStartExecution();
++      const observations: string[] = [];
++      const saved = vi.fn();
++      const started = vi.fn(() => {
++        observations.push("started");
++        const producer = entry.resolveTerminalProducer?.();
++        if (
++          !producer ||
++          producer.sessionId !== entry.sessionId ||
++          producer.sessionKey !== entry.sessionKey ||
++          !producer.handoff(async (completed) => {
++            await completed;
++            saved();
++          })
++        ) {
++          throw new Error("Requester synthesis lost its canonical final producer");
++        }
++      });
++      execution.params.io.emitExecutionStarted = started;
++      agentCommand.mockImplementationOnce(async (opts: AgentCommandOpts) => {
++        const admission = prepareAgentRunAdmission({
++          cfg: {},
++          operationalRunInstance: instance,
++          facts: {
++            runId: execution.params.runId,
++            agentId: "main",
++            ingress: { kind: "system", boundary: "requester-synthesis-test", state: "present" },
++          },
++          onAdmitted: opts.onAdmittedRunContext,
++        });
++        try {
++          if (order === "runner-first") {
++            // The real embedded orchestrator awaits this before runtime selection admits.
++            await opts.onExecutionStarted?.();
++            observations.push("runner-entered");
++            expect(started).not.toHaveBeenCalled();
++            // Cached acceptance uses this same owner flag to notify duplicate observers.
++            expect(entry.executionStarted).toBe(false);
++          }
++          await admission.admit("embedded");
++          observations.push("admitted");
++          if (order === "admission-first") {
++            expect(started).not.toHaveBeenCalled();
++            await opts.onExecutionStarted?.();
++          }
++          expect(entry.executionStarted).toBe(true);
++          expect(started).toHaveBeenCalledOnce();
++          await admission.admit("embedded");
++          await opts.onExecutionStarted?.();
++          expect(started).toHaveBeenCalledOnce();
++          expect(saved).not.toHaveBeenCalled();
++          await opts.beforeTerminalDelivery?.();
++          expect(saved).toHaveBeenCalledOnce();
++          return { payloads: [], meta: {} };
++        } finally {
++          admission.close();
++        }
++      });
++      const actualDispatch =
++        await vi.importActual<typeof import("./agent-run-dispatch.js")>("./agent-run-dispatch.js");
++      dispatchAgentRunFromGateway.mockImplementationOnce(
++        actualDispatch.dispatchAgentRunFromGateway,
++      );
++
++      await startAgentRunExecution(execution.params);
++
++      expect(execution.params.io.emitFinal).toHaveBeenCalledWith(
++        [true, expect.objectContaining({ status: "ok" }), undefined],
++        expect.anything(),
++      );
++      expect(started).toHaveBeenCalledOnce();
++      expect(saved).toHaveBeenCalledOnce();
++      expect(observations).toEqual(
++        order === "runner-first"
++          ? ["runner-entered", "started", "admitted"]
++          : ["admitted", "started"],
++      );
++    },
++  );
++
++  it.each([
++    "revoked",
++    "mismatched",
++    "aborted",
++    "timed out",
++    "replaced",
++    "cleanup requested",
++    "admission failed",
++  ] as const)("does not publish execution start after %s admission", async (boundary) => {
++    const { execution, controllers, instance, entry } = createStartExecution();
++    const started = vi.fn();
++    execution.params.io.emitExecutionStarted = started;
++    agentCommand.mockImplementationOnce(async (opts: AgentCommandOpts) => {
++      const admission = prepareAgentRunAdmission({
++        cfg: {},
++        operationalRunInstance:
++          boundary === "mismatched"
++            ? createOperationalRunInstanceRef(execution.params.runId)
++            : instance,
++        facts: {
++          runId: execution.params.runId,
++          agentId: "main",
++          ingress: { kind: "system", boundary: "requester-synthesis-test", state: "present" },
++        },
++        onAdmitted: opts.onAdmittedRunContext,
++        assertSourceCurrent:
++          boundary === "admission failed"
++            ? () => {
++                throw new Error("Synthetic source admission failed");
++              }
++            : undefined,
++      });
++      try {
++        if (boundary === "revoked") {
++          await admission.admit("embedded");
++          admission.close();
++          await opts.onExecutionStarted?.();
++        } else {
++          await opts.onExecutionStarted?.();
++          expect(entry.executionStarted).toBe(false);
++          if (boundary === "aborted" || boundary === "timed out") {
++            entry.controller.abort(new Error(boundary));
++          } else if (boundary === "replaced") {
++            controllers.set(execution.params.runId, { ...entry });
++          } else if (boundary === "cleanup requested") {
++            entry.registrationCleanupRequested = true;
++          }
++          await admission.admit("embedded");
++        }
++        throw new Error("Rejected execution unexpectedly crossed admission");
++      } finally {
++        admission.close();
++      }
++    });
++    const actualDispatch =
++      await vi.importActual<typeof import("./agent-run-dispatch.js")>("./agent-run-dispatch.js");
++    dispatchAgentRunFromGateway.mockImplementationOnce(actualDispatch.dispatchAgentRunFromGateway);
++
++    await startAgentRunExecution(execution.params);
++
++    expect(started).not.toHaveBeenCalled();
++    expect(entry.executionStarted).toBe(false);
++    expect(execution.params.io.emitFinal).toHaveBeenCalledWith(
++      [false, expect.objectContaining({ status: "error" }), expect.anything()],
++      expect.anything(),
++    );
++  });
++
++  it.each(["handled hook", "startup failure"] as const)(
++    "settles a %s without claiming admitted execution",
++    async (outcome) => {
++      const { execution, entry } = createStartExecution();
++      const started = vi.fn();
++      const saved = vi.fn();
++      execution.params.io.emitExecutionStarted = started;
++      agentCommand.mockImplementationOnce(async (opts: AgentCommandOpts) => {
++        await opts.onExecutionStarted?.();
++        expect(entry.executionStarted).toBe(false);
++        // Pre-start producer custody must still settle hooks and startup errors.
++        expect(
++          entry.resolveTerminalProducer?.()?.handoff(async (completed) => {
++            await completed;
++            saved();
++          }),
++        ).toBe(true);
++        if (outcome === "startup failure") {
++          throw new Error("Synthetic pre-admission startup failure");
++        }
++        await opts.beforeTerminalDelivery?.();
++        return { payloads: [], meta: {} };
++      });
++      const actualDispatch =
++        await vi.importActual<typeof import("./agent-run-dispatch.js")>("./agent-run-dispatch.js");
++      dispatchAgentRunFromGateway.mockImplementationOnce(
++        actualDispatch.dispatchAgentRunFromGateway,
++      );
++
++      await startAgentRunExecution(execution.params);
++
++      expect(started).not.toHaveBeenCalled();
++      expect(saved).toHaveBeenCalledOnce();
++      expect(execution.params.io.emitFinal).toHaveBeenCalledWith(
++        [
++          outcome === "handled hook",
++          expect.anything(),
++          outcome === "handled hook" ? undefined : expect.anything(),
++        ],
++        expect.anything(),
++      );
++    },
++  );
++
++  it("retains a failed execution-start observer without reannouncing a retry", async () => {
++    const { execution, instance, entry } = createStartExecution();
++    const fault = new Error("Synthetic canonical producer handoff failure");
++    const started = vi.fn(() => {
++      throw fault;
++    });
++    execution.params.io.emitExecutionStarted = started;
++    agentCommand.mockImplementationOnce(async (opts: AgentCommandOpts) => {
++      const admission = prepareAgentRunAdmission({
++        cfg: {},
++        operationalRunInstance: instance,
++        facts: {
++          runId: execution.params.runId,
++          agentId: "main",
++          ingress: { kind: "system", boundary: "requester-synthesis-test", state: "present" },
++        },
++        onAdmitted: opts.onAdmittedRunContext,
++      });
++      try {
++        await admission.admit("embedded");
++        await expect(opts.onExecutionStarted?.()).rejects.toBe(fault);
++        await expect(opts.onExecutionStarted?.()).rejects.toBe(fault);
++        throw fault;
++      } finally {
++        admission.close();
++      }
++    });
++    const actualDispatch =
++      await vi.importActual<typeof import("./agent-run-dispatch.js")>("./agent-run-dispatch.js");
++    dispatchAgentRunFromGateway.mockImplementationOnce(actualDispatch.dispatchAgentRunFromGateway);
++
++    await startAgentRunExecution(execution.params);
++
++    expect(started).toHaveBeenCalledOnce();
++    expect(entry.executionStarted).toBe(true);
++    expect(execution.params.io.emitFinal).toHaveBeenCalledWith(
++      [false, expect.objectContaining({ summary: fault.message }), expect.anything()],
++      expect.anything(),
++    );
++  });
++});
+diff --git a/src/gateway/agent-turn/agent-run-execution-phase.test-support.ts b/src/gateway/agent-turn/agent-run-execution-phase.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6bee790c83cc22553aebd73a6e4a9b606a771ff
+--- /dev/null
++++ b/src/gateway/agent-turn/agent-run-execution-phase.test-support.ts
+@@ -0,0 +1,93 @@
++import { vi } from "vitest";
++import { createDeferred } from "../../../test/helpers/promise.js";
++import type { startAgentRunExecution } from "./agent-run-execution-phase.js";
++
++export function createExecution(
++  options: {
++    aborted?: boolean;
++    assertContextCurrent?: () => void;
++    pendingInputSettlement?: () => Promise<void>;
++  } = {},
++) {
++  const abortCleanup = vi.fn();
++  const gatewayRelease = vi.fn();
++  const callerRelease = vi.fn();
++  const { promise: runtimeReleased, resolve: resolveRuntimeReleased } = createDeferred();
++  const runtimeRelease = vi.fn(async () => resolveRuntimeReleased());
++  const controller = new AbortController();
++  if (options.aborted) {
++    controller.abort();
++  }
++  return {
++    abortCleanup,
++    gatewayRelease,
++    callerRelease,
++    runtimeRelease,
++    runtimeReleased,
++    params: {
++      assertContextCurrent: options.assertContextCurrent,
++      prepared: {
++        releaseCallerAuthority: callerRelease,
++        activeGatewayWorkAdmission: {
++          release: gatewayRelease,
++          run: async (run: () => Promise<void>) => await run(),
++        },
++        activeRunAbort: {
++          cleanup: abortCleanup,
++          controller,
++          registered: false,
++        },
++        effectiveAllowModelOverride: false,
++        lifecycleStorePath: "",
++        operationalRunInstance: {},
++        preparedModelRuntimeLease: { [Symbol.asyncDispose]: runtimeRelease, snapshot: {} },
++        replyDispatchRuntime: {
++          config: { runtime: "A" },
++          pluginGeneration: "generation-A",
++        },
++        unpersistedOffloadedRefs: [],
++        userTurn: {
++          recorder: options.pendingInputSettlement
++            ? { waitForPendingInputSettlement: options.pendingInputSettlement }
++            : undefined,
++          execApprovalFollowupHandoffClaimId: "claim",
++          message: "continue",
++          senderIsOwner: false,
++          suppressPromptPersistence: false,
++        },
++        workspaceOverride: "/workspace/A",
++      },
++      request: {},
++      cfg: {},
++      activeSessionAgentId: "main",
++      delivery: {},
++      isNewSession: false,
++      isRawModelRun: true,
++      isOneShotModelRun: true,
++      isRestartRecoveryResumeRun: false,
++      suppressVisibleSessionEffects: true,
++      images: [],
++      imageOrder: [],
++      media: [],
++      runId: "owner-test",
++      agentDedupeKeys: [],
++      bestEffortDeliver: false,
++      lifecycleGeneration: "test",
++      preserveUserFacingSessionModelState: false,
++      skipAgentInitialSessionTouch: true,
++      canUseInternalRuntimeHandoff: false,
++      client: null,
++      context: {
++        getSessionEventSubscriberConnIds: () => new Set(),
++        dedupe: new Map(),
++        deps: {},
++        logGateway: { error: vi.fn(), warn: vi.fn() },
++      },
++      io: {
++        emitAcceptance: vi.fn(),
++        emitFinal: vi.fn(),
++      },
++      releaseCronContinuationClaimWithRecovery: async () => true,
++    } as unknown as Parameters<typeof startAgentRunExecution>[0],
++  };
++}
 diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
-index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b9996a707 100644
+index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..2e439a172b518d232458db3e188bb3e59eb6cc2c 100644
 --- a/src/gateway/agent-turn/agent-run-execution-phase.ts
 +++ b/src/gateway/agent-turn/agent-run-execution-phase.ts
-@@ -66,6 +66,7 @@ import { settleUnstartedGatewayFollowup } from "./agent-run-subagent.js";
+@@ -22,6 +22,7 @@ import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prep
+ import { resolveScheduledToolPolicyContext } from "../../agents/scheduled-tool-policy.js";
+ import { resolveIngressWorkspaceOverrideForSessionRun } from "../../agents/spawned-context.js";
+ import { isExecutionIdentityCollectionEnabled } from "../../audit/audit-config.js";
++import { createExecutionStartedOwnerBinding } from "../../audit/execution-owner-binding.js";
+ import {
+   resolveReplySourceTurnId,
+   setChannelSourceTurnId,
+@@ -66,6 +67,7 @@ import { settleUnstartedGatewayFollowup } from "./agent-run-subagent.js";
  import {
    annotateAgentRunUserTurnPrompt,
    finalizePreparedAgentRunUserTurn,
@@ -92235,7 +93381,7 @@ index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b
    releaseStoppedAgentRunUserTurn,
  } from "./agent-run-user-turn.js";
  
-@@ -313,29 +314,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+@@ -313,29 +315,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
              assertCurrent: assertDispatchCurrent,
            });
          }
@@ -92266,7 +93412,7 @@ index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b
  
          if (!params.isRawModelRun) {
            ({ message, execApprovalContinuationPromptRange } = annotateAgentRunUserTurnPrompt({
-@@ -385,7 +364,27 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+@@ -385,7 +365,45 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
            sessionEntry: params.sessionEntry,
          });
          const restartRecoveryChannelContext = restartRecoveryContext?.channel;
@@ -92284,6 +93430,24 @@ index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b
 +            throw new Error("MCP requester admitted execution changed");
 +          }
 +        };
++        // Publish Gateway start only after runner entry and admission, in either order.
++        const executionStart = createExecutionStartedOwnerBinding(() => {
++          assertMcpRequesterCurrent();
++          if (prepared.activeRunAbort.markExecutionStarted()) {
++            params.io.emitExecutionStarted?.();
++            if (params.resolvedSessionKey) {
++              emitSessionsChanged(
++                params.context,
++                {
++                  sessionKey: params.resolvedSessionKey,
++                  agentId: params.agentId,
++                  reason: "agent.run.started",
++                },
++                { accessChanged: false },
++              );
++            }
++          }
++        });
          const runContext = {
 +          ...(prepared.admittedMcpRequesterScope
 +            ? {
@@ -92294,7 +93458,16 @@ index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b
            messageChannel:
              restartRecoveryContext?.messageChannel ?? params.delivery.originMessageChannel,
            accountId:
-@@ -562,6 +561,8 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+@@ -552,7 +570,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+                 ...(executionIdentityAdmission ? { executionIdentityAdmission } : {}),
+                 operationalRunInstance: prepared.operationalRunInstance,
+                 operatorAuthority: prepared.operatorAuthority,
+-                onAdmittedRunContext: (admittedRunContext) => {
++                onAdmittedRunContext: async (admittedRunContext) => {
+                   skillLibraryAuthoring?.bind(admittedRunContext);
+                   bindGatewayContextResolver(
+                     admittedRunContext,
+@@ -562,11 +580,14 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                    if (!authority) {
                      throw new Error("agent run delegated authority was not admitted");
                    }
@@ -92303,6 +93476,37 @@ index ba8fd5f4e46fdf3ed39f754c971d4d8b948a1ef3..0188eead5b0bd611e80861982bbc6d3b
                    // Sessionless runs intentionally have no abort-map owner. Their
                    // prepared admission retains authority until agentCommand closes it.
                    if (prepared.activeRunAbort.registered) {
+                     prepared.activeRunAbort.bindAgentRunDelegatedAuthority(authority);
+                   }
++                  await executionStart.onPostAdmission(admittedRunContext);
+                 },
+                 internalDeliveryMediaUrls: params.client?.internal?.internalDeliveryMediaUrls,
+                 internalDeliverySuppressText: params.client?.internal?.internalDeliverySuppressText,
+@@ -577,23 +598,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+                 cleanupBundleMcpOnRunEnd: params.request.cleanupBundleMcpOnRunEnd,
+                 abortSignal: prepared.activeRunAbort.controller.signal,
+                 lifecycleGeneration: params.lifecycleGeneration,
+-                onExecutionStarted: () => {
+-                  if (!prepared.activeRunAbort.markExecutionStarted()) {
+-                    return;
+-                  }
+-                  params.io.emitExecutionStarted?.();
+-                  if (params.resolvedSessionKey) {
+-                    emitSessionsChanged(
+-                      params.context,
+-                      {
+-                        sessionKey: params.resolvedSessionKey,
+-                        agentId: params.agentId,
+-                        reason: "agent.run.started",
+-                      },
+-                      { accessChanged: false },
+-                    );
+-                  }
+-                },
++                onExecutionStarted: executionStart.onExecutionStarted,
+                 onActiveModelSelected: createAgentRunModelSelectionHandler({
+                   context: params.context,
+                   runId: params.runId,
 diff --git a/src/gateway/agent-turn/agent-run-subagent.ts b/src/gateway/agent-turn/agent-run-subagent.ts
 index bf4adf4aba27884237226bd9669daafcb932e30a..f863c53341e6048f27cf3d34a7f3932cbda41934 100644
 --- a/src/gateway/agent-turn/agent-run-subagent.ts
@@ -92405,6 +93609,55 @@ index 60dca56b5096428c70a7946a3eef206d9ef80dda..c7111e6583ddc29d4f9247454f233d80
 +    );
 +  }
 +}
+diff --git a/src/gateway/agent-turn/internal-facade.test.ts b/src/gateway/agent-turn/internal-facade.test.ts
+index 16d991524645f8488a3306359dc7f772c0754700..449111d5098f3afd4131af309855aed9048ea480 100644
+--- a/src/gateway/agent-turn/internal-facade.test.ts
++++ b/src/gateway/agent-turn/internal-facade.test.ts
+@@ -459,6 +459,44 @@ describe("createInternalAgentTurnFacade", () => {
+     expect(onExecutionStarted).toHaveBeenCalledOnce();
+   });
+ 
++  it.each([false, true])(
++    "replays execution start only after the Gateway owner publishes it (started: %s)",
++    async (executionStarted) => {
++      const context = createContext();
++      const registration = registerChatAbortController({
++        chatAbortControllers: context.chatAbortControllers,
++        runId: "admission-gap",
++        sessionKey: "agent:main:admission-gap",
++        sessionId: "admission-gap-session",
++        kind: "agent",
++        timeoutMs: 60_000,
++      });
++      if (executionStarted) {
++        expect(registration.markExecutionStarted()).toBe(true);
++      }
++      const onExecutionStarted = vi.fn();
++      startTurn.mockImplementationOnce(async ({ io }) => {
++        io.emitAcceptance([true, { runId: "admission-gap", status: "in_flight" }, undefined], {
++          cached: true,
++          runId: "admission-gap",
++        });
++      });
++      try {
++        await createFacade(context).dispatchRaw(
++          {
++            message: "retained requester synthesis",
++            sessionKey: "agent:main:admission-gap",
++            idempotencyKey: "admission-gap",
++          },
++          { onExecutionStarted },
++        );
++        expect(onExecutionStarted).toHaveBeenCalledTimes(executionStarted ? 1 : 0);
++      } finally {
++        registration.cleanup();
++      }
++    },
++  );
++
+   it.each([
+     "aborted",
+     "replaced",
 diff --git a/src/gateway/chat-display-projection.recovery.test.ts b/src/gateway/chat-display-projection.recovery.test.ts
 index 0229224e50cd35dee6dea7f46925123249e1ca00..607e52920a205fafc48a81562f3e373ebd5e3fcc 100644
 --- a/src/gateway/chat-display-projection.recovery.test.ts

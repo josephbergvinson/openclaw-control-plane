@@ -27,11 +27,12 @@ deployment or user acceptance.
 
 ## Optional companion source
 
-The current packet records installed R43 Mac companion build 2610000502 at its
-original source identity. Its canonical/native source reference has two
-qualified test-only fixture corrections: listener snapshot syntax and the
-final-edit fixture's core type boundary and guard braces. They change no
-production or package inputs and did not rebuild the installed components. The older companion
+The current packet retains Mac companion build 2610000502 at its actual embedded
+source identity. Canonical/native source includes OAuth bearer, loaded-profile
+recall and successful yield handoff repairs; native app inputs and the managed
+archive are unchanged. The selected external gateway and retained companion have
+separate roles and identities, described in the
+[source boundaries](../runtime/README.md#source-identities). This older companion
 has no supported reconstruction delta in this packet; select ordinary source or
 native-distribution mode. The following command applies only to a manifest that
 supplies one of the supported companion bindings below.

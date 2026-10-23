@@ -32,11 +32,11 @@ operations. No one layer substitutes for the others.
 | Tool access | `src/agents` and gateway tool resolution carry the admitted permission mode and tool policy into execution. Authenticated-owner defaults do not become permissions for unrelated senders. |
 | Visible workers | Native session/subagent tools and the retained run registry represent delegated work and bind registered projects to their authorized source root/worktree. The caller supplies the task scope; workers retain its constraints. |
 | Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. |
-| Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
+| Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. A successful explicit yield with accepted completion children retains its requester handoff through internal prompt cleanup; cancellation, failure and completed-output checks still apply. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
 | Original task context | Session creation, continuation and scheduled recovery retain the original request and source bindings. Later steering can correct ongoing work without silently replacing its objective. |
 | Follow-up admission | Queue and steering owners distinguish live corrections, queued follow-ups and independent requests. Ownership is rechecked after preparation and replacement; a stale parent or source cannot adopt another run. |
 | Admitted requester scope | Same-child follow-up execution and its completion record retain the admitted requester, account and channel partition through existing private in-process metadata. Target incarnation and source custody remain binding; later sender context does not silently replace the admitted scope. Finite mismatch diagnostics name the comparison stage and differing fields without exposing identity values. |
-| Child completion | Registry, announcement and requester-continuation paths keep result delivery owned through settlement and cleanup. A late completion does not justify another copy of an already delivered final. |
+| Child completion | Registry, announcement and requester-continuation paths keep result delivery owned through settlement and cleanup. Gateway start notification waits for both runner entry and live admission, so fast child completion can reach the final reply owed to its requester. A late completion does not justify another copy of an already delivered final. |
 | Deadlines and cancellation | Spawn, backend and native process boundaries carry configured deadlines, including explicit zero where supported. Observation timeouts, execution deadlines and caller cancellation keep separate meanings. |
 | Interrupted work | Durable run/session state and current execution handles inform recovery. Inspect effects before retrying; losing a wait or shortening a transcript does not prove an action never occurred. |
 
@@ -84,9 +84,12 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The current R43/app502 packet
-uses that descriptive case while canonical/native source includes two later
-test-only fixture corrections. Every supported reconstruction requires a full
+reconstruction target without a supported binding. The current packet retains
+Mac companion build 2610000502 in that descriptive case. Canonical/native source
+includes OAuth bearer, loaded-profile recall and successful yield handoff repairs.
+Its retained embedded JavaScript is distinct from the selected external gateway
+source; see the [source boundaries](../runtime/README.md#source-identities). Every
+supported reconstruction requires a full
 target-tree check. Source reconstruction does not install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through

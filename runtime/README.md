@@ -20,20 +20,39 @@ ordinary-use acceptance on another host.
 
 ## Source identities
 
-The current source reference includes two test-fixture corrections beyond the
-installed **R43** runtime and Mac companion build **2610000502**. Canonical source
-`7ce69d2a2075231411c00c06a964447abc743c19` and native distribution
-`3917084f508f795900f70470eb40695074b02c2e` contain those corrections. The installed
-runtime and companion retain distribution source
-`f18ba730959787b21b823f7259f064e9a9bd2801`. The requester-wake fixture uses
-`Array.from` for its existing listener snapshot. The final-edit fixture uses its
-own narrow JSON override shape and required guard braces, keeping Discord
-implementation types outside the core compiler graph. All other source blobs and
-modes, including production and package inputs, are unchanged from the respective
-installed source inputs. These test-only corrections did not rebuild either
-component. The companion identity is descriptive: this packet supplies no
-supported delta from the current distribution to that older companion source, so
-use ordinary source or native-distribution reconstruction for this packet.
+Read canonical source and native distribution identities from the manifest. The
+current source includes these targeted reliability repairs:
+
+- Current valid MCP OAuth bearers use a fresh canonical state read without taking
+  the exclusive renewal or consent lease. Expired or rejected bearers and pending
+  consent retain that leased path.
+- Stable identity and preference facts already explicit in trusted loaded profile
+  context can be answered directly. Source and audience constraints still apply;
+  missing, conflicting, historical and volatile facts require the appropriate source.
+- A successful explicit yield with accepted completion children retains the same
+  requester continuation and progress-card handoff. Internal prompt cleanup does
+  not close the owed reply. Final delivery remains separately owned.
+- Gateway start notification waits for both runner entry and live admission, so
+  fast child completion can reach the final reply owed to its requester.
+
+The existing registry can request an authored checkpoint after 45 seconds without
+progress. Its 60-second sweep, tool safe boundaries, model/provider work and
+transport can add delay. This is checkpoint eligibility, not a fixed delivery
+interval or response-time guarantee.
+
+The native archive and native app inputs are unchanged. Mac companion build
+**2610000502** retains its actual embedded source
+`f18ba730959787b21b823f7259f064e9a9bd2801`. In the recorded service-hosted
+configuration, the selected external gateway constructs text/voice agent prompts
+and resolves MCP tokens; the retained companion provides native client/worker
+functions. The companion has not been rebuilt with the later gateway JavaScript.
+App-hosted gateway operation, explicit embedded local CLI/agent use or changed
+worker roles require separate qualification.
+
+This companion identity is descriptive: the packet supplies no supported
+reconstruction delta to that older source. Use ordinary source or
+native-distribution mode; `referenceDeployment` separately describes the verified
+installed reference. Source reconstruction does not establish that deployment.
 
 | Identity                                          | Manifest field                                              |
 | ------------------------------------------------- | ----------------------------------------------------------- |
@@ -154,8 +173,8 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-First check the current manifest. This packet records the installed R43/app502
-companion descriptively and does not support `--native-companion`. For a packet
+First check the current manifest. This packet records retained Mac companion
+build 2610000502 descriptively and does not support `--native-companion`. For a packet
 that supplies one of the supported bindings below, use a new clean official-tag
 clone to reconstruct its declared companion:
 
