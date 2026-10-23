@@ -112,8 +112,27 @@ jobs:
         run: |
           set -o pipefail
           node --import ./scripts/tsx.mjs "$GITHUB_WORKSPACE/scripts/run-native-reference-checks.mjs" "$GITHUB_WORKSPACE/runtime/manifest.json" "$RUNNER_TEMP/reference-native-evidence" 2>&1 | tee "$RUNNER_TEMP/reference-native.log"
-      - name: Preserve native command plan and actual outcomes
+      - name: Check native artifact confidentiality
+        id: publication-native
         if: always() && steps.native.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-native-evidence"
+            "$RUNNER_TEMP/reference-native.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve native command plan and actual outcomes
+        if: always() && steps.native.outcome != 'skipped' && steps.publication-native.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-native-${{ github.sha }}
@@ -296,8 +315,27 @@ jobs:
             src/agents/tools/web-fetch-output-contract.test.ts \
             src/agents/sessions/tools/output-accumulator.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-focused-reliability.log"
-      - name: Preserve focused reliability outcomes
+      - name: Check focused-reliability artifact confidentiality
+        id: publication-focused-reliability
         if: always() && steps.focused-reliability.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-build-source.txt"
+            "$RUNNER_TEMP/reference-focused-reliability.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve focused reliability outcomes
+        if: always() && steps.focused-reliability.outcome != 'skipped' && steps.publication-focused-reliability.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-focused-reliability-${{ github.sha }}
@@ -692,8 +730,28 @@ jobs:
           node scripts/run-vitest.mjs run \
             src/agents/model-fallback.quota-continuation.e2e.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-quota-continuation.log"
-      - name: Preserve quota recovery qualification evidence
+      - name: Check quota artifact confidentiality
+        id: publication-quota
         if: always() && steps.quota.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-build-source.txt"
+            "$RUNNER_TEMP/reference-quota-unit.log"
+            "$RUNNER_TEMP/reference-quota-continuation.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve quota recovery qualification evidence
+        if: always() && steps.quota.outcome != 'skipped' && steps.publication-quota.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-quota-${{ github.sha }}
@@ -780,8 +838,28 @@ jobs:
             extensions/discord/src/monitor/message-handler.preflight.test.ts \
             extensions/discord/src/monitor/message-handler.process.session-routing.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-cadence-discord.log"
-      - name: Preserve resumed requester progress evidence
+      - name: Check cadence artifact confidentiality
+        id: publication-cadence
         if: always() && steps.cadence.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-build-source.txt"
+            "$RUNNER_TEMP/reference-cadence-agents.log"
+            "$RUNNER_TEMP/reference-cadence-discord.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve resumed requester progress evidence
+        if: always() && steps.cadence.outcome != 'skipped' && steps.publication-cadence.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-cadence-${{ github.sha }}
@@ -811,8 +889,35 @@ jobs:
             src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts \
             src/auto-reply/reply/agent-runner.runreplyagent.e2e.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-followup-continuation.log"
-      - name: Preserve follow-up qualification evidence
+      - name: Check followup artifact confidentiality
+        id: publication-followup
         if: always() && steps.followup.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-build-source.txt"
+            "$RUNNER_TEMP/reference-followup-unit.log"
+            "$RUNNER_TEMP/reference-qa-authority-gateway.log"
+            "$RUNNER_TEMP/reference-qa-authority-auto-reply.log"
+            "$RUNNER_TEMP/reference-mcp-discovery.log"
+            "$RUNNER_TEMP/reference-credential-continuity.log"
+            "$RUNNER_TEMP/reference-completion-checkpoint.log"
+            "$RUNNER_TEMP/reference-followup-terminal.log"
+            "$RUNNER_TEMP/reference-followup-receipts.log"
+            "$RUNNER_TEMP/reference-followup-continuation.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve follow-up qualification evidence
+        if: always() && steps.followup.outcome != 'skipped' && steps.publication-followup.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-followup-${{ github.sha }}
@@ -829,8 +934,36 @@ jobs:
             ${{ runner.temp }}/reference-followup-continuation.log
           if-no-files-found: error
           retention-days: 7
-      - name: Preserve actual build output
+      - name: Check build artifact confidentiality
+        id: publication-build
         if: always() && steps.build.outcome != 'skipped'
+        run: |
+          paths=(
+            "$RUNNER_TEMP/reference-build-source.txt"
+            "$RUNNER_TEMP/reference-build.log"
+            "$RUNNER_TEMP/reference-discord-own-channel-route.log"
+            "$RUNNER_TEMP/reference-requester-final-overlap.log"
+            "$RUNNER_TEMP/reference-discord-voice-yield-policy.log"
+            "$RUNNER_TEMP/reference-voice-execution-identity.log"
+            "$RUNNER_TEMP/reference-voice-runtime-ingress.log"
+            "$RUNNER_TEMP/reference-voice-wake-policy.log"
+            "$RUNNER_TEMP/reference-realtime-provider-response-lifecycle.log"
+            "$RUNNER_TEMP/reference-discord-voice-config-metadata.log"
+            "$RUNNER_TEMP/reference-npm-override-contexts.log"
+          )
+          args=()
+          for path in "${paths[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              args+=(--publication-input "$path")
+            fi
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No publication inputs available; artifact remains unqualified" >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_repo.py" "${args[@]}"
+      - name: Preserve actual build output
+        if: always() && steps.build.outcome != 'skipped' && steps.publication-build.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-build-${{ github.sha }}

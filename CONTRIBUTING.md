@@ -96,3 +96,37 @@ build jobs reconstruct on Ubuntu and feed the existing `reconstruct-and-build`
 check; each qualification job must succeed. Workflow artifacts retain command plans
 and actual results without environment values.
 No operator credentials or private preservation data belong in that workflow.
+
+### Publication confidentiality
+
+The existing validator also checks the exact logs and evidence directories before
+each artifact upload. An upload requires its check to succeed, including after a
+failed build or test. Only outputs that actually exist are checked; if none exist,
+the upload remains unqualified. Findings name a category and byte identity without
+printing suspect values or filenames into another public log.
+
+Before pushing, check outgoing files and commit metadata through the same owner:
+
+```bash
+python3 scripts/validate_repo.py \
+  --publication-input /path/to/outgoing-file-or-directory \
+  --publication-git-range origin/main..HEAD
+```
+
+Supply additional operator-specific expressions with `--publication-patterns
+/private/path/patterns.json`. This is a JSON object of pattern names to regular
+expressions. Keep it and all raw findings outside the public checkout and hosted
+workflow; the checker emits numbered labels for those private patterns. Review
+the exact source/export delta before publication and sanitize sensitive values
+at their producer. Do not solve a finding by broadly allowing a term or skipping
+test files; any synthetic-fixture qualification must bind its exact bytes and
+location and reject changed inputs.
+
+The check covers known credential formats, private record filenames, raw binary
+bytes, source-map contents, UTF-16, explicit Base64 payloads and bounded ZIP,
+gzip and tar members. Unsafe, malformed, unsupported or over-limit archives are
+uninspected failures. This is a bounded check, not proof about unknown encodings,
+images or future output. Review relevant media manually and inspect newly emitted
+GitHub attempt logs after the run: those platform-generated logs do not exist at
+the pre-upload boundary. Keep historical unavailable payloads and provider-held
+copies explicitly unresolved until their actual evidence changes.
