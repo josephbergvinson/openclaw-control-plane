@@ -45,6 +45,23 @@ class RuntimeWorkflowTargetsTests(unittest.TestCase):
         for target in ["src/agents/mcp-oauth.fresh-token.test.ts",
                        "extensions/memory-core/src/memory-tool-contract.profile-context.test.ts",
                        "src/agents/embedded-agent-runner/run/terminal-resolution.test.ts",
+                       "src/agents/embedded-agent-runner/run/attempt-trajectory-status.test.ts",
+                       "src/agents/embedded-agent-runner/run/attempt-finalize.media.test.ts",
+                       "src/agents/subagents/registry/subagent-delivery-state.test.ts",
+                       "src/agents/tools/message-tool-execution.test.ts",
+                       "src/agents/agent-command.cleanup-failure.test.ts",
+                       "src/audit/execution-owner-binding.test.ts",
+                       "src/infra/diagnostic-tool-execution-liveness.test.ts",
+                       "src/logging/diagnostic-run-activity-owners.test.ts",
+                       "src/logging/diagnostic-session-attention.test.ts",
+                       "src/logging/diagnostic-stuck-session-exec-deadline.test.ts",
+                       "src/agents/subagents/registry/subagent-registry-read-snapshot.test.ts",
+                       "src/agents/embedded-agent-runner/run.compaction-delivery.integration.test.ts",
+                       "src/gateway/agent-turn/agent-run-dispatch.owner.test.ts",
+                       "src/auto-reply/reply/dispatch-from-config.continuation-settlement.native.test.ts",
+                       "src/auto-reply/reply/waiting-status.delivery.test.ts",
+                       "src/auto-reply/reply/followup-turn-execution.lifecycle.test.ts",
+                       "extensions/telegram/src/bot-message-dispatch.progress-lifecycle.telegram-http.test.ts",
                        "src/gateway/agent-turn/agent-run-execution-phase.start-admission.test.ts"]:
             self.assertIn(target, targets)
             self.assertRegex(focused, r"(?m)^            " + re.escape(target) + r" \\$")

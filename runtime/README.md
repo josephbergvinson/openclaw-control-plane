@@ -32,8 +32,25 @@ current source includes these targeted reliability repairs:
 - A successful explicit yield with accepted completion children retains the same
   requester continuation and progress-card handoff. Internal prompt cleanup does
   not close the owed reply. Final delivery remains separately owned.
+- An already confirmed progress card can pass to accepted background work even
+  when the turn returns no new message. The handoff preserves its delivery
+  association without sending another preview.
+- A confirmed progress card keeps its role through the existing durable handoff
+  and restart recovery. Explicit final delivery uses a separate message;
+  corrections to completed answers remain supported.
+- Session recovery honors a successfully started, current native invocation
+  with no execution deadline. A quiet command stays owned while it runs; its actual exit starts
+  the existing bounded result-collection allowance. Cancellation, expired
+  deadlines and orphaned work retain their recovery paths.
+- Compaction retries carry earlier confirmed delivery facts forward once.
+  Progress stays distinct from a final answer, preserving pending child completion.
 - Gateway start notification waits for both runner entry and live admission, so
   fast child completion can reach the final reply owed to its requester.
+- Command cleanup and Gateway settlement still await required terminal saves.
+  Deferred start observers inherit their owning execution context, so normal
+  model-attempt completion cannot cancel a still-authorized final handoff.
+  A later save failure cannot replace the original execution error or change its
+  cancellation classification; a save-only failure is still reported.
 
 The existing registry can request an authored checkpoint after 45 seconds without
 progress. Its 60-second sweep, tool safe boundaries, model/provider work and
