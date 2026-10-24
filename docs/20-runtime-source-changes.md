@@ -85,13 +85,17 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The current packet retains
-Mac companion build 2610000502 in that descriptive case. Canonical/native source
-includes OAuth bearer, loaded-profile recall and successful yield handoff repairs.
-Its retained embedded JavaScript is distinct from the selected external gateway
-source; see the [source boundaries](../runtime/README.md#source-identities). Every
-supported reconstruction requires a full
-target-tree check. Source reconstruction does not install or launch the app.
+reconstruction target without a supported binding. The current optional companion
+delta supports complete two-button login-Keychain access-permission forms through
+the existing `NativeCredentialBinding` and `NativeCredentialPromptContext`
+owners. Verified Apple process identity, current host/local principal, native
+form and focused secure-field checks, and single-use entry/revalidation remain
+binding. The external gateway and native distribution retain their own source
+identities. The installed companion's separately retained Bun security payload is
+not reconstructed by this packet; see the
+[source boundaries](../runtime/README.md#source-identities). Every supported
+reconstruction requires a full target-tree check. Source reconstruction does not
+install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
 the matching native helper, using bounded private pipes and current configuration.

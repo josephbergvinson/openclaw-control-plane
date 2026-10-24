@@ -66,23 +66,29 @@ progress. Its 60-second sweep, tool safe boundaries, model/provider work and
 transport can add delay. This is checkpoint eligibility, not a fixed delivery
 interval or response-time guarantee.
 
-The managed Codex 0.160.0 archive and tracked OpenClaw native app source inputs
-are unchanged. Mac companion build **2610000502** retains its actual embedded
-source `f18ba730959787b21b823f7259f064e9a9bd2801`. The reference installation also
-has a separately qualified local Bun security patch, which changes its installed
-runtime payload. This packet supplies neither that patch's artifact nor its
-reconstruction binding; embedded source and build labels do not establish
-identical app bytes. In the recorded service-hosted
-configuration, the selected external gateway constructs text/voice agent prompts
-and resolves MCP tokens; the retained companion provides native client/worker
-functions. The companion has not been rebuilt with the later gateway JavaScript.
-App-hosted gateway operation, explicit embedded local CLI/agent use or changed
-worker roles require separate qualification.
+The managed Codex 0.160.0 archive and the selected external gateway retain their
+separate manifest bindings. The optional Mac companion target adds four shared
+and macOS Swift source/test changes for complete two-button login-Keychain
+access-permission forms. The existing native owner still verifies the Apple
+process, current host and local principal, exact form, focused secure field and
+single-use entry scope. Its source commit, full tree and build label are recorded
+in `nativeCompanion`.
 
-This companion identity is descriptive: the packet supplies no supported
-reconstruction delta to that older source. Use ordinary source or
-native-distribution mode; `referenceDeployment` separately describes the verified
-installed reference. Source reconstruction does not establish that deployment.
+In the recorded service-hosted configuration, the selected external gateway
+constructs text/voice agent prompts and resolves MCP tokens; the companion
+provides native client/worker functions. Reconstructing the companion does not
+change that external gateway's selected release or establish app-hosted gateway
+acceptance. App-hosted gateway operation, explicit embedded local CLI/agent use
+or changed worker roles require separate qualification.
+
+The reference companion retains a separately qualified local Bun security
+payload. This packet supplies neither that payload's artifact nor its
+reconstruction binding. A normal build uses the source's tracked Bun staging
+pin; it does not reproduce the retained security payload. Source and build
+labels therefore do not establish identical installed app bytes. The optional
+companion patch reconstructs the declared source tree; `referenceDeployment`
+separately describes the installed external runtime. Neither proves installation
+or ordinary-use acceptance on another host.
 
 | Identity                                          | Manifest field                                              |
 | ------------------------------------------------- | ----------------------------------------------------------- |

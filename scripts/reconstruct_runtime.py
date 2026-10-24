@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_PATH = "/josephbergvinson/openclaw-control-plane/releases/download/"
 NATIVE_DELTA_PATHS = {"pnpm-lock.yaml", "pnpm-workspace.yaml"}
 NATIVE_COMPANION_DELTA_PATHS = {
-    "apps/macos/Sources/OpenClaw/ConnectionModeCoordinator.swift",
-    "apps/macos/Sources/OpenClaw/NodeServiceManager.swift",
-    "apps/macos/Tests/Fixtures/ConnectionModeCoordinator/Fixture.swift",
-    "apps/macos/Tests/OpenClawIPCTests/NodeServiceManagerTests.swift",
+    "apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift",
+    "apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift",
+    "apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift",
+    "apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift",
 }
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
 CURRENT_MANIFEST_FIELDS = {

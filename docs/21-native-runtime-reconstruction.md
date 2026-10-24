@@ -27,19 +27,18 @@ deployment or user acceptance.
 
 ## Optional companion source
 
-The current packet retains Mac companion build 2610000502 at its actual embedded
-source identity. Canonical/native source includes OAuth bearer, loaded-profile
-recall and successful yield handoff repairs; the managed Codex 0.160.0 archive
-and tracked OpenClaw native app source inputs are unchanged. The reference
-installation also has a separately qualified local Bun security patch, which
-changes its installed runtime payload. This packet supplies neither that patch's
-artifact nor its reconstruction binding; embedded source and build labels do not
-establish identical app bytes. The selected external gateway and retained companion have
-separate roles and identities, described in the
-[source boundaries](../runtime/README.md#source-identities). This older companion
-has no supported reconstruction delta in this packet; select ordinary source or
-native-distribution mode. The following command applies only to a manifest that
-supplies one of the supported companion bindings below.
+The current packet supplies a separate four-file shared/macOS Swift delta for
+complete two-button login-Keychain access-permission forms through the existing
+native credential owner. Read the exact companion commit, full tree and build
+label from `nativeCompanion`; source reconstruction and build labels are not
+installed-app attestations. The external gateway remains separately identified
+by `source`, `nativeDistribution` and `referenceDeployment`.
+
+The reference companion retains a separately qualified local Bun security
+payload. This packet supplies neither that payload's artifact nor its
+reconstruction binding; normal source builds use the tracked Bun staging pin.
+See the [source boundaries](../runtime/README.md#source-identities) before
+comparing reconstructed source with installed app bytes.
 
 Select the Mac companion explicitly, from a new clean pinned-upstream clone:
 
@@ -53,7 +52,14 @@ companion source. The helper accepts either of these finite cases:
 | Case | Required binding and verification |
 | --- | --- |
 | Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals both `nativeDistribution.referenceTree` and `nativeDistribution.normalizedTree`. No extra patch is needed or accepted as a substitute for equality. |
-| Separate four-file Swift delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the four declared macOS Swift source/test paths. |
+| Separate four-file Swift delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the four declared shared/macOS Swift source/test paths. |
+
+The current separate delta is limited to:
+
+- `apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift`
+- `apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift`
+- `apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift`
+- `apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift`
 
 Both cases first verify the distribution, then the complete companion source tree,
 including modes, and provision the same bound archive. A historical descriptive
