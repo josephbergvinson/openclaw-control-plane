@@ -87950,7 +87950,7 @@ index 359ebaff7129aee50c41985d5ce9af72475fc58e..83b1132e96bbc35c454a2a4d78c18870
  
    it("snapshots estimatedCostUsd instead of accumulating (fixes #69347)", async () => {
 diff --git a/src/auto-reply/reply/waiting-status.delivery.test.ts b/src/auto-reply/reply/waiting-status.delivery.test.ts
-index 73eee9359ace6b7a07ca14718e5a146839ed9eeb..0c7ae4442f795f5e2592ad9ec49533687e03cfdd 100644
+index 73eee9359ace6b7a07ca14718e5a146839ed9eeb..6b6d585477fa56712c6c45090c1c600f577cebc6 100644
 --- a/src/auto-reply/reply/waiting-status.delivery.test.ts
 +++ b/src/auto-reply/reply/waiting-status.delivery.test.ts
 @@ -2,7 +2,9 @@ import { expectDefined } from "@openclaw/normalization-core";
@@ -88090,7 +88090,7 @@ index 73eee9359ace6b7a07ca14718e5a146839ed9eeb..0c7ae4442f795f5e2592ad9ec4953368
  it("delivers an ordinary terminal failure", async () => {
    const context = createContext();
    context.execution.result.acceptedSessionSpawns = undefined;
-@@ -234,6 +334,43 @@ it.each([true, false])(
+@@ -234,6 +334,52 @@ it.each([true, false])(
    },
  );
  
@@ -88123,7 +88123,16 @@ index 73eee9359ace6b7a07ca14718e5a146839ed9eeb..0c7ae4442f795f5e2592ad9ec4953368
 +    await pending.mock.calls[0]?.[0]?.settle(true);
 +    const settled = settleRequester.mock.calls[0]?.[0];
 +    if (mode === "adopted") {
-+      expect(settled?.progressPresentation).toEqual({ operationId: runId });
++      expect(settled?.progressPresentation).toEqual({
++        operationId: runId,
++        message: {
++          channel: receipt.channel,
++          accountId: undefined,
++          to: receipt.to,
++          threadId: undefined,
++          messageId: receipt.messageId,
++        },
++      });
 +    } else {
 +      expect(settled).not.toHaveProperty("progressPresentation");
 +    }
@@ -117213,9 +117222,18 @@ index af0f821415c2edacd66fcf24e6e7465070e1a857..48b5aab54424759725b7be0fcd874af8
                },
                "message": {
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
-index cf693c40dd47e056dc4e1c0f250b971663f072d3..877b69366cfbd0a4add81c0127167737bdc0ba7b 100644
+index cf693c40dd47e056dc4e1c0f250b971663f072d3..b814ce23fd531fe81c6a0bc408901d56277e0b1b 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
 +++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
+@@ -80,7 +80,7 @@
+           "type": "string"
+         },
+         "final": {
+-          "description": "For source replies, set false for progress; set true, or omit, for a completed send. For react, set true only when the user explicitly requested the reaction to the current source message as the complete response; omit or set false for acknowledgements or reactions followed by more work.",
++          "description": "Progress cards remain progress; send their final answer as a separate message. For source replies, set false for progress; set true, or omit, for a completed send. For react, set true only when the user explicitly requested the reaction to the current source message as the complete response; omit or set false for acknowledgements or reactions followed by more work.",
+           "type": "boolean"
+         },
+         "forceDocument": {
 @@ -364,7 +364,7 @@
      "tools": [
        {
@@ -117290,14 +117308,14 @@ index cf693c40dd47e056dc4e1c0f250b971663f072d3..877b69366cfbd0a4add81c0127167737
              },
              "message": {
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
-index b6f8103579c37ec90a710a71e7bedd2a6420ed83..75d62569ffe051a003f5ff3d3052611569fcda1b 100644
+index b6f8103579c37ec90a710a71e7bedd2a6420ed83..89b66e5d34beb2373f238be2882c169cc9452f2b 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
 +++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
 @@ -1,5 +1,5 @@
 ---- telegram-direct-codex-message-tool.md	sha256=188c4ba27ffacec2641f9ae11f2041080fb573b882e1db1083d73889a4e1c68d
 -+++ discord-group-codex-message-tool.md	sha256=eb26aa7d097c0bb20b714f9cc0d234af3ec776af4d6707a3e8dd1724ba5c63a2
-+--- telegram-direct-codex-message-tool.md	sha256=a8b0386521a9767f629486e41fe3ba548fbc547e6bb70c396a8fcf02e7b18688
-++++ discord-group-codex-message-tool.md	sha256=951fa32d5b4142c0421338b65965162b8e92e0837f9c9a1f79290aea98883e93
++--- telegram-direct-codex-message-tool.md	sha256=1ac4d042d8ed345812f23452d85b2f9819ff4ee1f47a585d103282a7221327fd
+++++ discord-group-codex-message-tool.md	sha256=7f0850e9b49674205b3cf0d5daeb440fc42fa863ea7670d90832bad7fcfb75e4
  @@ -1,1 +1,1 @@
  -# Telegram Direct Codex Message Tool Turn
  +# Discord Group Codex Message Tool Turn
@@ -117309,10 +117327,10 @@ index b6f8103579c37ec90a710a71e7bedd2a6420ed83..75d62569ffe051a003f5ff3d30526115
 --    "roughTokens": 18099
 -+    "chars": 72993,
 -+    "roughTokens": 18249
-+-    "chars": 73934,
-+-    "roughTokens": 18484
-++    "chars": 74532,
-++    "roughTokens": 18633
++-    "chars": 74013,
++-    "roughTokens": 18504
+++    "chars": 74611,
+++    "roughTokens": 18653
  @@ -263,2 +263,2 @@
  -    "chars": 2992,
  -    "roughTokens": 748
@@ -117324,15 +117342,15 @@ index b6f8103579c37ec90a710a71e7bedd2a6420ed83..75d62569ffe051a003f5ff3d30526115
 --    "roughTokens": 24944
 -+    "chars": 101690,
 -+    "roughTokens": 25423
-+-    "chars": 101314,
-+-    "roughTokens": 25329
-++    "chars": 103229,
-++    "roughTokens": 25808
++-    "chars": 101393,
++-    "roughTokens": 25349
+++    "chars": 103308,
+++    "roughTokens": 25827
  @@ -279,2 +279,2 @@
  -    "chars": 879,
  -    "roughTokens": 220
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
-index 448306b13a2477fc0b8994819017fd3ce31c5d0a..5edecba2b7bea93329a5b38da03677ce11701a4b 100644
+index 448306b13a2477fc0b8994819017fd3ce31c5d0a..cd0193a0f69ae2de98d5b60a68fbd7287486ccd8 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
 +++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
 @@ -256,8 +256,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the
@@ -117341,8 +117359,8 @@ index 448306b13a2477fc0b8994819017fd3ce31c5d0a..5edecba2b7bea93329a5b38da03677ce
    "dynamicToolsJson": {
 -    "chars": 72395,
 -    "roughTokens": 18099
-+    "chars": 73934,
-+    "roughTokens": 18484
++    "chars": 74013,
++    "roughTokens": 18504
    },
    "openClawDeveloperInstructions": {
      "chars": 2992,
@@ -117352,20 +117370,29 @@ index 448306b13a2477fc0b8994819017fd3ce31c5d0a..5edecba2b7bea93329a5b38da03677ce
    "totalWithDynamicToolsJson": {
 -    "chars": 99775,
 -    "roughTokens": 24944
-+    "chars": 101314,
-+    "roughTokens": 25329
++    "chars": 101393,
++    "roughTokens": 25349
    },
    "userInputText": {
      "chars": 879,
+@@ -680,7 +680,7 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
+           "type": "string"
+         },
+         "final": {
+-          "description": "For source replies, set false for progress; set true, or omit, for a completed send. For react, set true only when the user explicitly requested the reaction to the current source message as the complete response; omit or set false for acknowledgements or reactions followed by more work.",
++          "description": "Progress cards remain progress; send their final answer as a separate message. For source replies, set false for progress; set true, or omit, for a completed send. For react, set true only when the user explicitly requested the reaction to the current source message as the complete response; omit or set false for acknowledgements or reactions followed by more work.",
+           "type": "boolean"
+         },
+         "forceDocument": {
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
-index 5af2b7b0ec4c14f2a5e4c47d43838679d5c04e30..eeaae73ec863cd8540ab9572af4ee493ce17d7d2 100644
+index 5af2b7b0ec4c14f2a5e4c47d43838679d5c04e30..b3bea16de944fd4eae6c853d4dda439a7746eb37 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
 +++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
 @@ -1,5 +1,5 @@
 ---- telegram-direct-codex-message-tool.md	sha256=188c4ba27ffacec2641f9ae11f2041080fb573b882e1db1083d73889a4e1c68d
 -+++ telegram-heartbeat-codex-tool.md	sha256=a2868623ed583dfff1e1736a9cbc6ba19ad9789af67ac0e2d7be31a9fe6f20ef
-+--- telegram-direct-codex-message-tool.md	sha256=a8b0386521a9767f629486e41fe3ba548fbc547e6bb70c396a8fcf02e7b18688
-++++ telegram-heartbeat-codex-tool.md	sha256=e818c28fa22aac88f6a686b2c7718648d884908e86b2262767ec52022a399a40
++--- telegram-direct-codex-message-tool.md	sha256=1ac4d042d8ed345812f23452d85b2f9819ff4ee1f47a585d103282a7221327fd
+++++ telegram-heartbeat-codex-tool.md	sha256=71d273e97102aea875ae036299be053bec46eae752192d25a97846cd2df61ce1
  @@ -1,1 +1,1 @@
  -# Telegram Direct Codex Message Tool Turn
  +# Telegram Direct Codex Heartbeat Tool Turn
@@ -117377,10 +117404,10 @@ index 5af2b7b0ec4c14f2a5e4c47d43838679d5c04e30..eeaae73ec863cd8540ab9572af4ee493
 --    "roughTokens": 18099
 -+    "chars": 73888,
 -+    "roughTokens": 18472
-+-    "chars": 73934,
-+-    "roughTokens": 18484
-++    "chars": 75427,
-++    "roughTokens": 18857
++-    "chars": 74013,
++-    "roughTokens": 18504
+++    "chars": 75506,
+++    "roughTokens": 18877
  @@ -271,2 +268,2 @@
  -    "chars": 27378,
  -    "roughTokens": 6845
@@ -117391,10 +117418,10 @@ index 5af2b7b0ec4c14f2a5e4c47d43838679d5c04e30..eeaae73ec863cd8540ab9572af4ee493
 --    "roughTokens": 24944
 -+    "chars": 101605,
 -+    "roughTokens": 25402
-+-    "chars": 101314,
-+-    "roughTokens": 25329
-++    "chars": 103144,
-++    "roughTokens": 25786
++-    "chars": 101393,
++-    "roughTokens": 25349
+++    "chars": 103223,
+++    "roughTokens": 25806
  @@ -279,2 +276,2 @@
  -    "chars": 879,
  -    "roughTokens": 220
