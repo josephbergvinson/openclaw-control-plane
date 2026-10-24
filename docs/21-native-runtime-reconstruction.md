@@ -29,8 +29,12 @@ deployment or user acceptance.
 
 The current packet retains Mac companion build 2610000502 at its actual embedded
 source identity. Canonical/native source includes OAuth bearer, loaded-profile
-recall and successful yield handoff repairs; native app inputs and the managed
-archive are unchanged. The selected external gateway and retained companion have
+recall and successful yield handoff repairs; the managed Codex 0.160.0 archive
+and tracked OpenClaw native app source inputs are unchanged. The reference
+installation also has a separately qualified local Bun security patch, which
+changes its installed runtime payload. This packet supplies neither that patch's
+artifact nor its reconstruction binding; embedded source and build labels do not
+establish identical app bytes. The selected external gateway and retained companion have
 separate roles and identities, described in the
 [source boundaries](../runtime/README.md#source-identities). This older companion
 has no supported reconstruction delta in this packet; select ordinary source or

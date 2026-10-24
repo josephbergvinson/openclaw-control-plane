@@ -44,6 +44,12 @@ current source includes these targeted reliability repairs:
   deadlines and orphaned work retain their recovery paths.
 - Compaction retries carry earlier confirmed delivery facts forward once.
   Progress stays distinct from a final answer, preserving pending child completion.
+- Repeated projections of an accepted child retain its original completion
+  obligation once per run identity. Real repeated message sends remain separate
+  effects.
+- Initial session context can refresh once if a prior command appends a terminal
+  record while its unsent snapshot is being read. Rewrites, selection changes,
+  cancellation and another append during the refreshed read remain errors.
 - Read-only lifecycle artifact planning runs in the existing worker without
   reserving the transcript writer. Reclamation still rechecks selected state and
   native deletion authority before committing.
@@ -60,9 +66,13 @@ progress. Its 60-second sweep, tool safe boundaries, model/provider work and
 transport can add delay. This is checkpoint eligibility, not a fixed delivery
 interval or response-time guarantee.
 
-The native archive and native app inputs are unchanged. Mac companion build
-**2610000502** retains its actual embedded source
-`f18ba730959787b21b823f7259f064e9a9bd2801`. In the recorded service-hosted
+The managed Codex 0.160.0 archive and tracked OpenClaw native app source inputs
+are unchanged. Mac companion build **2610000502** retains its actual embedded
+source `f18ba730959787b21b823f7259f064e9a9bd2801`. The reference installation also
+has a separately qualified local Bun security patch, which changes its installed
+runtime payload. This packet supplies neither that patch's artifact nor its
+reconstruction binding; embedded source and build labels do not establish
+identical app bytes. In the recorded service-hosted
 configuration, the selected external gateway constructs text/voice agent prompts
 and resolves MCP tokens; the retained companion provides native client/worker
 functions. The companion has not been rebuilt with the later gateway JavaScript.

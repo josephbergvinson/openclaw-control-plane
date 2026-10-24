@@ -54085,17 +54085,182 @@ index 3d56e14047ff1539389447305f04a3892f991f62..702d9751fb924f339b2e165430f336e5
    it.each([
      { scenario: "warm cache", age: 290_000, thresholdCrossing: false, outcome: "success" },
      { scenario: "threshold crossing", age: 310_000, thresholdCrossing: true, outcome: "success" },
+diff --git a/src/agents/embedded-agent-runner/run/attempt-delivery-state.test.ts b/src/agents/embedded-agent-runner/run/attempt-delivery-state.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f6fc3d1700e8831f75cede0d01989b782ebc143
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run/attempt-delivery-state.test.ts
+@@ -0,0 +1,141 @@
++import { describe, expect, it } from "vitest";
++import type { AcceptedSessionSpawn } from "../../accepted-session-spawn.js";
++import { MAX_MESSAGING_HISTORY_ENTRIES } from "../../embedded-agent-messaging-history.js";
++import { makeAttemptResult } from "../run.overflow-compaction.fixture.js";
++import { copyAttemptDeliveryState } from "./attempt-delivery-state.js";
++
++const firstChild: AcceptedSessionSpawn = {
++  runId: "child-first",
++  childSessionKey: "agent:main:subagent:shared",
++  expectsCompletionMessage: true,
++  label: "Original child",
++  sessionUrl: "https://example.test/original",
++};
++const secondChild: AcceptedSessionSpawn = {
++  runId: "child-second",
++  childSessionKey: "agent:main:subagent:second",
++  expectsCompletionMessage: false,
++};
++
++describe("attempt delivery state child receipts", () => {
++  it("merges cumulative projections once in first-acceptance order", () => {
++    const first = copyAttemptDeliveryState(
++      makeAttemptResult({ acceptedSessionSpawns: [firstChild] }),
++    );
++    const cumulative = makeAttemptResult({
++      acceptedSessionSpawns: [firstChild, secondChild],
++    });
++    const retry = copyAttemptDeliveryState(cumulative, first);
++    const repeated = copyAttemptDeliveryState(
++      makeAttemptResult({ acceptedSessionSpawns: [secondChild, firstChild, secondChild] }),
++      retry,
++    );
++
++    expect(retry.acceptedSessionSpawns).toEqual([firstChild, secondChild]);
++    expect(repeated.acceptedSessionSpawns).toEqual([firstChild, secondChild]);
++    expect(first.acceptedSessionSpawns).toEqual([firstChild]);
++    expect(cumulative.acceptedSessionSpawns).toEqual([firstChild, secondChild]);
++  });
++
++  it("retains the original receipt metadata and completion obligation", () => {
++    const first = copyAttemptDeliveryState(
++      makeAttemptResult({ acceptedSessionSpawns: [firstChild] }),
++    );
++    const projection = copyAttemptDeliveryState(
++      makeAttemptResult({
++        acceptedSessionSpawns: [
++          {
++            ...firstChild,
++            expectsCompletionMessage: false,
++            label: "Later projection",
++            sessionUrl: "https://example.test/later",
++          },
++          secondChild,
++        ],
++      }),
++      first,
++    );
++
++    expect(projection.acceptedSessionSpawns).toEqual([firstChild, secondChild]);
++    expect(projection.acceptedSessionSpawns?.[0]).toBe(firstChild);
++  });
++
++  it("retains distinct run identities sharing one child session", () => {
++    const sameSessionChild = { ...secondChild, childSessionKey: firstChild.childSessionKey };
++    const first = copyAttemptDeliveryState(
++      makeAttemptResult({ acceptedSessionSpawns: [firstChild] }),
++    );
++
++    expect(
++      copyAttemptDeliveryState(
++        makeAttemptResult({ acceptedSessionSpawns: [firstChild, sameSessionChild] }),
++        first,
++      ).acceptedSessionSpawns,
++    ).toEqual([firstChild, sameSessionChild]);
++  });
++
++  it("does not collapse real repeated messaging effects", () => {
++    const text = "Still checking.";
++    const media = "https://example.test/progress.png";
++    const target = {
++      tool: "message",
++      provider: "discord",
++      to: "channel:source",
++      text,
++      sourceReplyFinal: false as const,
++    };
++    const payload = { text, sourceReplyFinal: false as const };
++    const attempt = makeAttemptResult({
++      acceptedSessionSpawns: [firstChild],
++      messagingToolSentTexts: [text],
++      messagingToolSentMediaUrls: [media],
++      messagingToolSentTargets: [target],
++      messagingToolSourceReplyPayloads: [payload],
++      successfulCronAdds: 1,
++    });
++    const projected = copyAttemptDeliveryState(attempt, copyAttemptDeliveryState(attempt));
++
++    expect(projected.acceptedSessionSpawns).toEqual([firstChild]);
++    expect(projected.messagingToolSentTexts).toEqual([text, text]);
++    expect(projected.messagingToolSentMediaUrls).toEqual([media, media]);
++    expect(projected.messagingToolSentTargets).toEqual([target, target]);
++    expect(projected.messagingToolSourceReplyPayloads).toEqual([payload, payload]);
++    expect(projected.successfulCronAdds).toBe(2);
++  });
++
++  it("combines refresh-prefix and retry receipts without donating them to a fresh run", () => {
++    const refreshPrefix = copyAttemptDeliveryState(
++      makeAttemptResult({ acceptedSessionSpawns: [firstChild] }),
++    );
++    const retry = makeAttemptResult({ acceptedSessionSpawns: [firstChild, secondChild] });
++    const local = copyAttemptDeliveryState(retry);
++    const refreshed = copyAttemptDeliveryState(Object.assign({}, retry, local), refreshPrefix);
++
++    expect(refreshed.acceptedSessionSpawns).toEqual([firstChild, secondChild]);
++    expect(copyAttemptDeliveryState(makeAttemptResult()).acceptedSessionSpawns).toEqual([]);
++  });
++
++  it("preserves missing receipt evidence without inventing acceptance", () => {
++    const missing = makeAttemptResult();
++    delete missing.acceptedSessionSpawns;
++
++    expect(copyAttemptDeliveryState(missing).acceptedSessionSpawns).toBeUndefined();
++    expect(
++      copyAttemptDeliveryState(missing, copyAttemptDeliveryState(missing)).acceptedSessionSpawns,
++    ).toEqual([]);
++  });
++
++  it("retains child completion obligations beyond the bounded messaging history", () => {
++    const children = Array.from({ length: MAX_MESSAGING_HISTORY_ENTRIES + 1 }, (_, index) => ({
++      runId: `child-${index}`,
++      childSessionKey: `agent:main:subagent:child-${index}`,
++      expectsCompletionMessage: true,
++    }));
++    const first = copyAttemptDeliveryState(makeAttemptResult({ acceptedSessionSpawns: children }));
++
++    expect(
++      copyAttemptDeliveryState(makeAttemptResult({ acceptedSessionSpawns: children }), first)
++        .acceptedSessionSpawns,
++    ).toEqual(children);
++  });
++});
 diff --git a/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts b/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts
-index f232e9fa914c2fea3ded167da6bc13ca7f1e42e6..f09eb7754977e13ddbbc5cb82f065745f70e3d2a 100644
+index f232e9fa914c2fea3ded167da6bc13ca7f1e42e6..a952e7c0357b82ef3e8297c371122b0ce1990156 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-delivery-state.ts
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
++import type { AcceptedSessionSpawn } from "../../accepted-session-spawn.js";
  import { MAX_MESSAGING_HISTORY_ENTRIES } from "../../embedded-agent-messaging-history.js";
 +import { resolveSourceReplyDelivery } from "../delivery-evidence.js";
  import { hasAsyncActivity } from "./attempt-terminal-evidence.js";
  import type { EmbeddedRunAttemptResult } from "./types.js";
  
-@@ -15,7 +16,9 @@ export function copyAttemptDeliveryState(
+@@ -9,13 +11,26 @@ export function copyAttemptDeliveryState(
+ ) {
+   const append = <T>(current: T[], before: T[] | undefined): T[] =>
+     previous ? [...(before ?? []), ...current].slice(-MAX_MESSAGING_HISTORY_ENTRIES) : current;
++  // Backends can project the whole admitted child cohort on each retry.
++  // Acceptance is immutable; repeated receipt projection is not another spawn.
++  const children = new Map<string, AcceptedSessionSpawn>();
++  for (const spawn of [
++    ...(previous?.acceptedSessionSpawns ?? []),
++    ...(attempt.acceptedSessionSpawns ?? []),
++  ]) {
++    if (!children.has(spawn.runId)) {
++      children.set(spawn.runId, spawn);
++    }
++  }
+   return {
+     latestMcpAppChannelView: attempt.latestMcpAppChannelView ?? previous?.latestMcpAppChannelView,
+     latestMcpConnectAction: attempt.latestMcpConnectAction ?? previous?.latestMcpConnectAction,
      didSendViaMessagingTool: previous?.didSendViaMessagingTool || attempt.didSendViaMessagingTool,
      sourceReplyDelivered: previous?.sourceReplyDelivered || attempt.sourceReplyDelivered,
      sourceReplyDeliveryState:
@@ -54106,6 +54271,18 @@ index f232e9fa914c2fea3ded167da6bc13ca7f1e42e6..f09eb7754977e13ddbbc5cb82f065745
      didDeliverSourceReplyViaMessageTool:
        previous?.didDeliverSourceReplyViaMessageTool === true ||
        attempt.didDeliverSourceReplyViaMessageTool === true,
+@@ -43,9 +58,8 @@ export function copyAttemptDeliveryState(
+     successfulCronAdds: previous?.successfulCronAdds
+       ? previous.successfulCronAdds + (attempt.successfulCronAdds ?? 0)
+       : attempt.successfulCronAdds,
+-    acceptedSessionSpawns: previous
+-      ? [...(previous.acceptedSessionSpawns ?? []), ...(attempt.acceptedSessionSpawns ?? [])]
+-      : attempt.acceptedSessionSpawns,
++    acceptedSessionSpawns:
++      previous || attempt.acceptedSessionSpawns ? [...children.values()] : undefined,
+     ...(previous?.asyncWorkStarted ||
+     attempt.asyncWorkStarted ||
+     hasAsyncActivity(attempt.toolMetas)
 diff --git a/src/agents/embedded-agent-runner/run/attempt-finalize.media.test.ts b/src/agents/embedded-agent-runner/run/attempt-finalize.media.test.ts
 index 687ea8355bc50b669c58cb1b117013f788c9af0d..e0bf9ebb0a5f3d4af4cc7bae9f493bd0f6ad8fbb 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-finalize.media.test.ts
@@ -64051,6 +64228,568 @@ index 62ff0810930f6ceee3f347844a74ca037a4ba465..c4731cb554e0f6613b9d80ca681985f5
      this.trackQueuedUserMessage(promptMessage, "steering", text);
      this.agent.steer(
        transcriptContext
+diff --git a/src/agents/sessions/sdk.metadata-admission.test.ts b/src/agents/sessions/sdk.metadata-admission.test.ts
+index 35e182b22031595273c36460b039239fc07ba227..7c56b690e443d87ab22fa5e3a11d574edd1c6a6a 100644
+--- a/src/agents/sessions/sdk.metadata-admission.test.ts
++++ b/src/agents/sessions/sdk.metadata-admission.test.ts
+@@ -5,6 +5,7 @@ import {
+   readSessionTranscriptWatermark,
+   replaceSessionEntry,
+ } from "../../config/sessions/session-accessor.js";
++import * as modelContextReader from "../../config/sessions/session-transcript-read-worker-runtime.js";
+ import {
+   getOwnedSessionTranscriptWriterFence,
+   SessionTranscriptWriterClaimReboundError,
+@@ -256,13 +257,13 @@ it.each([
+       const select = () => (selection === "branch" ? manager.branch(firstId) : manager.resetLeaf());
+       const entered = createDeferredCore();
+       const release = createDeferredCore();
+-      const readContext = SessionManager.openModelContextAsync.bind(SessionManager);
++      const readContext = modelContextReader.readSessionTranscriptModelContextAsync;
+       const intercepted =
+         timing === "during"
+           ? vi
+-              .spyOn(SessionManager, "openModelContextAsync")
+-              .mockImplementationOnce(async (scope, options) => {
+-                const context = await readContext(scope, options);
++              .spyOn(modelContextReader, "readSessionTranscriptModelContextAsync")
++              .mockImplementationOnce(async (...args) => {
++                const context = await readContext(...args);
+                 entered.resolve();
+                 await release.promise;
+                 return context;
+diff --git a/src/agents/sessions/session-manager-initial-context.test.ts b/src/agents/sessions/session-manager-initial-context.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6e7bec85c5db382bef6db9ff3bc91643b4a6169
+--- /dev/null
++++ b/src/agents/sessions/session-manager-initial-context.test.ts
+@@ -0,0 +1,289 @@
++import path from "node:path";
++import { expect, it, vi } from "vitest";
++import type { Model } from "../../../packages/ai/src/types.js";
++import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
++import type { SessionTranscriptRuntimeTarget } from "../../config/sessions/session-accessor.types.js";
++import * as modelContextReader from "../../config/sessions/session-transcript-read-worker-runtime.js";
++import { withOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
++import { recordGatewaySessionRunFailure } from "../../sessions/session-run-error.js";
++import { AsyncWorkScope } from "../../shared/async-work-scope.js";
++import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { createResourceLoader } from "./agent-session-loop-resource-loader.test-support.js";
++import { AuthStorage } from "./auth-storage.js";
++import { ModelRegistry } from "./model-registry.js";
++import { createAgentSession } from "./sdk.js";
++import { sessionManagerReadInitialContext } from "./session-manager-current-turn.js";
++import { SessionManager } from "./session-manager.js";
++import { SettingsManager } from "./settings-manager.js";
++
++const model: Model<"openai-responses"> = {
++  id: "initial-context-fixture",
++  name: "Initial context fixture",
++  api: "openai-responses",
++  provider: "fixture",
++  baseUrl: "https://example.test",
++  reasoning: false,
++  input: ["text"],
++  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++  contextWindow: 32_768,
++  maxTokens: 8_192,
++};
++
++it("refreshes SDK initial context after an accepted terminal receipt appends during its read", async () => {
++  await withOpenClawTestState({ label: "initial-context-refresh" }, async (state) => {
++    const target = {
++      agentId: "main",
++      sessionId: "initial-context",
++      sessionKey: "agent:main:initial-context",
++      storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
++    };
++    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++    const source = SessionManager.open(target, state.workspaceDir);
++    await source.appendThinkingLevelChange("off");
++    source.appendMessage({ role: "user", content: "Retain the complete request", timestamp: 1 });
++    const manager = await SessionManager.openBoundedAsync(target, {
++      cwd: state.workspaceDir,
++      maxBytes: 64_000,
++      maxEvents: 20,
++    });
++    const intercepted = interceptContextRead(async (read) => {
++      if (read === 1) {
++        // The prior command settles after releasing its execution lane. Use
++        // its real receipt owner, not a mocked read error or replacement data.
++        await recordGatewaySessionRunFailure({
++          target,
++          runId: "prior-command",
++          error: "Prior final delivery failed",
++        });
++      }
++    });
++    const authStorage = AuthStorage.inMemory();
++    let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
++    try {
++      ({ session } = await createAgentSession({
++        cwd: state.workspaceDir,
++        agentDir: state.agentDir("main"),
++        model,
++        thinkingLevel: "off",
++        noTools: "all",
++        authStorage,
++        modelRegistry: ModelRegistry.inMemory(authStorage),
++        sessionManager: manager,
++        settingsManager: SettingsManager.inMemory(),
++        resourceLoader: createResourceLoader(),
++      }));
++      expect(intercepted.reads()).toBe(2);
++      expect(session.messages).toEqual(
++        SessionManager.openModelContext(target).buildSessionContext().messages,
++      );
++      expect(session.messages).toEqual([
++        expect.objectContaining({ role: "user", content: "Retain the complete request" }),
++        expect.objectContaining({
++          role: "custom",
++          content: expect.stringContaining("Prior final delivery failed"),
++        }),
++      ]);
++    } finally {
++      intercepted.restore();
++      session?.dispose();
++    }
++  });
++});
++
++async function withInitialContextFixture(
++  run: (fixture: {
++    target: SessionTranscriptRuntimeTarget;
++    source: SessionManager;
++    manager: SessionManager;
++    appendReceipt: (runId: string) => Promise<void>;
++  }) => Promise<void>,
++) {
++  await withOpenClawTestState({ label: "initial-context-controls" }, async (state) => {
++    const target = {
++      agentId: "main",
++      sessionId: "initial-controls",
++      sessionKey: "agent:main:initial-controls",
++      storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
++    };
++    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++    const source = await SessionManager.openAsync(target);
++    await source.appendMessageAsync({ role: "user", content: "Complete source", timestamp: 1 });
++    const manager = await SessionManager.openBoundedAsync(target, {
++      maxBytes: 64_000,
++      maxEvents: 20,
++    });
++    await run({
++      target,
++      source,
++      manager,
++      appendReceipt: (runId) =>
++        recordGatewaySessionRunFailure({ target, runId, error: "Prior final delivery failed" }),
++    });
++  });
++}
++
++function interceptContextRead(
++  after: (read: number) => void | Promise<void>,
++  before?: (read: number) => void | Promise<void>,
++) {
++  const read = modelContextReader.readSessionTranscriptModelContextAsync;
++  let reads = 0;
++  const spy = vi
++    .spyOn(modelContextReader, "readSessionTranscriptModelContextAsync")
++    .mockImplementation(async (...args) => {
++      const current = ++reads;
++      await before?.(current);
++      const result = await read(...args);
++      await after(current);
++      return result;
++    });
++  return { reads: () => reads, restore: () => spy.mockRestore() };
++}
++
++it("keeps ordinary model-context reads fail-closed after an accepted terminal append", async () => {
++  await withInitialContextFixture(async ({ target, appendReceipt }) => {
++    const intercepted = interceptContextRead((read) => appendReceipt(`prior-${read}`));
++    try {
++      await expect(SessionManager.openModelContextAsync(target)).rejects.toThrow(
++        "Session transcript changed during context read",
++      );
++      expect(intercepted.reads()).toBe(1);
++    } finally {
++      intercepted.restore();
++    }
++  });
++});
++
++it.each(["during first read", "between reads"] as const)(
++  "rejects a transcript rewrite %s without accepting the replacement snapshot",
++  async (timing) => {
++    await withInitialContextFixture(async ({ source, manager, appendReceipt }) => {
++      const rewrite = async () => {
++        await source.reloadPersistedTranscriptAsync();
++        await source.removeTrailingEntriesAsync(
++          (entry) => entry.type === "message" || entry.type === "custom_message",
++        );
++        await source.appendMessageAsync({
++          role: "user",
++          content: "Replacement source",
++          timestamp: 2,
++        });
++      };
++      const intercepted = interceptContextRead(
++        async (read) => {
++          if (read === 1) {
++            if (timing === "during first read") {
++              await rewrite();
++            } else {
++              await appendReceipt("prior-command");
++            }
++          }
++        },
++        async (read) => {
++          if (read === 2) {
++            await rewrite();
++          }
++        },
++      );
++      try {
++        await expect(manager[sessionManagerReadInitialContext]()).rejects.toThrow(
++          "Session transcript changed during context read",
++        );
++        expect(intercepted.reads()).toBe(timing === "during first read" ? 1 : 2);
++      } finally {
++        intercepted.restore();
++      }
++    });
++  },
++);
++
++it("rejects another append during the single refreshed read", async () => {
++  await withInitialContextFixture(async ({ manager, appendReceipt }) => {
++    const intercepted = interceptContextRead((read) => appendReceipt(`prior-${read}`));
++    try {
++      await expect(manager[sessionManagerReadInitialContext]()).rejects.toThrow(
++        "Session transcript changed during context read",
++      );
++      expect(intercepted.reads()).toBe(2);
++    } finally {
++      intercepted.restore();
++    }
++  });
++});
++
++it.each(["branch", "reset", "target replacement"] as const)(
++  "preserves rejection of local %s while an initial snapshot is read",
++  async (change) => {
++    await withInitialContextFixture(async ({ target, manager }) => {
++      const replacement = {
++        ...target,
++        sessionId: "replacement",
++        sessionKey: `${target.sessionKey}-replacement`,
++      };
++      await upsertSessionEntryCore(replacement, { sessionId: replacement.sessionId, updatedAt: 1 });
++      const intercepted = interceptContextRead(() => {
++        if (change === "branch") {
++          manager.branch(manager.getLeafId()!);
++        } else if (change === "reset") {
++          manager.resetLeaf();
++        } else {
++          manager.setSessionTarget(replacement);
++        }
++      });
++      try {
++        await expect(manager[sessionManagerReadInitialContext]()).rejects.toThrow(
++          "Session manager changed during initial context read",
++        );
++        expect(intercepted.reads()).toBe(1);
++      } finally {
++        intercepted.restore();
++      }
++    });
++  },
++);
++
++it.each(
++  (["owner retired", "cancelled"] as const).flatMap((change) =>
++    ([1, 2] as const).map((afterRead) => ({ change, afterRead })),
++  ),
++)(
++  "rejects $change after read $afterRead without another attempt",
++  async ({ change, afterRead }) => {
++    await withInitialContextFixture(async ({ target, manager, appendReceipt }) => {
++      const work = new AsyncWorkScope();
++      const reason = new Error(change);
++      let active = true;
++      const intercepted = interceptContextRead(async (read) => {
++        if (read === 1) {
++          await appendReceipt("prior-command");
++        }
++        if (read === afterRead) {
++          if (change === "owner retired") {
++            active = false;
++          } else {
++            work.beginClose(reason);
++          }
++        }
++      });
++      try {
++        const pending = withOwnedSessionTranscriptWrites(
++          {
++            sessionTarget: target,
++            assertCommitAllowed: () => {
++              if (!active) {
++                throw reason;
++              }
++            },
++            withTranscriptWrite: async (run) => await run(),
++          },
++          () => work.run(() => manager[sessionManagerReadInitialContext]()),
++        );
++        await expect(pending).rejects.toBe(reason);
++        expect(intercepted.reads()).toBe(afterRead);
++      } finally {
++        intercepted.restore();
++        await work.drain();
++      }
++    });
++  },
++);
+diff --git a/src/agents/sessions/session-manager.ts b/src/agents/sessions/session-manager.ts
+index 562d0fabdbe49c43f1f974b39f71616d96c036b4..a03a3b5a25250befab06f58a5ab900fe60e12789 100644
+--- a/src/agents/sessions/session-manager.ts
++++ b/src/agents/sessions/session-manager.ts
+@@ -13,10 +13,8 @@ import type { SessionTranscriptContextVersion } from "../../config/sessions/sess
+ import {
+   readSessionTranscriptContextMessages,
+   readSessionTranscriptModelContext,
++  SessionTranscriptContextAppendError,
+   type SessionModelContextLimits,
+-  validateSessionTranscriptContextAdmission,
+-  validateSessionTranscriptContextAnchor,
+-  validateSessionTranscriptContextVersion,
+ } from "../../config/sessions/session-accessor.sqlite-model-context.js";
+ import { loadTranscriptReadSnapshotSync } from "../../config/sessions/session-accessor.sqlite-read.js";
+ import { redactTranscriptMessageForStorage } from "../../config/sessions/session-accessor.sqlite-transcript-store.js";
+@@ -26,11 +24,7 @@ import {
+   findSessionTranscriptHeader,
+ } from "../../config/sessions/session-entry-codec.js";
+ import { prepareSessionTranscriptHydration } from "../../config/sessions/session-transcript-hydration.js";
+-import {
+-  resolveSessionTranscriptReadFence,
+-  withSessionContextAdmission,
+-} from "../../config/sessions/session-transcript-read-fence.js";
+-import { readSessionTranscriptModelContextAsync } from "../../config/sessions/session-transcript-read-worker-runtime.js";
++import { withSessionContextAdmission } from "../../config/sessions/session-transcript-read-fence.js";
+ import { startSessionTranscriptIndexReconcile } from "../../config/sessions/session-transcript-reconcile.js";
+ import type { TranscriptEntryAnchor } from "../../config/sessions/transcript-entry-anchor.js";
+ import {
+@@ -45,8 +39,8 @@ import { CURRENT_SESSION_VERSION } from "../../config/sessions/version.js";
+ import type { Message } from "../../llm/types.js";
+ import { isIncognitoSessionKey } from "../../routing/session-key.js";
+ import type { UserTurnTranscriptAdmissionReceipt } from "../../sessions/user-turn-transcript.types.js";
++import { getAsyncWorkSignal } from "../../shared/async-work-scope.js";
+ import { freezeJsonSnapshot } from "../../shared/immutable-data.js";
+-import { isIncognitoOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
+ import type { BashExecutionMessage, CustomMessage } from "./messages.js";
+ import { SessionManagerBranching } from "./session-manager-branching.js";
+ import { sessionManagerReadInitialContext } from "./session-manager-current-turn.js";
+@@ -65,6 +59,10 @@ import {
+   appendSessionTranscriptNote,
+   withSessionManagerWrite,
+ } from "./session-manager-write-admission.js";
++import {
++  prepareSessionModelContextRead,
++  validateSessionModelContextRead,
++} from "./session-model-context-read.js";
+ import { warnSessionPersistenceDeprecation } from "./session-persistence-deprecation.js";
+ import {
+   runSessionPersistenceAsync,
+@@ -122,18 +120,52 @@ export class SessionManager extends SessionManagerBranching {
+     }
+     // A deliberate local branch owns its view; a concurrent selection must not
+     // install the database's different active path into the same writer.
++    const sourceTarget = this.persistenceTarget;
++    const target = captureSessionTranscriptTargetBinding(sourceTarget);
++    const signal = getAsyncWorkSignal();
++    const assertOwned = captureOwnedTranscriptWriteAssertion(target);
+     const initial = this.captureTranscriptView();
+-    const context = await SessionManager.openModelContextAsync(this.persistenceTarget, {
+-      cwd: this.cwd,
+-      limits: this.boundedContextLimits,
+-    });
+-    const current = this.captureTranscriptView();
+-    if (
+-      Object.keys(initial).some((key) => Reflect.get(initial, key) !== Reflect.get(current, key))
+-    ) {
+-      throw new Error("Session manager changed during initial context read");
++    const assertCurrent = () => {
++      signal?.throwIfAborted();
++      assertOwned();
++      const current = this.captureTranscriptView();
++      if (
++        this.persistenceTarget !== sourceTarget ||
++        Object.keys(initial).some((key) => Reflect.get(initial, key) !== Reflect.get(current, key))
++      ) {
++        throw new Error("Session manager changed during initial context read");
++      }
++    };
++    const read = () =>
++      prepareSessionModelContextRead(target, {
++        limits: this.boundedContextLimits,
++        signal,
++      }).catch((error: unknown) => {
++        assertCurrent();
++        throw error;
++      });
++    assertCurrent();
++    let prepared = await read();
++    assertCurrent();
++    try {
++      validateSessionModelContextRead(prepared, signal);
++    } catch (error) {
++      assertCurrent();
++      if (!(error instanceof SessionTranscriptContextAppendError)) {
++        throw error;
++      }
++      // A prior command can append its terminal receipt after lane release.
++      // Refresh only this unsent initial view once, never an admitted turn or rewrite.
++      prepared = await read();
++      assertCurrent();
++      if (prepared.context.version?.generation !== error.generation) {
++        throw error;
++      }
++      validateSessionModelContextRead(prepared, signal);
+     }
+-    for (const entry of context.fileEntries) {
++    assertCurrent();
++    const selected = SessionManager.fromSelectedEntries(prepared.context.events, this.cwd);
++    for (const entry of selected.fileEntries) {
+       if (entry.type !== "message") {
+         continue;
+       }
+@@ -154,7 +186,7 @@ export class SessionManager extends SessionManagerBranching {
+         freezeJsonSnapshot(entry.message);
+       }
+     }
+-    return context.buildSessionContext();
++    return selected.buildSessionContext();
+   }
+ 
+   /** No buffered writes remain here; asynchronous metadata methods own their settlement. */
+@@ -611,37 +643,9 @@ export class SessionManager extends SessionManagerBranching {
+       limits?: SessionModelContextLimits;
+     } = {},
+   ): Promise<SessionManager> {
+-    const readTarget = { ...target };
+-    const receipt = options.admission ?? resolveSessionTranscriptReadFence(readTarget);
+-    const admission = receipt ? { ...receipt } : undefined;
+-    const through = options.through ? { ...options.through } : undefined;
+-    const limits = options.limits ? { ...options.limits } : undefined;
+-    options.signal?.throwIfAborted();
+-    const context = await withSessionContextAdmission(readTarget, admission, () =>
+-      // Incognito belongs to this process; capture its snapshot before the first await.
+-      isIncognitoSessionKey(readTarget.sessionKey) ||
+-      isIncognitoOpenClawAgentSqlitePath(readTarget.storePath, readTarget)
+-        ? readSessionTranscriptModelContext(readTarget, through, limits)
+-        : readSessionTranscriptModelContextAsync(
+-            readTarget,
+-            admission,
+-            options.signal,
+-            through,
+-            limits,
+-          ),
+-    );
+-    options.signal?.throwIfAborted();
+-    // Even process-local reads yield here. Admitted history may exclude later
+-    // appends; unadmitted context must still match the snapshot being accepted.
+-    if (admission) {
+-      validateSessionTranscriptContextAdmission(readTarget, admission);
+-    } else if (!through) {
+-      validateSessionTranscriptContextVersion(readTarget, context.version);
+-    }
+-    if (through) {
+-      validateSessionTranscriptContextAnchor(readTarget, through);
+-    }
+-    return SessionManager.fromSelectedEntries(context.events, options.cwd);
++    const prepared = await prepareSessionModelContextRead(target, options);
++    validateSessionModelContextRead(prepared, options.signal);
++    return SessionManager.fromSelectedEntries(prepared.context.events, options.cwd);
+   }
+ 
+   private static fromSelectedEntries(contextEntries: unknown[], cwd?: string): SessionManager {
+diff --git a/src/agents/sessions/session-model-context-read.ts b/src/agents/sessions/session-model-context-read.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..287e2d4a203dc1eaded27a7c6624f9d2edc18f8c
+--- /dev/null
++++ b/src/agents/sessions/session-model-context-read.ts
+@@ -0,0 +1,68 @@
++import type { SessionTranscriptRuntimeTarget } from "../../config/sessions/session-accessor.js";
++import {
++  readSessionTranscriptModelContext,
++  validateSessionTranscriptContextAdmission,
++  validateSessionTranscriptContextAnchor,
++  validateSessionTranscriptContextVersion,
++  type SessionModelContextLimits,
++} from "../../config/sessions/session-accessor.sqlite-model-context.js";
++import {
++  resolveSessionTranscriptReadFence,
++  withSessionContextAdmission,
++} from "../../config/sessions/session-transcript-read-fence.js";
++import { readSessionTranscriptModelContextAsync } from "../../config/sessions/session-transcript-read-worker-runtime.js";
++import type { TranscriptEntryAnchor } from "../../config/sessions/transcript-entry-anchor.js";
++import { isIncognitoSessionKey } from "../../routing/session-key.js";
++import type { UserTurnTranscriptAdmissionReceipt } from "../../sessions/user-turn-transcript.types.js";
++import { isIncognitoOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
++
++/** Prepare detached read facts; the consuming continuation owns final validation. */
++export async function prepareSessionModelContextRead(
++  target: SessionTranscriptRuntimeTarget,
++  options: {
++    admission?: UserTurnTranscriptAdmissionReceipt;
++    signal?: AbortSignal;
++    through?: TranscriptEntryAnchor;
++    limits?: SessionModelContextLimits;
++  } = {},
++) {
++  const readTarget = { ...target };
++  const receipt = options.admission ?? resolveSessionTranscriptReadFence(readTarget);
++  const admission = receipt ? { ...receipt } : undefined;
++  const through = options.through ? { ...options.through } : undefined;
++  const limits = options.limits ? { ...options.limits } : undefined;
++  options.signal?.throwIfAborted();
++  const context = await withSessionContextAdmission(readTarget, admission, () =>
++    // Incognito belongs to this process; capture its snapshot before the first await.
++    isIncognitoSessionKey(readTarget.sessionKey) ||
++    isIncognitoOpenClawAgentSqlitePath(readTarget.storePath, readTarget)
++      ? readSessionTranscriptModelContext(readTarget, through, limits)
++      : readSessionTranscriptModelContextAsync(
++          readTarget,
++          admission,
++          options.signal,
++          through,
++          limits,
++        ),
++  );
++  return { readTarget, admission, through, context };
++}
++
++/** Validate synchronously immediately before selection, without another async handoff. */
++export function validateSessionModelContextRead(
++  prepared: Awaited<ReturnType<typeof prepareSessionModelContextRead>>,
++  signal?: AbortSignal,
++): void {
++  const { readTarget, admission, through, context } = prepared;
++  signal?.throwIfAborted();
++  // Even process-local reads yield. Admitted history may exclude later appends;
++  // unadmitted context must still match the snapshot being accepted.
++  if (admission) {
++    validateSessionTranscriptContextAdmission(readTarget, admission);
++  } else if (!through) {
++    validateSessionTranscriptContextVersion(readTarget, context.version);
++  }
++  if (through) {
++    validateSessionTranscriptContextAnchor(readTarget, through);
++  }
++}
 diff --git a/src/agents/sessions/tools/private-temp-file.ts b/src/agents/sessions/tools/private-temp-file.ts
 index c4ac2fde3caf3cc8b00c2ef549d7534a05451c80..bfeb5b4aeec5babac2140127146819e5ad5c9042 100644
 --- a/src/agents/sessions/tools/private-temp-file.ts
@@ -91798,6 +92537,41 @@ index 16c450cdc2ecf50bc39a11cc18a7810cfaca8cf2..ad72f44a9b8ee8cdbcb794d12aa0d447
      } finally {
        release.resolve();
        admission?.release();
+diff --git a/src/config/sessions/session-accessor.sqlite-model-context.ts b/src/config/sessions/session-accessor.sqlite-model-context.ts
+index 3df180281aa0b54c78d680298227ccfcf851f066..fac5acd606450dcff1bfd711f46aa74552763def 100644
+--- a/src/config/sessions/session-accessor.sqlite-model-context.ts
++++ b/src/config/sessions/session-accessor.sqlite-model-context.ts
+@@ -121,6 +121,13 @@ export function validateSessionTranscriptContextAnchor(
+   }
+ }
+ 
++/** A rejected snapshot can be refreshed only while its append-only generation survives. */
++export class SessionTranscriptContextAppendError extends SessionTranscriptReadFenceError {
++  constructor(readonly generation: string) {
++    super("Session transcript changed during context read");
++  }
++}
++
+ /** Unadmitted context must still describe this session when an async read returns. */
+ export function validateSessionTranscriptContextVersion(
+   scope: SessionTranscriptReadScope,
+@@ -137,6 +144,16 @@ export function validateSessionTranscriptContextVersion(
+     current?.rawSeq !== version?.rawSeq ||
+     current?.updatedAt !== version?.updatedAt
+   ) {
++    if (
++      typeof version?.generation === "string" &&
++      version.generation.length > 0 &&
++      current?.generation === version.generation &&
++      typeof version.rawSeq === "number" &&
++      typeof current.rawSeq === "number" &&
++      current.rawSeq > version.rawSeq
++    ) {
++      throw new SessionTranscriptContextAppendError(version.generation);
++    }
+     throw new SessionTranscriptReadFenceError("Session transcript changed during context read");
+   }
+ }
 diff --git a/src/config/sessions/session-entry-projection.ts b/src/config/sessions/session-entry-projection.ts
 index cb36ef2574c332fab5923feee392001bf212d63a..9c50a9b458634539a48c4ebf163f09701fdf1450 100644
 --- a/src/config/sessions/session-entry-projection.ts
