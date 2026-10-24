@@ -179,6 +179,29 @@ jobs:
           playwright_chromium="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath());')"
           "$playwright_chromium" --version
           printf 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=%s\n' "$playwright_chromium" >> "$GITHUB_ENV"
+          # Chromium documents the installed Chrome helper for restricted Ubuntu
+          # user namespaces, without changing the global AppArmor policy.
+          # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+          stat -c 'Managed Chromium: uid=%u mode=%a path=%n' "$playwright_chromium"
+          test "$(stat -c '%u' "$playwright_chromium")" = "$(id -u)"
+          adjacent_helper="$(dirname "$playwright_chromium")/chrome-sandbox"
+          if test -e "$adjacent_helper"; then
+            stat -c 'Adjacent Chrome sandbox helper: uid=%u mode=%a path=%n' "$adjacent_helper"
+          fi
+          sandbox_helper=/opt/google/chrome/chrome-sandbox
+          stat -c 'Chrome sandbox helper: uid=%u mode=%a path=%n' "$sandbox_helper"
+          test -f "$sandbox_helper"
+          test -x "$sandbox_helper"
+          test -u "$sandbox_helper"
+          test "$(stat -c '%u' "$sandbox_helper")" = 0
+          sandbox_helper_mode="$(stat -c '%a' "$sandbox_helper")"
+          if (( (8#$sandbox_helper_mode & 8#001) == 0 || (8#$sandbox_helper_mode & 8#022) != 0 )); then
+            echo 'Chrome sandbox helper needs other-execute and no group/other write permissions' >&2
+            exit 1
+          fi
+          sha256sum "$sandbox_helper"
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+          printf 'CHROME_DEVEL_SANDBOX=%s\n' "$sandbox_helper" >> "$GITHUB_ENV"
       - name: Verify managed Chromium startup
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}/openclaw-reference
