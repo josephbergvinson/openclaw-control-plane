@@ -179,29 +179,27 @@ jobs:
           playwright_chromium="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath());')"
           "$playwright_chromium" --version
           printf 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=%s\n' "$playwright_chromium" >> "$GITHUB_ENV"
-          # Chromium documents the installed Chrome helper for restricted Ubuntu
-          # user namespaces, without changing the global AppArmor policy.
+          # Admit only this pinned browser to Ubuntu's restricted user namespaces.
+          # Keep the global restriction and Chromium's own sandbox enabled.
           # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
-          stat -c 'Managed Chromium: uid=%u mode=%a path=%n' "$playwright_chromium"
-          test "$(stat -c '%u' "$playwright_chromium")" = "$(id -u)"
-          adjacent_helper="$(dirname "$playwright_chromium")/chrome-sandbox"
-          if test -e "$adjacent_helper"; then
-            stat -c 'Adjacent Chrome sandbox helper: uid=%u mode=%a path=%n' "$adjacent_helper"
-          fi
-          sandbox_helper=/opt/google/chrome/chrome-sandbox
-          stat -c 'Chrome sandbox helper: uid=%u mode=%a path=%n' "$sandbox_helper"
-          test -f "$sandbox_helper"
-          test -x "$sandbox_helper"
-          test -u "$sandbox_helper"
-          test "$(stat -c '%u' "$sandbox_helper")" = 0
-          sandbox_helper_mode="$(stat -c '%a' "$sandbox_helper")"
-          if (( (8#$sandbox_helper_mode & 8#001) == 0 || (8#$sandbox_helper_mode & 8#022) != 0 )); then
-            echo 'Chrome sandbox helper needs other-execute and no group/other write permissions' >&2
+          if [[ ! "$playwright_chromium" =~ ^/[a-zA-Z0-9_./-]+$ ]]; then
+            echo 'Managed Chromium path must be absolute and contain no policy metacharacters' >&2
             exit 1
           fi
-          sha256sum "$sandbox_helper"
           sysctl kernel.apparmor_restrict_unprivileged_userns
-          printf 'CHROME_DEVEL_SANDBOX=%s\n' "$sandbox_helper" >> "$GITHUB_ENV"
+          userns_restriction_before="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+          browser_profile=/etc/apparmor.d/openclaw-reference-chromium
+          test ! -e "$browser_profile"
+          sudo tee "$browser_profile" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile openclaw-reference-chromium "$playwright_chromium" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$browser_profile"
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "$userns_restriction_before"
       - name: Verify managed Chromium startup
         timeout-minutes: 1
         working-directory: ${{ runner.temp }}/openclaw-reference
