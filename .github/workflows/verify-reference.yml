@@ -368,7 +368,13 @@ jobs:
           retention-days: 7
       - name: Install required Playwright Chromium
         working-directory: ${{ runner.temp }}/openclaw-reference
-        run: node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts --require-playwright-chromium
+        run: |
+          node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts --require-playwright-chromium
+          # Native launch fixtures consume this override instead of selecting
+          # an unrelated system Chrome from the runner image.
+          playwright_chromium="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath());')"
+          "$playwright_chromium" --version
+          printf 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=%s\n' "$playwright_chromium" >> "$GITHUB_ENV"
       - name: Pre-warm Chrome MCP
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: npx -y --audit=false chrome-devtools-mcp@1.8.0 --version
