@@ -59,6 +59,55 @@ class PublicationConfidentialityTests(unittest.TestCase):
         self.assertIn("private-publication-filename", [x.category for x in self.inspect(b"safe", private_name)])
         self.assertIn("decoding-limit-uninspected", [x.category for x in self.inspect(b"base64," + b"A" * 8193)])
 
+
+    def test_quoted_encoded_metadata_keys_are_inspected_without_echo(self):
+        encoded = base64.b64encode(self.token).decode()
+        for key in ["payload", "base64", "encoded_data", "secret", "token", "PayloadValue"]:
+            with self.subTest(key=key):
+                payload = json.dumps({key: encoded}).encode()
+                findings = self.inspect(payload)
+                self.assertIn("github-token", [x.category for x in findings])
+                self.assertNotIn(self.token.decode(), "\n".join(x.render() for x in findings))
+        self.assertIn("github-token", [x.category for x in self.inspect(
+            b"{'payload': '" + encoded.encode() + b"'}")])
+        self.assertEqual(self.inspect(json.dumps({"payload": base64.b64encode(b"ordinary output").decode()}).encode()), [])
+
+    def test_quoted_encoded_candidates_keep_decoding_limits(self):
+        payload = json.dumps({"payload": "A" * 8193}).encode()
+        self.assertIn("decoding-limit-uninspected", [x.category for x in self.inspect(payload)])
+        payload = json.dumps({"payload": "A" * 16, "base64": "A" * 16}).encode()
+        with patch.object(validator, "PUBLICATION_MAX_DECODED", 1):
+            self.assertIn("decoding-limit-uninspected", [x.category for x in self.inspect(payload)])
+
+    def test_explicit_private_directory_roots_are_checked(self):
+        for name in ["receipts.private.dir", ".env", "credentials.json"]:
+            private = self.root / name
+            private.mkdir()
+            for populated in [False, True]:
+                with self.subTest(name=name, populated=populated):
+                    if populated:
+                        (private / "output.log").write_bytes(b"ordinary output")
+                    findings = validator.publication_findings([private])
+                    self.assertIn("private-publication-filename", [x.category for x in findings])
+                    self.assertNotIn(name, "\n".join(x.render() for x in findings))
+        safe = self.root / "ordinary-directory"
+        safe.mkdir()
+        (safe / "output.log").write_bytes(b"ordinary output")
+        self.assertEqual(validator.publication_findings([safe]), [])
+
+    def test_cli_rejects_quoted_encoded_values_and_private_root_names(self):
+        encoded = self.root / "output.json"
+        encoded.write_text(json.dumps({"payload": base64.b64encode(self.token).decode()}))
+        private = self.root / "receipts.private.dir"
+        private.mkdir()
+        for path, category in [(encoded, b"github-token"), (private, b"private-publication-filename")]:
+            with self.subTest(category=category):
+                result = subprocess.run([sys.executable, str(SCRIPT), "--publication-input", str(path)], capture_output=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(category, result.stderr)
+                self.assertNotIn(self.token, result.stdout + result.stderr)
+                self.assertNotIn(private.name.encode(), result.stdout + result.stderr)
+
     def test_private_pattern_names_and_values_are_not_printed(self):
         patterns = self.root / "operator-patterns.json"
         patterns.write_text(json.dumps({"private-person-name": "operator-only-value"}))

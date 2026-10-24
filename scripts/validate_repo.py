@@ -76,7 +76,7 @@ PUBLICATION_MAX_ENTRIES = 4096
 PUBLICATION_MAX_DEPTH = 3
 PUBLICATION_MAX_DECODED = 256
 ENCODED_VALUE = re.compile(
-    rb"(?:base64[,\s:=]+|(?:encoded|payload|secret|token)[A-Za-z0-9_]*[\s:=]+[\"'])"
+    rb"(?:base64[,\s:=]+|(?:base64|encoded|payload|secret|token)[A-Za-z0-9_]*[\"']?[\s:=]+[\"'])"
     rb"([A-Za-z0-9+/_-]{16,8192}={0,2})", re.I)
 
 
@@ -213,6 +213,8 @@ def publication_findings(paths: list[Path], pattern_file: Path | None = None,
             finding("symlink-uninspected", str(path).encode())
             continue
         directory_input = path.is_dir()
+        if directory_input and private_publication_name(path.name):
+            finding("private-publication-filename", path.name.encode())
         candidates = path.rglob("*") if directory_input else [path]
         for candidate in candidates:
             filesystem_entries += 1
