@@ -32,12 +32,12 @@ operations. No one layer substitutes for the others.
 | Tool access | `src/agents` and gateway tool resolution carry the admitted permission mode and tool policy into execution. Authenticated-owner defaults do not become permissions for unrelated senders. |
 | Visible workers | Native session/subagent tools and the retained run registry represent delegated work and bind registered projects to their authorized source root/worktree. The caller supplies the task scope; workers retain its constraints. |
 | Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. |
-| Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
+| Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. A successful explicit yield with accepted completion children retains its requester handoff through internal prompt cleanup. The existing dispatcher can transfer an already confirmed current progress card without a new payload; recovered prepared cohorts retain its progress reference. Cancellation, failure and completed-output checks still apply. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
 | Original task context | Session creation, continuation and scheduled recovery retain the original request and source bindings. Later steering can correct ongoing work without silently replacing its objective. |
 | Follow-up admission | Queue and steering owners distinguish live corrections, queued follow-ups and independent requests. Ownership is rechecked after preparation and replacement; a stale parent or source cannot adopt another run. |
 | Admitted requester scope | Same-child follow-up execution and its completion record retain the admitted requester, account and channel partition through existing private in-process metadata. Target incarnation and source custody remain binding; later sender context does not silently replace the admitted scope. Finite mismatch diagnostics name the comparison stage and differing fields without exposing identity values. |
-| Child completion | Registry, announcement and requester-continuation paths keep result delivery owned through settlement and cleanup. A late completion does not justify another copy of an already delivered final. |
-| Deadlines and cancellation | Spawn, backend and native process boundaries carry configured deadlines, including explicit zero where supported. Observation timeouts, execution deadlines and caller cancellation keep separate meanings. |
+| Child completion | Registry, announcement and requester-continuation paths keep result delivery owned through settlement and cleanup. Gateway start notification waits for both runner entry and live admission. Its deferred observers inherit the owning execution context rather than a shorter model-attempt scope, so normal model completion does not cancel a still-authorized final handoff. Source revocation and cancellation checks remain binding. A late completion does not justify another copy of an already delivered final. |
+| Deadlines and cancellation | Spawn, backend and native process boundaries carry configured deadlines, including explicit zero where supported. Stale-session recovery honors a current native invocation's accepted deadline-free lifetime, then allows bounded collection from its confirmed normal exit. Orphaned markers, cancellation and expired deadlines remain recoverable. Observation timeouts, execution deadlines and caller cancellation keep separate meanings. |
 | Interrupted work | Durable run/session state and current execution handles inform recovery. Inspect effects before retrying; losing a wait or shortening a transcript does not prove an action never occurred. |
 
 See [continuation](06-execution-and-durable-lanes.md) and
@@ -49,10 +49,11 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | --- | --- |
 | Bootstrap selection | `src/agents/workspace.ts` owns recognized filenames, guarded reads and role/session filtering. Workspace manifests describe intended context but do not inject arbitrary files. |
 | Durable context | Primary and company profiles carry stable identity, preferences and source pointers. Retrieval remains source- and audience-aware; stale memory cannot prove current provider facts. |
-| Compaction | Native context-pressure handling, summary construction and memory flushing retain recent task context and writer custody. Genuine lifecycle updates use the existing presenter, including the same status card when that mode is enabled; successful compaction remains distinct from a later model-request failure. |
+| Compaction | Native context-pressure handling, summary construction and memory flushing retain recent task context and writer custody. Same-request retries carry earlier confirmed delivery facts forward once; accepted-child receipts keep their original completion obligation once per run identity. Real repeated message effects remain separate, and progress does not settle an owed child final. Genuine lifecycle updates use the existing presenter, including the same status card when that mode is enabled; successful compaction remains distinct from a later model-request failure. |
 | Optional recall | Memory preparation and search have bounded scope and usable fallbacks. Unavailable semantic search does not disable exact source lookup or justify claiming all context is missing. |
 | OAuth refresh | `src/agents/auth-profiles` retains refresh ownership and durable profile adoption under queue/cross-process locking. A caller timing out does not authorize a competing refresh or identity substitution. |
 | Request accounting | Transport metadata and accepted response identities distinguish configured model/reasoning preferences, outgoing requests, returned usage and goal totals. They do not expose hidden reasoning. |
+| Initial context reads | `src/agents/sessions` prepares and validates an unsent initial snapshot in its existing reader. A same-generation append can trigger one fresh read; rewrites, changed selection, cancellation and repeated changes remain rejected. Ordinary admitted reads keep their existing strict validation. |
 | SDK and plugin contracts | Compiled SDK surfaces, generated schemas and plugin metadata travel with their consumers and tests. A source export must include the dependency closure rather than a few hand-selected fixes. |
 
 [Memory and context](08-memory-and-context.md) explains loading boundaries and
@@ -63,8 +64,8 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | Mechanism | Implementation area and behavior |
 | --- | --- |
 | Channel routing | Discord/Telegram adapters preserve the intended account, channel and thread. Exact-message reads return that message or an error instead of substituting general history. |
-| Progress | When status-card progress is enabled, reply presentation updates the current card across long work and legitimate yields, preserving authored milestones; final delivery is a separate message. Other modes retain their configured behavior. For quiet progress cards, internal file-change counters remain structured state rather than visible status text. Optional tool narration is distinct from useful commentary. |
-| Final ownership | Direct replies, command settlement, workers and resumed runs share native delivery ownership. Implicit reply references follow the configured route while explicit targets and source checks remain binding. A settled successful explicit final edit of the exact current source records completion through the per-tool terminal hook, including nested message actions. Wrong targets, dry runs, partial delivery and failed edits do not suppress the separate final. |
+| Progress | When status-card progress is enabled, reply presentation updates the current card across long work and legitimate yields, preserving authored milestones; final delivery is a separate message. Confirmed card identity survives the existing durable handoff and restart recovery, so a final edit cannot turn that card into the completed answer. Legacy records without confirmed identity remain unknown. Other modes retain their configured behavior. For quiet progress cards, internal file-change counters remain structured state rather than visible status text. Optional tool narration is distinct from useful commentary. |
+| Final ownership | Direct replies, command settlement, workers and resumed runs share native delivery ownership. Implicit reply references follow the configured route while explicit targets and source checks remain binding. A settled successful explicit final edit of an existing completed answer at the exact current source records completion through the per-tool terminal hook, including nested message actions. Wrong targets, dry runs, partial delivery and failed edits do not suppress the separate final. Required terminal saves remain joined; a later cleanup failure cannot replace the original execution error or reclassify cancellation. |
 | Delivery reconciliation | A model result, internal terminal record and provider-visible message are distinct observations. Unknown sends require inspection before retry; an unconditional exactly-once guarantee is not implied. |
 | Voice identity and context | `extensions/discord/src/voice` resolves the authenticated speaker and whole selected primary/room policy and profile before admitting speech. Explicitly selected owner records retain required-file checks and native memory audience filtering; guests retain room context without the owner's private additions. |
 | Wake name and task handoff | Room/guild voice settings control when the bot responds and whether it may consult the normal agent for records or actions. A spoken acknowledgment and eventual result keep the original request's owner. Same-room follow requests reuse the pending join and voice generation; late agent consults obtain fresh admission through the existing Gateway work owner, retaining caller, room and cancellation checks. |
@@ -84,10 +85,21 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The current R43/app502 packet
-uses that descriptive case while canonical/native source includes two later
-test-only fixture corrections. Every supported reconstruction requires a full
-target-tree check. Source reconstruction does not install or launch the app.
+reconstruction target without a supported binding. The current optional companion
+delta supports complete two-button login-Keychain access-permission forms through
+the existing `NativeCredentialBinding` and `NativeCredentialPromptContext`
+owners. Verified Apple process identity, current host/local principal, native
+form and focused secure-field checks, and single-use entry/revalidation remain
+binding. The finite eight-file source replay also reverses the four gateway-only
+SQL source, test, schema and documentation changes to reproduce the separately
+retained complete companion tree. This does not roll back the selected external
+gateway or claim newer gateway SQL behavior in the older companion. The external
+gateway and native distribution retain their own source identities. The installed
+companion's separately retained Bun security payload is
+not reconstructed by this packet; see the
+[source boundaries](../runtime/README.md#source-identities). Every supported
+reconstruction requires a full target-tree check. Source reconstruction does not
+install or launch the app.
 
 Local application authentication resolves the configured gateway SecretRef through
 the matching native helper, using bounded private pipes and current configuration.
@@ -126,7 +138,8 @@ published dependency, source patch and resource notices.
 | Release activation | The host's activation owner seals a complete candidate, captures compatible recovery state, admits one start and retains its authentic initial-generation verification. Source publication can bind that accepted result; reconciliation alone is not activation or a fresh observation of a running process. |
 | Host lifecycle controls | Prefer native controls. When they lack the required host operation, an authenticated owner's explicit or standing authorization permits the existing documented external lifecycle route, with normal exec authorization, drain/handoff, resumable-work and rollback checks. Respect policy refusals and reconcile admitted updates before another transition. A setup reply is guidance, not evidence of execution. |
 | Health and access | Existing health owners check their declared runtime and provisioned account routes. Normal provider refresh and task-time recovery retain exact identity; missing optional bindings do not fail unrelated accounts. |
-| Maintenance and recovery | Classified cleanup, retention and backup helpers keep producer/lease, identity and recovery checks. They must report partial work honestly and preserve unknown or active data. |
+| Trajectory retention | The canonical covering index supplies session/run grouping, newest-event ordering and stored-octet byte totals without a materialized table scan. Existing writable database admission repairs the index; retention caps, age limits, active-run protection, whole-run deletion and transaction ownership remain unchanged. |
+| Maintenance and recovery | Classified cleanup, retention and backup helpers keep producer/lease, identity and recovery checks. Read-only lifecycle artifact planning leaves the shared writer available; actual reclamation revalidates row, reference and native deletion custody at commit. They must report partial work honestly and preserve unknown or active data. |
 
 The runtime patch and exported Workspace are different source owners. A host may
 retain its private activation/publication owner rather than export that operator's

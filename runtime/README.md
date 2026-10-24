@@ -20,20 +20,84 @@ ordinary-use acceptance on another host.
 
 ## Source identities
 
-The current source reference includes two test-fixture corrections beyond the
-installed **R43** runtime and Mac companion build **2610000502**. Canonical source
-`7ce69d2a2075231411c00c06a964447abc743c19` and native distribution
-`3917084f508f795900f70470eb40695074b02c2e` contain those corrections. The installed
-runtime and companion retain distribution source
-`f18ba730959787b21b823f7259f064e9a9bd2801`. The requester-wake fixture uses
-`Array.from` for its existing listener snapshot. The final-edit fixture uses its
-own narrow JSON override shape and required guard braces, keeping Discord
-implementation types outside the core compiler graph. All other source blobs and
-modes, including production and package inputs, are unchanged from the respective
-installed source inputs. These test-only corrections did not rebuild either
-component. The companion identity is descriptive: this packet supplies no
-supported delta from the current distribution to that older companion source, so
-use ordinary source or native-distribution reconstruction for this packet.
+Read canonical source and native distribution identities from the manifest. The
+current source includes these targeted reliability repairs:
+
+- Current valid MCP OAuth bearers use a fresh canonical state read without taking
+  the exclusive renewal or consent lease. Expired or rejected bearers and pending
+  consent retain that leased path.
+- Stable identity and preference facts already explicit in trusted loaded profile
+  context can be answered directly. Source and audience constraints still apply;
+  missing, conflicting, historical and volatile facts require the appropriate source.
+- A successful explicit yield with accepted completion children retains the same
+  requester continuation and progress-card handoff. Internal prompt cleanup does
+  not close the owed reply. Final delivery remains separately owned.
+- An already confirmed progress card can pass to accepted background work even
+  when the turn returns no new message. The handoff preserves its delivery
+  association without sending another preview.
+- A confirmed progress card keeps its role through the existing durable handoff
+  and restart recovery. Explicit final delivery uses a separate message;
+  corrections to completed answers remain supported.
+- Session recovery honors a successfully started, current native invocation
+  with no execution deadline. A quiet command stays owned while it runs; its actual exit starts
+  the existing bounded result-collection allowance. Cancellation, expired
+  deadlines and orphaned work retain their recovery paths.
+- Compaction retries carry earlier confirmed delivery facts forward once.
+  Progress stays distinct from a final answer, preserving pending child completion.
+- Repeated projections of an accepted child retain its original completion
+  obligation once per run identity. Real repeated message sends remain separate
+  effects.
+- Initial session context can refresh once if a prior command appends a terminal
+  record while its unsent snapshot is being read. Rewrites, selection changes,
+  cancellation and another append during the refreshed read remain errors.
+- Read-only lifecycle artifact planning runs in the existing worker without
+  reserving the transcript writer. Reclamation still rechecks selected state and
+  native deletion authority before committing.
+- Gateway start notification waits for both runner entry and live admission, so
+  fast child completion can reach the final reply owed to its requester.
+- Command cleanup and Gateway settlement still await required terminal saves.
+  Deferred start observers inherit their owning execution context, so normal
+  model-attempt completion cannot cancel a still-authorized final handoff.
+  A later save failure cannot replace the original execution error or change its
+  cancellation classification; a save-only failure is still reported.
+
+Trajectory retention aggregates group and byte totals through the canonical
+covering index rather than materializing and sorting the runtime event table.
+The existing writable database admission installs that index; retention limits,
+whole-run ordering, active-run protection and transaction ownership are unchanged.
+
+The existing registry can request an authored checkpoint after 45 seconds without
+progress. Its 60-second sweep, tool safe boundaries, model/provider work and
+transport can add delay. This is checkpoint eligibility, not a fixed delivery
+interval or response-time guarantee.
+
+The managed Codex 0.160.0 archive and the selected external gateway retain their
+separate manifest bindings. The optional Mac companion target reproduces its
+separately retained complete source tree. Its eight-file delta combines four
+shared/macOS Swift source/test changes for complete two-button login-Keychain
+access-permission forms with the inverse of four gateway-only SQL source, test,
+schema and documentation changes. Those inverse changes reproduce the older
+companion; they do not roll back the selected external gateway. The existing
+native owner still verifies the Apple
+process, current host and local principal, exact form, focused secure field and
+single-use entry scope. Its source commit, full tree and build label are recorded
+in `nativeCompanion`.
+
+In the recorded service-hosted configuration, the selected external gateway
+constructs text/voice agent prompts and resolves MCP tokens; the companion
+provides native client/worker functions. Reconstructing the companion does not
+change that external gateway's selected release or establish app-hosted gateway
+acceptance. App-hosted gateway operation, explicit embedded local CLI/agent use
+or changed worker roles require separate qualification.
+
+The reference companion retains a separately qualified local Bun security
+payload. This packet supplies neither that payload's artifact nor its
+reconstruction binding. A normal build uses the source's tracked Bun staging
+pin; it does not reproduce the retained security payload. Source and build
+labels therefore do not establish identical installed app bytes. The optional
+companion patch reconstructs the declared source tree; `referenceDeployment`
+separately describes the installed external runtime. Neither proves installation
+or ordinary-use acceptance on another host.
 
 | Identity                                          | Manifest field                                              |
 | ------------------------------------------------- | ----------------------------------------------------------- |
@@ -154,8 +218,8 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-First check the current manifest. This packet records the installed R43/app502
-companion descriptively and does not support `--native-companion`. For a packet
+First check the current manifest. This packet records retained Mac companion
+build 2610000502 descriptively and does not support `--native-companion`. For a packet
 that supplies one of the supported bindings below, use a new clean official-tag
 clone to reconstruct its declared companion:
 
