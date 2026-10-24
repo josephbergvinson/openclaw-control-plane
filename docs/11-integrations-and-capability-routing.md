@@ -119,7 +119,7 @@ Model selection and authentication profiles are separate configuration concerns.
 
 Credential values remain in sanctioned state and SecretRef/environment/broker lanes. Public configuration contains references and selectable account placeholders, not OAuth tokens, browser profiles or live host identifiers. A successful chooser or login screen does not prove that refreshed state persists across subsequent runtime use. Acceptance must check the supported stored state, the provider operation and the later use relevant to account rotation.
 
-The reference distinguishes the main reasoning model, its image-understanding capability and the separate Images 2.5 generation route. The [configuration and runtime chapters](10-runtime-releases-and-promotion.md) describe the pinned model settings. An unavailable generation route is not permission to silently switch to an older model or a new billing mechanism.
+The reference distinguishes the main reasoning model, its image-understanding capability and the separate Images 2.5 generation route. The [configuration guide](../config/README.md#model-and-context-preferences) describes the pinned model settings. An unavailable generation route is not permission to silently switch to an older model or a new billing mechanism.
 
 ## Recovering an existing account
 

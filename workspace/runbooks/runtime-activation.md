@@ -2,6 +2,7 @@
 
 `../scripts/openclaw_runtime_activate.py` is the exported lifecycle owner. Its
 operations are `seal`, `snapshot`, `activate`, `restore`, `retire-receipts`,
+`node-toolchain-preflight`, `screen-capture-node-precondition-enroll`,
 `screen-capture-enroll` and `screen-capture-check`.
 It runs as the configured macOS operator account. It does not install Node,
 onboard accounts, invent a predecessor, stop a working service, or turn an
@@ -268,7 +269,7 @@ agent/plugin directories and config includes, native rollout/home and separately
 configured SQLite homes, and the matching companion application. The native
 database inventory must cover all seven database families at their real locations;
 do not infer them from a guessed default home. Record those physical roots in
-`runtime.recovery_roots`. The same helper captures them in its version-3 snapshot
+`runtime.recovery_roots`. The same helper captures them in its versioned stopped snapshot
 and rejects a later attempt to reinterpret that generation under different roots.
 
 Settle writer custody before snapshot or restore through the affected native
@@ -302,3 +303,25 @@ historical privileged-build cleanup, `paths.approval_a_execution_root`.
 A missing historical build root is an accepted no-op. The latter helper keeps
 its root-ownership checks and must run in a separately authorized privileged
 maintenance invocation. It is not part of ordinary user activation.
+
+## Managed Node transitions
+
+A reviewed Node change uses this same activation owner. The
+`screen-capture-node-precondition-enroll` operation records the candidate's existing
+permission and code evidence; it neither grants permission nor performs capture.
+Pass the immutable private transition declaration and its reviewed digest as global
+options before the selected operation:
+
+```sh
+"$PYTHON" "$WORKSPACE/scripts/openclaw_runtime_activate.py" \
+  --node-toolchain-transition "$NODE_TRANSITION" \
+  --node-toolchain-transition-sha256 "$NODE_TRANSITION_SHA256" \
+  node-toolchain-preflight
+```
+
+Run that read-only preflight before stopping the predecessor. It checks the
+declared transition, service/support bindings and candidate permission prerequisites;
+it does not start or stop services. Use the same declaration for the subsequent
+seal, snapshot, activation and any matching restore. The
+[Node transition contract](../../docs/10-runtime-releases-and-promotion.md#explicit-node-security-transition)
+describes preserved controls and post-activation effective-access acceptance.

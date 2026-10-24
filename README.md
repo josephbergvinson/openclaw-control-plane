@@ -72,10 +72,11 @@ acceptance are separate steps.
 
 This reference targets the official OpenClaw **v2026.10.4** base and the
 managed **Codex 0.160.0** native package. The manifest binds the complete custom source,
-native distribution and companion source. The current packet reconstructs the
-canonical and native distribution source, including OAuth bearer reuse, direct
-recall from trusted loaded profiles and delegated task handoff repairs. Mac
-companion build 2610000502 retains its separate identity and embedded source.
+native distribution and companion source. The current packet includes task
+continuation, progress/final delivery, loaded-profile context, scoped credential
+entry and retention-query repairs. The optional Mac companion has a separate
+source target; its reconstruction does not reproduce the reference installation's
+local Bun security payload or establish identical installed app bytes.
 Read the [current source boundaries](runtime/README.md#source-identities)
 before choosing a reconstruction target. The installed-reference record does not
 establish deployment or account access for a new adopter.
