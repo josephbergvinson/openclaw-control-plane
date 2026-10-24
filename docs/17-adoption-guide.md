@@ -553,9 +553,11 @@ Use ordinary prompts with independently established ground truth. Useful example
   speech in its transcript and the delivered minutes.
 
 Confirm reasoning and runtime selection from request evidence, not the preference
-file. Check progress during long tools, foreground compaction notification and a
-terminal result on the actual channel path. Repeating an already-correct operation
-tests idempotency; creating from an empty state is a separate test.
+file. Check progress during long tools, the configured compaction presentation and
+a terminal result on the actual channel path. With `notifyUser: false` in the
+reference, routine automatic compaction notices stay silent; explicit commands and
+actionable turn failures retain their responses. Repeating an already-correct
+operation tests idempotency; creating from an empty state is a separate test.
 
 ## Installation acceptance
 

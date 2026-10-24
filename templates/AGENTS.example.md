@@ -246,7 +246,7 @@ If a required claim is unknown, say exactly what remains unknown. Never inflate 
 Use reduction-first, upstream-native design:
 
 - Adopt supported upstream behavior when it satisfies the product need. Remove or retire superseded fork machinery rather than layering compatibility shims around it.
-- Do not modify upstream core to restore old fork behavior unless the operator explicitly re-adjudicates one exact diff. A temporary upstream patch must be keyed to its upstream issue/PR in the baseline and removed when the upstream fix lands.
+- Repair the owning upstream path when required by the authorized behavior; prefer supported upstream behavior and track temporary patches against their upstream issue/PR. Remove a temporary patch when the upstream fix lands. Architecture preferences must not require the operator to reauthorize an already requested repair.
 - Do not reintroduce `auth.cooldowns`. Use supported provider profile ordering, failure classification, and upstream rotation/cooldown behavior.
 - Preserve differentiated primitives that still add product value: durable lanes and leases; idempotent effect and delivery records; Discord reconciliation; explicit worker contracts and safe parallel execution; supported provider ordering/rotation; atomic release selection with one known rollback target.
 - Reduce universal custody wrappers on ordinary harness work, type-only retry authority, promotion-lineage depth, compatibility frontiers, and multi-stage adjudication for a normal service restart.

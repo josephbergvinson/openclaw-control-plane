@@ -218,10 +218,10 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-First check the current manifest. This packet records retained Mac companion
-build 2610000502 descriptively and does not support `--native-companion`. For a packet
-that supplies one of the supported bindings below, use a new clean official-tag
-clone to reconstruct its declared companion:
+The current manifest supplies a separate companion source delta and supports
+`--native-companion`. Read its exact source, build and scope from `nativeCompanion`,
+including the retained Bun payload limitation under [source identities](#source-identities).
+Use a new clean official-tag clone to reconstruct that declared source target:
 
 ```bash
 git clone --depth 1 --branch "$reference_tag" https://github.com/openclaw/openclaw.git /path/to/openclaw-companion-reference
@@ -245,9 +245,10 @@ companion cases:
   `nativeDistribution.normalizedTree`. No empty extra patch stands in for this
   equality.
 - **Finite source delta:** bind the distribution tree and an exact nonempty patch
-  in `nativeCompanion.delta`. The patch must change exactly the four declared
-  macOS Swift source/test paths. Its bytes and SHA-256, base tree and complete
-  final companion tree are checked.
+  in `nativeCompanion.delta`. The patch must change exactly the allowed paths
+  enforced by the helper. The current [eight-path source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
+  covers the shared/macOS credential changes and inverse gateway SQL changes.
+  Its bytes and SHA-256, base tree and complete final companion tree are checked.
 
 Both cases verify `nativeCompanion.sourceTree` and use the same declared native
 archive. A descriptive companion identity that differs without a valid delta is
@@ -295,6 +296,13 @@ The existing serial terminal-continuation step also runs
 `src/agents/tools/message-tool-final-edit.test.ts`, covering direct and nested
 final edits, negative controls and a later input. Workspace helper tests retain
 their separate scope.
+
+Browser qualification uses the pinned Playwright-managed Chromium and verifies
+sandbox-enabled startup before the browser cases. On the hosted Ubuntu runner,
+the [workflow](https://github.com/josephbergvinson/openclaw-control-plane/blob/main/.github/workflows/verify-reference.yml) admits user namespaces
+for that exact executable through an AppArmor profile while retaining the global
+restriction. This is a CI prerequisite, not a production host setting or a reason
+to disable the browser sandbox when a test cannot launch.
 
 A changed source target requires the corresponding behavioral assertions to be
 reviewed against its maintained owner before qualification. Retiring an old path

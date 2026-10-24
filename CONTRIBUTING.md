@@ -80,6 +80,12 @@ Review the patch, normalized trees, native archive binding and notices together.
 Keep the current reconstruction contract in the manifest, mechanisms in the
 documentation and concise historical context behind its index. Do not append an
 operator's deployment diary or private proof inventory to the README or manifest.
+When a source packet changes, review the newcomer path in the README, runtime
+guide and adoption guide together. Check available reconstruction modes against
+the helper, and keep exact build identities in the manifest rather than copying
+them into navigation prose. Label older native packets as historical. Source,
+archive, installed application and live acceptance claims need their own evidence;
+one does not establish the others.
 After merging, inspect all required hosted checks on the exact final head and read
 back the public source/asset bindings. Source publication does not itself change
 an installed runtime or qualify another host's accounts and user workflows.
@@ -87,8 +93,9 @@ an installed runtime or qualify another host's accounts and user workflows.
 [GitHub Actions](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/verify-reference.yml) runs the repository checks
 and reconstructs and builds the pinned runtime in a separate Ubuntu checkout.
 It accepts manual dispatch and runs on pull requests, main, and reference rebuild
-branches. Standard hosted runners are free for public repositories; a private fork
-uses the owner's Actions allowance. See [GitHub's runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+branches. Review the workflow's permissions, runner requirements and your account's
+Actions settings before enabling it on a fork. See
+[GitHub's runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The native plan adapter changes only full-lint shard selection and preserves every
 other command, including checks after lint. Its tests use fake command execution.
 The repository/Workspace fixture job runs on macOS; independent native-check and
