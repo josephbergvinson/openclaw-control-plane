@@ -90,8 +90,12 @@ delta supports complete two-button login-Keychain access-permission forms throug
 the existing `NativeCredentialBinding` and `NativeCredentialPromptContext`
 owners. Verified Apple process identity, current host/local principal, native
 form and focused secure-field checks, and single-use entry/revalidation remain
-binding. The external gateway and native distribution retain their own source
-identities. The installed companion's separately retained Bun security payload is
+binding. The finite eight-file source replay also reverses the four gateway-only
+SQL source, test, schema and documentation changes to reproduce the separately
+retained complete companion tree. This does not roll back the selected external
+gateway or claim newer gateway SQL behavior in the older companion. The external
+gateway and native distribution retain their own source identities. The installed
+companion's separately retained Bun security payload is
 not reconstructed by this packet; see the
 [source boundaries](../runtime/README.md#source-identities). Every supported
 reconstruction requires a full target-tree check. Source reconstruction does not
@@ -134,6 +138,7 @@ published dependency, source patch and resource notices.
 | Release activation | The host's activation owner seals a complete candidate, captures compatible recovery state, admits one start and retains its authentic initial-generation verification. Source publication can bind that accepted result; reconciliation alone is not activation or a fresh observation of a running process. |
 | Host lifecycle controls | Prefer native controls. When they lack the required host operation, an authenticated owner's explicit or standing authorization permits the existing documented external lifecycle route, with normal exec authorization, drain/handoff, resumable-work and rollback checks. Respect policy refusals and reconcile admitted updates before another transition. A setup reply is guidance, not evidence of execution. |
 | Health and access | Existing health owners check their declared runtime and provisioned account routes. Normal provider refresh and task-time recovery retain exact identity; missing optional bindings do not fail unrelated accounts. |
+| Trajectory retention | The canonical covering index supplies session/run grouping, newest-event ordering and stored-octet byte totals without a materialized table scan. Existing writable database admission repairs the index; retention caps, age limits, active-run protection, whole-run deletion and transaction ownership remain unchanged. |
 | Maintenance and recovery | Classified cleanup, retention and backup helpers keep producer/lease, identity and recovery checks. Read-only lifecycle artifact planning leaves the shared writer available; actual reclamation revalidates row, reference and native deletion custody at commit. They must report partial work honestly and preserve unknown or active data. |
 
 The runtime patch and exported Workspace are different source owners. A host may

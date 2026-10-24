@@ -33,6 +33,10 @@ NATIVE_COMPANION_DELTA_PATHS = {
     "apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift",
     "apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift",
     "apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift",
+    "docs/reference/database-schemas/versioning.md",
+    "src/state/openclaw-agent-schema.sql",
+    "src/trajectory/runtime-store.sqlite.test.ts",
+    "src/trajectory/runtime-store.sqlite.ts",
 }
 ARCHIVE_CHUNK_BYTES = 1024 * 1024
 CURRENT_MANIFEST_FIELDS = {
@@ -611,7 +615,7 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
                     raise ReconstructionError("Companion delta must contain ordinary text changes")
                 paths.append(fields[2])
             if len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
-                raise ReconstructionError("Companion delta must change only the four declared macOS source and fixture files")
+                raise ReconstructionError("Companion delta must change exactly the eight declared shared/macOS and retained-gateway source, test, schema and documentation paths")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
         raise ReconstructionError("Checkout HEAD is not the pinned upstream commit")
     if git(checkout, "rev-parse", "HEAD^{tree}") != package.base_tree:

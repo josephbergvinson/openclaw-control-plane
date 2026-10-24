@@ -9687,6 +9687,28 @@ index fcfed917c3cb9d0a28373664a8f6507cdfcc4808..364096d9c35ab1e04f37aec75573d406
  
      Related OpenAI docs:
      - [Responses API WebSocket mode](https://developers.openai.com/api/docs/guides/websocket-mode)
+diff --git a/docs/reference/database-schemas/versioning.md b/docs/reference/database-schemas/versioning.md
+index e31acef2c64816b1f8c8c61d08172b18989ef283..ed1169013e86b0cd864faf75570c1f3cc022bc5d 100644
+--- a/docs/reference/database-schemas/versioning.md
++++ b/docs/reference/database-schemas/versioning.md
+@@ -75,6 +75,17 @@ same-version readers can ignore the extra index, so binary rollback leaves it
+ intact. The accepted design is recorded in the
+ [session label index decision](https://github.com/openclaw/openclaw/pull/147837#issuecomment-5658783288).
+ 
++Trajectory runtime retention uses a nonunique expression index over session,
++run, timestamp, and stored event byte length. The existing writable schema owner
++installs or repairs it at admission; read-only admission accepts its absence.
++The direct aggregate uses these byte counts without scanning event records or
++materializing a grouping table. Initial construction takes time and temporary
++disk proportional to retained events; later writes maintain the small derived
++index in the same transaction. Agent schema 24, event contents, age and byte
++limits, whole-run eviction, active-session protection, and sweep cadence are
++unchanged. Older same-version readers ignore the index, so binary rollback
++preserves both canonical rows and derived metadata.
++
+ Task and maintenance lookups added nonunique indexes without changing state
+ schema 17 or agent schema 21: task requester sessions, worker placements by
+ environment, and session entries whose validity is not yet confirmed. The task
 diff --git a/docs/reference/database-schemas/worker-access-inventory.md b/docs/reference/database-schemas/worker-access-inventory.md
 index 10b8b0a9bf99f3e75d89c4d151dfefcee191bfbd..1f179b74edf1e4354645515cd67598aa509cf0a8 100644
 --- a/docs/reference/database-schemas/worker-access-inventory.md
@@ -111975,6 +111997,20 @@ index d07595b727ea36904b7de2e552ab197879e254f6..70ed8dead37c750fab25b63e01810fe1
 +): OpenClawAgentDatabaseReadOnlyResult<T> {
 +  return withFreshOpenClawAgentDatabaseReadOnly(operation, options, { artifactPreserving: true });
 +}
+diff --git a/src/state/openclaw-agent-schema.sql b/src/state/openclaw-agent-schema.sql
+index 79216473995f8d721b14fd91d79bdb8b779a738d..e414050ec7b8232e1dc657bd9a1ecc078bc142de 100644
+--- a/src/state/openclaw-agent-schema.sql
++++ b/src/state/openclaw-agent-schema.sql
+@@ -668,6 +668,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_trajectory_runtime_run
+   ON trajectory_runtime_events(session_id, run_id, seq)
+   WHERE run_id IS NOT NULL;
+ 
++CREATE INDEX IF NOT EXISTS idx_agent_trajectory_runtime_retention
++  ON trajectory_runtime_events(session_id, run_id, created_at, octet_length(event_json));
++
+ CREATE TABLE IF NOT EXISTS acp_parent_stream_events (
+   session_id TEXT NOT NULL,
+   run_id TEXT NOT NULL,
 diff --git a/src/state/openclaw-database-paths.windows.test.ts b/src/state/openclaw-database-paths.windows.test.ts
 index dd6675458669852b12527293ba91e2f0148e6511..7901fa769c813518652ef127f203b83551be4656 100644
 --- a/src/state/openclaw-database-paths.windows.test.ts
@@ -112445,6 +112481,211 @@ index 23d4599ceda7efc5801bce6e561c4e5b4e0644bf..cf4c4155406f4b60b13568ed54e57225
        os,
        runtime: {
          node: process.version,
+diff --git a/src/trajectory/runtime-store.sqlite.test.ts b/src/trajectory/runtime-store.sqlite.test.ts
+index 9d5d7299178c658222b6cc2a8597ed48cdd6bad2..9ad3b419f761bdf80dd7d717bf026823accdcef3 100644
+--- a/src/trajectory/runtime-store.sqlite.test.ts
++++ b/src/trajectory/runtime-store.sqlite.test.ts
+@@ -8,7 +8,10 @@ import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
+ import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+ import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
+ import type { DB as OpenClawAgentKyselyDatabase } from "../state/openclaw-agent-db.generated.js";
+-import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
++import {
++  closeOpenClawAgentDatabasesForTest,
++  openOpenClawAgentDatabase,
++} from "../state/openclaw-agent-db.js";
+ import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
+ import {
+   appendSqliteTrajectoryRuntimeEvents,
+@@ -209,6 +212,151 @@ describe("SQLite trajectory runtime store", () => {
+     },
+   );
+ 
++  it.each(["UTF-8", "UTF-16le", "UTF-16be"])(
++    "keeps global retention byte metadata covering and transactional in %s stores",
++    async (encoding) => {
++      const now = Date.parse("2026-07-26T00:00:00.000Z");
++      vi.useFakeTimers();
++      vi.setSystemTime(now);
++      if (encoding !== "UTF-8") {
++        storePath = path.join(tempDir, `${encoding}.sqlite`);
++        const seed = new DatabaseSync(storePath);
++        seed.exec(
++          `PRAGMA encoding = '${encoding}'; CREATE TABLE encoding_seed (id INTEGER); DROP TABLE encoding_seed;`,
++        );
++        seed.close();
++        await replaceSessionEntry(
++          { sessionKey: "agent:main:main", storePath },
++          { sessionId: "session-1", updatedAt: now },
++        );
++      }
++      for (const sessionId of ["session-1", "history"]) {
++        if (sessionId !== "session-1") {
++          await addSession(sessionId);
++        }
++        const events = ["run-a", undefined, "run-a"].map((runId, index) => {
++          const event = createTrajectoryEvent({
++            sessionId,
++            type: `seed-${index}`,
++            ts: new Date(now).toISOString(),
++          });
++          event.runId = runId;
++          event.data = { payload: "日本語🦞".repeat(100 + index) };
++          return event;
++        });
++        appendSqliteTrajectoryRuntimeEvents({ sessionId, storePath }, events);
++      }
++      const location = encoding === "UTF-8" ? sqlitePath() : storePath;
++      let database = openOpenClawAgentDatabase({ agentId: "main", path: location });
++      // A same-version existing store acquires the derived index at writable
++      // admission; no runtime repair or history rewrite is needed.
++      database.db.exec("DROP INDEX IF EXISTS idx_agent_trajectory_runtime_retention");
++      closeOpenClawAgentDatabasesForTest(tempDir);
++      database = openOpenClawAgentDatabase({ agentId: "main", path: location });
++      let aggregateSql = "";
++      let readAggregate: (() => Record<string, unknown>[]) | undefined;
++      let explainAggregate: ((prefix: string) => Record<string, unknown>[]) | undefined;
++      const prepare = database.db.prepare.bind(database.db);
++      const spy = vi.spyOn(database.db, "prepare").mockImplementation((sql) => {
++        const statement = prepare(sql);
++        if (sql.includes('"newest_created_at"')) {
++          aggregateSql = sql;
++          const all = statement.all.bind(statement);
++          vi.spyOn(statement, "all").mockImplementation((...args) => {
++            readAggregate = () => all(...args);
++            explainAggregate = (prefix) => prepare(`${prefix} ${sql}`).all(...args);
++            return all(...args);
++          });
++        }
++        return statement;
++      });
++      try {
++        appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-1", storePath }, [
++          createTrajectoryEvent({ type: "after-reopen", ts: new Date(now).toISOString() }),
++        ]);
++      } finally {
++        spy.mockRestore();
++      }
++      expect(aggregateSql).not.toBe("");
++      if (!readAggregate || !explainAggregate) {
++        throw new Error("Global retention aggregate was not executed");
++      }
++      const aggregate = { all: readAggregate };
++      function expectExactAggregates() {
++        const expected = new Map<
++          string,
++          {
++            session_id: string;
++            run_id: string | null;
++            newest_created_at: number;
++            runtime_bytes: number;
++          }
++        >();
++        for (const row of database.db
++          .prepare("SELECT session_id,run_id,created_at,event_json FROM trajectory_runtime_events")
++          .all()) {
++          const sessionId = String(row.session_id);
++          const runId = row.run_id === null ? null : String(row.run_id);
++          const key = JSON.stringify([sessionId, runId]);
++          const value = expected.get(key) ?? {
++            session_id: sessionId,
++            run_id: runId,
++            newest_created_at: 0,
++            runtime_bytes: 0,
++          };
++          value.newest_created_at = Math.max(value.newest_created_at, Number(row.created_at));
++          value.runtime_bytes +=
++            Buffer.byteLength(String(row.event_json), encoding === "UTF-8" ? "utf8" : "utf16le") +
++            1;
++          expected.set(key, value);
++        }
++        const order = (left: unknown, right: unknown) =>
++          JSON.stringify(left).localeCompare(JSON.stringify(right));
++        expect(
++          aggregate
++            .all()
++            .map((row) => ({
++              session_id: row.session_id,
++              run_id: row.run_id,
++              newest_created_at: row.newest_created_at,
++              runtime_bytes: row.runtime_bytes,
++            }))
++            .toSorted(order),
++        ).toEqual([...expected.values()].toSorted(order));
++      }
++      expectExactAggregates();
++      const plan = explainAggregate("EXPLAIN QUERY PLAN");
++      expect(plan.some((row) => String(row.detail).includes("COVERING INDEX"))).toBe(true);
++      expect(plan.some((row) => /MATERIALIZE|TEMP B-TREE/.test(String(row.detail)))).toBe(false);
++      const rootPage = database.db
++        .prepare("SELECT rootpage FROM sqlite_schema WHERE name='trajectory_runtime_events'")
++        .get()?.rootpage;
++      const operations = explainAggregate("EXPLAIN");
++      const tableCursors = new Set(
++        operations
++          .filter((row) => row.opcode === "OpenRead" && row.p2 === rootPage)
++          .map((row) => row.p1),
++      );
++      expect(
++        operations.filter((row) => row.opcode === "Column" && tableCursors.has(row.p1)),
++      ).toEqual([]);
++      const committed = aggregate.all();
++      database.db.exec("BEGIN IMMEDIATE");
++      database.db
++        .prepare(
++          "UPDATE trajectory_runtime_events SET event_json=event_json||?,created_at=created_at+1 WHERE session_id=? AND seq=0",
++        )
++        .run("more日本語🦞", "history");
++      database.db
++        .prepare("DELETE FROM trajectory_runtime_events WHERE session_id=? AND seq=1")
++        .run("history");
++      expectExactAggregates();
++      database.db.exec("ROLLBACK");
++      expect(aggregate.all()).toEqual(committed);
++      expectExactAggregates();
++    },
++  );
++
+   it("loads a bounded trailing window in storage order", () => {
+     appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-1", storePath }, [
+       createTrajectoryEvent({ type: "event-1" }),
+diff --git a/src/trajectory/runtime-store.sqlite.ts b/src/trajectory/runtime-store.sqlite.ts
+index 26f7aec1b65de0080f1720721656679e78f8ba34..48d16f0e116bd8c9fd2b38dd7019efa88ca2b298 100644
+--- a/src/trajectory/runtime-store.sqlite.ts
++++ b/src/trajectory/runtime-store.sqlite.ts
+@@ -278,26 +278,18 @@ function sweepSqliteTrajectoryRuntimeRetention(
+ 
+ function readSqliteTrajectoryRuntimeRuns(database: OpenClawAgentDatabase): TrajectoryRuntimeRun[] {
+   const db = getTrajectoryKysely(database.db);
+-  // Reduce bodies before grouping; otherwise SQLite carries event_json through
+-  // the temporary sort instead of just the byte counts retention needs.
++  // The canonical retention index covers grouping keys, timestamps and byte
++  // counts. Aggregate it directly without materializing or sorting event rows.
+   const rows = executeSqliteQuerySync(
+     database.db,
+     db
+-      .with(
+-        (cte) => cte("event_sizes").materialized(),
+-        (qb) =>
+-          qb
+-            .selectFrom("trajectory_runtime_events")
+-            .select(["session_id", "run_id", "created_at"])
+-            .select((eb) =>
+-              eb(eb.fn<number>("octet_length", ["event_json"]), "+", 1).as("runtime_bytes"),
+-            ),
+-      )
+-      .selectFrom("event_sizes")
++      .selectFrom("trajectory_runtime_events")
+       .select(["session_id", "run_id"])
+       .select((eb) => [
+         eb.fn.max<number | bigint>("created_at").as("newest_created_at"),
+-        eb.fn.sum<number | bigint>("runtime_bytes").as("runtime_bytes"),
++        eb.fn
++          .sum<number | bigint>(eb(eb.fn<number>("octet_length", ["event_json"]), "+", 1))
++          .as("runtime_bytes"),
+       ])
+       .groupBy(["session_id", "run_id"]),
+   ).rows;
 diff --git a/src/transcripts/capture-operations.ts b/src/transcripts/capture-operations.ts
 index 045520a1d2c750ef6a2ee81ae4f426974b498ce7..b14c140ac858841e023c0dabdf7a5f0852b84c25 100644
 --- a/src/transcripts/capture-operations.ts

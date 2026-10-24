@@ -61,15 +61,24 @@ current source includes these targeted reliability repairs:
   A later save failure cannot replace the original execution error or change its
   cancellation classification; a save-only failure is still reported.
 
+Trajectory retention aggregates group and byte totals through the canonical
+covering index rather than materializing and sorting the runtime event table.
+The existing writable database admission installs that index; retention limits,
+whole-run ordering, active-run protection and transaction ownership are unchanged.
+
 The existing registry can request an authored checkpoint after 45 seconds without
 progress. Its 60-second sweep, tool safe boundaries, model/provider work and
 transport can add delay. This is checkpoint eligibility, not a fixed delivery
 interval or response-time guarantee.
 
 The managed Codex 0.160.0 archive and the selected external gateway retain their
-separate manifest bindings. The optional Mac companion target adds four shared
-and macOS Swift source/test changes for complete two-button login-Keychain
-access-permission forms. The existing native owner still verifies the Apple
+separate manifest bindings. The optional Mac companion target reproduces its
+separately retained complete source tree. Its eight-file delta combines four
+shared/macOS Swift source/test changes for complete two-button login-Keychain
+access-permission forms with the inverse of four gateway-only SQL source, test,
+schema and documentation changes. Those inverse changes reproduce the older
+companion; they do not roll back the selected external gateway. The existing
+native owner still verifies the Apple
 process, current host and local principal, exact form, focused secure field and
 single-use entry scope. Its source commit, full tree and build label are recorded
 in `nativeCompanion`.

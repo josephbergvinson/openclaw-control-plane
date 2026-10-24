@@ -27,12 +27,18 @@ deployment or user acceptance.
 
 ## Optional companion source
 
-The current packet supplies a separate four-file shared/macOS Swift delta for
-complete two-button login-Keychain access-permission forms through the existing
-native credential owner. Read the exact companion commit, full tree and build
-label from `nativeCompanion`; source reconstruction and build labels are not
-installed-app attestations. The external gateway remains separately identified
-by `source`, `nativeDistribution` and `referenceDeployment`.
+The current packet supplies an eight-file delta to reproduce the separately
+retained complete companion source. Four shared/macOS Swift source/test changes
+support complete two-button login-Keychain access-permission forms through the
+existing native credential owner. Four gateway-only SQL source, test, schema and
+documentation changes are reversed to reach that older component tree. These
+reversals do not change the selected external gateway release or claim that the
+companion contains its newer gateway SQL behavior.
+
+Read the exact companion commit, full tree and build label from
+`nativeCompanion`; source reconstruction and build labels are not installed-app
+attestations. The external gateway remains separately identified by `source`,
+`nativeDistribution` and `referenceDeployment`.
 
 The reference companion retains a separately qualified local Bun security
 payload. This packet supplies neither that payload's artifact nor its
@@ -52,7 +58,7 @@ companion source. The helper accepts either of these finite cases:
 | Case | Required binding and verification |
 | --- | --- |
 | Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals both `nativeDistribution.referenceTree` and `nativeDistribution.normalizedTree`. No extra patch is needed or accepted as a substitute for equality. |
-| Separate four-file Swift delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the four declared shared/macOS Swift source/test paths. |
+| Separate eight-file retained-companion delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the eight declared shared/macOS and gateway SQL source, test, schema and documentation paths. |
 
 The current separate delta is limited to:
 
@@ -60,6 +66,14 @@ The current separate delta is limited to:
 - `apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift`
 - `apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift`
 - `apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift`
+- `docs/reference/database-schemas/versioning.md`
+- `src/state/openclaw-agent-schema.sql`
+- `src/trajectory/runtime-store.sqlite.test.ts`
+- `src/trajectory/runtime-store.sqlite.ts`
+
+The last four entries are the inverse of the selected gateway's SQL delta. The
+complete final source tree, including modes, must match the retained companion;
+this is not a mixed tree combining older Swift with newer gateway SQL.
 
 Both cases first verify the distribution, then the complete companion source tree,
 including modes, and provision the same bound archive. A historical descriptive
