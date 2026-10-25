@@ -19,7 +19,9 @@ Infer the following from the request and relevant context; ask only when a mater
 4. **Reference artifact** — use a supplied or relevant known example when helpful; do not require one.
 5. **Deliverable** — what is actually being produced, and roughly how long. Treat approximate length as guidance; do not invent a narrower pass/fail range or pad useful work to meet it.
 
-Carry the original objective, audience and relevant current project decisions into delegated briefs; judge the finished work against that same purpose.
+Keep the original request and latest purpose or reader steering in their own words, separate from your derived brief. Inferred choices remain interpretations; fixed decisions come from the operator. Choose the intended reader independently of permission to publish or send the document. Preparation can remain private while the finished draft is written for community members or another outside reader. Do not turn an audience-facing statement into an internal legal or research packet because its sources require detailed analysis.
+
+Carry the original objective, audience, relevant current project decisions and latest steering into delegated briefs; judge the finished work against that same purpose.
 
 Then pick the working directory before writing. For a registered project, use its configured runtime data root under `work-product/<slug>-<id>/`. For other work, use `artifacts/<slug>-<id>/` under the configured OpenClaw workspace. Resolve the project through `registry/project_topology.json`; do not invent a second project root in the home directory.
 
@@ -57,6 +59,8 @@ Tab order is fixed, left to right, seven maximum:
 
 Review the actual deliverable as its intended reader. When presentation matters, inspect the rendered result, including the examples and navigation the reader will use.
 
+Check reader fit even for a short document, using a review proportionate to its length and risk. For a substantial delegated review, give the brief-fidelity reviewer the original request and latest steering separately from the derived brief so it can challenge the brief itself. Give a clean reader the draft, intended audience and relevant reference material, keeping the derived brief and private research history out of that review. A plan or lint pass does not establish reader fit.
+
 - Walk through one representative reader action using only the delivered content: can the reader understand the recommendation, find the needed material and know what to do next?
 - For visual or craft work, show the decisive examples beside the explanation of what to borrow or change. A list of links is not a visual comparison.
 - Check that the relevant existing brand guide, template or governing assets have been applied, with the applicable version established rather than merely listed.
@@ -67,3 +71,7 @@ Then ask:
 > Could this be sent to the intended reader without explaining or apologising for how it is written?
 
 If the honest answer is no, it is not finished, regardless of how correct the analysis is.
+
+## Delivery
+
+Deliver the completed caption and all finished files together through the run's admitted final mode: one ordinary automatic final with one `MEDIA:<path-or-url>` line per file, or one final message-tool send when the run requires message-tool-only delivery. Use explicit nonfinal attachment sends for genuinely intermediate or separate operations; keep the completed deliverable's caption with its files instead of repeating the completion message in another final.
