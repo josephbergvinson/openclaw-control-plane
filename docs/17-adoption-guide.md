@@ -86,7 +86,7 @@ instructions. Detailed mechanics are installed once at
 `runbook/tools-reference.md` and read deliberately when AGENTS routes there. Adapt
 the example companies, source ownership and standing grants to the intended
 operator. Keep current personal facts in private memory and source systems. Do
-not convert examples into assertions that integrations are ready.
+not convert examples into assertions that integrations are ready. Keep shared operating rules in the concise core and specialized procedures in their existing deliberate-read references. Preserve current facts and grants when replacing repeated prose; do not overwrite an existing private profile or company memory with this example. Verify main, native child, cron, company and fresh voice composition separately through their actual loaders.
 
 The installer supplies the manual backup owner's required policy files and
 canonical runbook reference. Backup also requires a physical private `memory/`
@@ -147,14 +147,14 @@ configuration. If adopting the reference's native compaction triggers, review th
 [two-key deletion patch](../config/README.md#existing-compaction-overrides) to remove
 any earlier byte-threshold and memory-flush-margin overrides explicitly.
 
-The profile uses `openai/gpt-6.1-sol` for the main agent and image understanding,
-`max` for ordinary reasoning, inherited by subagents. Explicit `/think ultra`
-remains available. Scheduled agent turns, heartbeat and dreaming use GPT-6.1 Sol/Max;
-active memory and utility helpers retain GPT-6.1 Sol/Max. Generation uses
-`openai/gpt-image-2.5-flare`. The profile includes explicit ChatGPT-route metadata,
-local memory search, compaction and session settings described in
-[configuration](../config/README.md). Check account availability and native runtime
-selection on an actual request; a saved model ID is not proof of execution.
+The checked-in profile contains example model, effort, image, memory, compaction
+and session settings described in [configuration](../config/README.md). Choose
+effective ordinary settings in native configuration; preserve separately owned
+scheduler/review overrides and supported per-task choices. New child model and
+effort follow [native precedence](../config/README.md#child-model-and-effort),
+rather than an assumed universal parent setting. Check account availability and
+the accepted selection on an actual request; a saved model ID is not execution
+proof. Source/configuration export and live acceptance remain separate stages.
 
 ### Configure and check local memory
 

@@ -85,15 +85,13 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The current optional companion
-delta supports complete two-button login-Keychain access-permission forms through
-the existing `NativeCredentialBinding` and `NativeCredentialPromptContext`
-owners. Verified Apple process identity, current host/local principal, native
+reconstruction target without a supported binding. The optional companion delta supports retained native credential forms through
+the existing `NativeCredentialBinding` and `NativeCredentialPromptContext` owners. Verified Apple process identity, current host/local principal, native
 form and focused secure-field checks, and single-use entry/revalidation remain
-binding. The finite eight-file source replay also reverses the four gateway-only
-SQL source, test, schema and documentation changes to reproduce the separately
-retained complete companion tree. This does not roll back the selected external
-gateway or claim newer gateway SQL behavior in the older companion. The external
+binding. The finite source replay includes every inverse gateway-only difference
+needed to reproduce the separately retained complete companion tree. Its exact
+path set is declared for review; legacy packets retain their eight-path scope. This does not roll back the selected external
+gateway or claim newer gateway behavior in the older companion. The external
 gateway and native distribution retain their own source identities. The installed
 companion's separately retained Bun security payload is
 not reconstructed by this packet; see the

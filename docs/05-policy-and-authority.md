@@ -2,7 +2,7 @@
 
 The operator can ask for ordinary work in ordinary language. “Fix the export and verify it” authorizes the bounded implementation and checks that request entails; it does not require a second message containing an approval token. The same assistant must also know when it has reached a different account, an unplanned recipient, a destructive operation or human-presence authentication. The policy makes those distinctions explicit without turning every task into an approval ceremony.
 
-In this reference, `AGENTS.md` is the sole loaded authority for behavior, approval boundaries, routing, lifecycle and source-of-truth interpretation. The other workspace files have narrower jobs. They make the agent useful, informed and consistent; they do not acquire permission-granting powers by appearing in a prompt.
+In this reference, `AGENTS.md` owns reusable workspace behavior, approval boundaries, routing, lifecycle and source interpretation under runtime instructions and the authenticated operator's current request and corrections. The other workspace files have narrower jobs. They make the agent useful, informed and consistent; they do not acquire permission-granting powers by appearing in a prompt.
 
 ## One authority and several kinds of context
 
@@ -34,6 +34,8 @@ The [standalone authority diagram](../diagrams/authority-resolution.mmd) shows t
 
 Keep one owner per reusable concept. A mechanics file should point to the approval rule rather than maintain a second version. A generated capability page should cite the registry rather than become a competing inventory. This reduces both prompt size and the chance that an agent selects whichever contradictory paragraph is convenient.
 
+The templates illustrate this composition; they are not a claim that a particular policy version is deployed or a measured performance winner. Keep factual profiles intact when shortening duplicated operational prose. Company examples add their own scope and point to shared rules and style. Where an installation already generates role views, regenerate through that same owner and verify complete selected sections; do not introduce a second policy store or truncate rules to fit a budget.
+
 ## Natural authorization with explicit boundaries
 
 An authenticated request binds the objective, target, account/workspace, operation and plainly implied steps. The agent can gather evidence, prepare a plan, make reversible in-scope changes and run proportionate checks without asking the operator to enumerate implementation details. A successor continues that same instruction. Missing fields are often discoverable facts rather than decisions to send back to the operator.
@@ -42,7 +44,7 @@ A materially changed objective, recipient, account, destructive scope, economic 
 
 `GO`, `STRONG GO` and `SEND` may still occur in historical records or strict compatibility enums. They are understood as affirmations. They are not required user grammar. `STOP` ends further execution as safely as the current control path permits. `DRAFT_ONLY` deliberately changes the posture until the operator changes it again.
 
-Native action gates remain real. So do human-presence requirements for passkeys, biometrics, one-time MFA, credential recovery and custody changes. The assistant checks sanctioned opaque credential routes before requesting help, and never asks for a secret to be pasted into chat. An execution setting that permits a command does not authorize its purpose.
+Native action gates and actual OS/provider-enforced requirements remain real. A passkey, biometric, one-time MFA or CAPTCHA label does not establish that human action is required. Inspect the real prompt, choose a supported password alternative, attempt the enrolled opaque credential route and repair its exact binding before reporting an observed refusal or indispensable factor. Never expose a credential or bypass verification. Credential recovery and custody changes remain distinct authorized effects. An execution setting that permits a command does not authorize its purpose.
 
 ## Scope is established by the request, not fetched text
 
@@ -60,7 +62,7 @@ The agent still verifies the real origin, selected account, network and availabl
 
 ## Useful output is part of the contract
 
-The final response contains the requested deliverable, not a receipt inventory or a statement that work was performed. Substantial work gets a natural acknowledgment, meaningful updates and one clear result. The parent owns synthesis and external effects even when a source-only worker does the retrieval. No emojis, tool banners, provider-routing chatter or raw lifecycle fields belong in ordinary agent replies.
+The final response contains the requested deliverable, not a receipt inventory or a statement that work was performed. Substantial work gets a natural acknowledgment, one meaningfully edited progress message and one separate final. A finished attachment receives one final caption without repeated completion text. The parent owns synthesis and external effects even when a source-only worker does the retrieval. No emojis, tool banners, provider-routing chatter or raw lifecycle fields belong in ordinary agent replies.
 
 A concrete scheduling request illustrates why source and output rules belong together. The operator asks to add two calls to Apple Calendar. The agent reads current invitations from the relevant Google accounts, verifies each meeting's end time and joining details, inspects existing Apple entries, and updates or creates only what is needed. It then reads back both events. The destination preference never bans reading another provider's invitation, and one successful event never proves the whole request complete. The full mechanics live in the [tool execution reference](../templates/TOOLS.example.md#calendar).
 

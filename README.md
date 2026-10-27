@@ -42,8 +42,8 @@ retrieval through destination readback.
 
 - **Runtime source:** a complete patch from a pinned official OpenClaw release,
   regression tests and a separately verified native distribution input.
-- **Working policy:** substantial AGENTS, SOUL, USER, TOOLS and related templates
-  for authorization, source selection, long tasks, writing and verification.
+- **Working policy:** a concise AGENTS core, separate style/preferences and
+  deliberately read mechanics for source selection, long tasks and verification.
 - **Workspace implementation:** account-aware routing, release activation,
   maintenance and recovery helpers with their contracts and tests.
 - **Adoption guidance:** configuration, account enrollment, context loading,
@@ -72,9 +72,10 @@ acceptance are separate steps.
 
 This reference targets the official OpenClaw **v2026.10.4** base and the
 managed **Codex 0.160.0** native package. The manifest binds the complete custom source,
-native distribution and companion source. The current packet includes task
-continuation, progress/final delivery, loaded-profile context, scoped credential
-entry and retention-query repairs. The optional Mac companion has a separate
+native distribution and companion source. The source map explains task
+continuation, progress/final delivery, profile context, scoped credential entry and
+retention-query behavior. Template edits and source reconstruction do not by
+themselves establish a faster or more capable installed assistant. The optional Mac companion has a separate
 source target; its reconstruction does not reproduce the reference installation's
 local Bun security payload or establish identical installed app bytes.
 Read the [current source boundaries](runtime/README.md#source-identities)

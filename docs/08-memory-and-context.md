@@ -32,7 +32,7 @@ The [standalone diagram](../diagrams/memory-tiers.mmd) includes the privacy boun
 
 ## What the runtime recognizes
 
-The pinned source's `WORKSPACE_BOOTSTRAP_FILENAMES` in `src/agents/workspace.ts` contains `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `BOOTSTRAP.md` and `MEMORY.md`. Recognized means eligible for the loader, subject to file presence, safe reads, session filtering, setup/continuation handling and context budgets. It is not a promise that the entire file appears in every prompt.
+The pinned source's `WORKSPACE_BOOTSTRAP_FILENAMES` in `src/agents/workspace-bootstrap-policy.ts`, consumed by `src/agents/workspace.ts`, contains `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `BOOTSTRAP.md` and `MEMORY.md`. Recognized means eligible for the loader, subject to file presence, safe reads, session filtering, setup/continuation handling and context budgets. It is not a promise that the entire file appears in every prompt.
 
 `runbook/tools-reference.md`, `WRITING.md` and `WORKER.md` are outside that recognized list. The tool execution reference is opened deliberately when AGENTS routes a task to it. WRITING is opened for applicable long-form prose. WORKER, if retained, is a legacy generated reference. Extra-file configuration is not a universal bypass of accepted bootstrap basenames.
 
@@ -58,8 +58,8 @@ and truncation report before attributing generic replies to the model.
 The [company workspace example](../examples/company-workspace/AGENTS.md) retains
 useful team participation and authenticated operator authority. Its
 [SOUL](../examples/company-workspace/SOUL.md) and
-[WRITING](../examples/company-workspace/WRITING.md) preserve analytical voice and
-substantial prose without importing a private USER profile or personal memory.
+[WRITING](../examples/company-workspace/WRITING.md) point to the maintained shared
+style without importing a private USER profile or personal memory.
 Its [TOOLS](../examples/company-workspace/TOOLS.md) describes capability-aware
 retrieval. These are optional examples, not an automatically activated agent.
 Adapt the guild and operator identifiers, source bindings and available tools.
@@ -122,6 +122,17 @@ Keep MEMORY compact. When a cue needs explanation, leave a pointer and move the 
 
 These are OpenClaw's memory conventions. A separate coding harness or desktop assistant may have its own memory authorization and storage rules; copying this file does not override them.
 
+## Session age and active work
+
+Session daily/idle renewal and compaction are different owners. Inspect effective
+reset settings and agent/session overrides before attributing lost context to the
+model window. A long quiet tool or pending child does not establish an idle task.
+The session renewal owner revalidates current run and child-settlement state before
+an implicit rollover; hydration and draining must not hold the lifecycle or writer
+custody needed for completion. Explicit reset/cancellation retain their supported
+semantics. Keep the objective, later corrections, completed effects and pending
+children bound through any transition.
+
 ## Compaction, warnings and resumption
 
 Use supported compaction to preserve continuity without retaining redundant active context. At a material milestone or near the context limit, write a compact checkpoint: objective, completed and unresolved work, verified evidence, current workers/processes, constraints, blockers and the next atomic step. Detailed diagnostics stay in internal work product.
@@ -161,5 +172,7 @@ native reset boundary and the first compiled context.
 ## How to verify this design
 
 Check the pinned source filename list and role filters, then exercise private, channel, cron and native-subagent cases in an isolated test setup. Verify deliberate TOOLS/WRITING reads separately from automatic bootstrap. Test a safe memory fallback with source/audience constraints and a resume that reconciles an already-finished effect without repeating it.
+
+Measure the composed provider request: runtime instructions, tool/schema and skill overhead, project framing, eligible bootstrap content, conversation/retrieval and replay state. A source-file sum omits fixed and generated overhead; an absent explicit context limit does not establish unlimited context. Record the effective model metadata and provider behavior.
 
 Measure token usage and latency at the actual request path. Smaller source files, a green search probe or a successful compaction command do not by themselves prove better answers or shorter end-to-end delivery. The acceptance claim should identify the role, operation and user-visible result it observed.

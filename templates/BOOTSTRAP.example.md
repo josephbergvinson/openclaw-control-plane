@@ -18,7 +18,7 @@ This file describes intended use and sensitivity. It is not a loader configurati
 | `policy_manifest.json`, `policy_bootstrap_manifest.json` | Advisory metadata | Not runtime loader inputs |
 | `capabilities.md`, `INDEX.md`, `HEARTBEAT.md` | Optional derived/reference files | Not recognized by the standard workspace bootstrap list; use only an explicitly configured reader |
 
-The pinned source implements these rules in `src/agents/workspace.ts`, particularly `WORKSPACE_BOOTSTRAP_FILENAMES` and `filterBootstrapFilesForSession`. A visible dashboard worker is not automatically a native `subagent:` session: its session and chat classification determine filtering. Do not infer injected contents from a UI label or a manifest role name.
+The pinned source implements these rules in `src/agents/workspace-bootstrap-policy.ts` (`WORKSPACE_BOOTSTRAP_FILENAMES`) and `src/agents/workspace.ts` (`filterBootstrapFilesForSession`). A visible dashboard worker is not automatically a native `subagent:` session: its session and chat classification determine filtering. Do not infer injected contents from a UI label or a manifest role name.
 
 ## Advisory sensitivity exceptions
 

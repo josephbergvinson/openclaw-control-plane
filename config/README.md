@@ -16,16 +16,19 @@ It is not a complete authenticated gateway configuration. Use the native
 
 ## Model and context preferences
 
-The profile carries these reference choices:
+The checked-in profile carries these example choices. They describe this source
+snapshot, not a required effort level or the configuration of a live installation.
+The executing runtime configuration and supported user/session/task overrides own
+the effective selection.
 
 | Setting | Value and purpose |
 |---|---|
 | Main model | `openai/gpt-6.1-sol`, OpenClaw runtime, no automatic fallback. |
-| Main reasoning | `max`; an explicit Discord `/think ultra` enables orchestration while provider reasoning remains Max. |
+| Main reasoning | `max` in this example; supported conversation/task choices can override ordinary defaults. |
 | Fast mode | Global default `false`; inline, session and per-agent overrides take precedence. |
-| Subagents | Inherit the initiating turn’s model and reasoning; maximum eight concurrent subagents, four main runs. Explicit task choices take precedence. |
-| Scheduled inference | GPT-6.1 Sol with `max` for scheduled agent turns, autonomous heartbeat and all dreaming phases. Pure command jobs have no scheduler model. |
-| Interactive helpers | Active memory and the utility model use GPT-6.1 Sol/Max. A helper does not become a scheduled automation just because it runs in another process. |
+| Subagents | No global model/thinking pins in this example; native precedence below governs inheritance. Limits are eight concurrent subagents and four main runs. |
+| Scheduled inference | The example heartbeat and dreaming fields select GPT-6.1 Sol/Max. Saved agent-turn payloads retain their own selections; pure command jobs need no scheduler model. |
+| Interactive helpers | Example active-memory and utility fields select GPT-6.1 Sol/Max independently of ordinary turns. Another process is not by itself a scheduled automation. |
 | Image understanding | GPT-6.1 Sol in `imageModel`. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
@@ -52,7 +55,7 @@ Do not label a configured reasoning level or a copied memory file as runtime pro
 
 ## Background model and existing overrides
 
-The native OpenAI provider needs an authenticated route with GPT-6.1 Sol available on the
+This profile's OpenAI model needs an authenticated route with GPT-6.1 Sol available on the
 adopter's account. Preserve provider enrollment, model metadata and credentials
 when applying this preference profile. Verify the actual model and reasoning on
 both an interactive request and a scheduled request; a catalog row alone proves
@@ -65,27 +68,55 @@ The declared provider efforts are low, medium, high, xhigh and max; the host
 adds optional Ultra orchestration using Max. Temperature is disabled for this
 reasoning-only model. Account enrollment is still required.
 
-Scheduled agent turns explicitly select `openai/gpt-6.1-sol` and `max`.
-Heartbeat has its own `thinking: "max"`; dreaming sets
+In this example, heartbeat has its own `thinking: "max"`; dreaming sets
 `phases.light/deep/rem.execution.thinking` to `max`. These fields require the
 matching reconstructed runtime and compatible companion workers. Active memory
 explicitly uses `max`, and utility calls inherit the GPT-6.1 Sol model's
-`params.thinking: "max"`. Normal agent, maintenance and utility inference share
-this model and default effort. Realtime voice has its own model configuration;
-specialized image generation, local embeddings and speech also retain their own providers.
+`params.thinking: "max"`. These are separately owned settings; changing ordinary
+agent effort does not migrate them. Realtime voice has its own model configuration;
+specialized image generation, local embeddings and speech retain their own providers.
 Autonomous heartbeat settings do not override admitted user-task continuations.
-Configured background-model failures retain their selected route and report the
-existing degraded outcome instead of silently changing model or effort.
+Configured failures follow their actual fallback and spending policy and report
+the owning workflow's outcome rather than silently changing model or effort.
 
 Autonomous heartbeats use `isolatedSession: true`: each run starts with a fresh
 transcript while retaining its originating conversation's delivery policy.
-Background checks therefore do not reuse an interactive conversation's history
-or replace its latest run status. Their recorded outcomes remain available for
-diagnosis and subsequent conversation context. This setting does not clear past
-failures or change the configured heartbeat destination.
+Background checks do not reuse an interactive conversation's history or replace
+its latest run status. Recorded outcomes remain available for diagnosis and
+subsequent conversation context. This setting neither clears past failures nor
+changes the configured heartbeat destination.
 
-A merge retains omitted keys. For an earlier profile with global child model or
-thinking pins, apply this native deletion patch after reviewing the current values:
+### Child model and effort
+
+Ordinary effort resolves supported turn/session choices before defaults. Within
+configured defaults, an agent's `thinkingDefault` precedes model `params.thinking`,
+then the global `thinkingDefault`. Changing only the global value may leave a
+per-agent or stored-session selection effective.
+
+Native child selection follows these separate precedence chains:
+
+| Selection | Priority, highest first |
+|---|---|
+| Thinking | Explicit `sessions_spawn.thinking`; requester-agent `subagents.thinking`; target-agent `subagents.thinking`; global `agents.defaults.subagents.thinking`; effective caller effort. |
+| Model | Explicit spawn model; target-agent `subagents.model`; global `agents.defaults.subagents.model`; same-agent caller model when available, otherwise the target agent's primary/default chain. |
+
+When thinking is inherited, the active caller turn takes precedence over saved
+requester preferences. Lowering caller effort therefore lowers newly inherited
+children unless a child setting applies. Already accepted child selections remain
+stored in their sessions; changing ordinary defaults does not retune them.
+Use supported task/session or spawn overrides when a particular job needs them.
+`sessions_spawn.thinking` is unavailable with `visible:true`; follow the selected
+route's supported interface. Inspect accepted child settings and the installed
+runtime's native consumers rather than assuming every worker matches its parent.
+
+Required fresh repository-native code review follows that repository's workflow
+and its own model/effort options. Ordinary agent defaults neither waive that
+review nor select the review helper's settings. Delegation remains useful for
+independent work, review and continuity; `AGENTS.md` owns the execution choice.
+
+A merge retains omitted keys. If an authorized change deliberately restores
+caller inheritance, review existing global child pins before removing them with
+this native deletion patch. Retain pins that the operator still intends:
 
 ```json
 {
@@ -103,23 +134,21 @@ model object contains a `fallbacks` array, also pass
 `baseHash`; the native owner requires the exact destructive array path even when
 its parent is deleted. Review and name any other reported array removal explicitly.
 
-This restores current-turn inheritance: interactive GPT-6.1 Sol/Max or explicitly chosen
-Ultra stays with user orchestration, while scheduled GPT-6.1 Sol/Max stays with autonomous
-work. Review per-agent `thinkingDefault` values that previously duplicated the old
-Ultra default and update those defaults to Max. When applying an authorized
-all-surface model change, inspect stale per-agent,
-stored-session and per-task overrides through their native owners; defaults alone
-do not migrate them. Preserve deliberate Ultra orchestration and active task
-ownership. Use `/think default` to restore inherited reasoning where intended.
+Review per-agent `thinkingDefault`, model parameters, stored-session and per-task
+overrides through their native owners during an authorized migration; changing
+defaults alone does not rewrite them. Preserve deliberate `/think ultra`
+orchestration and active task ownership. Use `/think default` to restore inherited
+reasoning only where intended.
 
-Existing `agentTurn` jobs need their own `payload.model: "openai/gpt-6.1-sol"` and
-`payload.thinking: "max"`; changing the default model does not rewrite job
-payloads. Preserve job IDs, enabled states, schedules, prompts, budgets and delivery
-settings. System-owned skill collection review jobs retain their owner-projected
-payloads: use supported `sessions.patch` on each exact
-`agent:<agent-id>:cron:<job-id>` key to set `model` and `thinkingLevel`, then verify
-the job’s enablement is unchanged. Inspect command implementations for nested inference rather than treating
-all `command` payloads as model-free. See [scheduling and background work](../docs/12-scheduling-and-background-work.md).
+Preserve deliberately selected `payload.model` and `payload.thinking` on existing
+operator-owned `agentTurn` jobs; changing defaults does not rewrite payloads.
+Keep job IDs, enablement, schedules, prompts, budgets and delivery settings.
+System-owned skill-review, heartbeat and inference declarations retain their
+native ownership and inheritance. Where that owner exposes execution-session
+preferences, use supported `sessions.patch` on its exact
+`agent:<agent-id>:cron:<job-id>` key instead of rewriting a projected payload;
+verify intended disabled state remains unchanged. Inspect command implementations
+for nested inference. See [scheduling and background work](../docs/12-scheduling-and-background-work.md).
 
 ## Local memory setup
 

@@ -1,37 +1,15 @@
-# USER.md — Durable working preferences
+# USER.md — Example working preferences
 
-Durable preferences, not runtime facts. **Hard cap 4,000 chars.** `AGENTS.md` owns authority. A preference does not establish a current provider fact or grant an unrelated action.
+Illustrative preferences for a fictional operator; replace them with the intended operator's choices. AGENTS owns authority and boundaries. Current provider roles and account facts come from registered sources.
 
-## Working context
+- Portfolios: Company Alpha, Company Beta and the Personal Data Project remain distinct. Use Europe/London for bare dates and times in this example, including daylight-saving rules.
+- Write as the operator's assistant unless asked to use the operator's voice. SOUL and WRITING own presentation.
+- Write events to Apple Calendar/iCloud, including invitations read from Gmail. Use Google Calendar as the destination only when requested. Inspect current invitations and existing entries through the tool reference.
+- Use Apple Reminders for reminders unless another destination is requested. Personal task tracking uses Trello; Company Alpha uses Jira and Company Beta its registered tracker. Scheduled assistant work retains its separate owner.
+- In this fictional portfolio, Company Alpha permits repository read/write while a maintainer owns production deployment; Company Beta permits administration. Verify current roles for the actual operation. Resolve credential stores and accounts through the registry, without copying their values here.
 
-The example operator works across Company Alpha, Company Beta and the Personal Data Project. Keep those portfolios and their registered accounts separate. Use the configured timezone for bare dates and times; this example uses `Europe/London`, including its daylight-saving rules. Resolve current organizations, roles, account membership and calendar availability from their authoritative sources.
+## Optional deployment preference
 
-The assistant writes as the operator's assistant unless asked to write in the operator's voice. Use judgment for ordinary contact details. Confidential records remain private unless the authenticated instruction names the recipient and package to share; that permission does not carry to a different package. Never disclose passwords, private keys, seed phrases or API secrets.
+Disabled until the operator explicitly enables and binds one verified target in AGENTS. Once enabled, a verified DigitalOcean-backed Personal Data Project slice on its deploy-tracked main branch continues through deployment and live health verification unless the operator opts out or a concrete rollback/safety blocker remains. A forced rebuild belongs only to the verified slice that needs it. This grants no unrelated infrastructure operation.
 
-## Communication and thinking
-
-Be direct, concise, technically clear and evidence-based. Work asynchronously when the task permits. Use no emojis or ritual meetings. Write for the actual reader and keep internal tools, paths, telemetry, correlation identifiers and runtime mechanics out of ordinary prose unless implementation detail is requested.
-
-Keep substantive answers in the conversation. Send Discord command blocks as ordinary messages rather than quoted replies; never replace the answer with an internal artifact pointer. `SOUL.md` and `WRITING.md` carry voice, formatting and long-form detail.
-
-## Calendar
-
-Use Apple Calendar/iCloud for writes, including invitations from Gmail. Use Google Calendar as the destination only when explicitly requested. This preference does not restrict source reads: check the current invitations and their updates through the registered accounts before copying meeting details. Follow `runbook/tools-reference.md` for matching existing entries and complete readback.
-
-## Reminders
-
-Use Apple Reminders for reminders, including timed one-off reminders, unless the operator explicitly specifies another destination. “Remind me” uses this default without a destination clarification. Project tracking and scheduled assistant work retain their separate owners.
-
-## Task tracking
-
-Use Trello for personal projects and maintain it within the authenticated task's scope. Use Jira for Company Alpha. Company Beta's tracker is resolved through its registered route. Do not create company work in the personal Trello board unless asked. The repository is authoritative for technical implementation state.
-
-## Optional Personal Data Project deployment preference
-
-This standing grant is disabled until the operator explicitly enables it for one registered deployment target in `AGENTS.md`. Once enabled, after a verified DigitalOcean-backed Personal Data Project source slice reaches its deploy-tracked `main`, deploy it and report live health proof unless the operator opts out or a safety/rollback blocker remains. Include a forced rebuild only when needed for that verified slice. Every other infrastructure mutation requires an instruction naming or plainly implying it.
-
-Reuse the operator's actual roles; administrative access means equal access. In this fictional example, Company Alpha allows repository read/write and Riley owns production deployment; Company Beta grants administration. Use the registered portfolio credential stores in `runbook/tools-reference.md`. Keep acceptance-test traffic out of quality-control; prefer a personal destination or an authorized company admin channel. Ordinary replies stay in their conversation.
-
-## Source pointers
-
-Use `registry/project_topology.json` for source roots, `registry/integration_routes.json` for provider/account routes, and deliberately loaded private records for context relevant to the task. Keep detailed private records out of this default preference layer.
+Detailed private records and mutable readiness stay in their existing source systems. Keep only useful durable choices here.

@@ -1,18 +1,10 @@
-# MEMORY.md — Compressed Cues and Source Pointers
+# MEMORY.md — Compact factual cues
 
-Role boundary:
-- Short cache of high-value cues and source pointers only.
-- Never canonical policy, approval authority, runtime fact registry, or secret store.
+A small retrieval aid, with no secrets, policy grants or current-state attestations. Replace these synthetic pointers with relevant permitted source pointers; move explanations to their owning topic notes.
 
-Rules:
-- Keep this file to 12 bullets or fewer.
-- Each bullet must be either a source pointer or a uniquely high-value cue.
-- If a cue needs explanation, move the explanation to its source file and leave only the cue or pointer here.
+- Canonical project roots: registry/project_topology.json.
+- Provider/account routes: registry/integration_routes.json; retain the source account with evidence.
+- Durable working choices: USER.md. Current source and provider facts require their respective owners.
+- Topic decisions and source pointers: the relevant existing memory note; dated working notes follow memory/YYYY-MM-DD.md.
 
-Cues / pointers:
-- `AGENTS.md` owns behavior and authority. `runbook/tools-reference.md` supplies current mechanics on deliberate read.
-- Resolve source roots through `registry/project_topology.json`; rendered capability views do not override their structured owners or fresh evidence.
-- Company Alpha and Company Beta are distinct portfolios. Retain the source account with retrieved evidence; a multi-account read set never selects a write destination.
-- Apple Calendar is the default event destination. An invitation in another provider is still an authoritative source for times and joining details.
-- Long-form work uses `SOUL.md`, deliberately read `WRITING.md`, and the work-product skill when the request calls for a shareable deliverable.
-- Project-specific decisions and source pointers belong in the relevant topic note. Dated working notes use the established `memory/YYYY-MM-DD.md` convention.
+Keep this file short. AGENTS owns continuity, privacy and authority; deliberately read its tool reference for applicable mechanics.

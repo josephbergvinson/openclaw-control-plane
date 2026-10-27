@@ -83,6 +83,9 @@ class NativeCompanion:
     distribution_tree: str
     patch_sha256: str | None
     patch: bytes | None
+    delta_paths: frozenset[str] = frozenset(NATIVE_COMPANION_DELTA_PATHS)
+    normalized_tree: str | None = None
+    normalization_paths: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -356,20 +359,70 @@ def load_native_distribution(directory: Path, manifest: dict, source_tree: str) 
     ), native.get("referenceCommit"), native.get("referenceTree"))
 
 
+def validate_companion_paths(paths: frozenset[str]) -> None:
+    """Admit only an explicit finite set of ordinary source paths."""
+    if not isinstance(paths, frozenset) or not paths:
+        raise ReconstructionError("Companion delta requires a nonempty exact source-path set")
+    for name in paths:
+        if (not isinstance(name, str) or not name.startswith(("apps/", "src/", "extensions/", "test/", "docs/"))
+                or "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                or any(part in ("", ".", "..", ".git", "node_modules") for part in name.split("/"))):
+            raise ReconstructionError("Companion delta contains an unsupported source path")
+
+
+def validate_companion_normalization(companion: NativeCompanion) -> None:
+    if companion.normalized_tree is None:
+        if companion.normalization_paths:
+            raise ReconstructionError("Companion normalization paths require a normalized tree")
+        return
+    require_digest(companion.normalized_tree, 40, "normalized companion tree SHA-1")
+    if companion.patch is None or companion.normalized_tree == companion.source_tree:
+        raise ReconstructionError("Companion normalization requires a distinct bound replay tree and delta")
+    validate_companion_paths(companion.normalization_paths)
+
+
 def load_native_companion(directory: Path, manifest: dict, native: NativeDistribution) -> NativeCompanion:
     companion = manifest.get("nativeCompanion")
     if not isinstance(companion, dict) or companion.get("platform") != "darwin-arm64":
         raise ReconstructionError("The runtime manifest has no bound macOS companion")
     source_commit = require_digest(companion.get("sourceCommit"), 40, "companion source commit SHA-1")
     source_tree = require_digest(companion.get("sourceTree"), 40, "companion source tree SHA-1")
+    normalized_tree, normalization_paths = None, frozenset()
+    if "normalizedTree" in companion or "normalization" in companion:
+        normalized_tree = require_digest(companion.get("normalizedTree"), 40,
+                                         "normalized companion tree SHA-1")
+        normalization = companion.get("normalization")
+        if (not isinstance(normalization, dict) or set(normalization) != {"scope", "paths"}
+                or not isinstance(normalization.get("scope"), str) or not normalization["scope"].strip()):
+            raise ReconstructionError("Companion normalized tree requires its explicit fixture normalization")
+        declared = normalization["paths"]
+        source = manifest.get("source")
+        source_normalization = source.get("normalization") if isinstance(source, dict) else None
+        source_paths = source_normalization.get("paths") if isinstance(source_normalization, dict) else None
+        if (not isinstance(declared, list) or not declared or not all(isinstance(name, str) for name in declared)
+                or declared != sorted(set(declared)) or declared != source_paths):
+            raise ReconstructionError("Companion fixture paths must exactly match the declared source normalization")
+        normalization_paths = frozenset(declared)
+        validate_companion_paths(normalization_paths)
     if "delta" not in companion:
+        if normalized_tree is not None:
+            raise ReconstructionError("Companion normalization requires a bound delta")
         if (source_commit != native.reference_commit or source_tree != native.reference_tree
                 or source_tree != native.normalized_tree):
             raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
         return NativeCompanion(source_commit, source_tree, native.normalized_tree, None, None)
     delta = companion["delta"]
-    if not isinstance(delta, dict) or set(delta) != {"distributionTree", "patch"}:
+    if not isinstance(delta, dict) or set(delta) not in ({"distributionTree", "patch"},
+                                                       {"distributionTree", "patch", "paths"}):
         raise ReconstructionError("Companion reconstruction requires one bound finite delta")
+    paths = frozenset(NATIVE_COMPANION_DELTA_PATHS)
+    if "paths" in delta:
+        declared = delta["paths"]
+        if (not isinstance(declared, list) or not declared or not all(isinstance(path, str) for path in declared)
+                or declared != sorted(set(declared))):
+            raise ReconstructionError("Companion delta paths must be a sorted unique nonempty list")
+        paths = frozenset(declared)
+    validate_companion_paths(paths)
     base = require_digest(delta["distributionTree"], 40, "companion distribution tree SHA-1")
     if base != native.normalized_tree:
         raise ReconstructionError("Companion base must match the normalized native distribution")
@@ -386,7 +439,10 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
     digest = require_digest(patch["sha256"], 64, "companion patch SHA-256")
     if type(patch["bytes"]) is not int or patch["bytes"] <= 0 or patch["bytes"] != len(raw) or hashlib.sha256(raw).hexdigest() != digest:
         raise ReconstructionError("Companion patch size or SHA-256 does not match the manifest")
-    return NativeCompanion(source_commit, source_tree, base, digest, raw)
+    result = NativeCompanion(source_commit, source_tree, base, digest, raw, paths,
+                             normalized_tree, normalization_paths)
+    validate_companion_normalization(result)
+    return result
 
 
 def load_package(directory: Path, *, native_distribution: bool = False,
@@ -594,6 +650,7 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             raise ReconstructionError("Native delta must change only pnpm-lock.yaml and pnpm-workspace.yaml")
     if package.companion is not None:
         companion = package.companion
+        validate_companion_normalization(companion)
         if companion.distribution_tree != package.native.normalized_tree:
             raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")
         for value in (companion.source_commit, companion.source_tree):
@@ -614,8 +671,9 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
                 if len(fields) != 3 or not all(value.isdigit() for value in fields[:2]):
                     raise ReconstructionError("Companion delta must contain ordinary text changes")
                 paths.append(fields[2])
-            if len(paths) != len(NATIVE_COMPANION_DELTA_PATHS) or set(paths) != NATIVE_COMPANION_DELTA_PATHS:
-                raise ReconstructionError("Companion delta must change exactly the eight declared shared/macOS and retained-gateway source, test, schema and documentation paths")
+            validate_companion_paths(companion.delta_paths)
+            if len(paths) != len(companion.delta_paths) or set(paths) != companion.delta_paths:
+                raise ReconstructionError("Companion delta must change exactly its declared source paths")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
         raise ReconstructionError("Checkout HEAD is not the pinned upstream commit")
     if git(checkout, "rev-parse", "HEAD^{tree}") != package.base_tree:
@@ -658,14 +716,16 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             if companion.patch is not None:
                 git(checkout, "apply", "--check", "--index", "--whitespace=error-all", "-", data=companion.patch)
                 git(checkout, "apply", "--index", "--whitespace=error-all", "-", data=companion.patch)
-            if git(checkout, "write-tree") != companion.source_tree:
+            final_tree = companion.normalized_tree or companion.source_tree
+            if git(checkout, "write-tree") != final_tree:
                 raise ReconstructionError("Companion applied tree differs from the manifest; inspect this isolated checkout")
             git(checkout, "diff", "--quiet")
-            final_tree = companion.source_tree
             result["nativeCompanion"] = {
                 "sourceCommit": companion.source_commit, "sourceTree": companion.source_tree,
                 "normalizedTree": final_tree, "normalizedTreeVerified": True,
             }
+            if companion.normalization_paths:
+                result["nativeCompanion"]["normalizationPaths"] = sorted(companion.normalization_paths)
             if companion.patch is not None:
                 result["nativeCompanion"]["patchSha256"] = companion.patch_sha256
         artifact = provision_native_artifact(checkout, native.artifact)

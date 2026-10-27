@@ -91,9 +91,10 @@ class WorkspaceInstallTests(unittest.TestCase):
         }}))
         files = INSTALLER.make_plan(self.destination, operator)
         agents = files[Path("AGENTS.md")][0].decode()
-        self.assertIn(str(self.destination / "artifacts"), agents)
-        self.assertIn(str(project_data), agents)
-        self.assertIn(str(legacy_state / "exec-approvals.json"), agents)
+        installed_operator = json.loads(files[Path("operator.json")][0])
+        self.assertEqual(str(self.destination), installed_operator["paths"]["workspace"])
+        self.assertEqual(str(project_data), installed_operator["paths"]["project_data_root"])
+        self.assertEqual(str(legacy_state), installed_operator["paths"]["legacy_state_root"])
         self.assertIn("](runbook/tools-reference.md)", agents)
         for name in ("AGENTS.md", "runbook/tools-reference.md"):
             body = files[Path(name)][0].decode()

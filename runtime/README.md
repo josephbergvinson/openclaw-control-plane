@@ -73,15 +73,14 @@ interval or response-time guarantee.
 
 The managed Codex 0.160.0 archive and the selected external gateway retain their
 separate manifest bindings. The optional Mac companion target reproduces its
-separately retained complete source tree. Its eight-file delta combines four
-shared/macOS Swift source/test changes for complete two-button login-Keychain
-access-permission forms with the inverse of four gateway-only SQL source, test,
-schema and documentation changes. Those inverse changes reproduce the older
-companion; they do not roll back the selected external gateway. The existing
-native owner still verifies the Apple
-process, current host and local principal, exact form, focused secure field and
-single-use entry scope. Its source commit, full tree and build label are recorded
-in `nativeCompanion`.
+separately retained complete source tree. Its finite patch includes native
+credential-form changes and every inverse gateway-only change needed to reach
+that older component. These inverse changes do not roll back the selected
+external gateway. New finite declarations list their exact paths; legacy packets
+retain their original eight-path contract. The existing native owner still
+verifies the Apple process, current host and local principal, exact form, focused
+secure field and single-use entry scope. Its source commit, full tree and build
+label are recorded in `nativeCompanion`.
 
 In the recorded service-hosted configuration, the selected external gateway
 constructs text/voice agent prompts and resolves MCP tokens; the companion
@@ -113,8 +112,9 @@ or ordinary-use acceptance on another host.
 
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
-The manifest declares any deliberate fixture normalization; its current list is
-empty. The resulting Git tree,
+The manifest declares deliberate fixture normalization. The current export replaces
+identifying labels in two synthetic tests across all three source targets;
+production code is unchanged. The resulting Git tree,
 including file modes, is the comparison point; an adopter's commit ID will depend
 on their own author and timestamp.
 
@@ -124,7 +124,7 @@ Choose the reconstruction target explicitly:
 | --- | --- | --- |
 | Customized runtime source | `--apply` | `source.normalizedTree` |
 | Native distribution | `--apply --native-distribution` | `nativeDistribution.normalizedTree` |
-| Mac companion source | `--apply --native-distribution --native-companion` | `nativeCompanion.sourceTree` |
+| Mac companion source | `--apply --native-distribution --native-companion` | `nativeCompanion.normalizedTree`, or `sourceTree` when no normalization is declared |
 
 These are source targets, not three running systems. The companion can share the
 native distribution's exact commit and tree; a separate patch is required only
@@ -232,7 +232,8 @@ git switch -c reference/openclaw-companion
 git commit -m "Apply the pinned OpenClaw Mac companion source"
 ```
 
-Before committing, `git write-tree` must match `nativeCompanion.sourceTree`.
+Before committing, `git write-tree` must match `nativeCompanion.normalizedTree`
+when declared, otherwise `nativeCompanion.sourceTree`.
 Recording the reconstructed target in `HEAD` lets the validation below compare
 its changes with the official upstream commit, using your own Git identity.
 
@@ -246,12 +247,16 @@ companion cases:
   equality.
 - **Finite source delta:** bind the distribution tree and an exact nonempty patch
   in `nativeCompanion.delta`. The patch must change exactly the allowed paths
-  enforced by the helper. The current [eight-path source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
-  covers the shared/macOS credential changes and inverse gateway SQL changes.
+  enforced by the helper. The [source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
+  covers the declared shared/macOS changes and all inverse gateway changes.
   Its bytes and SHA-256, base tree and complete final companion tree are checked.
 
-Both cases verify `nativeCompanion.sourceTree` and use the same declared native
-archive. A descriptive companion identity that differs without a valid delta is
+The source commit and `sourceTree` retain the authentic component identity.
+When fixture labels are normalized, a separate `normalizedTree` and exact
+`normalization.paths` describe the public replay; those paths must match the
+source normalization declaration. The helper verifies the complete replay tree
+before retrieving the same declared native archive.
+A descriptive companion identity that differs without a valid delta is
 not reconstructable in this mode. Ordinary source and native-distribution modes
 keep their existing targets; do not apply another mode on an already modified
 checkout. This command reconstructs source, not an installed or accepted Mac app.
