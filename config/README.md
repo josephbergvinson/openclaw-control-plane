@@ -16,19 +16,18 @@ It is not a complete authenticated gateway configuration. Use the native
 
 ## Model and context preferences
 
-This candidate profile carries prospective configuration choices. Final acceptance
-and runtime/configuration export remain pending; these values do not establish a
-live installation. The executing runtime configuration and supported user/session/task
-overrides own the effective selection.
+The checked-in profile is an example configuration. It does not describe the
+settings of every installation. The running configuration and supported user,
+session and task overrides determine the effective selection.
 
 | Setting | Value and purpose |
 |---|---|
 | Main model | `openai/gpt-6.1-sol`, OpenClaw runtime, no automatic fallback. |
-| Main reasoning | `high` for ordinary turns in this candidate; supported conversation/task choices can override the defaults. |
+| Main reasoning | `high` for ordinary turns; supported conversation/task choices can override the defaults. |
 | Fast mode | Global default `false`; inline, session and per-agent overrides take precedence. |
 | Subagents | Delegation guidance is `suggest`, with no global model/thinking pins. Native precedence below governs inheritance. Limits remain eight concurrent subagents and four main runs. |
 | Scheduled inference | The example heartbeat and dreaming fields select GPT-6.1 Sol/Max. Saved agent-turn payloads retain their own selections; pure command jobs need no scheduler model. |
-| Interactive helpers | The existing active-memory example remains unchanged pending separate selection. Utility calls use GPT-6.1 Sol and inherit its configured effort unless overridden. |
+| Interactive helpers | Active memory explicitly selects GPT-6.1 Sol/Max. Utility calls inherit the model's configured effort unless overridden. |
 | Image understanding | GPT-6.1 Sol in `imageModel`. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
@@ -70,10 +69,9 @@ reasoning-only model. Account enrollment is still required.
 
 In this example, heartbeat has its own `thinking: "max"`; dreaming sets
 `phases.light/deep/rem.execution.thinking` to `max`. These fields require the
-matching reconstructed runtime and compatible companion workers. The existing
-active-memory `model` and explicit `thinking: "max"` example is retained; its final
-mode, effort, eligibility and retrieval acceptance remain unresolved. Utility calls
-inherit the GPT-6.1 Sol model's `params.thinking: "high"` unless they supply an
+matching reconstructed runtime and compatible companion workers. Active memory
+has its own model and explicit `thinking: "max"` setting. Utility calls inherit
+the GPT-6.1 Sol model's `params.thinking: "high"` unless they supply an
 override. Preserve separately owned scheduler and helper settings when changing
 ordinary effort. Realtime voice has its own model configuration;
 specialized image generation, local embeddings and speech retain their own providers.
