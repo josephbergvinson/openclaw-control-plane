@@ -51,6 +51,12 @@ class WorkspaceInstallTests(unittest.TestCase):
         config = json.loads((self.destination / "config/openclaw.json").read_text())
         self.assertEqual(str(self.destination), config["agents"]["defaults"]["workspace"])
         self.assertEqual("openai/gpt-image-2.5-flare", config["agents"]["defaults"]["mediaModels"]["image"]["primary"])
+        compaction = config["agents"]["defaults"]["compaction"]
+        self.assertEqual((48000, 6, "low"),
+                         (compaction["keepRecentTokens"], compaction["recentTurnsPreserve"],
+                          compaction["thinkingLevel"]))
+        self.assertEqual({"mode": "idle", "idleMinutes": 10080},
+                         config["session"]["resetByChannel"]["discord"])
         self.assertEqual(0o600, (self.destination / "operator.json").stat().st_mode & 0o777)
         self.assertTrue((self.destination / "installation-manifest.json").is_file())
 
@@ -113,8 +119,8 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual({"primary": model, "fallbacks": []}, defaults["imageModel"])
         self.assertEqual([model], defaults["modelPolicy"]["allow"])
         self.assertEqual([model], list(defaults["models"]))
-        self.assertEqual("max", defaults["thinkingDefault"])
-        self.assertEqual("max", defaults["models"][model]["params"]["thinking"])
+        self.assertEqual("high", defaults["thinkingDefault"])
+        self.assertEqual("high", defaults["models"][model]["params"]["thinking"])
         self.assertEqual("openclaw", defaults["models"][model]["agentRuntime"]["id"])
         self.assertEqual(model, defaults["utilityModel"])
         self.assertEqual(model, defaults["heartbeat"]["model"])
@@ -122,6 +128,7 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertTrue(defaults["heartbeat"]["isolatedSession"])
         self.assertNotIn("model", defaults["subagents"])
         self.assertNotIn("thinking", defaults["subagents"])
+        self.assertEqual("suggest", defaults["subagents"]["delegationMode"])
         plugins = config["plugins"]["entries"]
         dreaming = plugins["memory-core"]["config"]["dreaming"]
         self.assertEqual(model, dreaming["model"])
