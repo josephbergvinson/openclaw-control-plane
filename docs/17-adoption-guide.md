@@ -168,7 +168,7 @@ bundled llama.cpp setup using the same pinned CLI and native state directory:
 Select **Local llama.cpp**, then **Managed local server**. Decline the chat-model
 proposal and accept the separate **embedding-only setup**. Native setup installs
 the managed server and embedding model and writes its command, arguments and
-loopback endpoint. The selected GPT-6.1 Sol chat model should remain unchanged. The
+loopback endpoint. The selected GPT-6 Astra chat model should remain unchanged. The
 reference supplies the canonical EmbeddingGemma URI; a bare cache filename from
 another installation would require that file to exist locally. See the
 [official llama.cpp setup guide](https://docs.openclaw.ai/plugins/llama-cpp).
@@ -184,7 +184,7 @@ Verify the resulting configuration and exercise a known, nonsecret memory source
 "$node_executable" "$source_checkout/openclaw.mjs" memory search "QUESTION ABOUT A KNOWN NONSECRET MEMORY FACT" --agent main --max-results 3 --json
 ```
 
-Confirm that GPT-6.1 Sol remains selected, deep status reports local embedding readiness,
+Confirm that GPT-6 Astra remains selected, deep status reports local embedding readiness,
 and retrieval returns the expected source with no stale or unavailable status. An
 empty corpus cannot prove retrieval. The [memory CLI guide](https://docs.openclaw.ai/cli/memory)
 describes indexing and status. These steps initialize the adopter's local service;

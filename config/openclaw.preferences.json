@@ -2,15 +2,16 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-6.1-sol",
+        "primary": "openai/gpt-6-astra",
         "fallbacks": []
       },
       "modelPolicy": {
         "allow": [
-          "openai/gpt-6.1-sol"
+          "openai/gpt-6.1-sol",
+          "openai/gpt-6-astra"
         ]
       },
-      "thinkingDefault": "high",
+      "thinkingDefault": "xhigh",
       "bootstrapMaxChars": 180000,
       "bootstrapTotalMaxChars": 400000,
       "compaction": {
@@ -37,10 +38,12 @@
       "subagents": {
         "maxConcurrent": 8,
         "runTimeoutSeconds": 0,
-        "delegationMode": "suggest"
+        "delegationMode": "suggest",
+        "model": "openai/gpt-6-astra",
+        "thinking": "xhigh"
       },
       "imageModel": {
-        "primary": "openai/gpt-6.1-sol",
+        "primary": "openai/gpt-6-astra",
         "fallbacks": []
       },
       "mediaModels": {
@@ -52,16 +55,17 @@
       "systemAgent": {
         "agentId": "main"
       },
-      "utilityModel": "openai/gpt-6.1-sol",
+      "utilityModel": "openai/gpt-6-astra",
       "verboseDefault": "off",
       "workspace": "${operator:paths.workspace}",
       "models": {
-        "openai/gpt-6.1-sol": {
+        "openai/gpt-6-astra": {
           "agentRuntime": {
             "id": "openclaw"
           },
           "params": {
-            "thinking": "high"
+            "thinking": "xhigh",
+            "transport": "websocket"
           }
         }
       },
@@ -72,9 +76,9 @@
         "mode": "off"
       },
       "heartbeat": {
-        "model": "openai/gpt-6.1-sol",
+        "model": "openai/gpt-6-astra",
         "isolatedSession": true,
-        "thinking": "max"
+        "thinking": "xhigh"
       }
     }
   },
