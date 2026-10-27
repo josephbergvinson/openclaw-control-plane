@@ -52,6 +52,7 @@ class WorkspaceInstallTests(unittest.TestCase):
         self.assertEqual(str(self.destination), config["agents"]["defaults"]["workspace"])
         self.assertEqual("openai/gpt-image-2.5-flare", config["agents"]["defaults"]["mediaModels"]["image"]["primary"])
         compaction = config["agents"]["defaults"]["compaction"]
+        self.assertEqual(300, compaction["timeoutSeconds"])
         self.assertEqual((48000, 6, "low"),
                          (compaction["keepRecentTokens"], compaction["recentTurnsPreserve"],
                           compaction["thinkingLevel"]))

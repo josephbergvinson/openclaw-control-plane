@@ -33,7 +33,7 @@ session and task overrides determine the effective selection.
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
 | Compaction | Safeguard mode, strict identifier preservation, 48,000 recent tokens, six recent turns, explicit `low` summary effort, quality guard with one retry. |
 | Compaction trigger | Native context pressure and overflow recovery; the optional active-transcript byte threshold is unset. |
-| Compaction maintenance | 1,800-second timeout; enabled memory flush with the native 4,000-token soft margin and an 8 MiB force-flush threshold. |
+| Compaction maintenance | 300-second safety window per built-in compaction model request; serial stages refresh it. Memory flush uses the native 4,000-token soft margin and an 8 MiB force-flush threshold. |
 | Visibility | Routine automatic compaction notices are disabled with `notifyUser: false`. Explicit compact commands and actionable turn failures retain their normal responses. |
 | Memory search | Local EmbeddingGemma model, no provider fallback; requires managed llama.cpp setup below. Native citation display is off; policy still requires support for factual claims. |
 | Sessions | Per-channel peer scope; Discord, group and thread idle renewal after seven days. Thread bindings retain their separate 24-hour idle and 168-hour maximum-age limits. |
