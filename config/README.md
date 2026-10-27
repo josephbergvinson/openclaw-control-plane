@@ -22,13 +22,13 @@ session and task overrides determine the effective selection.
 
 | Setting | Value and purpose |
 |---|---|
-| Main model | `openai/gpt-6.1-sol`, OpenClaw runtime, no automatic fallback. |
-| Main reasoning | `high` for ordinary turns; supported conversation/task choices can override the defaults. |
+| Main model | `openai/gpt-6-astra`, OpenClaw runtime, no automatic fallback. |
+| Main reasoning | `xhigh` for ordinary turns; supported conversation/task choices can override the defaults. |
 | Fast mode | Global default `false`; inline, session and per-agent overrides take precedence. |
-| Subagents | Delegation guidance is `suggest`, with no global model/thinking pins. Native precedence below governs inheritance. Limits remain eight concurrent subagents and four main runs. |
-| Scheduled inference | The example heartbeat and dreaming fields select GPT-6.1 Sol/Max. Saved agent-turn payloads retain their own selections; pure command jobs need no scheduler model. |
-| Interactive helpers | Active memory explicitly selects GPT-6.1 Sol/Max. Utility calls inherit the model's configured effort unless overridden. |
-| Image understanding | GPT-6.1 Sol in `imageModel`. |
+| Subagents | Delegation guidance is `suggest`; the configured child default is GPT-6 Astra/`xhigh`. Supported task overrides and native precedence below still apply. Limits remain eight concurrent subagents and four main runs. |
+| Scheduled inference | This example selects GPT-6 Astra/`xhigh` in the separately owned heartbeat and dreaming fields. Saved agent-turn payloads retain their own selections; pure command jobs need no scheduler model. |
+| Interactive helpers | This example explicitly selects GPT-6 Astra/`xhigh` for active memory. Utility calls use GPT-6 Astra and inherit its configured effort unless overridden. |
+| Image understanding | GPT-6 Astra in `imageModel`, separate from image generation. |
 | Image generation | `openai/gpt-image-2.5-flare` in `mediaModels.image`. |
 | Bootstrap sizes | 180,000 characters per file and 400,000 total. These are loader limits, not a model's token window. |
 | Compaction | Safeguard mode, strict identifier preservation, 48,000 recent tokens, six recent turns, explicit `low` summary effort, quality guard with one retry. |
@@ -54,24 +54,25 @@ Do not label a configured reasoning level or a copied memory file as runtime pro
 
 ## Background model and existing overrides
 
-This profile's OpenAI model needs an authenticated route with GPT-6.1 Sol available on the
+The ordinary model needs an authenticated route with GPT-6 Astra available on the
 adopter's account. Preserve provider enrollment, model metadata and credentials
 when applying this preference profile. Verify the actual model and reasoning on
 both an interactive request and a scheduled request; a catalog row alone proves
 neither. This profile does not change the account or require a new API key. Its explicit
-`openai-chatgpt-responses` model row supplies GPT-6.1 Sol metadata when the
-account catalog has not refreshed yet. The ChatGPT route advertises an 872,000-token
-ceiling and a 272,000-token default, with text/image input and 128,000 output tokens.
-Do not substitute the Platform API model window for this authenticated route.
-The declared provider efforts are low, medium, high, xhigh and max; the host
-adds optional Ultra orchestration using Max. Temperature is disabled for this
-reasoning-only model. Account enrollment is still required.
+`openai-chatgpt-responses` model row retains GPT-6.1 Sol compatibility metadata.
+The ordinary, image-understanding and utility selectors use Astra. The Sol
+row declares an 872,000-token ceiling and a 272,000-token default, with text/image
+input and 128,000 output tokens. Its declared efforts are low, medium, high, xhigh
+and max, with temperature disabled. Verify Astra's own catalog metadata and
+effective accepted selection separately. Use the authenticated route's metadata
+rather than substituting a Platform API model window. Account enrollment is still
+required.
 
-In this example, heartbeat has its own `thinking: "max"`; dreaming sets
-`phases.light/deep/rem.execution.thinking` to `max`. These fields require the
+Heartbeat owns its `model` and `thinking` fields; dreaming owns its model and
+`phases.light/deep/rem.execution.thinking` fields. These settings require the
 matching reconstructed runtime and compatible companion workers. Active memory
-has its own model and explicit `thinking: "max"` setting. Utility calls inherit
-the GPT-6.1 Sol model's `params.thinking: "high"` unless they supply an
+owns its model and effort separately. Utility calls inherit the GPT-6 Astra
+model's `params.thinking: "xhigh"` unless they supply an
 override. Preserve separately owned scheduler and helper settings when changing
 ordinary effort. Realtime voice has its own model configuration;
 specialized image generation, local embeddings and speech retain their own providers.
