@@ -51,6 +51,13 @@ class WorkspaceInstallTests(unittest.TestCase):
         config = json.loads((self.destination / "config/openclaw.json").read_text())
         self.assertEqual(str(self.destination), config["agents"]["defaults"]["workspace"])
         self.assertEqual("openai/gpt-image-2.5-flare", config["agents"]["defaults"]["mediaModels"]["image"]["primary"])
+        compaction = config["agents"]["defaults"]["compaction"]
+        self.assertEqual(300, compaction["timeoutSeconds"])
+        self.assertEqual((48000, 6, "low"),
+                         (compaction["keepRecentTokens"], compaction["recentTurnsPreserve"],
+                          compaction["thinkingLevel"]))
+        self.assertEqual({"mode": "idle", "idleMinutes": 10080},
+                         config["session"]["resetByChannel"]["discord"])
         self.assertEqual(0o600, (self.destination / "operator.json").stat().st_mode & 0o777)
         self.assertTrue((self.destination / "installation-manifest.json").is_file())
 
@@ -91,9 +98,10 @@ class WorkspaceInstallTests(unittest.TestCase):
         }}))
         files = INSTALLER.make_plan(self.destination, operator)
         agents = files[Path("AGENTS.md")][0].decode()
-        self.assertIn(str(self.destination / "artifacts"), agents)
-        self.assertIn(str(project_data), agents)
-        self.assertIn(str(legacy_state / "exec-approvals.json"), agents)
+        installed_operator = json.loads(files[Path("operator.json")][0])
+        self.assertEqual(str(self.destination), installed_operator["paths"]["workspace"])
+        self.assertEqual(str(project_data), installed_operator["paths"]["project_data_root"])
+        self.assertEqual(str(legacy_state), installed_operator["paths"]["legacy_state_root"])
         self.assertIn("](runbook/tools-reference.md)", agents)
         for name in ("AGENTS.md", "runbook/tools-reference.md"):
             body = files[Path(name)][0].decode()
@@ -107,28 +115,29 @@ class WorkspaceInstallTests(unittest.TestCase):
         files = INSTALLER.make_plan(self.destination)
         config = json.loads(files[Path("config/openclaw.json")][0])
         defaults = config["agents"]["defaults"]
-        model = "openai/gpt-6.1-sol"
+        model = "openai/gpt-6-astra"
         self.assertEqual({"primary": model, "fallbacks": []}, defaults["model"])
         self.assertEqual({"primary": model, "fallbacks": []}, defaults["imageModel"])
-        self.assertEqual([model], defaults["modelPolicy"]["allow"])
+        self.assertEqual(["openai/gpt-6.1-sol", model], defaults["modelPolicy"]["allow"])
         self.assertEqual([model], list(defaults["models"]))
-        self.assertEqual("max", defaults["thinkingDefault"])
-        self.assertEqual("max", defaults["models"][model]["params"]["thinking"])
+        self.assertEqual("xhigh", defaults["thinkingDefault"])
+        self.assertEqual("xhigh", defaults["models"][model]["params"]["thinking"])
         self.assertEqual("openclaw", defaults["models"][model]["agentRuntime"]["id"])
         self.assertEqual(model, defaults["utilityModel"])
         self.assertEqual(model, defaults["heartbeat"]["model"])
-        self.assertEqual("max", defaults["heartbeat"]["thinking"])
+        self.assertEqual("xhigh", defaults["heartbeat"]["thinking"])
         self.assertTrue(defaults["heartbeat"]["isolatedSession"])
-        self.assertNotIn("model", defaults["subagents"])
-        self.assertNotIn("thinking", defaults["subagents"])
+        self.assertEqual(model, defaults["subagents"]["model"])
+        self.assertEqual("xhigh", defaults["subagents"]["thinking"])
+        self.assertEqual("suggest", defaults["subagents"]["delegationMode"])
         plugins = config["plugins"]["entries"]
         dreaming = plugins["memory-core"]["config"]["dreaming"]
         self.assertEqual(model, dreaming["model"])
         for phase in ("light", "deep", "rem"):
-            self.assertEqual("max", dreaming["phases"][phase]["execution"]["thinking"])
+            self.assertEqual("xhigh", dreaming["phases"][phase]["execution"]["thinking"])
         active_memory = plugins["active-memory"]["config"]
         self.assertEqual(model, active_memory["model"])
-        self.assertEqual("max", active_memory["thinking"])
+        self.assertEqual("xhigh", active_memory["thinking"])
 
     def test_rendered_chatgpt_model_metadata_preserves_route_limits(self):
         files = INSTALLER.make_plan(self.destination)

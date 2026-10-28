@@ -26,9 +26,24 @@ current source includes these targeted reliability repairs:
 - Current valid MCP OAuth bearers use a fresh canonical state read without taking
   the exclusive renewal or consent lease. Expired or rejected bearers and pending
   consent retain that leased path.
+- Local gateway probes reuse compatible Mac client metadata for the same paired
+  device key and current, unrevoked operator issuance. Explicit shared authentication
+  does not require a matching cached device token; a cached token is reused only
+  after native issuance verification. Remote targets and identity mismatches retain
+  normal pairing checks.
 - Stable identity and preference facts already explicit in trusted loaded profile
   context can be answered directly. Source and audience constraints still apply;
   missing, conflicting, historical and volatile facts require the appropriate source.
+- Facts supplied in the current request or trusted provider context can be used
+  directly. A search for one missing fact starts with one candidate and expands
+  when the evidence is ambiguous or conflicting; configured score thresholds stay
+  unchanged. Unstated personal preferences still require relevant memory.
+- Memory helpers return evidence from completed work and identify incomplete
+  results. Skipping deeper recall does not establish that prior context is irrelevant.
+- Corrections arriving while an agent waits for a child or compacts its context
+  remain attached to the same task. They wait for its continuation instead of
+  starting a competing run. Task replacement cannot redirect them to a different
+  run, and completion handoffs retain their original authority checks.
 - A successful explicit yield with accepted completion children retains the same
   requester continuation and progress-card handoff. Internal prompt cleanup does
   not close the owed reply. Final delivery remains separately owned.
@@ -61,6 +76,9 @@ current source includes these targeted reliability repairs:
   A later save failure cannot replace the original execution error or change its
   cancellation classification; a save-only failure is still reported.
 
+The regression tests cover these behaviors in source. Verify delivery and memory
+quality on the installed runtime before treating a deployment as accepted.
+
 Trajectory retention aggregates group and byte totals through the canonical
 covering index rather than materializing and sorting the runtime event table.
 The existing writable database admission installs that index; retention limits,
@@ -73,15 +91,14 @@ interval or response-time guarantee.
 
 The managed Codex 0.160.0 archive and the selected external gateway retain their
 separate manifest bindings. The optional Mac companion target reproduces its
-separately retained complete source tree. Its eight-file delta combines four
-shared/macOS Swift source/test changes for complete two-button login-Keychain
-access-permission forms with the inverse of four gateway-only SQL source, test,
-schema and documentation changes. Those inverse changes reproduce the older
-companion; they do not roll back the selected external gateway. The existing
-native owner still verifies the Apple
-process, current host and local principal, exact form, focused secure field and
-single-use entry scope. Its source commit, full tree and build label are recorded
-in `nativeCompanion`.
+separately retained complete source tree. Its finite patch includes native
+credential-form changes and every inverse gateway-only change needed to reach
+that older component. These inverse changes do not roll back the selected
+external gateway. New finite declarations list their exact paths; legacy packets
+retain their original eight-path contract. The existing native owner still
+verifies the Apple process, current host and local principal, exact form, focused
+secure field and single-use entry scope. Its source commit, full tree and build
+label are recorded in `nativeCompanion`.
 
 In the recorded service-hosted configuration, the selected external gateway
 constructs text/voice agent prompts and resolves MCP tokens; the companion
@@ -113,8 +130,9 @@ or ordinary-use acceptance on another host.
 
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
-The manifest declares any deliberate fixture normalization; its current list is
-empty. The resulting Git tree,
+The manifest declares deliberate fixture normalization. The current export replaces
+identifying labels in two synthetic tests across all three source targets;
+production code is unchanged. The resulting Git tree,
 including file modes, is the comparison point; an adopter's commit ID will depend
 on their own author and timestamp.
 
@@ -124,7 +142,7 @@ Choose the reconstruction target explicitly:
 | --- | --- | --- |
 | Customized runtime source | `--apply` | `source.normalizedTree` |
 | Native distribution | `--apply --native-distribution` | `nativeDistribution.normalizedTree` |
-| Mac companion source | `--apply --native-distribution --native-companion` | `nativeCompanion.sourceTree` |
+| Mac companion source | `--apply --native-distribution --native-companion` | `nativeCompanion.normalizedTree`, or `sourceTree` when no normalization is declared |
 
 These are source targets, not three running systems. The companion can share the
 native distribution's exact commit and tree; a separate patch is required only
@@ -232,7 +250,8 @@ git switch -c reference/openclaw-companion
 git commit -m "Apply the pinned OpenClaw Mac companion source"
 ```
 
-Before committing, `git write-tree` must match `nativeCompanion.sourceTree`.
+Before committing, `git write-tree` must match `nativeCompanion.normalizedTree`
+when declared, otherwise `nativeCompanion.sourceTree`.
 Recording the reconstructed target in `HEAD` lets the validation below compare
 its changes with the official upstream commit, using your own Git identity.
 
@@ -246,12 +265,16 @@ companion cases:
   equality.
 - **Finite source delta:** bind the distribution tree and an exact nonempty patch
   in `nativeCompanion.delta`. The patch must change exactly the allowed paths
-  enforced by the helper. The current [eight-path source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
-  covers the shared/macOS credential changes and inverse gateway SQL changes.
+  enforced by the helper. The [source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
+  covers the declared shared/macOS changes and all inverse gateway changes.
   Its bytes and SHA-256, base tree and complete final companion tree are checked.
 
-Both cases verify `nativeCompanion.sourceTree` and use the same declared native
-archive. A descriptive companion identity that differs without a valid delta is
+The source commit and `sourceTree` retain the authentic component identity.
+When fixture labels are normalized, a separate `normalizedTree` and exact
+`normalization.paths` describe the public replay; those paths must match the
+source normalization declaration. The helper verifies the complete replay tree
+before retrieving the same declared native archive.
+A descriptive companion identity that differs without a valid delta is
 not reconstructable in this mode. Ordinary source and native-distribution modes
 keep their existing targets; do not apply another mode on an already modified
 checkout. This command reconstructs source, not an installed or accepted Mac app.

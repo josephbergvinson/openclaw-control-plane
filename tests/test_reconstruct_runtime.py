@@ -84,11 +84,12 @@ class RuntimeReconstructionTests(unittest.TestCase):
         )
         return replace(self.package, native=native), contents
 
-    def companion_package(self):
+    def companion_package(self, extra_paths=()):
         package, contents = self.native_package()
         with patch.object(RUNTIME, "provision_native_artifact", return_value={"verified": True}):
             RUNTIME.reconstruct(self.checkout, package, apply=True)
-        for name in sorted(RUNTIME.NATIVE_COMPANION_DELTA_PATHS):
+        paths = frozenset(RUNTIME.NATIVE_COMPANION_DELTA_PATHS | set(extra_paths))
+        for name in sorted(paths):
             path = self.checkout / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("// companion fixture\n", encoding="utf-8")
@@ -98,8 +99,96 @@ class RuntimeReconstructionTests(unittest.TestCase):
         self.run_git("restore", "--staged", "--worktree", "--source=HEAD", "--", ".")
         companion = RUNTIME.NativeCompanion(
             "4" * 40, tree, package.native.normalized_tree, hashlib.sha256(raw).hexdigest(), raw,
+            paths,
         )
         return replace(package, companion=companion), contents
+
+    def normalized_companion_package(self):
+        fixture = "src/example.test.ts"
+        package, contents = self.companion_package((fixture,))
+        with patch.object(RUNTIME, "provision_native_artifact", return_value={"verified": True}):
+            RUNTIME.reconstruct(self.checkout, package, apply=True)
+        (self.checkout / fixture).write_text("// normalized synthetic label\n")
+        self.run_git("add", fixture)
+        tree = self.run_git("write-tree")
+        raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index",
+                                 package.native.normalized_tree)
+        self.run_git("restore", "--staged", "--worktree", "--source=HEAD", "--", ".")
+        companion = replace(package.companion, normalized_tree=tree,
+                            normalization_paths=frozenset({fixture}), patch=raw,
+                            patch_sha256=hashlib.sha256(raw).hexdigest())
+        return replace(package, companion=companion), contents
+
+    def test_normalized_companion_preserves_authentic_tree_and_verifies_replay_tree(self) -> None:
+        package, contents = self.normalized_companion_package()
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(contents)
+        with patch.object(RUNTIME, "build_opener", return_value=opener):
+            result = RUNTIME.reconstruct(self.checkout, package, apply=True)
+        self.assertNotEqual(package.companion.source_tree, package.companion.normalized_tree)
+        self.assertEqual(package.companion.source_tree, result["nativeCompanion"]["sourceTree"])
+        self.assertEqual(package.companion.source_commit, result["nativeCompanion"]["sourceCommit"])
+        self.assertEqual(package.companion.normalized_tree, result["nativeCompanion"]["normalizedTree"])
+        self.assertEqual(package.companion.normalized_tree, self.run_git("write-tree"))
+        self.assertEqual(["src/example.test.ts"], result["nativeCompanion"]["normalizationPaths"])
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        opener.open.assert_called_once()
+
+    def test_wrong_normalized_companion_tree_never_downloads_or_discards_evidence(self) -> None:
+        package, _ = self.normalized_companion_package()
+        invalid = replace(package, companion=replace(package.companion, normalized_tree="0" * 40))
+        with patch.object(RUNTIME, "build_opener") as opener:
+            with self.assertRaisesRegex(RUNTIME.ReconstructionError, "Companion applied tree differs"):
+                RUNTIME.reconstruct(self.checkout, invalid, apply=True)
+            opener.assert_not_called()
+        self.assertEqual(package.companion.normalized_tree, self.run_git("write-tree"))
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        self.assertFalse((self.checkout / "native-package-artifacts").exists())
+
+    def test_undeclared_companion_normalization_refuses_before_any_source_change(self) -> None:
+        package, _ = self.normalized_companion_package()
+        invalid = [replace(package.companion, normalization_paths=frozenset()),
+                   replace(package.companion, normalized_tree=None),
+                   replace(package.companion, normalization_paths=frozenset({"src/../outside"})),
+                   replace(package.companion, normalized_tree=package.companion.source_tree)]
+        with patch.object(RUNTIME, "build_opener") as opener:
+            for companion in invalid:
+                with self.subTest(companion=companion):
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.reconstruct(self.checkout, replace(package, companion=companion), apply=True)
+                    self.assertEqual("", self.run_git("status", "--porcelain"))
+                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
+            opener.assert_not_called()
+
+    def test_declared_companion_scope_reconstructs_the_complete_retained_tree(self) -> None:
+        extra = ("src/auto-reply/reply/session.ts", "docs/concepts/session.md")
+        package, contents = self.companion_package(extra)
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(contents)
+        with patch.object(RUNTIME, "build_opener", return_value=opener):
+            result = RUNTIME.reconstruct(self.checkout, package, apply=True)
+        self.assertTrue(result["nativeCompanion"]["normalizedTreeVerified"])
+        self.assertEqual(package.companion.source_tree, self.run_git("write-tree"))
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        for name in extra:
+            self.assertEqual("// companion fixture\n", (self.checkout / name).read_text())
+
+    def test_declared_companion_scope_cannot_omit_or_add_paths_before_apply(self) -> None:
+        extra = "src/auto-reply/reply/session.ts"
+        package, _ = self.companion_package((extra,))
+        invalid = [frozenset(RUNTIME.NATIVE_COMPANION_DELTA_PATHS),
+                   package.companion.delta_paths | {"src/unexpected.ts"},
+                   frozenset(), frozenset({"src/../outside"}),
+                   frozenset({"src/.git/config"}), frozenset({"operator.json"})]
+        with patch.object(RUNTIME, "build_opener") as opener:
+            for paths in invalid:
+                with self.subTest(paths=paths):
+                    broken = replace(package, companion=replace(package.companion, delta_paths=paths))
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.reconstruct(self.checkout, broken, apply=True)
+                    self.assertEqual("", self.run_git("status", "--porcelain"))
+                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
+            opener.assert_not_called()
 
     def identity_companion_package(self):
         package, contents = self.native_package()
@@ -227,9 +316,49 @@ class RuntimeReconstructionTests(unittest.TestCase):
         path.write_text(json.dumps(manifest))
         self.assertEqual(package, RUNTIME.load_package(directory, native_distribution=True, native_companion=True))
         self.assertEqual(replace(package, companion=None), RUNTIME.load_package(directory, native_distribution=True))
+        manifest["nativeCompanion"]["delta"]["paths"] = sorted(package.companion.delta_paths)
+        path.write_text(json.dumps(manifest))
+        self.assertEqual(package, RUNTIME.load_package(directory, native_distribution=True, native_companion=True))
         with self.assertRaisesRegex(RUNTIME.ReconstructionError, "requires the native distribution"):
             RUNTIME.load_package(directory, native_companion=True)
+        normalized = json.loads(json.dumps(manifest))
+        paths = ["src/example.test.ts"]
+        normalized["source"]["normalization"] = {"scope": "Synthetic fixture labels only", "paths": paths}
+        normalized["nativeCompanion"].update({
+            "sourceTree": "8" * 40, "normalizedTree": package.companion.source_tree,
+            "normalization": {"scope": "Synthetic fixture labels only", "paths": paths},
+        })
+        path.write_text(json.dumps(normalized))
+        expected = replace(package, companion=replace(package.companion, source_tree="8" * 40,
+                           normalized_tree=package.companion.source_tree,
+                           normalization_paths=frozenset(paths)))
+        self.assertEqual(expected, RUNTIME.load_package(directory, native_distribution=True,
+                                                       native_companion=True))
+        for field in ("normalization", "normalizedTree"):
+            broken = json.loads(json.dumps(normalized))
+            del broken["nativeCompanion"][field]
+            path.write_text(json.dumps(broken))
+            with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
+        for value in (None, "undeclared", {}):
+            broken = json.loads(json.dumps(normalized))
+            broken["source"]["normalization"] = value
+            path.write_text(json.dumps(broken))
+            with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
+        for declared in ([], ["src/example.test.ts", "src/example.test.ts"], ["src/other.test.ts"]):
+            broken = json.loads(json.dumps(normalized))
+            broken["nativeCompanion"]["normalization"]["paths"] = declared
+            path.write_text(json.dumps(broken))
+            with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
         invalid = []
+        for value in (None, [], ["src/a", "src/a"], ["src/b", "src/a"], [True],
+                      ["/src/a"], ["src/../a"], ["src/.git/config"], ["src/node_modules/a"],
+                      ["src/a\\b"], ["src/a\nb"], ["operator.json"]):
+            broken = json.loads(json.dumps(manifest))
+            broken["nativeCompanion"]["delta"]["paths"] = value
+            invalid.append(broken)
         for field, value in (("bytes", 0), ("bytes", True), ("bytes", len(package.companion.patch) + 1),
                              ("sha256", "0" * 64), ("file", "../outside.patch")):
             broken = json.loads(json.dumps(manifest))

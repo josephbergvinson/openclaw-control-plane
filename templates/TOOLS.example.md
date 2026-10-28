@@ -206,9 +206,9 @@ Enrollment belongs to each target host; a credential on one Mac does not establi
 
 Use state assertions, text/anchors and observable waits rather than blind clicks or fixed delays. Reconfirm app/window/focus after a context change. A click is not evidence of the requested effect; read back the target object or observable UI state. Unexpected layout or account changes require renewed identification, not guessing.
 
-For `AGENTS.md` §11 cleanup, recheck the recorded tab/window or app-instance identity and current activity, use supported close controls on the same lane, and verify that only the intended resource closed.
+For AGENTS.md's Work and continuity resource cleanup, recheck the recorded tab/window or app-instance identity and current activity, use supported close controls on the same lane, and verify that only the intended resource closed.
 
-Apply AGENTS §5 to the actual challenge. Use an existing authorized secure facility for verification it supports, including one-time-code or MFA entry, without exposing the value. Request human action when the provider requires physical biometric/security-key or CAPTCHA presence, or no supported secure route is available. Secure enrollment of an existing credential remains distinct from provider credential creation/reset/recovery or custody changes. Ordinary system-dialog authorization does not invent a secure channel or bypass a provider-required human step.
+Apply AGENTS.md's Boundaries section to the actual challenge. Use an existing authorized secure facility for verification it supports, including one-time-code or MFA entry, without exposing the value. Inspect the actual prompt, choose supported password alternatives, discover and repair the enrolled secure route, then report only a verified unmet tool/OS requirement. Labels alone do not establish physical-presence requirements. Secure enrollment of an existing credential remains distinct from provider credential creation/reset/recovery or custody changes. Ordinary system-dialog authorization does not invent a secure channel or bypass a provider-required human step.
 
 ## Authorized wallet and economic operations
 
@@ -242,14 +242,14 @@ supported refresh or replacement; an edited text file alone does not update it.
 - Announce in the room's associated text channel that the bot is recording for meeting notes, then call `transcripts` action `start` with `providerId:"discord-voice"` and the verified `accountId`, `guildId`, `channelId`. Manual capture joins silently when free; no separate conversational join is needed. Retain the exact returned capture `selector`, `sessionId`, originating conversation and connection ownership. Read the result before claiming that recording has started.
 - If the operator explicitly says to join without recording, use native `message` action `voice-join` instead and do not start capture. The native join action itself remains connection-only.
 - Run voice joins, capture start/stop and connection cleanup in the authenticated requesting agent; delegate note drafting only after capture has ended, and do not assume a background worker inherits the caller’s live meeting authority.
-- Manual capture continues until explicitly stopped. When the operator asks to stop recording or deliver the minutes, use `transcripts` action `stop` with that exact `selector`, wait for pending transcription/finalization, then `show` its saved notes or `summarize` the same capture. Deliver readable decisions, action owners, stated deadlines and open questions in the originating conversation unless the operator names another destination. Manual capture does not post notes automatically; configured follow recording has its own finalization/delivery owner. Check names and facts against relevant existing records using the LLM's contextual understanding. Verify that actually played assistant speech and captured human speech are represented; state meaningful coverage gaps without inventing missing or unheard speech.
+- Separately authorized manual capture keeps its stated scope until stopped; presence-tied capture stops and disconnects its owned connection on verified departure or move under AGENTS. When the operator asks to stop recording or deliver the minutes, use `transcripts` action `stop` with that exact `selector`, wait for pending transcription/finalization, then `show` its saved notes or `summarize` the same capture. Deliver readable decisions, action owners, stated deadlines and open questions in the originating conversation unless the operator names another destination. Manual capture does not post notes automatically; configured follow recording has its own finalization/delivery owner. Check names and facts against relevant existing records using the LLM's contextual understanding. Verify that actually played assistant speech and captured human speech are represented; state meaningful coverage gaps without inventing missing or unheard speech.
 - A connection created solely for capture may leave automatically when capture stops; do not promise continued presence. When the operator asks to leave, first stop and deliver any active capture, then use `voice-leave` if the task's owned connection remains, and verify it has left. Preserve pre-existing or separately owned conversations. Do not enable `voice.autoJoin` or `transcripts.autoStart` for a one-off request. Keep each company's meeting context separate.
 
 ## Discord delivery and substantial work
 
 Use natural prose, not fixed Result/Impact/Blocker schemas or compact JSON. Keep one logical answer together and use code fences when copying matters. Prefer conversation content; use a meaningful attachment when requested or when channel limits would make the answer unreadable. Do not expose absolute host paths or substitute an internal receipt for the answer.
 
-For work that continues, acknowledge what is being undertaken and establish/resume the supported durable task before long computation, I/O or waiting. Keep the parent responsible for synthesis, source selection and external effects. Native subagents inherit supported model/thinking settings unless the task explicitly requires an override.
+For work that continues, acknowledge what is being undertaken. Use the supported durable owner when continuity or independent work benefits; bounded inline execution remains available under AGENTS. Keep the parent responsible for synthesis, source selection and external effects. Worker model and effort follow native precedence and supported overrides, as described below.
 
 Relay user-relevant milestones and real waits within AGENTS' cadence. Internal tool chatter and generic runtime notices are not useful task progress by themselves; authored commentary shown through the native progress card is a checkpoint. Ordinary finals use native source delivery. Automatic-delivery foreground checkpoints use that native commentary/progress path when its compositor is active. When the admitted source-delivery mode requires message-tool-only output, send checkpoints through `message(action=send, final=false)`; that route does not by itself prove a same-card edit. A `message` send with `final: false` redeems the same-card route only for an admitted retained continuation with its exact current-card capability, or sends a distinct authorized message such as an answer to a new user question or an attachment. Never send the same completed final through both an explicit send and the automatic final path.
 
@@ -273,25 +273,26 @@ Invoke the checked activator from its supported independent process boundary. Do
 
 ## Model and reasoning policy
 
-Use `openai/gpt-6.1-sol` with Max reasoning for interactive work and LLM-backed
-background work, with no automatic model fallback. An explicit Discord
-`/think ultra` enables automatic multi-agent orchestration using underlying Max.
-Verify the effective model and effort on the actual requesting surface.
+The executing runtime configuration owns model, effort, provider/fallback,
+spending and delegation defaults. Apply supported explicit user/session/task
+choices through native precedence and verify the accepted selection. Historical
+examples do not select today's route. `AGENTS.md` owns when to execute directly
+or use bounded delegation.
 
-Set native `agentTurn` payload.model and payload.thinking explicitly for
-operator-owned jobs. For system-owned skill review jobs, preserve the projected
-payload and use supported execution-session model and thinking preferences.
-Heartbeat has its own thinking setting; all three dreaming phases have execution
-thinking settings. Active memory and utility calls use the same GPT-6.1 Sol/Max
-policy. Pure command jobs have no scheduler model; inspect any nested LLM calls.
-Keep intentionally disabled jobs disabled and preserve schedule and delivery scope.
+Preserve explicitly owned scheduler and review overrides. Operator-authored
+`agentTurn` payloads select model/thinking where their interface requires it;
+native heartbeat, dreaming, skill-review and inference-hook declarations retain
+their owners, inheritance and disabled state. Pure command jobs need no scheduler
+model; inspect nested inference. Keep schedules and delivery scope intact.
 
-Leave global subagent model/thinking pins unset so children inherit the initiating
-turn, including deliberately selected Ultra. A user-task continuation carried by
-a heartbeat remains user work. When an all-surface model change is authorized,
-inspect stale agent, session and task overrides through their native owners rather
-than assuming the default reaches them. Do not silently switch model or lower
-reasoning effort when the configured route fails.
+Use supported scoped model/effort overrides when work needs them. Child selection
+follows the [native precedence reference](../config/README.md#child-model-and-effort);
+`sessions_spawn.thinking` is unavailable with `visible:true`. Lower caller effort
+also lowers newly inherited children unless a child setting applies; already
+accepted child sessions retain their selections. Preserve conversation choices
+and active work during authorized migrations. Required fresh repository-native
+code review keeps its own workflow and settings. Follow configured fallback and
+spending restrictions rather than silently substituting a model or lower effort.
 
 Image generation, local embedding and speech use their specialized providers;
 the LLM policy does not substitute a chat model for those capabilities.

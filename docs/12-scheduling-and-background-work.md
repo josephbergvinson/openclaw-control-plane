@@ -59,41 +59,35 @@ For an explicitly requested one-shot chat reminder, use the existing job-level `
 
 ## Model and reasoning ownership
 
-Interactive work defaults to GPT-6.1 Sol/Max; an explicit Discord `/think ultra` adds
-multi-agent orchestration with underlying Max reasoning. Autonomous inference uses
-`openai/gpt-6.1-sol` with `max` reasoning. Native `agentTurn` jobs carry those values in
-`payload.model` and `payload.thinking`, including intentionally disabled jobs when
-their saved policy is updated. Keep their enablement, schedule and delivery intact.
-For system-owned skill review jobs, leave the projected payload with its owner and
-set the supported execution-session preferences through `sessions.patch` using
-`agent:<agent-id>:cron:<job-id>`, `model: "openai/gpt-6.1-sol"` and
-`thinkingLevel: "max"`. Check the existing job remains disabled when intended;
-changing its model policy is not authorization to enable it.
+The executing runtime configuration and supported user/session/task choices own
+model, reasoning, provider/fallback and spending restrictions. The checked-in
+[preferences profile](../config/openclaw.preferences.json) supplies example values;
+it does not require every ordinary or background task to use those settings.
+The [configuration guide](../config/README.md#child-model-and-effort) describes
+native child precedence and deliberate migrations. A model row or catalog refresh
+is not acceptance; verify the effective route on the intended surface.
 
-The [preferences profile](../config/openclaw.preferences.json) configures the same
-GPT-6.1 Sol/Max policy for autonomous heartbeat and all three dreaming phases.
-Active memory and utility calls retain GPT-6.1 Sol/Max; they assist ordinary work.
-The [configuration guide](../config/README.md#background-model-and-existing-overrides)
-describes provider enrollment and migration of older settings. A model row or a
-successful catalog refresh is not acceptance; verify the effective GPT-6.1 Sol/Max route
-with a read-only request before relying on the scheduled path.
+Preserve explicitly owned `payload.model` and `payload.thinking` selections on
+operator-authored agent turns. Native heartbeat, dreaming, skill-review and
+inference-hook declarations retain their existing owners, inheritance and disabled
+state. Use the owning supported interface for an authorized change; a generic
+scheduler client must not rewrite projected declarations or enable disabled work.
+Keep schedule and delivery intact. A heartbeat carrying an admitted user-task
+continuation does not replace that conversation's model and effort.
 
-Global child model and thinking pins stay unset. Children inherit the initiating
-turn, including scheduled GPT-6.1 Sol/Max or deliberately selected interactive
-Ultra. Admitted user-task continuations retain their conversation
-model and effort when a heartbeat carries the wake. An authorized all-surface
-migration must also inspect stale session and per-task
-overrides through their native owners; changing defaults does not rewrite them.
-Preserve deliberate Ultra and do not reset running conversations.
+Child inheritance follows native precedence rather than a universal global pin
+or an instruction to clear every pin. Use supported scoped overrides when work
+needs a different selection. Preserve active task ownership and inspect existing
+agent/session/task overrides before an authorized migration. Required fresh
+repository-native review retains its separate workflow and model/effort choices.
 
-Classify command work by its implementation. A script that reads receipts, exports
-data or performs deterministic maintenance has no scheduler reasoning setting.
-A script that invokes an LLM must select GPT-6.1 Sol/Max at that internal inference owner.
-Foreground helpers belonging to a user turn do not become autonomous jobs merely
-because they run in another process. Configured model failures retain the selected
-route and must not silently fall
-back to another model or lower effort. Image generation, embedding and speech
-models remain specialized capabilities, separate from LLM inference.
+Classify command work by its implementation. Deterministic receipt reads,
+exports and maintenance have no scheduler reasoning setting. A script that invokes
+an LLM retains its internal inference owner's selected settings. Foreground
+helpers remain user work even when they run in another process. Configured failures
+follow the actual fallback and spending policy; do not silently substitute a model
+or lower effort. Image generation, embedding and speech remain specialized
+capabilities, separate from LLM inference.
 
 ## Inventory and ownership
 

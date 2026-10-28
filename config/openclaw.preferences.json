@@ -2,15 +2,16 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-6.1-sol",
+        "primary": "openai/gpt-6-astra",
         "fallbacks": []
       },
       "modelPolicy": {
         "allow": [
-          "openai/gpt-6.1-sol"
+          "openai/gpt-6.1-sol",
+          "openai/gpt-6-astra"
         ]
       },
-      "thinkingDefault": "max",
+      "thinkingDefault": "xhigh",
       "bootstrapMaxChars": 180000,
       "bootstrapTotalMaxChars": 400000,
       "compaction": {
@@ -27,19 +28,22 @@
           "maxRetries": 1
         },
         "recentTurnsPreserve": 6,
-        "timeoutSeconds": 1800,
+        "timeoutSeconds": 300,
         "midTurnPrecheck": {
           "enabled": true
         },
-        "thinkingLevel": "inherit"
+        "thinkingLevel": "low"
       },
       "maxConcurrent": 4,
       "subagents": {
         "maxConcurrent": 8,
-        "runTimeoutSeconds": 0
+        "runTimeoutSeconds": 0,
+        "delegationMode": "suggest",
+        "model": "openai/gpt-6-astra",
+        "thinking": "xhigh"
       },
       "imageModel": {
-        "primary": "openai/gpt-6.1-sol",
+        "primary": "openai/gpt-6-astra",
         "fallbacks": []
       },
       "mediaModels": {
@@ -51,16 +55,17 @@
       "systemAgent": {
         "agentId": "main"
       },
-      "utilityModel": "openai/gpt-6.1-sol",
+      "utilityModel": "openai/gpt-6-astra",
       "verboseDefault": "off",
       "workspace": "${operator:paths.workspace}",
       "models": {
-        "openai/gpt-6.1-sol": {
+        "openai/gpt-6-astra": {
           "agentRuntime": {
             "id": "openclaw"
           },
           "params": {
-            "thinking": "max"
+            "thinking": "xhigh",
+            "transport": "websocket"
           }
         }
       },
@@ -71,9 +76,9 @@
         "mode": "off"
       },
       "heartbeat": {
-        "model": "openai/gpt-6.1-sol",
+        "model": "openai/gpt-6-astra",
         "isolatedSession": true,
-        "thinking": "max"
+        "thinking": "xhigh"
       }
     }
   },
@@ -100,7 +105,7 @@
     "resetByChannel": {
       "discord": {
         "mode": "idle",
-        "idleMinutes": 52596000
+        "idleMinutes": 10080
       }
     }
   },
@@ -148,21 +153,21 @@
         },
         "config": {
           "dreaming": {
-            "model": "openai/gpt-6.1-sol",
+            "model": "openai/gpt-6-astra",
             "phases": {
               "light": {
                 "execution": {
-                  "thinking": "max"
+                  "thinking": "xhigh"
                 }
               },
               "deep": {
                 "execution": {
-                  "thinking": "max"
+                  "thinking": "xhigh"
                 }
               },
               "rem": {
                 "execution": {
-                  "thinking": "max"
+                  "thinking": "xhigh"
                 }
               }
             }
@@ -190,8 +195,8 @@
       "active-memory": {
         "enabled": true,
         "config": {
-          "model": "openai/gpt-6.1-sol",
-          "thinking": "max"
+          "model": "openai/gpt-6-astra",
+          "thinking": "xhigh"
         }
       }
     },

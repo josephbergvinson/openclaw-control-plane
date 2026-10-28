@@ -27,13 +27,12 @@ deployment or user acceptance.
 
 ## Optional companion source
 
-The current packet supplies an eight-file delta to reproduce the separately
-retained complete companion source. Four shared/macOS Swift source/test changes
-support complete two-button login-Keychain access-permission forms through the
-existing native credential owner. Four gateway-only SQL source, test, schema and
-documentation changes are reversed to reach that older component tree. These
-reversals do not change the selected external gateway release or claim that the
-companion contains its newer gateway SQL behavior.
+The optional companion target reproduces a separately retained complete source
+tree. Its exact finite patch includes every difference from the declared native
+distribution, including native credential-form changes and inverse gateway-only
+changes needed to reach that older component. Reversing those changes for the
+companion does not roll back the selected external gateway or claim newer gateway
+behavior in the older app. Source and deployment remain independently bound.
 
 Read the exact companion commit, full tree and build label from
 `nativeCompanion`; source reconstruction and build labels are not installed-app
@@ -58,9 +57,18 @@ companion source. The helper accepts either of these finite cases:
 | Case | Required binding and verification |
 | --- | --- |
 | Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals both `nativeDistribution.referenceTree` and `nativeDistribution.normalizedTree`. No extra patch is needed or accepted as a substitute for equality. |
-| Separate eight-file retained-companion delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` names one nonempty regular patch with exact `file`, `bytes` and `sha256` bindings. The patch changes exactly the eight declared shared/macOS and gateway SQL source, test, schema and documentation paths. |
+| Separate retained-companion delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` binds one nonempty regular patch by `file`, `bytes` and `sha256`. Its ordinary text changes must match the complete finite path set exactly. |
 
-The current separate delta is limited to:
+A new finite declaration supplies `delta.paths`: a nonempty, sorted, unique list
+of exact relative source paths under `apps/`, `src/`, `extensions/`, `test/` or
+`docs/`. Traversal, control characters, Git metadata and dependency-store paths
+are refused. Extra or omitted patch paths fail before source application or
+archive retrieval. A target-tree mismatch still fails after application and leaves
+the isolated staged checkout available for inspection. The path list is reviewed
+source metadata, not permission to omit differences or weaken full-tree equality.
+
+For compatibility, a legacy declaration without `delta.paths` uses exactly these
+eight paths:
 
 - `apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift`
 - `apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift`
@@ -71,9 +79,18 @@ The current separate delta is limited to:
 - `src/trajectory/runtime-store.sqlite.test.ts`
 - `src/trajectory/runtime-store.sqlite.ts`
 
-The last four entries are the inverse of the selected gateway's SQL delta. The
-complete final source tree, including modes, must match the retained companion;
-this is not a mixed tree combining older Swift with newer gateway SQL.
+The legacy packet uses the last four entries to reverse its gateway-only SQL
+delta. A newer distribution may require more inverse source changes; those belong
+in its exact declared path list and patch. In every case the complete final tree,
+including modes, must equal the declared companion replay tree.
+
+For deliberate fixture normalization, `sourceCommit` and `sourceTree` retain the
+authentic component identity. The optional `normalizedTree` binds the public
+replay separately; `normalization.paths` must be a sorted, unique list matching
+the source normalization declaration. Both normalization fields and a bound
+delta are required together. Without normalization, the replay target remains
+`sourceTree`. This preserves the distinction between anonymized test labels and
+the original source without changing production code.
 
 Both cases first verify the distribution, then the complete companion source tree,
 including modes, and provision the same bound archive. A historical descriptive

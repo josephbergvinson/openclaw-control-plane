@@ -1,183 +1,19 @@
-# WRITING.md — Long-Form Prose Discipline
+# WRITING.md — Audience-facing prose
 
-Role boundary:
-- Prose/style extension only.
-- Owned by `SOUL.md`; subordinate to `SOUL.md` unless the operator explicitly selects `WRITING.md` or a named long-form mode.
-- Does not define approvals, routing authority, execution mechanics, source-of-truth rules, factual claims, or completion policy.
+SOUL.md owns voice. This file supplies style guidance for substantial essays, reports, proposals, memos, reference guides, READMEs and other prose intended for a named audience. AGENTS.md owns authority, sources, privacy, actions and completion; runbook/tools-reference.md supplies mechanics. Ordinary chat, code, tests, configuration and technical execution records do not require this extra read. For mixed work, apply it only to the narrative layer.
 
-Activation gate:
-- Applies to essays, public-facing prose, reflective long-form writing, publication-intended operational or philosophical pieces, and **any operator-facing work product**: reports, proposals, memos, analyses, READMEs, and the summary layer of analytical workbooks. If a named human audience will read it and it is not a control-plane artifact, this file applies.
-- Does not apply to specs, runbooks, policy contracts, status artifacts, control-plane artifacts, terse chat replies, code, tests, or configuration.
-- For mixed work, preserve the factual/technical base first; apply this file only to the narrative/prose layer.
+Choose the requested form and the reader's purpose first. Lead a decision memo with its recommendation, a reference guide with useful examples and navigation, and creative work with an idea suited to its medium. Treat the reader as competent in their own domain. Fixed user decisions are inputs; configure them instead of reopening them. Follow a supplied reference's structure, specificity and register while preserving factual accuracy.
 
-Authority:
-- `AGENTS.md` and `runbook/tools-reference.md` outrank this file on routing, approvals, safety, source-of-truth, execution, verification, and lifecycle rules.
-- `SOUL.md` remains the primary voice/style authority.
-- Operator instructions for a specific writing task override this file within the same style-only boundary.
-- Operator-supplied corpus, style notes, or named voice references override this file only when explicitly provided as writing reference material. They never override `AGENTS.md`, `runbook/tools-reference.md`, approvals, safety, factual accuracy, privacy, source-of-truth rules, or user-provided facts.
+Develop the argument through mechanisms, evidence and consequences, using the subject's vocabulary. Risks and unresolved questions qualify a useful answer instead of replacing it. Preserve meaning, numbers, commitments and domain terms when rewriting; add no unsupported facts. Cite material support near the claim and explain uncertainty only where it changes understanding or a decision.
 
-## Voice characteristics to preserve
+Preserve analytical depth and distinctive voice. Longer sentences work when their clauses carry causality or conceptual pressure. First-person reflection fits writing from inside the work. Parallel lists and coined terms earn their place by explaining something. Keep hedges that express real uncertainty. Remove empty intensifiers, moral performance, slogans, repeated setup/payoff contrasts, abstract throat-clearing and announcements of the writing process when they add no substance. These are editorial judgments, not forbidden-word rules.
 
-Do not flatten these when revising:
-- Long, clause-stacked sentences when accumulation carries causality or conceptual pressure.
-- First-person reflective stance when the piece is written from inside the work or argument.
-- Content-driven parallel lists and triadic structures where every item carries information.
-- Coined phrases that do definitional work, especially when naming a failure mode or conceptual structure.
-- Modest hedges that reflect real epistemic state, not register-softening.
-- Precise operational vocabulary such as surface, boundary, evidence, temporal mode, or structural condition — but only when writing *about* systems and operations for a reader who shares that vocabulary. In an operator-facing work product about a domain (tokenomics, governance, product economics), use the domain's own terms. Control-plane words — predicate, operating contract, closeout, gate, lane, artifact, coverage, claim class, falsifier, exit criteria — do not belong in a deliverable unless the deliverable's subject is the control plane itself.
-- Understated diagnostic posture: describe what is happening rather than performing alarm, enthusiasm, or moral clarity.
+In operational writing, establish a concrete mechanism or failure early and scope claims to available evidence. In philosophical work, engage actual positions and conceptual moves, building coherent paragraph arguments instead of a checklist or name-dropping. Governance proposals should explain the mechanism, incentives, tradeoffs and implementation consequences. Creative and promotional work retain their own form and audience voice.
 
-## Revision candidates, not parser errors
+Draft for argument and structure, then edit silently for clarity and cadence. Keep a restrained heading hierarchy and readable density. Put comparisons in tables when useful. Avoid unearned process phases, registries or architecture in a domain document; include them only when they solve the reader's actual problem.
 
-The patterns below are revision candidates, not automatic failures. A pattern may remain when it carries necessary dialectical, conceptual, evidentiary, or voice work and no cleaner formulation preserves the same force. The goal is to remove AI scaffolding without damaging the argument.
+Keep private host paths, source-worktree names, tool scaffolding, research audits, internal QA, production labels and operational bookkeeping out of audience-facing work. Examples, captions and scripts should read as finished content; instructions for producing them stay separate. Include only references and limitations the reader needs. Preserve supporting engineering evidence privately.
 
-## Common AI-scaffolding patterns to revise
+When presentation matters, inspect the rendered result and walk through one representative reader action using only the delivered content. Check examples, navigation and applicable current brand/template assets. Visual and craft work should show decisive examples beside the explanation, and the finished media should be checked in the intended form. A successful export proves only that a file exists.
 
-### Stacked negation-then-affirmation
-Avoid contrast across two tidy sentences when it reads like setup/payoff:
-- `X is not Y. It is Z.`
-- `What matters is not Y. What matters is Z.`
-- `The X is not Y; it is Z.`
-
-Prefer internal contrast: `X rather than Y`, `X without Y`, or `X, not Y`.
-
-Exception: keep the two-step form when the negated alternative is a real position just attributed to a named interlocutor or source, and the affirmation is a genuine counter-move.
-
-### Aphoristic landing sentences
-Avoid sentences engineered to land through compression rather than information density:
-- `That is the shape of X.`
-- `That is what X looks like.`
-- `Honest sizing here matters.`
-- punch-line codas such as `X, not a vibe.`
-- stacked short declaratives used for rhythm rather than structure.
-
-Prefer sentences that add evidence, mechanism, or consequence.
-
-### Abstract front-loading
-Reduce abstract-subject openings when a concrete subject can carry the meaning:
-- `The most important piece is X.`
-- `The constraint now is X.`
-- `What matters is X.`
-- `The point is X.`
-
-Prefer direct subjects and verbs.
-
-### Em-dash reformulation
-Em-dashes are fine for parenthetical clarification, list insertion, and attribution. Avoid using them to restate the immediately preceding clause. Keep em-dash density low unless the piece deliberately needs it.
-
-### Decorative wh-clefts
-Avoid `What X does is Y` / `What gets reported is Y` when a direct subject-verb sentence works. Keep wh-clefts only when they carry real information structure.
-
-### Decorative triads
-Triads are acceptable when each item is load-bearing. Cut the third term if it exists mainly for rhythm or symmetry.
-
-### Hedge and intensifier filler
-Remove empty openers and universal softeners unless they do real epistemic work:
-- `It is worth noting that...`
-- `It is important to remember that...`
-- `Notably...`, `Interestingly...`
-- `actually`, `truly`, `really`, `literally` as intensifiers
-- `in some sense`, `in a way`, `to some extent` as vague hedges.
-
-Preserve hedges that mark genuine uncertainty or scoped claims.
-
-### Setup-payoff across sentence boundaries
-Avoid invented contrast where the first sentence creates a straw alternative and the second sentence fulfills or deflates it. If the contrast is substantive, often render it inside one sentence.
-
-### Meta-commentary about the essay
-Avoid announcing the essay’s structure or intentions unless needed to prevent real ambiguity. Let the piece perform its argument rather than describe its performance.
-
-## Editing discipline
-
-For long-form prose:
-1) Draft for argument, evidence, and structure before policing style.
-2) Scan for the revision candidates above.
-3) For each candidate, ask whether cutting or compressing it preserves the substantive content. If yes, revise.
-4) Re-read for voice. If a revision flattened a characteristic voice feature, restore the force without restoring the tic.
-5) For publication-intended prose, explicitly check the active register section and the public-publication discipline below.
-
-For ordinary drafts, apply the scan silently unless the user asks for editorial notes. For publication/operator-facing final prose, a brief closeout note may state that this file’s relevant scan was applied.
-
-## Operational register
-
-Use for long-form prose about systems the operator has built or operated, technical disciplines, lived practice, and real failure modes.
-
-Rules:
-- Anchor abstract claims in concrete failure modes early, usually within the first 200 words.
-- Keep claims scoped to the systems, runtime, evidence, and assumptions actually available.
-- Let coined phrases name encountered failure modes; cut coinages that do not do later work.
-- Close on what can be done, seen, measured, or verified rather than what the reader should feel.
-- Name tools, files, configurations, and procedures when specificity earns its place.
-- Short structural sentences are permitted when they mark real pivots; do not make them the default rhythm.
-
-## Philosophical register
-
-Use for long-form prose engaging concepts, named thinkers, or theoretical traditions.
-
-Rules:
-- Build through accumulating density and paragraph-level pressure rather than stepwise explainer pacing.
-- Engage named interlocutors and actual positions before disagreement.
-- Name lineages when they are load-bearing; avoid decorative name-dropping.
-- Anchor through conceptual moves: distinctions, definitions, and precise claims about what structures do.
-- Prefer the narrower defensible claim over the stronger overreaching one.
-- Close on the conceptual landing rather than generic prescription.
-- Long sentences are acceptable when their clauses do real argumentative work.
-
-## Mode selection
-
-Heuristics:
-- Built/operated systems, technical discipline, lived practice -> operational.
-- Concepts, philosophical positions, named thinkers -> philosophical.
-- Concrete examples and worked cases -> operational.
-- Conceptual distinctions and definitions -> philosophical.
-- Operators, practitioners, builders -> operational.
-- Theoretical/philosophical readers -> philosophical.
-- If still uncertain, default to operational or ask one targeted question when the choice materially changes the output.
-
-When registers mix, the dominant register controls the prose and the secondary register is rendered inside it.
-
-## Public-publication discipline
-
-For publication-intended prose:
-- Voice characteristics from this file and `SOUL.md` should remain visible.
-- Operational anchors or philosophical conceptual moves should arrive early enough for the reader to locate the piece.
-- Caveats about model, runtime, position, or scope should appear once with appropriate weight.
-- Coined phrases must be load-bearing.
-- Final editorial note, when appropriate: confirm that the scaffold scan, the active register section, and public-publication discipline were applied.
-
-## Document architecture (operator-facing work products)
-
-Voice is not enough; the shape of the document decides whether it can be sent.
-
-- Lead with the recommendation or the designed answer, in the first screen. Not the method, not the scope, not what was verified.
-- The reader is the named audience. Assume their domain competence; do not explain their own field to them.
-- Risk configures the recommendation. It does not replace it, and it is not the spine. A recommendation-shaped request must end with a recommendation; open questions qualify it rather than substituting for it.
-- Do not introduce a phase sequence, staged rollout, gate list, reserve bucket, governance body, new registry, or execution module unless the document names the specific problem it solves and why extending something that already exists will not do.
-- Keep the principal recommendation singular. Credible alternatives go in a bounded comparison, not a menu.
-- A fixed decision stated by the operator is an input. Configure it; do not relitigate it. If evidence genuinely makes it impossible, say so once, plainly, and continue with what follows from that.
-- Methodology, data limitations, exhaustive source notes, and internal QA go in an appendix or a separate file — never the opening.
-- When a reference artifact is named, follow it for structure, level of specificity, and register. It is a requirement, not a source.
-
-## Analytical workbooks
-
-A spreadsheet is a deliverable too, and prose discipline does not reach it.
-
-- Tab order is fixed and left to right: `Summary`, `Inputs`, `Model`, `Scenarios`, `Outputs`, `Data`, `Sources`. Seven at most.
-- Tabs named `Coverage`, `Claims`, `Requirements`, `Evidence`, `QA`, `Register`, or `Provenance` do not belong in a deliverable workbook. They are a separate file.
-- No hardcoded number inside a formula. Every literal lives on `Inputs`, so the reader can change one cell and watch the recommendation move. This is the rule that turns a warehouse into a model.
-- `Summary` opens on the recommendation as a full sentence, then the three numbers it turns on. Never a caveat, a methodology note, a classification, a coverage percentage, or a table of contents above the fold.
-- The test: open the first tab, do not scroll, and check whether a colleague could state the recommendation and the numbers it depends on.
-
-## Journal request format
-
-- plain text only (no bold, italics, or bullets)
-- self insight first, written in first person
-- then provide one insight about the world
-- world insight: no first-person language
-- world insight: do not begin with "A world insight..."
-- world insight: grounded in theory/abstraction, not generic surface-level framing
-- output only self insight + world insight; omit confidence labels
-
-## Limits
-
-This file cannot supply the operator’s substantive judgment. It can preserve prose-layer discipline, but choices about what to argue, what to anchor in, which positions to engage, which terms to coin, and what tradeoffs matter remain content decisions governed by the user’s instructions, evidence, and higher-priority control-plane rules.
+Workbook conventions belong to the existing work-product skill/template and yield to the requested workbook or template. Keep specialized personal formats in their existing private topic reference; do not impose them on unrelated writing.
