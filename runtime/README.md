@@ -29,6 +29,16 @@ current source includes these targeted reliability repairs:
 - Stable identity and preference facts already explicit in trusted loaded profile
   context can be answered directly. Source and audience constraints still apply;
   missing, conflicting, historical and volatile facts require the appropriate source.
+- Facts supplied in the current request or trusted provider context can be used
+  directly. A search for one missing fact starts with one candidate and expands
+  when the evidence is ambiguous or conflicting; configured score thresholds stay
+  unchanged. Unstated personal preferences still require relevant memory.
+- Memory helpers return evidence from completed work and identify incomplete
+  results. Skipping deeper recall does not establish that prior context is irrelevant.
+- Corrections arriving while an agent waits for a child or compacts its context
+  remain attached to the same task. They wait for its continuation instead of
+  starting a competing run. Task replacement cannot redirect them to a different
+  run, and completion handoffs retain their original authority checks.
 - A successful explicit yield with accepted completion children retains the same
   requester continuation and progress-card handoff. Internal prompt cleanup does
   not close the owed reply. Final delivery remains separately owned.
@@ -60,6 +70,9 @@ current source includes these targeted reliability repairs:
   model-attempt completion cannot cancel a still-authorized final handoff.
   A later save failure cannot replace the original execution error or change its
   cancellation classification; a save-only failure is still reported.
+
+The regression tests cover these behaviors in source. Verify delivery and memory
+quality on the installed runtime before treating a deployment as accepted.
 
 Trajectory retention aggregates group and byte totals through the canonical
 covering index rather than materializing and sorting the runtime event table.

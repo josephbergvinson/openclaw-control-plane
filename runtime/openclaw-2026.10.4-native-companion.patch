@@ -284,15 +284,107 @@ index 3220f1ad277244f6fd08eae4a25ede83ac5fe142..a89bedd637c9569a0e652b360f8eaa6c
      @Test(arguments: ["com.openclaw.browser-credentials.v1", "example.other.service"])
      func `login Keychain access authorizes the enrolled current local principal without visible account`(
          _ item: String) throws
+diff --git a/docs/concepts/active-memory/enabling.md b/docs/concepts/active-memory/enabling.md
+index a2ad829708880f3569db1794008e5858167fb507..9a73d18b063ace5b01c7ff3ef1c7d1df859b9cad 100644
+--- a/docs/concepts/active-memory/enabling.md
++++ b/docs/concepts/active-memory/enabling.md
+@@ -47,10 +47,10 @@ This does not merge transcripts, change session keys or delivery routes, widen
+ workspace memory (`MEMORY.md` and `memory/*.md`) keeps its existing behavior.
+ 
+ Active Memory must remain enabled. Retrieval adds a bounded blocking step to
+-eligible replies. An unavailable search adds a short hidden outcome note without
+-exposing provider errors. An escalation skip is diagnostic only and preserves any
+-trusted trigger context without adding a claim about the user's recall intent.
+-Timeout and empty results keep their existing behavior.
++eligible replies. An intentional no-intent skip or an unavailable search adds a
++short hidden outcome note instead of recalled transcript context. This tells
++the main model that recall did not run or could not finish without exposing
++provider errors. Timeout and empty results keep their existing behavior.
+ OpenClaw's built-in memory provider supports this protected transcript-recall
+ path. Other memory providers keep their own recall behavior but do not
+ automatically receive private transcript authorization. `openclaw doctor`
+diff --git a/docs/concepts/active-memory/how-it-works.md b/docs/concepts/active-memory/how-it-works.md
+index c05a38112880f4ea569a2d535c6a30d55a046681..29db65d6d6d4d88a888ebc67d897e85a73829f05 100644
+--- a/docs/concepts/active-memory/how-it-works.md
++++ b/docs/concepts/active-memory/how-it-works.md
+@@ -13,10 +13,10 @@ flowchart LR
+   U["User Message"] --> D["Deterministic Trigger Recall"]
+   D -->|strong trusted match| I["Inject Bounded Hidden Context"]
+   D -->|weak or empty| H["Check Recall Intent"]
+-  H -->|no| M
++  H -->|no| O["Inject Bounded Recall Outcome"]
+   H -->|yes| R["Active Memory Deep Recall Sub-Agent"]
+   R -->|NONE| M
+-  R -->|unavailable| O["Inject Bounded Recall Outcome"]
++  R -->|unavailable| O
+   R -->|relevant summary| I
+   O --> M["Main Reply"]
+   I --> M
+@@ -25,15 +25,8 @@ flowchart LR
+ The deep-recall sub-agent can call only the configured memory recall tools (see
+ [Memory tools](/concepts/active-memory/memory-tools#memory-tools)). If the connection between the query and
+ available memory is weak, it returns `NONE` and the main reply proceeds without
+-extra context. An unavailable recall adds a fixed, bounded outcome note. An
+-escalation skip stays in diagnostics and adds no claim about whether the user
+-needs memory; any trusted trigger context remains available to the main reply.
+-
+-Deep recall publishes only the helper's completed answer, grounded in a successful
+-recall tool result. Raw tool output and unfinished assistant text are not injected
+-when the helper fails or times out. If the answer completed before the deadline
+-but cleanup crosses it, the answer can still be used after cleanup settles within
+-the bounded grace period. A completed `NONE` remains an empty recall outcome.
++extra context. Intentional no-intent skips and unavailable recall add only a
++fixed, bounded outcome note.
+ 
+ Active memory is a conversational enrichment feature, not a platform-wide
+ inference feature:
+diff --git a/docs/concepts/active-memory/tuning.md b/docs/concepts/active-memory/tuning.md
+index 06d611161e55e2961e7366847d5c1152afec5ad4..a1b233d0d04a92f072810f0cb6ad14d0ef8a600e 100644
+--- a/docs/concepts/active-memory/tuning.md
++++ b/docs/concepts/active-memory/tuning.md
+@@ -86,15 +86,6 @@ full -> contextual
+ 
+ An explicit `config.promptStyle` always overrides the mapping.
+ 
+-The default helper prompt first identifies the fact missing from the latest
+-request and supplied conversation, including preferences needed implicitly. If
+-nothing else is needed, it returns `NONE` before searching. For one unambiguous
+-fact, it starts with one candidate when the tool supports a result limit, keeps
+-the configured minimum score, and reads only the needed source excerpt. It
+-expands or reformulates the lookup for insufficient, ambiguous, conflicting, or
+-multiple facts, then stops once supported. This guidance uses each configured
+-tool's supported arguments and does not change tool limits or index settings.
+-
+ ## Model fallback policy
+ 
+ If `config.model` is unset, active memory resolves a model in this order:
+diff --git a/docs/concepts/memory.md b/docs/concepts/memory.md
+index 13e8442eef466476c53ebc91c452ef39f0908142..55773c8577f31c2748d259e5c0f343d2f684f96e 100644
+--- a/docs/concepts/memory.md
++++ b/docs/concepts/memory.md
+@@ -156,13 +156,6 @@ The agent has three tools for working with memory:
+ 
+ All three tools are provided by the active memory plugin (default: `memory-core`).
+ 
+-The Memory Recall guidance identifies missing facts, including implicit
+-preferences, while allowing direct answers from trusted loaded profile context.
+-For one unambiguous missing fact, it starts `memory_search` with `maxResults: 1`
+-and leaves `minScore` at its configured value. It expands or reformulates the
+-lookup when needed, reads only the relevant source lines, and stops once
+-supported. These instructions do not change tool defaults or index limits.
+-
+ When session indexing is enabled, `memory_search` can also return session
+ transcript hits. Their `sessions/...jsonl` paths are search references, not files
+ that `memory_get` can read. Use `sessions_search` with distinctive text from the
 diff --git a/docs/concepts/queue.md b/docs/concepts/queue.md
-index d98a3e2b12e650e05fbdc94dbbb46bb96a1aa841..c25eb5ac09da00c0afef384c73d709acb0db60d0 100644
+index 4f6f4f9c078ccc50177ac3b5f88940e6bb5e2795..c25eb5ac09da00c0afef384c73d709acb0db60d0 100644
 --- a/docs/concepts/queue.md
 +++ b/docs/concepts/queue.md
 @@ -35,8 +35,6 @@ When unset, all inbound channel surfaces use:
  
  Same-turn steering is the default. A prompt that arrives mid-run is injected into the active runtime when the run can accept steering, so no second session run is started. If the active run cannot accept steering, OpenClaw waits for the active run to finish before starting the prompt.
  
--If an admitted run is still preparing, steering waits for that same run to publish its native backend. Completion, cancellation, or replacement of the captured run ends that wait; follow-up delivery never borrows a later run with the same session key or run ID.
+-If an admitted run is still preparing, steering waits for that same run to publish its native backend. Completion, cancellation, or replacement of the captured run ends that wait; follow-up delivery never borrows a later run with the same session key or run ID. This includes channel corrections while a requester resumes after a delegated child settles or performs automatic context maintenance before its next model call.
 -
  ## Queue modes
  
@@ -340,6 +432,1322 @@ index ed1169013e86b0cd864faf75570c1f3cc022bc5d..e31acef2c64816b1f8c8c61d08172b18
  Task and maintenance lookups added nonunique indexes without changing state
  schema 17 or agent schema 21: task requester sessions, worker placements by
  environment, and session entries whose validity is not yet confirmed. The task
+diff --git a/extensions/active-memory/index.test.ts b/extensions/active-memory/index.test.ts
+index 67b1e343978f0664a3ec71efd0b158ce90b7869f..56f735b3be31fd86a9cd11afc3c5403c76401fd4 100644
+--- a/extensions/active-memory/index.test.ts
++++ b/extensions/active-memory/index.test.ts
+@@ -55,6 +55,7 @@ import {
+   setCachedResult,
+ } from "./recall-state.js";
+ import {
++  readPartialAssistantText,
+   resetActiveMemoryTranscriptForTests,
+   setTimeoutPartialDataGraceMsForTests,
+ } from "./transcript-result.js";
+@@ -181,6 +182,8 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
+ });
+ 
+ describe("active-memory plugin", () => {
++  const skippedRecallContext =
++    "Active Memory intentionally skipped deep recall because this turn did not ask for past context.";
+   const unavailableRecallContext =
+     "Active Memory could not retrieve memory for this turn. Do not assume that no relevant memory exists.";
+ 
+@@ -221,7 +224,6 @@ describe("active-memory plugin", () => {
+     return {
+       ...resultRecord,
+       meta: {
+-        stopReason: "stop",
+         ...meta,
+         agentMeta: {
+           sessionId,
+@@ -1614,7 +1616,7 @@ describe("active-memory plugin", () => {
+       { sessionKey: "agent:main:live-config-removed" },
+     );
+ 
+-    expect(result).toBeUndefined();
++    expectPrependContextContains(result, skippedRecallContext);
+     expect(runEmbeddedAgent).not.toHaveBeenCalled();
+   });
+ 
+@@ -1636,10 +1638,10 @@ describe("active-memory plugin", () => {
+         channelId: "owner",
+       };
+       const ordinary = await runPromptBuild({ prompt: ordinaryPrompt }, context);
+-      expect(ordinary).toBeUndefined();
++      expectPrependContextContains(ordinary, skippedRecallContext);
+       expect(runEmbeddedAgent).not.toHaveBeenCalled();
+       const future = await runPromptBuild({ prompt: futurePrompt }, context);
+-      expect(future).toBeUndefined();
++      expectPrependContextContains(future, skippedRecallContext);
+       expect(runEmbeddedAgent).not.toHaveBeenCalled();
+       const recall = await runPromptBuild({ prompt }, context);
+       expect(runEmbeddedAgent).toHaveBeenCalledOnce();
+@@ -1648,20 +1650,6 @@ describe("active-memory plugin", () => {
+     },
+   );
+ 
+-  it.each(["Suggest a quick lunch for me.", "The cache is ready."])(
+-    "keeps a heuristic no-intent decision diagnostic without publishing a claim: %s",
+-    async (prompt) => {
+-      registerPluginConfig({ mode: "escalate" });
+-      const result = await runPromptBuild(
+-        { prompt },
+-        { sessionKey: "agent:main:no-intent-diagnostic" },
+-      );
+-      expect(result).toBeUndefined();
+-      expect(runEmbeddedAgent).not.toHaveBeenCalled();
+-      expect(hasDebugLine("active-memory: recall skipped reason=no-recall-intent")).toBe(true);
+-    },
+-  );
+-
+   it("does not run for agents that are not explicitly targeted", async () => {
+     const result = await runPromptBuild(
+       { prompt: "what wings should i order?" },
+@@ -1814,53 +1802,48 @@ describe("active-memory plugin", () => {
+     },
+   );
+ 
+-  it.each(["escalate", "off"])(
+-    "keeps lane-one context and diagnostics when deep recall is skipped (mode=%s)",
+-    async (mode) => {
+-      registerPluginConfig({ mode, logging: true });
+-      hoisted.getActiveMemorySearchManager.mockResolvedValueOnce({
+-        manager: {
+-          search: vi.fn(async () => []),
+-          listTriggerCandidates: vi.fn(async () => [
+-            {
+-              path: "MEMORY.md",
+-              startLine: 1,
+-              endLine: 1,
+-              score: 1,
+-              snippet: "Prefer aisle seats.",
+-              source: "memory" as const,
+-              provenance: {
+-                originClass: "agent" as const,
+-                sessionKind: "interactive" as const,
+-                observedAt: 1,
+-              },
+-              triggers: "booking a flight",
++  it("logs deterministic trigger injections when invocation logging is enabled", async () => {
++    hoisted.getActiveMemorySearchManager.mockResolvedValueOnce({
++      manager: {
++        search: vi.fn(async () => []),
++        listTriggerCandidates: vi.fn(async () => [
++          {
++            path: "MEMORY.md",
++            startLine: 1,
++            endLine: 1,
++            score: 1,
++            snippet: "Prefer aisle seats.",
++            source: "memory" as const,
++            provenance: {
++              originClass: "agent" as const,
++              sessionKind: "interactive" as const,
++              observedAt: 1,
+             },
+-          ]),
+-        },
+-      } as never);
++            triggers: "booking a flight",
++          },
++        ]),
++      },
++    } as never);
+ 
+-      const result = await runPromptBuild(
+-        { prompt: "Help when booking a flight" },
+-        {
+-          sessionKey: "agent:main:telegram:direct:owner",
+-          messageProvider: "telegram",
+-          channelId: "owner",
+-        },
+-      );
++    const result = await runPromptBuild(
++      { prompt: "Help when booking a flight" },
++      {
++        sessionKey: "agent:main:telegram:direct:owner",
++        messageProvider: "telegram",
++        channelId: "owner",
++      },
++    );
+ 
+-      expectPrependContextContains(result, "Prefer aisle seats.");
+-      expect(runEmbeddedAgent).not.toHaveBeenCalled();
+-      expect(
+-        vi
+-          .mocked(api.logger.info)
+-          .mock.calls.some(
+-            (call: unknown[]) =>
+-              String(call[0]) === "active-memory: lane-1 injected 1 trigger-matched entries",
+-          ),
+-      ).toBe(true);
+-    },
+-  );
++    expectPrependContextContains(result, "Prefer aisle seats.");
++    expect(
++      vi
++        .mocked(api.logger.info)
++        .mock.calls.some(
++          (call: unknown[]) =>
++            String(call[0]) === "active-memory: lane-1 injected 1 trigger-matched entries",
++        ),
++    ).toBe(true);
++  });
+ 
+   it.each([-1_000])(
+     "continues model recall after trigger timeout with a %d ms wall-clock change",
+@@ -1976,7 +1959,7 @@ describe("active-memory plugin", () => {
+     expect(allowGatewaySubagentBinding).toBe(true);
+     expect(prompt).toContain("Another model is preparing the final user-facing answer.");
+     expect(prompt).toContain("Do not answer the user directly.");
+-    expect(prompt).toContain("bounded search query with the configured memory tools");
++    expect(prompt).toContain("Use the bounded search query with the configured memory tools.");
+     expect(prompt).toContain("Mutable operational facts");
+     expect(prompt).toContain("source timestamp");
+     expect(prompt).toContain("verify live");
+@@ -2494,13 +2477,12 @@ describe("active-memory plugin", () => {
+   );
+ 
+   it.each([
+-    { failed: true, persistTranscripts: true, cleanupFails: false, none: false },
+-    { failed: false, persistTranscripts: true, cleanupFails: false, none: false },
+-    { failed: false, persistTranscripts: true, cleanupFails: true, none: false },
+-    { failed: false, persistTranscripts: true, cleanupFails: false, none: true },
++    { failed: true, persistTranscripts: true, cleanupFails: false },
++    { failed: false, persistTranscripts: true, cleanupFails: false },
++    { failed: false, persistTranscripts: true, cleanupFails: true },
+   ])(
+-    "preserves terminal recall outcome when cleanup crosses its deadline (failed=$failed, persist=$persistTranscripts, cleanupFails=$cleanupFails, none=$none)",
+-    async ({ failed, persistTranscripts, cleanupFails, none }) => {
++    "preserves terminal recall outcome when cleanup crosses its deadline (failed=$failed, persist=$persistTranscripts, cleanupFails=$cleanupFails)",
++    async ({ failed, persistTranscripts, cleanupFails }) => {
+       vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+       setMinimumTimeoutMsForTests(1);
+       setSetupGraceTimeoutMsForTests(0);
+@@ -2540,7 +2522,7 @@ describe("active-memory plugin", () => {
+             assistantRecord(summary),
+           ]);
+           return {
+-            payloads: [{ text: none ? "NONE" : summary }],
++            payloads: [{ text: summary }],
+             meta: {
+               durationMs: 0,
+               ...(failed ? { error: { kind: "incomplete_turn", message: "No final reply." } } : {}),
+@@ -2573,7 +2555,7 @@ describe("active-memory plugin", () => {
+           expect.stringContaining("failed to clean up recall session"),
+         );
+       }
+-      if (!failed && !cleanupFails && !none) {
++      if (!failed && !cleanupFails) {
+         expectPrependContextContains(result, summary);
+         expectLinesToContain(getActiveMemoryLines(sessionKey), "status=timeout_partial");
+       } else {
+@@ -2586,55 +2568,7 @@ describe("active-memory plugin", () => {
+     },
+   );
+ 
+-  it.each([
+-    { name: "embedded stop", meta: { stopReason: "stop" }, publish: true },
+-    { name: "native end turn", meta: { stopReason: "end_turn" }, publish: true },
+-    {
+-      name: "CLI completion",
+-      meta: {
+-        stopReason: undefined,
+-        completion: { stopReason: "completed", finishReason: "stop" },
+-      },
+-      publish: true,
+-    },
+-    { name: "missing completion", meta: { stopReason: undefined }, publish: false },
+-    { name: "aborted", meta: { aborted: true }, publish: false },
+-    { name: "yielded", meta: { yielded: true }, publish: false },
+-    { name: "pending continuation", meta: { continuationPending: true }, publish: false },
+-    { name: "pending tool calls", meta: { stopReason: "tool_calls" }, publish: false },
+-    { name: "truncated answer", meta: { stopReason: "length" }, publish: false },
+-    {
+-      name: "planning only",
+-      meta: { agentHarnessResultClassification: "planning-only" },
+-      publish: false,
+-    },
+-    { name: "commentary only", meta: {}, payload: { isCommentary: true }, publish: false },
+-    { name: "reasoning only", meta: {}, payload: { isReasoning: true }, publish: false },
+-  ])("publishes only completed native answers: $name", async ({ meta, publish, ...testCase }) => {
+-    registerPluginConfig({ logging: true });
+-    const sessionKey = "agent:main:native-terminal-boundary";
+-    seedSession(sessionKey, "s-native-terminal-boundary", 0);
+-    const summary = "User usually orders ramen.";
+-    runEmbeddedAgent.mockImplementationOnce(async (params: { sessionFile: string }) => {
+-      await writeTranscriptJsonl(params.sessionFile, [usableMemoryTranscriptRecord(summary)]);
+-      return {
+-        payloads: [{ text: summary, ...("payload" in testCase ? testCase.payload : {}) }],
+-        meta,
+-      };
+-    });
+-    const result = await runPromptBuild(
+-      { prompt: "what food do i usually order?" },
+-      { sessionKey },
+-    );
+-    if (publish) {
+-      expectPrependContextContains(result, summary);
+-    } else {
+-      expect(result).toBeUndefined();
+-      expectLinesNotToContain(getActiveMemoryLines(sessionKey), "status=ok");
+-    }
+-  });
+-
+-  it("rejects unfinished assistant transcript text on timeout", async () => {
++  it("returns partial transcript text on timeout when the subagent has already written assistant output", async () => {
+     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+     setMinimumTimeoutMsForTests(1);
+     setSetupGraceTimeoutMsForTests(0);
+@@ -2679,14 +2613,22 @@ describe("active-memory plugin", () => {
+     const result = await resultPromise;
+ 
+     expect(lastEmbeddedPrompt()).toContain("summary under 40 characters total");
+-    expect(result).toBeUndefined();
++    const prependContext = requirePrependContext(result);
++    expect(prependContext).toContain("alpha beta gamma delta epsilon zeta eta…");
++    expect(prependContext).toContain("<active_memory_plugin>");
++    expect(prependContext).not.toContain("theta");
++    expect(prependContext).not.toContain("ignore this user text");
+     const lines = getActiveMemoryLines(sessionKey);
+-    expectLinesToContain(lines, "🧩 Active Memory: status=timeout");
+-    expectLinesNotToContain(lines, "status=timeout_partial");
++    expectLinesToContain(lines, "🧩 Active Memory: status=timeout_partial");
++    expectLinesToContain(lines, "summary=40 chars");
++    expectLinesToContain(
++      lines,
++      "🔎 Active Memory Debug: timeout_partial: 40 chars recovered (not persisted)",
++    );
+     expect(lines.join("\n")).not.toContain("alpha beta gamma delta");
+   });
+ 
+-  it("rejects unfinished text while still cleaning temporary SQLite recall rows", async () => {
++  it("returns partial transcript text after temporary SQLite recall rows are cleaned up", async () => {
+     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+     setMinimumTimeoutMsForTests(1);
+     setSetupGraceTimeoutMsForTests(0);
+@@ -2729,7 +2671,9 @@ describe("active-memory plugin", () => {
+     await vi.advanceTimersByTimeAsync(100);
+     const result = await resultPromise;
+ 
+-    expect(result, recallDiagnostics(sessionKey)).toBeUndefined();
++    expect(result, recallDiagnostics(sessionKey)).toMatchObject({
++      prependContext: expect.stringContaining("temporary partial recall summary"),
++    });
+     expect(sessionRuntime.getSessionEntry(target)).toBeUndefined();
+     expect(await transcriptRuntime.readSessionTranscriptEvents(target)).toEqual([]);
+     expect(hoisted.rawDeltaReads).toContainEqual({
+@@ -2738,8 +2682,11 @@ describe("active-memory plugin", () => {
+       maxEvents: 2_000,
+     });
+     const lines = getActiveMemoryLines(sessionKey);
+-    expectLinesToContain(lines, "🧩 Active Memory: status=timeout");
+-    expectLinesNotToContain(lines, "status=timeout_partial");
++    expectLinesToContain(lines, "🧩 Active Memory: status=timeout_partial");
++    expectLinesToContain(
++      lines,
++      "🔎 Active Memory Debug: timeout_partial: 32 chars recovered (not persisted)",
++    );
+   });
+ 
+   it("rejects a timeout partial without usable memory evidence", async () => {
+@@ -2860,80 +2807,67 @@ describe("active-memory plugin", () => {
+       );
+     }
+     const lines = getActiveMemoryLines(sessionKey);
+-    expect(result).toBeUndefined();
+-    expectLinesToContain(lines, "🧩 Active Memory: status=timeout");
+-    expectLinesNotToContain(lines, "status=timeout_partial");
++    if (failed || cleanupFails) {
++      expect(result).toBeUndefined();
++      expectLinesToContain(lines, "🧩 Active Memory: status=timeout");
++      expectLinesNotToContain(lines, "status=timeout_partial");
++    } else {
++      expectPrependContextContains(result, "partial abort summary");
++      expectLinesToContain(lines, "🧩 Active Memory: status=timeout_partial");
++      expectLinesToContain(
++        lines,
++        "🔎 Active Memory Debug: timeout_partial: 21 chars recovered (not persisted)",
++      );
++    }
+     expect(getActiveMemoryLines(sessionKey).join("\n")).not.toContain("partial abort summary");
+   });
+ 
+-  it.each([false, true])(
+-    "rejects tool-only timeout output (unfinishedText=%s)",
+-    async (unfinishedText) => {
+-      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+-      setMinimumTimeoutMsForTests(1);
+-      setSetupGraceTimeoutMsForTests(0);
+-      setTimeoutPartialDataGraceMsForTests(50);
+-      registerPluginConfig({ timeoutMs: 100, logging: true });
+-      const sessionKey = "agent:main:timeout-partial-callback-evidence";
+-      seedSession(sessionKey, "s-timeout-partial-callback-evidence", 0);
+-      const transcriptWritten = createDeferred<void>();
+-      runEmbeddedAgent.mockImplementationOnce(
+-        async (params: {
+-          sessionFile: string;
+-          abortSignal?: AbortSignal;
+-          onAgentToolResult?: (event: {
+-            toolName: string;
+-            result: unknown;
+-            isError: boolean;
+-          }) => void;
+-        }) => {
+-          params.onAgentToolResult?.({
+-            toolName: "memory_search",
+-            isError: false,
+-            result: {
+-              content: [{ type: "text", text: '{"results":[{"text":"User likes ramen."}]}' }],
+-              details: { results: [{ text: "User likes ramen." }] },
+-            },
+-          });
+-          await writeTranscriptJsonl(params.sessionFile, [
+-            usableMemoryTranscriptRecord("User likes ramen."),
+-            {
+-              type: "message",
+-              message: {
+-                role: "assistant",
+-                stopReason: "toolUse",
+-                content: [
+-                  ...(unfinishedText
+-                    ? [{ type: "text", text: "User likes ramen with chili oil." }]
+-                    : []),
+-                  {
+-                    type: "toolCall",
+-                    id: "pending-get",
+-                    name: "memory_get",
+-                    arguments: { path: "memory/preferences.md" },
+-                  },
+-                ],
+-              },
+-            },
+-          ]);
+-          transcriptWritten.resolve();
+-          return await waitForAbort(params.abortSignal);
+-        },
+-      );
++  it("keeps a timeout partial grounded only by the tool-result callback", async () => {
++    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
++    setMinimumTimeoutMsForTests(1);
++    setSetupGraceTimeoutMsForTests(0);
++    setTimeoutPartialDataGraceMsForTests(50);
++    registerPluginConfig({ timeoutMs: 100, logging: true });
++    const sessionKey = "agent:main:timeout-partial-callback-evidence";
++    seedSession(sessionKey, "s-timeout-partial-callback-evidence", 0);
++    const transcriptWritten = createDeferred<void>();
++    runEmbeddedAgent.mockImplementationOnce(
++      async (params: {
++        sessionFile: string;
++        abortSignal?: AbortSignal;
++        onAgentToolResult?: (event: {
++          toolName: string;
++          result: unknown;
++          isError: boolean;
++        }) => void;
++      }) => {
++        params.onAgentToolResult?.({
++          toolName: "memory_search",
++          isError: false,
++          result: {
++            content: [{ type: "text", text: '{"results":[{"text":"User likes ramen."}]}' }],
++            details: { results: [{ text: "User likes ramen." }] },
++          },
++        });
++        await writeTranscriptJsonl(params.sessionFile, [
++          assistantRecord("User likes ramen with chili oil."),
++        ]);
++        transcriptWritten.resolve();
++        return await waitForAbort(params.abortSignal);
++      },
++    );
+ 
+-      const resultPromise = runPromptBuild(
+-        { prompt: "what ramen do i like? callback evidence" },
+-        { sessionKey },
+-      );
+-      await transcriptWritten.promise;
+-      await vi.advanceTimersByTimeAsync(100);
+-      const result = await resultPromise;
++    const resultPromise = runPromptBuild(
++      { prompt: "what ramen do i like? callback evidence" },
++      { sessionKey },
++    );
++    await transcriptWritten.promise;
++    await vi.advanceTimersByTimeAsync(100);
++    const result = await resultPromise;
+ 
+-      expect(result).toBeUndefined();
+-      expectLinesToContain(getActiveMemoryLines(sessionKey), "Active Memory: status=timeout");
+-      expectLinesNotToContain(getActiveMemoryLines(sessionKey), "status=timeout_partial");
+-    },
+-  );
++    expectPrependContextContains(result, "User likes ramen with chili oil.");
++    expectLinesToContain(getActiveMemoryLines(sessionKey), "Active Memory: status=timeout_partial");
++  });
+ 
+   it("skips generic subagent errors without using partial transcript output", async () => {
+     registerPluginConfig({ persistTranscripts: true, logging: true });
+@@ -2974,6 +2908,42 @@ describe("active-memory plugin", () => {
+     );
+   });
+ 
++  it("bounds partial assistant transcript reads by character cap", async () => {
++    const source = await writeRuntimeTranscript([assistantRecord(`${"a".repeat(38)}🎉TAILWORD`)]);
++    const result = await readPartialAssistantText(source, {
++      maxChars: 39,
++      maxLines: 2_000,
++      maxBytes: 10 * 1024 * 1024,
++    });
++    const partialText = requireNonEmptyString(result, "partial assistant text missing");
++    expect(partialText).toBe("a".repeat(38));
++    expect(hoisted.rawDeltaReads).toContainEqual({
++      sessionId: source.sessionId,
++      maxEvents: 2_000,
++      maxBytes: 10 * 1024 * 1024,
++    });
++  });
++
++  it("keeps joined partial assistant transcript caps UTF-16 safe", async () => {
++    const source = await writeRuntimeTranscript([
++      {
++        type: "message",
++        message: { role: "assistant", content: "a".repeat(37) },
++      },
++      {
++        type: "message",
++        message: { role: "assistant", content: "🎉TAILWORD" },
++      },
++    ]);
++
++    const result = await readPartialAssistantText(source, {
++      maxChars: 39,
++      maxLines: 10,
++    });
++
++    expect(result).toBe("a".repeat(37));
++  });
++
+   it("schedules timeout cleanup before slow status persistence", async () => {
+     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+     configureRecallTimeout(1);
+@@ -3434,11 +3404,11 @@ describe("active-memory plugin", () => {
+ 
+   it.each([
+     {
+-      name: "terminal model error rejects raw retrieval and unfinished reply",
++      name: "terminal model error preserves completed retrieval",
+       summary: true,
+       error: true,
+       failed: true,
+-      status: "failed",
++      status: "ok",
+     },
+     {
+       name: "error payload without terminal metadata",
+@@ -3514,6 +3484,9 @@ describe("active-memory plugin", () => {
+       expect(context).toContain(summary);
+       expect(context).not.toContain("Please try again.");
+       expect(context).not.toContain("Unsupported assistant guess.");
++      if (testCase.failed) {
++        expect(context).toContain("Retrieved memory_search result:");
++      }
+     } else {
+       expect(result).toBeUndefined();
+     }
+diff --git a/extensions/active-memory/index.ts b/extensions/active-memory/index.ts
+index 7ee8cea970afcc364e2f81056caf2d465cafa1c7..e0bf07b9ce8267c4e05a2dbbc80e0b37f13a9836 100644
+--- a/extensions/active-memory/index.ts
++++ b/extensions/active-memory/index.ts
+@@ -14,7 +14,7 @@ import {
+   readActiveMemoryConfig,
+ } from "./config.js";
+ import { resolveRecallEscalationDecision } from "./escalation.js";
+-import { buildPromptPrefix, buildRecallUnavailablePrefix } from "./prompt.js";
++import { buildPromptPrefix, buildRecallOutcomePrefix } from "./prompt.js";
+ import { buildQuery, buildSearchQuery, extractRecentTurns, getModelRef } from "./query.js";
+ import { forgetActiveRecallRun, toSingleLineErrorMessage } from "./recall-state.js";
+ import { maybeResolveActiveRecall } from "./recall.js";
+@@ -498,8 +498,13 @@ export default definePluginEntry({
+               hasStrongLaneOneHit: laneOne.hasStrongHit,
+             });
+             if (escalationDecision !== "recall") {
++              // Ordinary turns intentionally skip recall in the default escalation mode.
+               api.logger.debug?.(`active-memory: recall skipped reason=${escalationDecision}`);
+-              return publishPrependContext([laneOneContext]);
++              const outcomeContext =
++                escalationDecision === "no-recall-intent"
++                  ? buildRecallOutcomePrefix("skipped-no-recall-intent")
++                  : undefined;
++              return publishPrependContext([laneOneContext, outcomeContext]);
+             }
+             const conversationRecall: ConversationRecallContext | undefined =
+               productRecallAllowed && resolvedSessionKey
+@@ -548,7 +553,7 @@ export default definePluginEntry({
+             const recallContext = result.summary
+               ? buildPromptPrefix(result.summary)
+               : result.status === "unavailable"
+-                ? buildRecallUnavailablePrefix()
++                ? buildRecallOutcomePrefix(result.status)
+                 : undefined;
+             return publishPrependContext([laneOneContext, recallContext]);
+           } catch (error) {
+diff --git a/extensions/active-memory/prompt.test.ts b/extensions/active-memory/prompt.test.ts
+index dbe13fec135761747bf3c19bf4fa01b7a77e40db..f882f063a6bb138a88a4cae23423ed46549e03c1 100644
+--- a/extensions/active-memory/prompt.test.ts
++++ b/extensions/active-memory/prompt.test.ts
+@@ -1,29 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import { normalizePluginConfig } from "./config.js";
+-import { buildRecallPrompt, normalizeActiveSummary } from "./prompt.js";
+-
+-describe("buildRecallPrompt", () => {
+-  it.each([
+-    { tools: ["memory_search", "memory_get"], nativeSearch: true },
+-    { tools: ["record_find", "record_get"], nativeSearch: false },
+-  ])(
+-    "adapts bounded lookup instructions to the configured tool contract: $tools",
+-    ({ tools, nativeSearch }) => {
+-      const prompt = buildRecallPrompt({
+-        config: normalizePluginConfig({ toolsAllow: tools }),
+-        query: "Latest user message: Recommend a lunch.",
+-        searchQuery: "lunch preferences",
+-      });
+-      expect(prompt).toContain(`Configured memory tools: ${tools.join(", ")}`);
+-      expect(prompt).toContain("recall is implicit");
+-      expect(prompt).toContain("return NONE before using tools");
+-      expect(prompt).toContain("one candidate");
+-      expect(prompt).toContain("supported arguments");
+-      expect(prompt.includes("maxResults: 1")).toBe(nativeSearch);
+-      expect(prompt).not.toContain("permissive search limits or thresholds");
+-    },
+-  );
+-});
++import { normalizeActiveSummary } from "./prompt.js";
+ 
+ describe("normalizeActiveSummary", () => {
+   it.each([
+diff --git a/extensions/active-memory/prompt.ts b/extensions/active-memory/prompt.ts
+index 65bed89104a1ec0539b94c9c74bdd02d3a3b2fab..32fd9ad58f8e7bfc8959653b7f45180cccc77d86 100644
+--- a/extensions/active-memory/prompt.ts
++++ b/extensions/active-memory/prompt.ts
+@@ -12,10 +12,22 @@ import {
+   STRUCTURED_MEMORY_EMPTY_STATUSES,
+   STRUCTURED_MEMORY_FAILURE_STATUSES,
+   TIMEOUT_BOILERPLATE_PATTERNS,
++  type ActiveRecallResult,
+   type ActiveMemoryPromptStyle,
+   type ResolvedActiveRecallPluginConfig,
+ } from "./types.js";
+ 
++type ActiveMemoryRecallOutcome =
++  | Extract<ActiveRecallResult["status"], "unavailable">
++  | "skipped-no-recall-intent";
++
++const ACTIVE_MEMORY_RECALL_OUTCOME_TEXT = {
++  "skipped-no-recall-intent":
++    "Active Memory intentionally skipped deep recall because this turn did not ask for past context.",
++  unavailable:
++    "Active Memory could not retrieve memory for this turn. Do not assume that no relevant memory exists.",
++} satisfies Record<ActiveMemoryRecallOutcome, string>;
++
+ function buildPromptStyleLines(style: ActiveMemoryPromptStyle): string[] {
+   switch (style) {
+     case "strict":
+@@ -75,20 +87,11 @@ export function buildRecallPrompt(params: {
+     "Your job is to search memory and return only the most relevant memory context for that model.",
+     "You receive a bounded search query plus conversation context, including the user's latest message.",
+     "Use only the available memory tools.",
++    "Use the bounded search query with the configured memory tools.",
+     `Configured memory tools: ${params.config.toolsAllow.join(", ")}.`,
+-    "First identify the missing fact needed to help answer the latest user message, including relevant preferences even when recall is implicit.",
+-    "If the latest message and supplied conversation already provide what is needed, return NONE before using tools.",
+-    "When lookup is needed, use the bounded search query with the configured memory tools.",
+-    "For a single unambiguous fact, start with one candidate when the selected search tool supports a result-limit argument; use only its supported arguments and leave the configured minimum score unchanged.",
+-    ...(params.config.toolsAllow.includes("memory_search")
+-      ? [
+-          "For that initial memory_search lookup, use maxResults: 1 and omit minScore to keep its configured value.",
+-        ]
+-      : []),
+-    "Expand the result limit where supported, or reformulate the query, when the best hit is insufficient, ambiguous, conflicting, or multiple independent facts are needed.",
+-    "Read only the source lines or excerpts needed to resolve the missing facts, using the selected tool's supported arguments. Stop once the answer is supported.",
+     "Do not use channel metadata, provider metadata, debug output, or the full conversation context as the memory tool query.",
+     "If the available memory tools find nothing useful, reply with NONE.",
++    "When searching for preference or habit recall, use permissive search limits or thresholds before deciding that no useful memory exists.",
+     "Do not answer the user directly.",
+     `Prompt style: ${params.config.promptStyle}.`,
+     ...buildPromptStyleLines(params.config.promptStyle),
+@@ -305,8 +308,6 @@ export function buildPromptPrefix(summary: string): string {
+   ].join("\n");
+ }
+ 
+-export function buildRecallUnavailablePrefix(): string {
+-  return buildPromptPrefix(
+-    "Active Memory could not retrieve memory for this turn. Do not assume that no relevant memory exists.",
+-  );
++export function buildRecallOutcomePrefix(outcome: ActiveMemoryRecallOutcome): string {
++  return buildPromptPrefix(ACTIVE_MEMORY_RECALL_OUTCOME_TEXT[outcome]);
+ }
+diff --git a/extensions/active-memory/recall-run.ts b/extensions/active-memory/recall-run.ts
+index 003b84805ba9784de68884824f2347e85ca96be3..6d3ab25116e3f4efd9d9f9a0cbc10b5cc4d72b32 100644
+--- a/extensions/active-memory/recall-run.ts
++++ b/extensions/active-memory/recall-run.ts
+@@ -22,8 +22,17 @@ import {
+ import { buildRecallPrompt } from "./prompt.js";
+ import { toSingleLineErrorMessage } from "./recall-state.js";
+ import { resolveRecallRunChannelContext } from "./session.js";
+-import { attachPartialTimeoutData, readMemoryToolResultEvidence } from "./transcript-result.js";
++import {
++  attachPartialTimeoutData,
++  readMemoryToolResultEvidence,
++  readPartialAssistantTextFromSources,
++} from "./transcript-result.js";
+ import { readMergedActiveMemoryTranscriptState } from "./transcript-watch.js";
++import {
++  appendMemoryToolResultText,
++  formatMemoryToolResultText,
++  type MemoryToolTexts,
++} from "./transcript.js";
+ import {
+   ACTIVE_MEMORY_CLEANUP_RETRY_DELAYS_MS,
+   ACTIVE_MEMORY_RECALL_LANE,
+@@ -160,10 +169,10 @@ export async function runRecallSubagent(params: {
+ 
+   let harnessHasUsableMemoryResult = false;
+   let harnessHasUnavailableMemorySearchResult = false;
++  let harnessMemoryToolTexts: MemoryToolTexts = {};
+   let transcriptArtifactPersisted = false;
+   let runtimeSessionCreated = false;
+   let resultStatus: RecallSubagentResult["resultStatus"];
+-  let rawReply: string | undefined;
+   const readRecallEvidence = async () => {
+     const state = await readMergedActiveMemoryTranscriptState({
+       sources: transcriptSources,
+@@ -171,6 +180,7 @@ export async function runRecallSubagent(params: {
+     });
+     return {
+       ...state,
++      memoryToolText: formatMemoryToolResultText(harnessMemoryToolTexts) ?? state.memoryToolText,
+       hasUsableMemoryResult: state.hasUsableMemoryResult || harnessHasUsableMemoryResult,
+       hasUnavailableMemorySearchResult:
+         state.hasUnavailableMemorySearchResult || harnessHasUnavailableMemorySearchResult,
+@@ -299,22 +309,14 @@ export async function runRecallSubagent(params: {
+           });
+           harnessHasUsableMemoryResult ||= evidence.hasUsableMemoryResult;
+           harnessHasUnavailableMemorySearchResult ||= evidence.hasUnavailableMemorySearchResult;
++          harnessMemoryToolTexts = appendMemoryToolResultText(
++            harnessMemoryToolTexts,
++            evidence.modelVisibleEvidence,
++          );
+         },
+       })
+       .finally(params.onEmbeddedRunSettled);
+-    const stopReason = result.meta.stopReason ?? result.meta.completion?.stopReason;
+-    const completed =
+-      stopReason === "stop" || stopReason === "end_turn" || stopReason === "completed";
+-    resultStatus =
+-      !completed ||
+-      result.meta.error ||
+-      result.meta.aborted ||
+-      result.meta.yielded ||
+-      result.meta.continuationPending ||
+-      result.meta.pendingToolCalls?.length ||
+-      result.meta.agentHarnessResultClassification
+-        ? "failed"
+-        : undefined;
++    resultStatus = result.meta.error ? "failed" : undefined;
+     const agentMeta = result.meta.agentMeta;
+     const activeSessionFile = normalizeOptionalString(agentMeta?.sessionFile);
+     const marker = parseSqliteSessionFileMarker(activeSessionFile);
+@@ -341,17 +343,12 @@ export async function runRecallSubagent(params: {
+       abortErr.name = "AbortError";
+       throw abortErr;
+     }
+-    // Capture only a completed native answer before persistence/cleanup can cross
+-    // the watchdog. Transcript/tool text has not passed the helper's selection.
+-    if (!resultStatus) {
+-      rawReply =
+-        (result.payloads ?? [])
+-          .filter((payload) => !payload.isError && !payload.isReasoning && !payload.isCommentary)
+-          .map((payload) => payload.text?.trim() ?? "")
+-          .filter(Boolean)
+-          .join("\n")
+-          .trim() || "NONE";
+-    }
++    const rawReply = (result.payloads ?? [])
++      .filter((payload) => payload.isError !== true)
++      .map((payload) => payload.text?.trim() ?? "")
++      .filter(Boolean)
++      .join("\n")
++      .trim();
+     if (artifactSessionFile) {
+       await persistActiveMemoryTranscriptArtifact({
+         sources: transcriptSources,
+@@ -360,15 +357,16 @@ export async function runRecallSubagent(params: {
+       transcriptArtifactPersisted = true;
+     }
+     return {
+-      rawReply: rawReply ?? "NONE",
++      rawReply: rawReply || "NONE",
+       resultStatus,
+       transcriptPath: artifactSessionFile,
+       ...(await readRecallEvidence()),
+     };
+   } catch (error) {
+     if (params.abortSignal?.aborted) {
++      const partialReply = await readPartialAssistantTextFromSources(transcriptSources);
+       attachPartialTimeoutData(error, {
+-        rawReply,
++        rawReply: partialReply ?? undefined,
+         resultStatus,
+         ...(await readRecallEvidence()),
+       });
+@@ -385,7 +383,7 @@ export async function runRecallSubagent(params: {
+     if (!params.abortSignal?.aborted) {
+       const message = toSingleLineErrorMessage(error);
+       params.api.logger.warn?.(
+-        `active-memory: memory sub-agent failed; skipping recall: ${message}`,
++        `active-memory: memory sub-agent failed; checking completed retrieval evidence: ${message}`,
+       );
+       return { rawReply: "NONE", resultStatus: "failed", ...(await readRecallEvidence()) };
+     }
+diff --git a/extensions/active-memory/transcript-result.evidence.test.ts b/extensions/active-memory/transcript-result.evidence.test.ts
+index 3e381b4b96afa8ebf8df97442b45288e9595e2da..23125a0dbea495e82af3409975f46e3310e9afac 100644
+--- a/extensions/active-memory/transcript-result.evidence.test.ts
++++ b/extensions/active-memory/transcript-result.evidence.test.ts
+@@ -1,13 +1,20 @@
+-import { describe, expect, it, vi } from "vitest";
++import { describe, expect, it } from "vitest";
+ import {
+   buildSubagentRecallResult,
+   buildTimeoutRecallResult,
+   readMemoryToolResultEvidence,
+ } from "./transcript-result.js";
+-const summary = "The preferred reminder app is Example Reminders.";
++import {
++  appendMemoryToolResultText,
++  formatMemoryToolResultText,
++  resolveTranscriptReadLimits,
++  type MemoryToolTexts,
++} from "./transcript.js";
++
++const retrieved = "Retrieved memory_get result:\nThe preferred reminder app is Example Reminders.";
+ 
+ describe("completed memory tool evidence", () => {
+-  it("records permitted retrieval usability without retaining raw tool text", () => {
++  it("keeps only permitted model-visible content, excluding private runtime details", () => {
+     const evidence = readMemoryToolResultEvidence({
+       toolName: "memory_get",
+       toolsAllow: ["memory_get"],
+@@ -23,34 +30,51 @@ describe("completed memory tool evidence", () => {
+       },
+     });
+     expect(evidence.hasUsableMemoryResult).toBe(true);
+-    expect(evidence).toEqual({
+-      hasUsableMemoryResult: true,
+-      hasUnavailableMemorySearchResult: false,
+-    });
++    expect(evidence.modelVisibleEvidence?.text).toContain("Example Reminders");
++    expect(evidence.modelVisibleEvidence?.text).toContain("memory/preferences.md");
++    expect(evidence.modelVisibleEvidence?.text).not.toContain("runtime-only");
+   });
+ 
+-  it.each(["disallowed", "failed", "unavailable"] as const)(
+-    "does not ground recall in %s output",
++  it.each(["disallowed", "failed", "details-only", "unavailable"] as const)(
++    "does not recover %s output",
+     (mode) => {
+       const evidence = readMemoryToolResultEvidence({
+         toolName: "memory_get",
+         toolsAllow: mode === "disallowed" ? [] : ["memory_get"],
+         isError: mode === "failed",
+         result: {
+-          content: [{ type: "text", text: JSON.stringify({ text: "fixture-record" }) }],
++          content:
++            mode === "details-only"
++              ? []
++              : [{ type: "text", text: JSON.stringify({ text: "fixture-record" }) }],
+           details: {
+             text: "details-only-value",
+             ...(mode === "unavailable" ? { unavailable: true } : {}),
+           },
+         },
+       });
+-      expect(evidence.hasUsableMemoryResult).toBe(false);
++      expect(evidence.modelVisibleEvidence).toBeUndefined();
+     },
+   );
+ 
+-  it("rejects failed replies and respects an explicit completed NONE", () => {
++  it("bounds all accumulated text and retains a later completed get before search snippets", () => {
++    let texts: MemoryToolTexts = {};
++    texts = appendMemoryToolResultText(texts, {
++      toolName: "memory_search",
++      text: "😀".repeat(32_000),
++    });
++    texts = appendMemoryToolResultText(texts, { toolName: "memory_get", text: retrieved });
++    const text = formatMemoryToolResultText(texts) ?? "";
++    expect(text.startsWith(retrieved)).toBe(true);
++    expect(text.length).toBeLessThanOrEqual(resolveTranscriptReadLimits().maxChars);
++    expect(text).not.toMatch(
++      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u,
++    );
++  });
++
++  it("recovers a summarizer failure from real retrieval while respecting an explicit successful NONE", () => {
+     const params = {
+-      subagentResult: { rawReply: "NONE", hasUsableMemoryResult: true },
++      subagentResult: { rawReply: "NONE", memoryToolText: retrieved, hasUsableMemoryResult: true },
+       elapsedMs: 1,
+       maxSummaryChars: 220,
+     };
+@@ -58,11 +82,12 @@ describe("completed memory tool evidence", () => {
+     expect(
+       buildSubagentRecallResult({
+         ...params,
+-        subagentResult: { ...params.subagentResult, rawReply: summary, resultStatus: "failed" },
++        subagentResult: { ...params.subagentResult, resultStatus: "failed" },
+       }),
+     ).toMatchObject({
+-      status: "failed",
+-      summary: null,
++      status: "ok",
++      rawReply: retrieved,
++      summary: expect.stringContaining("Example Reminders"),
+     });
+     expect(
+       buildSubagentRecallResult({
+@@ -83,7 +108,7 @@ describe("completed memory tool evidence", () => {
+       transcriptSources: [],
+       toolsAllow: ["memory_get"],
+       hasUsableMemoryResult: true,
+-      rawReply: summary,
++      memoryToolText: retrieved,
+     };
+     expect(await buildTimeoutRecallResult(params)).toMatchObject({
+       status: "timeout_partial",
+@@ -93,9 +118,6 @@ describe("completed memory tool evidence", () => {
+       { cleanupFailed: true },
+       { hasUnavailableMemorySearchResult: true },
+       { hasUsableMemoryResult: false },
+-      { resultStatus: "failed" as const },
+-      { resultStatus: "unavailable" as const },
+-      { rawReply: "NONE" },
+     ]) {
+       expect(await buildTimeoutRecallResult({ ...params, ...blocked })).toMatchObject({
+         status: "timeout",
+@@ -103,23 +125,4 @@ describe("completed memory tool evidence", () => {
+       });
+     }
+   });
+-
+-  it("does not treat captured text as settlement while cleanup is still pending", async () => {
+-    vi.useFakeTimers();
+-    const result = buildTimeoutRecallResult({
+-      elapsedMs: 10,
+-      maxSummaryChars: 80,
+-      transcriptSources: [],
+-      toolsAllow: ["memory_get"],
+-      rawReply: summary,
+-      hasUsableMemoryResult: true,
+-      subagentPromise: new Promise(() => {}),
+-    });
+-    try {
+-      await vi.advanceTimersByTimeAsync(500);
+-      expect(await result).toMatchObject({ status: "timeout", summary: null });
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+ });
+diff --git a/extensions/active-memory/transcript-result.ts b/extensions/active-memory/transcript-result.ts
+index 476121bf6a6d1ea40e85e90c93a2f3ba4d98600b..dd384494b236c6d897c9521d274e5a0960ce1a42 100644
+--- a/extensions/active-memory/transcript-result.ts
++++ b/extensions/active-memory/transcript-result.ts
+@@ -2,10 +2,16 @@ import {
+   asOptionalRecord,
+   normalizeOptionalString,
+ } from "openclaw/plugin-sdk/string-coerce-runtime";
++import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+ import { raceWithTimeout } from "openclaw/plugin-sdk/time-runtime";
+ import { normalizeActiveSummary, truncateSummary } from "./prompt.js";
++import { extractTextContent } from "./query.js";
+ import { readMergedActiveMemoryTranscriptState } from "./transcript-watch.js";
+-import { readMemoryResultFromSessionRecord } from "./transcript.js";
++import {
++  readMemoryResultFromSessionRecord,
++  resolveTranscriptReadLimits,
++  streamActiveMemoryTranscriptRecords,
++} from "./transcript.js";
+ import {
+   TIMEOUT_PARTIAL_DATA_GRACE_MS,
+   type ActiveMemoryPartialTimeoutData,
+@@ -14,6 +20,7 @@ import {
+   type ActiveMemoryTranscriptSource,
+   type ActiveRecallResult,
+   type RecallSubagentResult,
++  type TranscriptReadLimits,
+ } from "./types.js";
+ 
+ let timeoutPartialDataGraceMs = TIMEOUT_PARTIAL_DATA_GRACE_MS;
+@@ -26,6 +33,7 @@ export function readMemoryToolResultEvidence(params: {
+ }): {
+   hasUsableMemoryResult: boolean;
+   hasUnavailableMemorySearchResult: boolean;
++  modelVisibleEvidence?: { toolName: "memory_search" | "memory_get"; text: string };
+ } {
+   const result = asOptionalRecord(params.result);
+   const rawContent = result?.content;
+@@ -45,9 +53,71 @@ export function readMemoryToolResultEvidence(params: {
+       details: result?.details,
+     },
+   };
+-  const { hasUsableMemoryResult, hasUnavailableMemorySearchResult } =
++  const { hasUsableMemoryResult, hasUnavailableMemorySearchResult, modelVisibleEvidence } =
+     readMemoryResultFromSessionRecord(record, params.toolsAllow);
+-  return { hasUsableMemoryResult, hasUnavailableMemorySearchResult };
++  return { hasUsableMemoryResult, hasUnavailableMemorySearchResult, modelVisibleEvidence };
++}
++
++function extractAssistantTextFromSessionRecord(value: unknown): string {
++  const record = asOptionalRecord(value);
++  if (!record) {
++    return "";
++  }
++  const nestedMessage = asOptionalRecord(record.message);
++  const topLevelMessage = normalizeOptionalString(record.role) === "assistant" ? record : undefined;
++  const message = nestedMessage ?? topLevelMessage;
++  if (!message || normalizeOptionalString(message.role) !== "assistant") {
++    return "";
++  }
++  return extractTextContent(message.content).trim();
++}
++
++export async function readPartialAssistantText(
++  source: ActiveMemoryTranscriptSource,
++  limits?: TranscriptReadLimits,
++): Promise<string | null> {
++  const texts: string[] = [];
++  const resolvedLimits = resolveTranscriptReadLimits(limits);
++  let collectedChars = 0;
++  await streamActiveMemoryTranscriptRecords({
++    source,
++    limits: resolvedLimits,
++    onRecord: (record) => {
++      const text = extractAssistantTextFromSessionRecord(record);
++      if (text) {
++        const separatorChars = texts.length > 0 ? 1 : 0;
++        const remaining = resolvedLimits.maxChars - collectedChars - separatorChars;
++        if (remaining <= 0) {
++          return true;
++        }
++        const nextText = truncateUtf16Safe(text, remaining);
++        if (!nextText) {
++          return true;
++        }
++        texts.push(nextText);
++        collectedChars += separatorChars + nextText.length;
++        // A surrogate backoff leaves spare code units; stop instead of skipping ahead.
++        return nextText.length < text.length || collectedChars >= resolvedLimits.maxChars;
++      }
++      return false;
++    },
++  });
++  // Accepted chunks and separators are charged before append, so the join is already bounded.
++  const joined = texts.join("\n").trim();
++  return joined || null;
++}
++
++export async function readPartialAssistantTextFromSources(
++  sources: readonly ActiveMemoryTranscriptSource[],
++  limits?: TranscriptReadLimits,
++): Promise<string | null> {
++  for (const source of sources) {
++    const text = await readPartialAssistantText(source, limits);
++    if (text) {
++      return text;
++    }
++  }
++  return null;
+ }
+ 
+ export function attachPartialTimeoutData(
+@@ -107,8 +177,13 @@ export async function buildTimeoutRecallResult(
+     toolsAllow: readonly string[];
+   },
+ ): Promise<ActiveRecallResult> {
+-  const subagentPartialData = await waitForSubagentPartialTimeoutData(params.subagentPromise);
+-  const rawReply = params.rawReply ?? subagentPartialData.rawReply;
++  const subagentPartialData = params.rawReply
++    ? { settled: true as const }
++    : await waitForSubagentPartialTimeoutData(params.subagentPromise);
++  const rawReply =
++    params.rawReply ??
++    subagentPartialData.rawReply ??
++    (await readPartialAssistantTextFromSources(params.transcriptSources));
+   const transcriptState =
+     params.transcriptSources.length > 0
+       ? await readMergedActiveMemoryTranscriptState({
+@@ -118,8 +193,13 @@ export async function buildTimeoutRecallResult(
+       : undefined;
+   const searchDebug =
+     params.searchDebug ?? subagentPartialData.searchDebug ?? transcriptState?.searchDebug;
++  const memoryToolText = rawReply
++    ? undefined
++    : (params.memoryToolText ??
++      subagentPartialData.memoryToolText ??
++      transcriptState?.memoryToolText);
+   const summary = normalizeGroundedSummary(
+-    rawReply ?? "",
++    rawReply || memoryToolText || "",
+     params.maxSummaryChars,
+     params.hasUsableMemoryResult === true ||
+       subagentPartialData.hasUsableMemoryResult === true ||
+@@ -127,8 +207,8 @@ export async function buildTimeoutRecallResult(
+   );
+   if (
+     summary === null ||
+-    params.resultStatus !== undefined ||
+-    subagentPartialData.resultStatus !== undefined ||
++    ((params.resultStatus === "failed" || subagentPartialData.resultStatus === "failed") &&
++      !memoryToolText) ||
+     params.cleanupFailed ||
+     subagentPartialData.cleanupFailed ||
+     Boolean(searchDebug?.error) ||
+@@ -154,8 +234,28 @@ export function buildSubagentRecallResult(params: {
+   const hasUsableMemoryResult =
+     params.subagentResult.hasUsableMemoryResult === true ||
+     params.fallbackHasUsableMemoryResult === true;
+-  const summary = normalizeGroundedSummary(rawReply, params.maxSummaryChars, hasUsableMemoryResult);
+-  if (resultStatus === undefined && summary !== null) {
++  const recoveredText =
++    resultStatus === "failed" &&
++    hasUsableMemoryResult &&
++    !params.subagentResult.hasUnavailableMemorySearchResult &&
++    !searchDebug?.error
++      ? params.subagentResult.memoryToolText
++      : undefined;
++  const summary = normalizeGroundedSummary(
++    recoveredText ?? rawReply,
++    params.maxSummaryChars,
++    hasUsableMemoryResult,
++  );
++  if (recoveredText && summary !== null) {
++    return {
++      status: "ok",
++      elapsedMs: params.elapsedMs,
++      rawReply: recoveredText,
++      summary,
++      searchDebug,
++    };
++  }
++  if (resultStatus !== "failed" && summary !== null) {
+     return { status: "ok", elapsedMs: params.elapsedMs, rawReply, summary, searchDebug };
+   }
+   const status =
+diff --git a/extensions/active-memory/transcript-watch.ts b/extensions/active-memory/transcript-watch.ts
+index 30bcb95a22d6027d147f401863320025f07b8a5b..7c8030f0853df8c59ca8a645abe6b049847c6f03 100644
+--- a/extensions/active-memory/transcript-watch.ts
++++ b/extensions/active-memory/transcript-watch.ts
+@@ -1,8 +1,11 @@
+ import { createDeferred } from "openclaw/plugin-sdk/concurrency-runtime";
+ import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+ import {
++  appendMemoryToolResultText,
++  formatMemoryToolResultText,
+   readMemoryResultFromSessionRecord,
+   streamActiveMemoryTranscriptRecords,
++  type MemoryToolTexts,
+ } from "./transcript.js";
+ import {
+   TERMINAL_MEMORY_SEARCH_POLL_INTERVAL_MS,
+@@ -19,10 +22,12 @@ export async function readMergedActiveMemoryTranscriptState(params: {
+   searchDebug?: ActiveMemorySearchDebug;
+   hasUsableMemoryResult: boolean;
+   hasUnavailableMemorySearchResult: boolean;
++  memoryToolText?: string;
+ }> {
+   let searchDebug: ActiveMemorySearchDebug | undefined;
+   let hasUsableMemoryResult = false;
+   let hasUnavailableMemorySearchResult = false;
++  let memoryToolTexts: MemoryToolTexts = {};
+   for (const source of params.sources) {
+     await streamActiveMemoryTranscriptRecords({
+       source,
+@@ -31,6 +36,7 @@ export async function readMergedActiveMemoryTranscriptState(params: {
+         searchDebug = result.searchDebug ?? searchDebug;
+         hasUnavailableMemorySearchResult ||= result.hasUnavailableMemorySearchResult;
+         hasUsableMemoryResult ||= result.hasUsableMemoryResult;
++        memoryToolTexts = appendMemoryToolResultText(memoryToolTexts, result.modelVisibleEvidence);
+       },
+     });
+   }
+@@ -38,6 +44,7 @@ export async function readMergedActiveMemoryTranscriptState(params: {
+     searchDebug,
+     hasUsableMemoryResult,
+     hasUnavailableMemorySearchResult,
++    memoryToolText: formatMemoryToolResultText(memoryToolTexts),
+   };
+ }
+ 
+diff --git a/extensions/active-memory/transcript.ts b/extensions/active-memory/transcript.ts
+index 4895da539e9ff9c165c0428c9553105127c9cad9..816d34dd275db545b9eed813036a2c55247eff18 100644
+--- a/extensions/active-memory/transcript.ts
++++ b/extensions/active-memory/transcript.ts
+@@ -7,7 +7,7 @@ import {
+   normalizeLowercaseStringOrEmpty,
+   normalizeOptionalString,
+ } from "openclaw/plugin-sdk/string-coerce-runtime";
+-import { safeParseJson } from "openclaw/plugin-sdk/text-utility-runtime";
++import { safeParseJson, truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+ import {
+   readExplicitMemoryEvidence,
+   readStructuredMemoryEvidenceFromContent,
+@@ -17,6 +17,7 @@ import {
+ import { extractTextContent } from "./query.js";
+ import {
+   DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW,
++  DEFAULT_PARTIAL_TRANSCRIPT_MAX_CHARS,
+   DEFAULT_TRANSCRIPT_READ_MAX_BYTES,
+   DEFAULT_TRANSCRIPT_READ_MAX_LINES,
+   LANCEDB_ACTIVE_MEMORY_TOOLS_ALLOW,
+@@ -25,10 +26,14 @@ import {
+   type TranscriptReadLimits,
+ } from "./types.js";
+ 
+-function resolveTranscriptReadLimits(
++export function resolveTranscriptReadLimits(
+   limits?: TranscriptReadLimits,
+ ): Required<TranscriptReadLimits> {
+   return {
++    maxChars: resolveIntegerOption(limits?.maxChars, DEFAULT_PARTIAL_TRANSCRIPT_MAX_CHARS, {
++      min: 1,
++      max: DEFAULT_PARTIAL_TRANSCRIPT_MAX_CHARS,
++    }),
+     maxLines: resolveIntegerOption(limits?.maxLines, DEFAULT_TRANSCRIPT_READ_MAX_LINES, {
+       min: 1,
+       max: DEFAULT_TRANSCRIPT_READ_MAX_LINES,
+@@ -126,6 +131,13 @@ export function readMemoryResultFromSessionRecord(
+       status === "disabled" ||
+       status === "unavailable" ||
+       (isSearch && (Boolean(searchDebug?.error) || Boolean(details?.error))));
++  const modelVisibleEvidence =
++    (toolName === "memory_search" || toolName === "memory_get") &&
++    allowed &&
++    !hasUnavailableMemorySearchResult &&
++    hasUsableMemoryResult(toolName, undefined, message?.content)
++      ? formatModelVisibleMemoryEvidence(toolName, message?.content)
++      : undefined;
+   return {
+     toolName,
+     searchDebug,
+@@ -135,9 +147,74 @@ export function readMemoryResultFromSessionRecord(
+       !hasUnavailableMemorySearchResult &&
+       hasUsableMemoryResult(toolName, details, message?.content),
+     terminalUnavailable,
++    modelVisibleEvidence,
+   };
+ }
+ 
++type MemoryToolName = "memory_search" | "memory_get";
++export type MemoryToolTexts = Partial<Record<MemoryToolName, string>>;
++
++function formatModelVisibleMemoryEvidence(
++  toolName: MemoryToolName,
++  content: unknown,
++): { toolName: MemoryToolName; text: string } | undefined {
++  const visibleText = extractTextContent(content).trim();
++  if (!visibleText) {
++    return undefined;
++  }
++  const payload = asOptionalRecord(safeParseJson(visibleText));
++  let body = visibleText;
++  if (toolName === "memory_get") {
++    const text = normalizeOptionalString(payload?.text);
++    const source = normalizeOptionalString(payload?.path);
++    if (text) {
++      body = source ? `${text}\nSource: ${source}` : text;
++    }
++  } else if (Array.isArray(payload?.results)) {
++    const snippets = payload.results.flatMap((value) => {
++      const hit = asOptionalRecord(value);
++      const snippet = normalizeOptionalString(hit?.snippet);
++      const source = normalizeOptionalString(hit?.path);
++      return snippet ? [source ? `${snippet}\nSource: ${source}` : snippet] : [];
++    });
++    if (snippets.length) {
++      body = snippets.join("\n");
++    }
++  }
++  // This is previously permitted tool content, not a new instruction or a generated summary.
++  return { toolName, text: `Retrieved ${toolName} result:\n${body}` };
++}
++
++/** Keep completed source text ahead of search snippets within the existing transcript bound. */
++export function appendMemoryToolResultText(
++  current: MemoryToolTexts,
++  next: { toolName: MemoryToolName; text: string } | undefined,
++): MemoryToolTexts {
++  if (!next) {
++    return current;
++  }
++  const maxChars = resolveTranscriptReadLimits().maxChars;
++  const previous = current[next.toolName] ?? "";
++  const addition = truncateUtf16Safe(
++    next.text,
++    Math.max(0, maxChars - previous.length - (previous ? 1 : 0)),
++  );
++  const updated = {
++    ...current,
++    [next.toolName]: previous + (addition ? `${previous ? "\n" : ""}${addition}` : ""),
++  };
++  const getText = updated.memory_get ?? "";
++  updated.memory_search = truncateUtf16Safe(
++    updated.memory_search ?? "",
++    Math.max(0, maxChars - getText.length - (getText && updated.memory_search ? 1 : 0)),
++  );
++  return updated;
++}
++
++export function formatMemoryToolResultText(texts: MemoryToolTexts): string | undefined {
++  return [texts.memory_get, texts.memory_search].filter(Boolean).join("\n") || undefined;
++}
++
+ type ActiveMemoryHookDeadline = {
+   arm: (timeoutMs: number, onTimeout: () => void) => void;
+   promise: Promise<symbol>;
+diff --git a/extensions/active-memory/types.ts b/extensions/active-memory/types.ts
+index 46a8b86de19eeefc891bd033eaa0783f6b678b67..5f97e33ec51b8ec615b244d0cdbd441900871ee2 100644
+--- a/extensions/active-memory/types.ts
++++ b/extensions/active-memory/types.ts
+@@ -87,6 +87,7 @@ export const ACTIVE_MEMORY_RESERVED_TOOLS_ALLOW = new Set([
+   "web_search",
+   "write",
+ ]);
++export const DEFAULT_PARTIAL_TRANSCRIPT_MAX_CHARS = 32_000;
+ export const DEFAULT_TRANSCRIPT_READ_MAX_LINES = 2_000;
+ export const DEFAULT_TRANSCRIPT_READ_MAX_BYTES = 50 * 1024 * 1024;
+ export const TIMEOUT_PARTIAL_DATA_GRACE_MS = 500;
+@@ -215,6 +216,7 @@ export type ActiveMemoryPartialTimeoutError = Error & {
+ };
+ 
+ export type TranscriptReadLimits = {
++  maxChars?: number;
+   maxLines?: number;
+   maxBytes?: number;
+ };
+@@ -222,8 +224,9 @@ export type TranscriptReadLimits = {
+ export type ActiveMemoryTranscriptSource = SessionTranscriptTargetParams;
+ 
+ export type RecallSubagentResult = {
+-  /** Completed native answer, or NONE when absent; never recovered transcript/tool text. */
+   rawReply: string;
++  /** Bounded content already returned by permitted memory tools, without runtime details. */
++  memoryToolText?: string;
+   resultStatus?: "failed" | "unavailable";
+   transcriptPath?: string;
+   searchDebug?: ActiveMemorySearchDebug;
 diff --git a/extensions/discord/index.ts b/extensions/discord/index.ts
 index 0be1353914581ef6e6076cb1812aed155b1b3a27..ddd87b5146978fbd54738187e76246b4b50955f9 100644
 --- a/extensions/discord/index.ts
@@ -882,6 +2290,381 @@ index b0b2cbf93c27f47739e2f57a2a0d80fda7a48938..53c7259551a3bd40696eda29a86a4474
  // Ordinary ingress composition keeps the host owner and the real Discord
  // preflight/context producer; this exports fixtures, not a second ingress path.
  export const loadDiscordIngressContextFixture = async () => {
+diff --git a/extensions/memory-core/index.test.ts b/extensions/memory-core/index.test.ts
+index 3664d3c9ee58b7b6113e1ce5e9cfa7f7d50e0a65..11d75b49645aa63c0473839e9d805a9a593f53e1 100644
+--- a/extensions/memory-core/index.test.ts
++++ b/extensions/memory-core/index.test.ts
+@@ -146,22 +146,7 @@ describe("buildPromptSection", () => {
+     });
+     expect(result[0]).toBe("## Memory Recall");
+     expect(result[1]).toContain("run memory_search");
+-    expect(result[1]).not.toContain("memory_get");
+-  });
+-
+-  it("offers adaptive missing-fact lookup without overriding trusted loaded profiles", () => {
+-    const { search, promptBuilder } = captureMemoryModelContract({});
+-    const prompt = promptBuilder({ availableTools: new Set(["memory_search"]) }).join("\n");
+-    expect(prompt).toContain("trusted runtime-injected profile context");
+-    expect(prompt).toContain("answer directly without a redundant memory lookup");
+-    expect(prompt).toContain("source and audience constraints");
+-    expect(prompt).toContain("recall is implicit");
+-    expect(prompt).toContain("maxResults: 1");
+-    expect(prompt).toContain("omit minScore");
+-    expect(prompt).toContain("Expand the result limit or reformulate");
+-    expect(Value.Check(search.parameters, { query: "lunch preferences", maxResults: 1 })).toBe(
+-      true,
+-    );
++    expect(result[1]).not.toContain("then use memory_get");
+   });
+ 
+   it("limits the guidance to memory_get when only get is available", () => {
+diff --git a/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts b/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts
+index 740c7474e6bc86b418ca76b13c78c1b442acb04f..4de3f092dfa0efc0457a289f65bab79df3b3d4f4 100644
+--- a/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts
++++ b/extensions/memory-core/src/memory-tool-contract.profile-context.test.ts
+@@ -16,13 +16,6 @@ function expectScopedProfileRecall(text: string) {
+   expect(text).toContain("missing or conflicting facts");
+   expect(text).toContain("prior work or history");
+   expect(text).toContain("volatile or provider-state claims");
+-  expect(text).toContain(
+-    "fresh authenticated owner correction to their own identity or preferences",
+-  );
+-  expect(text).toContain("do not search historical memory merely to corroborate it");
+-  expect(text).toContain("narrow search or exact reads as needed");
+-  expect(text).toContain("existing records and conflicting assertions for an authorized update");
+-  expect(text).toContain("preserving unrelated content");
+ }
+ 
+ describe("memory recall from loaded authoritative profile context", () => {
+@@ -44,32 +37,6 @@ describe("memory recall from loaded authoritative profile context", () => {
+     expect(MEMORY_SEARCH_TOOL_CONTRACT.describe(sources)).toContain("before answering");
+   });
+ 
+-  it("keeps staged lookup available in deferred descriptions and search-enabled prompts", () => {
+-    const surfaces = [
+-      MEMORY_SEARCH_TOOL_CONTRACT.describe(sources),
+-      buildMemoryPromptSection({ availableTools: new Set(["memory_search"]) }).join("\n"),
+-      buildMemoryPromptSection({ availableTools: new Set(["memory_search", "memory_get"]) }).join(
+-        "\n",
+-      ),
+-    ];
+-    for (const text of surfaces) {
+-      expect(text).toContain("For a single unambiguous missing fact, start with maxResults: 1");
+-      expect(text).toContain("omit minScore to keep its configured value");
+-      expect(text).toContain("Expand the result limit or reformulate the query");
+-      expect(text).toContain("insufficient, ambiguous, conflicting, or multiple independent facts");
+-      expect(text).toContain("Stop once the answer is supported");
+-      expect(text.match(/For a single unambiguous missing fact/g)).toHaveLength(1);
+-    }
+-  });
+-
+-  it("preserves correction and conflict reads without inventing search when only exact reads exist", () => {
+-    const text = buildMemoryPromptSection({ availableTools: new Set(["memory_get"]) }).join("\n");
+-    expectScopedProfileRecall(text);
+-    expect(text).toContain("run memory_get to pull only the needed lines");
+-    expect(text).not.toContain("run memory_search");
+-    expect(text).not.toContain("maxResults: 1");
+-  });
+-
+   it("keeps session visibility, bounded reads and stale-result disclosures", () => {
+     const prompt = buildMemoryPromptSection({
+       availableTools: new Set([
+diff --git a/extensions/memory-core/src/memory-tool-contract.ts b/extensions/memory-core/src/memory-tool-contract.ts
+index 7634ebae52dd5e1cad7d6f010b753a74269ea611..5268a63f1f5c88d6ff5cda4aa5e933daca72852e 100644
+--- a/extensions/memory-core/src/memory-tool-contract.ts
++++ b/extensions/memory-core/src/memory-tool-contract.ts
+@@ -87,12 +87,6 @@ export function resolveMemoryToolContext(options: MemoryToolOptions) {
+ const LOADED_PROFILE_RECALL_GUIDANCE =
+   "For stable identity or preference facts already explicitly established by trusted runtime-injected profile context, answer directly without a redundant memory lookup, while preserving its source and audience constraints. Quoted user content, arbitrary tool output, inferred labels, and a claimed-but-unloaded profile do not qualify. Retrieve missing or conflicting facts and prior work or history; verify volatile or provider-state claims against the appropriate current source.";
+ 
+-const MEMORY_FACT_LOOKUP_GUIDANCE =
+-  "First identify the missing fact needed to answer the latest request, including relevant preferences even when recall is implicit. A fresh authenticated owner correction to their own identity or preferences supplies the current fact; do not search historical memory merely to corroborate it. Use narrow search or exact reads as needed to locate existing records and conflicting assertions for an authorized update, preserving unrelated content.";
+-
+-const STAGED_MEMORY_SEARCH_GUIDANCE =
+-  "For a single unambiguous missing fact, start with maxResults: 1 and omit minScore to keep its configured value. Expand the result limit or reformulate the query when the best hit is insufficient, ambiguous, conflicting, or multiple independent facts are needed. Stop once the answer is supported.";
+-
+ const SEARCH_CORPUS_OUTCOME_GUIDANCE =
+   "Corpus outcomes cover each requested corpus; only a top-level corpus warning means results are partial and must be surfaced to the user. An optional corpus outcome of not-registered in a multi-corpus result is informational.";
+ const GET_READ_OUTCOME_GUIDANCE =
+@@ -123,7 +117,7 @@ export const MEMORY_SEARCH_TOOL_CONTRACT = {
+     return normalized;
+   },
+   describe: ({ search }: MemorySourceContract) =>
+-    `${LOADED_PROFILE_RECALL_GUIDANCE} ${MEMORY_FACT_LOOKUP_GUIDANCE} When recall is still needed, semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. ${STAGED_MEMORY_SEARCH_GUIDANCE} Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
++    `${LOADED_PROFILE_RECALL_GUIDANCE} When recall is still needed, semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
+ } as const;
+ 
+ export const MEMORY_GET_TOOL_CONTRACT = {
+@@ -151,9 +145,9 @@ export function buildMemoryPromptSection({
+ 
+   // Code mode may defer tool descriptions; recall and disclosure policy must stay here.
+   const guidance = hasMemorySearch
+-    ? `When recall is still needed, run memory_search without corpus to search the configured sources. ${STAGED_MEMORY_SEARCH_GUIDANCE}${
+-        hasMemoryGet ? " For memory-file hits, use memory_get to pull only the needed lines." : ""
+-      } Use corpus=all only when compiled wiki supplements are needed. If low confidence after search, say you checked.`
++    ? `When recall is still needed, before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search without corpus to search the configured sources${
++        hasMemoryGet ? "; for memory-file hits, use memory_get to pull only the needed lines" : ""
++      }. Use corpus=all only when compiled wiki supplements are needed. If low confidence after search, say you checked.`
+     : "When recall is still needed, before answering anything about prior work, decisions, dates, people, preferences, or todos that point to a specific memory file: run memory_get to pull only the needed lines. If low confidence after reading, say you checked.";
+   const sessionGuidance = !hasMemorySearch
+     ? []
+@@ -177,7 +171,7 @@ export function buildMemoryPromptSection({
+       : "Citations: include Source: <path#line> when it helps the user verify memory snippets.";
+   return [
+     "## Memory Recall",
+-    `${LOADED_PROFILE_RECALL_GUIDANCE} ${MEMORY_FACT_LOOKUP_GUIDANCE} ${guidance}`,
++    `${LOADED_PROFILE_RECALL_GUIDANCE} ${guidance}`,
+     ...sessionGuidance,
+     outcomeGuidance,
+     citationGuidance,
+diff --git a/src/agents/agent-command-restart-recovery.test.ts b/src/agents/agent-command-restart-recovery.test.ts
+index 210d078e51192ab6287a91040c48174d008a3698..b8d293a57020fb8d25cb9a90e65812892d0899ba 100644
+--- a/src/agents/agent-command-restart-recovery.test.ts
++++ b/src/agents/agent-command-restart-recovery.test.ts
+@@ -1,16 +1,10 @@
+ import { describe, expect, it } from "vitest";
+ import { getRestartRecoveryTerminalDeliveryEvidence } from "../config/sessions/restart-recovery-state.js";
+-import {
+-  consumeSubagentCompletionToolHandoff,
+-  registerSubagentCompletionToolHandoff,
+-} from "../gateway/subagent-completion-tool-handoff.js";
+ import {
+   buildCurrentRunRestartRecoveryClaim,
+   buildRestartRecoveryTerminalDeliveryEvidence,
+   constrainRestartRecoveryDeliveryPayloads,
+-  prepareCommandHarnessCompletionRecovery,
+ } from "./agent-command-restart-recovery.js";
+-import type { AgentCommandOpts } from "./command/types.js";
+ import { hasMessagingToolDeliveryToSource } from "./subagents/announce/subagent-announce-completion-delivery.js";
+ 
+ describe("buildCurrentRunRestartRecoveryClaim", () => {
+@@ -114,167 +108,6 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
+   });
+ });
+ 
+-describe("admitted subagent completion recovery source", () => {
+-  function fixture(explicitRunId?: string) {
+-    const sessionKey = "agent:main:discord:channel:123456789012345678";
+-    const sessionId = "yielded-requester";
+-    const sourceSessionKey = "agent:main:subagent:completed-child";
+-    const runId =
+-      explicitRunId ?? `announce:requester-settle:main:${sessionKey}:completed-child:yield-1`;
+-    let current = true;
+-    const id = registerSubagentCompletionToolHandoff({
+-      sourceSessionKey,
+-      targetSessionKey: sessionKey,
+-      targetSessionId: sessionId,
+-      idempotencyKey: runId,
+-      settleBatch: { sourceSessionKeys: [sourceSessionKey], isCurrent: () => current },
+-    });
+-    const handoff = consumeSubagentCompletionToolHandoff({
+-      handoffId: id,
+-      sourceTool: "subagent_settle",
+-      sourceSessionKey,
+-      targetSessionKey: sessionKey,
+-      targetSessionId: sessionId,
+-      idempotencyKey: runId,
+-      provider: "openai",
+-      model: "test-model",
+-    });
+-    if (!handoff) {
+-      throw new Error("Expected the exact native completion handoff");
+-    }
+-    const entry = { sessionId, lifecycleRevision: "original-incarnation", updatedAt: 1 };
+-    const opts: AgentCommandOpts = {
+-      message: "Continue the accepted task",
+-      trustedInternalHandoff: handoff,
+-      inputProvenance: {
+-        kind: "inter_session",
+-        sourceSessionKey,
+-        sourceChannel: "internal",
+-        sourceTool: "subagent_settle",
+-      },
+-    };
+-    const params = {
+-      entry,
+-      sessionId,
+-      sessionKey,
+-      runId,
+-      agentId: "main",
+-      opts,
+-      hasDeliveryContext: true,
+-    };
+-    return {
+-      params,
+-      handoff,
+-      retire: () => {
+-        current = false;
+-      },
+-    };
+-  }
+-
+-  it.each([undefined, "native-completion-request"])(
+-    "binds its own source and revalidates the consumed cohort before commit (%s)",
+-    (runId) => {
+-      const f = fixture(runId);
+-      const prepared = prepareCommandHarnessCompletionRecovery(f.params);
+-      expect(prepared.sourceOptions).toMatchObject({
+-        sourceRunId: f.params.runId,
+-        sourceIngress: "internal",
+-      });
+-      expect(prepared.isCompletionCurrent(f.params.entry)).toBe(true);
+-      expect(
+-        prepared.isCompletionCurrent({ ...f.params.entry, lifecycleRevision: "successor" }),
+-      ).toBe(false);
+-      f.retire();
+-      expect(prepared.isCompletionCurrent(f.params.entry)).toBe(false);
+-    },
+-  );
+-
+-  it.each([
+-    "missing-capability",
+-    "wrong-source",
+-    "wrong-target",
+-    "wrong-session",
+-    "wrong-cohort",
+-    "retired-cohort",
+-    "no-delivery",
+-  ] as const)("does not mint a scoped source from %s", (mode) => {
+-    const f = fixture();
+-    const params = f.params;
+-    if (mode === "missing-capability") {
+-      params.opts = { ...params.opts, trustedInternalHandoff: undefined };
+-    }
+-    if (mode === "wrong-source") {
+-      params.opts = {
+-        ...params.opts,
+-        inputProvenance: {
+-          kind: "inter_session",
+-          sourceSessionKey: "agent:main:subagent:foreign",
+-          sourceChannel: "internal",
+-          sourceTool: "subagent_settle",
+-        },
+-      };
+-    }
+-    if (mode === "wrong-target") {
+-      params.sessionKey = "agent:main:discord:channel:foreign";
+-    }
+-    if (mode === "wrong-session") {
+-      params.entry = { ...params.entry, sessionId: "replacement" };
+-    }
+-    if (mode === "wrong-cohort") {
+-      const sourceSessionKey = "agent:main:subagent:outside-cohort";
+-      params.opts = {
+-        ...params.opts,
+-        trustedInternalHandoff: { ...f.handoff, sourceSessionKey },
+-        inputProvenance: {
+-          kind: "inter_session",
+-          sourceSessionKey,
+-          sourceChannel: "internal",
+-          sourceTool: "subagent_settle",
+-        },
+-      };
+-    }
+-    if (mode === "retired-cohort") {
+-      f.retire();
+-    }
+-    if (mode === "no-delivery") {
+-      params.hasDeliveryContext = false;
+-    }
+-    const prepared = prepareCommandHarnessCompletionRecovery(params);
+-    expect(prepared.sourceOptions.sourceRunId).toBeUndefined();
+-    expect(prepared.sourceOptions.sourceIngress).toBeUndefined();
+-    if (!["missing-capability", "no-delivery"].includes(mode)) {
+-      expect(prepared.isCompletionCurrent(params.entry)).toBe(false);
+-    }
+-  });
+-
+-  it("preserves the exact preclaimed recovery source and delivery constraints", () => {
+-    const f = fixture();
+-    const entry = {
+-      ...f.params.entry,
+-      restartRecoveryDeliveryRunId: f.params.runId,
+-      restartRecoveryDeliverySourceRunId: "original-channel-source",
+-      restartRecoverySourceIngress: "channel" as const,
+-      restartRecoveryDeliveryContext: { channel: "discord", to: "channel:123456789012345678" },
+-      restartRecoveryDeliveryMediaUrls: ["original-media"],
+-      restartRecoveryDisableMessageTool: true as const,
+-    };
+-    const prepared = prepareCommandHarnessCompletionRecovery({ ...f.params, entry });
+-    expect(
+-      buildCurrentRunRestartRecoveryClaim({
+-        entry,
+-        runId: f.params.runId,
+-        ...prepared.sourceOptions,
+-      }),
+-    ).toMatchObject({
+-      restartRecoveryDeliverySourceRunId: "original-channel-source",
+-      restartRecoverySourceIngress: "channel",
+-      restartRecoveryDeliveryContext: entry.restartRecoveryDeliveryContext,
+-      restartRecoveryDeliveryMediaUrls: ["original-media"],
+-      restartRecoveryDisableMessageTool: true,
+-    });
+-  });
+-});
+-
+ describe("constrainRestartRecoveryDeliveryPayloads", () => {
+   it("replaces model media with the exact host-owned set", () => {
+     expect(
+diff --git a/src/agents/agent-command-restart-recovery.ts b/src/agents/agent-command-restart-recovery.ts
+index b1f291809a3407b9a0350ed022c7464f03405238..14333495d4ca802c0ab04417cf2e633fed768367 100644
+--- a/src/agents/agent-command-restart-recovery.ts
++++ b/src/agents/agent-command-restart-recovery.ts
+@@ -25,7 +25,6 @@ import {
+   type AgentDeliveryEvidence,
+ } from "./embedded-agent-runner/delivery-evidence.js";
+ import { mergeAttemptToolMediaPayloads } from "./embedded-agent-runner/run/tool-media-payloads.js";
+-import { isTrustedSubagentCompletionHandoffForSession } from "./subagents/announce/subagent-announce-handoff.js";
+ 
+ /** Restore the exact host-owned delivery constraints before starting a recovery turn. */
+ export function resolveCommandRecoveryOptions(params: {
+@@ -449,23 +448,6 @@ export function prepareCommandHarnessCompletionRecovery(params: {
+       ? entry.restartRecoveryHarnessCompletion
+       : undefined;
+   const guardedHarnessCompletion = harnessCompletion ?? claimedHarnessCompletion;
+-  const completionHandoff = params.hasDeliveryContext ? opts.trustedInternalHandoff : undefined;
+-  const completionLifecycleRevision = entry.lifecycleRevision;
+-  const isSubagentCompletionCurrent = (current: SessionEntry | undefined) =>
+-    completionHandoff === undefined ||
+-    Boolean(
+-      current &&
+-      current.lifecycleRevision === completionLifecycleRevision &&
+-      isTrustedSubagentCompletionHandoffForSession({
+-        handoff: completionHandoff,
+-        inputProvenance: opts.inputProvenance,
+-        internalEvents: opts.internalEvents,
+-        sessionKey,
+-        sessionId: current.sessionId,
+-      }),
+-    );
+-  const subagentCompletionSourceRunId =
+-    completionHandoff && isSubagentCompletionCurrent(entry) ? runId : undefined;
+   if (guardedHarnessCompletion && !getOwedHarnessCompletionTask(guardedHarnessCompletion, entry)) {
+     throw createSessionWorkStartChangedError(sessionKey);
+   }
+@@ -473,18 +455,12 @@ export function prepareCommandHarnessCompletionRecovery(params: {
+     harnessCompletion,
+     guardedHarnessCompletion,
+     isCompletionCurrent: (current: SessionEntry | undefined) =>
+-      isSubagentCompletionCurrent(current) &&
+-      (!guardedHarnessCompletion ||
+-        Boolean(current && getOwedHarnessCompletionTask(guardedHarnessCompletion, current))),
++      !guardedHarnessCompletion ||
++      Boolean(current && getOwedHarnessCompletionTask(guardedHarnessCompletion, current)),
+     sourceOptions: {
+       sourceIngress:
+-        generatedMediaSourceRunId || harnessCompletion || subagentCompletionSourceRunId
+-          ? ("internal" as const)
+-          : undefined,
+-      sourceRunId:
+-        generatedMediaSourceRunId ??
+-        harnessCompletion?.sourceRunId ??
+-        subagentCompletionSourceRunId,
++        generatedMediaSourceRunId || harnessCompletion ? ("internal" as const) : undefined,
++      sourceRunId: generatedMediaSourceRunId ?? harnessCompletion?.sourceRunId,
+       sourceReplyDeliveryMode:
+         opts.sourceReplyDeliveryMode ?? (harnessCompletion ? ("automatic" as const) : undefined),
+     },
 diff --git a/src/agents/embedded-agent-helpers/error-text.test.ts b/src/agents/embedded-agent-helpers/error-text.test.ts
 index 20e7263ce28bd29b97ed17dae7639a0241516ce8..90800f8d9f71c0df57373a268c607b5b625a291a 100644
 --- a/src/agents/embedded-agent-helpers/error-text.test.ts
@@ -932,7 +2715,7 @@ index 20e7263ce28bd29b97ed17dae7639a0241516ce8..90800f8d9f71c0df57373a268c607b5b
 -  });
 -});
 diff --git a/src/agents/embedded-agent-runner/message-injection-target.ts b/src/agents/embedded-agent-runner/message-injection-target.ts
-index e2fc9464ac06a913b6ca1ae0035b75758c05ba94..7e9da85c79b40253f8c244e9e518445158493822 100644
+index f884f258f67878927e995749366baf5463155367..7e9da85c79b40253f8c244e9e518445158493822 100644
 --- a/src/agents/embedded-agent-runner/message-injection-target.ts
 +++ b/src/agents/embedded-agent-runner/message-injection-target.ts
 @@ -28,7 +28,6 @@ import {
@@ -943,7 +2726,16 @@ index e2fc9464ac06a913b6ca1ae0035b75758c05ba94..7e9da85c79b40253f8c244e9e5184451
  import {
    ACTIVE_EMBEDDED_RUN_REGISTRATIONS,
    ACTIVE_EMBEDDED_RUN_SESSION_IDS_BY_KEY,
-@@ -54,7 +53,6 @@ function allowsDirectMessageInjectionOwner(sessionKey: string): boolean {
+@@ -38,7 +37,7 @@ import {
+ } from "./run-state.js";
+ import { isEmbeddedRunHandleAbortable } from "./runs.probes.js";
+ 
+-export function allowsDirectMessageInjectionOwner(sessionKey: string): boolean {
++function allowsDirectMessageInjectionOwner(sessionKey: string): boolean {
+   const operation = replyRunState.activeRunsByKey.get(sessionKey);
+   return (
+     !operation ||
+@@ -54,7 +53,6 @@ export function allowsDirectMessageInjectionOwner(sessionKey: string): boolean {
  export function captureReplyMessageInjectionTarget(input: {
    normalizedSessionKey: string | undefined;
    operation: ReplyOperation | undefined;
@@ -4039,6 +5831,60 @@ index 64b16c7362fbda06a5616ea6ac9ade950ce57f47..d07968d7511307af63d710545f52d927
      const classified = directFailure ?? classifyResponse(directAnnounceResponse);
      const delivery = classified instanceof Promise ? await classified : classified;
      const originalOutcome = buildAgentRunTerminalOutcomeFromWaitResult(
+diff --git a/src/agents/subagents/announce/subagent-announce-handoff.ts b/src/agents/subagents/announce/subagent-announce-handoff.ts
+index 7ca4dcb5ace8186e9b68ef214d212a3236968ea3..dbfcb4912c20622e8f41f60d8e96de2ee17f2278 100644
+--- a/src/agents/subagents/announce/subagent-announce-handoff.ts
++++ b/src/agents/subagents/announce/subagent-announce-handoff.ts
+@@ -70,13 +70,15 @@ export function isSubagentAnnounceCompletionHandoff(params: {
+   );
+ }
+ 
+-/** Revalidate the consumed source, requester incarnation and live completion cohort. */
+-export function isTrustedSubagentCompletionHandoffForSession(params: {
++/** Verify that a consumed in-process handoff still matches this exact model attempt. */
++export function isTrustedSubagentCompletionHandoffForRun(params: {
+   handoff?: TrustedSubagentCompletionHandoff;
+   inputProvenance?: InputProvenance;
+   internalEvents?: AgentInternalEvent[];
+   sessionKey?: string;
+   sessionId?: string;
++  provider?: string;
++  model?: string;
+ }): boolean {
+   const handoff = params.handoff;
+   const completionEvent = resolveExactSubagentCompletionEvent({
+@@ -96,25 +98,12 @@ export function isTrustedSubagentCompletionHandoffForSession(params: {
+   }
+   return (
+     handoff.sourceSessionKey === params.inputProvenance.sourceSessionKey &&
+-    (handoff.settleBatch !== undefined
+-      ? handoff.settleBatch.sourceSessionKeys.includes(handoff.sourceSessionKey)
+-      : params.internalEvents === undefined ||
+-        handoff.sourceSessionId === completionEvent?.childSessionId) &&
++    (handoff.settleBatch !== undefined ||
++      params.internalEvents === undefined ||
++      handoff.sourceSessionId === completionEvent?.childSessionId) &&
+     handoff.targetSessionKey === params.sessionKey &&
+-    handoff.targetSessionId === params.sessionId
+-  );
+-}
+-
+-/** Model/tool authority additionally requires the actual selected attempt route. */
+-export function isTrustedSubagentCompletionHandoffForRun(
+-  params: Parameters<typeof isTrustedSubagentCompletionHandoffForSession>[0] & {
+-    provider?: string;
+-    model?: string;
+-  },
+-): boolean {
+-  return (
+-    isTrustedSubagentCompletionHandoffForSession(params) &&
+-    params.handoff?.provider === params.provider?.trim().toLowerCase() &&
+-    params.handoff?.model === params.model?.trim()
++    handoff.targetSessionId === params.sessionId &&
++    handoff.provider === params.provider?.trim().toLowerCase() &&
++    handoff.model === params.model?.trim()
+   );
+ }
 diff --git a/src/agents/subagents/announce/subagent-announce-requester-presentation.ts b/src/agents/subagents/announce/subagent-announce-requester-presentation.ts
 deleted file mode 100644
 index 45073f46f48ffb9eeec5ffa1619710c89d8649ac..0000000000000000000000000000000000000000
@@ -5086,6 +6932,1253 @@ index 3255eac633aa95ea7535075b32245c77bb2a78b7..bb2fb32a17f2840966f0e2d64695c5e4
  export function initSubagentRegistry() {
    return subagentRestorer.restoreOnce();
  }
+diff --git a/src/auto-reply/reply/agent-runner-core.ts b/src/auto-reply/reply/agent-runner-core.ts
+index 3b8470c93f83b74ae2772f9c35b2e2233880f099..93966e3ea7ac6b964e2d2f21779c37c4e8fd4c23 100644
+--- a/src/auto-reply/reply/agent-runner-core.ts
++++ b/src/auto-reply/reply/agent-runner-core.ts
+@@ -15,7 +15,6 @@ import type { OpenClawConfig } from "../../config/config.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+ import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
+ import type { TypingMode } from "../../config/types.js";
+-import type { PendingAgentMessageInjectionTarget } from "../../gateway/agent-message-injection-target.js";
+ import { logVerbose } from "../../globals.js";
+ import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
+ import { resolveSendPolicy } from "../../sessions/send-policy.js";
+@@ -47,7 +46,6 @@ import { resolveEffectiveReplyRoute } from "./effective-reply-route.js";
+ import type { InternalGetReplyOptions } from "./get-reply.types.js";
+ import { sanitizePendingFinalDeliveryText } from "./pending-final-delivery-state.js";
+ import { type FollowupRun, type QueueSettings, scheduleFollowupDrain } from "./queue.js";
+-import { scheduleFollowupDrainAfterAgentRun } from "./queue/drain.js";
+ import { normalizeReplyPayloadDirectives, type DirectBlockDelivery } from "./reply-delivery.js";
+ import {
+   buildRestartLifecycleReplyText,
+@@ -59,23 +57,6 @@ import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
+ import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
+ import type { TypingController } from "./typing.js";
+ export const BLOCK_REPLY_SEND_TIMEOUT_MS = 15_000;
+-export { scheduleFollowupDrainAfterAgentRun } from "./queue/drain.js";
+-
+-/** Keep queued fallback dormant behind whichever exact active owner admitted it. */
+-export function scheduleFollowupDrainAfterActiveRun(params: {
+-  queueKey: string;
+-  runFollowup: (run: FollowupRun) => Promise<void>;
+-  nativeTarget?: PendingAgentMessageInjectionTarget;
+-  replyOperation?: ReplyOperation;
+-}): void {
+-  if (params.nativeTarget) {
+-    scheduleFollowupDrainAfterAgentRun({ ...params, target: params.nativeTarget });
+-  } else if (params.replyOperation) {
+-    scheduleFollowupDrainAfterReplyOperationClear({ ...params, operation: params.replyOperation });
+-  } else {
+-    scheduleFollowupDrain(params.queueKey, params.runFollowup);
+-  }
+-}
+ 
+ export function scheduleFollowupDrainAfterReplyOperationClear(params: {
+   operation: ReplyOperation;
+@@ -491,7 +472,6 @@ export type RunReplyAgentParams = {
+   shouldFollowup: boolean;
+   hasQueuedFollowups?: boolean;
+   isActive: boolean;
+-  pendingAgentMessageInjectionTarget?: PendingAgentMessageInjectionTarget;
+   isRunActive?: () => boolean;
+   opts?: InternalGetReplyOptions;
+   typing: TypingController;
+diff --git a/src/auto-reply/reply/agent-runner-run.ts b/src/auto-reply/reply/agent-runner-run.ts
+index fc334439684f37bdabaf04f1eeddd88caa6cfbb5..8915e87742a443b63d27621147099fb8af0025f6 100644
+--- a/src/auto-reply/reply/agent-runner-run.ts
++++ b/src/auto-reply/reply/agent-runner-run.ts
+@@ -27,7 +27,7 @@ import {
+   handleReplyAgentRunError,
+   resolveAdmittedRunSessionFile,
+   type RunReplyAgentParams,
+-  scheduleFollowupDrainAfterActiveRun,
++  scheduleFollowupDrainAfterReplyOperationClear,
+ } from "./agent-runner-core.js";
+ import {
+   continueStalledReplyTurn,
+@@ -59,7 +59,7 @@ import { createFollowupRunner } from "./followup-runner.js";
+ import { REPLY_RUN_STILL_SHUTTING_DOWN_TEXT } from "./get-reply-run-queue.js";
+ import { resolveOriginMessageProvider } from "./origin-routing.js";
+ import { resolveActiveRunQueueAction } from "./queue-policy.js";
+-import { enqueueFollowupRun } from "./queue.js";
++import { enqueueFollowupRun, scheduleFollowupDrain } from "./queue.js";
+ import { resolveFollowupAbortSignal } from "./queue/types.js";
+ import { REPLY_ADMISSION_TICKET } from "./reply-admission-ticket.js";
+ import { createReplyMediaContext } from "./reply-media-paths.js";
+@@ -89,7 +89,6 @@ export async function runReplyAgent(
+     shouldFollowup,
+     hasQueuedFollowups = false,
+     isActive,
+-    pendingAgentMessageInjectionTarget,
+     isRunActive,
+     opts,
+     typing,
+@@ -225,11 +224,9 @@ export async function runReplyAgent(
+   const effectiveShouldSteer = !isHeartbeat && !effectiveResetTriggered && shouldSteer;
+   const effectiveShouldFollowup = !effectiveResetTriggered && shouldFollowup;
+   const messageInjectionDisposition = opts?.messageInjectionDisposition ?? "none";
+-  const activeReplyOperation = pendingAgentMessageInjectionTarget
+-    ? undefined
+-    : sessionKey
+-      ? (replyRunRegistry.get(sessionKey) ?? providedReplyOperation)
+-      : providedReplyOperation;
++  const activeReplyOperation = sessionKey
++    ? (replyRunRegistry.get(sessionKey) ?? providedReplyOperation)
++    : providedReplyOperation;
+   const steeringAuthority = resolveReplySteeringAuthority(followupRun, activeReplyOperation);
+   const shouldQueueAuthorityMismatch =
+     effectiveShouldSteer && isActive && steeringAuthority.shouldQueueAuthorityMismatch;
+@@ -260,11 +257,7 @@ export async function runReplyAgent(
+     isActive &&
+     !shouldQueueAuthorityMismatch &&
+     messageInjectionDisposition === "none" &&
+-    terminalDeliveryBlockReason !== undefined &&
+-    !(
+-      pendingAgentMessageInjectionTarget &&
+-      terminalDeliveryBlockReason === "unknown-source-with-terminal-history"
+-    );
++    terminalDeliveryBlockReason !== undefined;
+   if (shouldQueueTerminalReceiptSteer) {
+     logVerbose(
+       `queue: active session ${activeReplyOperation?.sessionId ?? followupRun.run.sessionId} cannot accept steering (${terminalDeliveryBlockReason}); queuing instead`,
+@@ -361,7 +354,6 @@ export async function runReplyAgent(
+       followupRun,
+       opts,
+       providedReplyOperation: activeReplyOperation,
+-      pendingAgentMessageInjectionTarget,
+       queueKey,
+       releaseAdmissionTicket,
+       replyOperationRunState,
+@@ -440,12 +432,16 @@ export async function runReplyAgent(
+     }
+     // The queue must stay dormant while the active owner can still collect
+     // messages. Registering after enqueue closes the owner-clear race.
+-    scheduleFollowupDrainAfterActiveRun({
+-      nativeTarget: pendingAgentMessageInjectionTarget,
+-      replyOperation: replyRunRegistry.get(queueKey) ?? activeReplyOperation,
+-      queueKey,
+-      runFollowup: queuedRunFollowupTurn,
+-    });
++    const queuedOperationOwner = replyRunRegistry.get(queueKey) ?? activeReplyOperation;
++    if (queuedOperationOwner) {
++      scheduleFollowupDrainAfterReplyOperationClear({
++        operation: queuedOperationOwner,
++        queueKey,
++        runFollowup: queuedRunFollowupTurn,
++      });
++    } else {
++      scheduleFollowupDrain(queueKey, queuedRunFollowupTurn);
++    }
+     releaseAdmissionTicket();
+     const queuedBehindActiveRun = isRunActive?.() === true;
+     await touchActiveSessionEntry();
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
+index 10277c767c76c568379ce059f5b0ecb5f9e6b268..f61d29d2bc9f7c92e90a723734fec65b111905ff 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
+@@ -8,33 +8,19 @@ import {
+   createOperationalRunInstanceRef,
+   prepareAgentRunAdmission,
+ } from "../../agents/admitted-run-context.js";
+-import { EMBEDDED_RUN_WAITERS } from "../../agents/embedded-agent-runner/run-state.js";
+ import {
+   clearActiveEmbeddedRun,
+   setActiveEmbeddedRun,
+ } from "../../agents/embedded-agent-runner/runs.js";
+-import * as publicationWait from "../../agents/embedded-agent-runner/runs.publication-wait.js";
+ import {
+   createEmbeddedRunHandle,
+   testing as embeddedTesting,
+ } from "../../agents/embedded-agent-runner/runs.test-support.js";
+ import { withPreparedEmbeddedRunToolAuthority } from "../../agents/harness/tool-authority.runtime.js";
+-import {
+-  capturePendingAgentMessageInjectionTarget,
+-  waitForAgentMessageInjectionTargetRelease,
+-} from "../../gateway/agent-message-injection-target.js";
+-import { removeChatAbortControllerEntry } from "../../gateway/chat-abort-lifecycle-internal.js";
+-import type { ChatAbortControllerEntry } from "../../gateway/chat-abort.types.js";
+-import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
+-import * as gatewayWork from "../../process/gateway-work-admission.js";
+ import type { Deferred } from "../../shared/deferred.js";
+-import * as queueHelpers from "../../utils/queue-helpers.js";
+-import { scheduleFollowupDrainAfterAgentRun } from "./agent-runner-core.js";
+ import { runActiveReplySteer, type ActiveReplySteerParams } from "./agent-runner-steer-adoption.js";
+ import { MessageInjectionAuthorityError } from "./message-injection-authority.js";
+-import { enqueueFollowupRun } from "./queue.js";
+ import { clearFollowupQueueForTest, createQueueTestRun } from "./queue.test-helpers.js";
+-import { prepareStaleFollowupDrainRetirement } from "./queue/drain.js";
+ import { getExistingFollowupQueue } from "./queue/state.js";
+ import type { ReplyBackendMessageInjectionV2 } from "./reply-run-registry.contracts.js";
+ import { replyRunRegistry } from "./reply-run-registry.js";
+@@ -56,7 +42,6 @@ afterEach(() => {
+ async function withDirectRequester(
+   run: (owner: {
+     fingerprint: string;
+-    instance: ReturnType<typeof createOperationalRunInstanceRef>;
+     entered: Deferred;
+     release: Deferred;
+     injected: ReturnType<typeof vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>>;
+@@ -84,10 +69,9 @@ async function withDirectRequester(
+       sourceTool: "subagent_settle",
+     },
+   };
+-  const instance = createOperationalRunInstanceRef(runId);
+   const admission = prepareAgentRunAdmission({
+     cfg: {},
+-    operationalRunInstance: instance,
++    operationalRunInstance: createOperationalRunInstanceRef(runId),
+     facts: {
+       agentId: "main",
+       runId,
+@@ -131,7 +115,6 @@ async function withDirectRequester(
+         try {
+           await run({
+             fingerprint,
+-            instance,
+             entered,
+             release,
+             injected,
+@@ -202,215 +185,6 @@ function correction(fingerprint: string, messageId: string): ActiveReplySteerPar
+ }
+ 
+ describe("direct requester continuation steering", () => {
+-  it("transfers exact native terminal custody when recovery replaces a stale queue generation", async ({
+-    signal,
+-  }) => {
+-    const entry: ChatAbortControllerEntry = {
+-      kind: "agent",
+-      controller: new AbortController(),
+-      operationalRunInstance: createOperationalRunInstanceRef(runId),
+-      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-      sessionKey,
+-      sessionId,
+-      startedAtMs: 1,
+-      expiresAtMs: Number.MAX_SAFE_INTEGER,
+-    };
+-    const entries = new Map([[runId, entry]]);
+-    const target = capturePendingAgentMessageInjectionTarget({ entries, sessionKey, sessionId });
+-    if (!target) {
+-      throw new Error("Expected the exact native owner");
+-    }
+-    const staleEntered = createDeferred();
+-    const releaseStale = createDeferred();
+-    const pendingExecuted = createDeferred();
+-    const stale = correction("pending-native-authority", "stale-queue-turn").followupRun;
+-    const pending = correction("pending-native-authority", "surviving-correction").followupRun;
+-    const runFollowup = vi.fn(async (run: typeof stale) => {
+-      if (run === stale) {
+-        staleEntered.resolve();
+-        await releaseStale.promise;
+-      } else {
+-        pendingExecuted.resolve();
+-      }
+-    });
+-    const settings = { mode: "followup" as const, debounceMs: 0 };
+-    try {
+-      enqueueFollowupRun(sessionKey, stale, settings, "message-id", runFollowup);
+-      await withinTest(staleEntered.promise, signal);
+-      const oldQueue = getExistingFollowupQueue(sessionKey)!;
+-      const retire = prepareStaleFollowupDrainRetirement(sessionKey);
+-      expect(retire).toBeTypeOf("function");
+-      enqueueFollowupRun(sessionKey, pending, settings, "message-id", runFollowup, false);
+-      scheduleFollowupDrainAfterAgentRun({ target, queueKey: sessionKey, runFollowup });
+-      retire!();
+-      const replacement = getExistingFollowupQueue(sessionKey)!;
+-      expect(replacement).not.toBe(oldQueue);
+-      expect(oldQueue.abortController.signal.aborted).toBe(true);
+-      expect(replacement.items).toEqual([pending]);
+-      expect(replacement.drainAdmissionOwner).toBe(target);
+-      expect(runFollowup).toHaveBeenCalledExactlyOnceWith(stale);
+-      expect(removeChatAbortControllerEntry(entries, runId, entry)).toBe(true);
+-      await withinTest(pendingExecuted.promise, signal);
+-      expect(runFollowup.mock.calls.map(([run]) => run)).toEqual([stale, pending]);
+-    } finally {
+-      releaseStale.resolve();
+-      clearFollowupQueueForTest(sessionKey);
+-      removeChatAbortControllerEntry(entries, runId, entry);
+-    }
+-  });
+-
+-  it("holds an already draining queue before dequeue until exact native terminal settlement", async ({
+-    signal,
+-  }) => {
+-    const entry: ChatAbortControllerEntry = {
+-      kind: "agent",
+-      controller: new AbortController(),
+-      operationalRunInstance: createOperationalRunInstanceRef(runId),
+-      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-      sessionKey,
+-      sessionId,
+-      startedAtMs: 1,
+-      expiresAtMs: Number.MAX_SAFE_INTEGER,
+-    };
+-    const entries = new Map([[runId, entry]]);
+-    const target = capturePendingAgentMessageInjectionTarget({ entries, sessionKey, sessionId });
+-    if (!target) {
+-      throw new Error("Expected the exact native owner");
+-    }
+-    const debounceEntered = createDeferred();
+-    const releaseDebounce = createDeferred();
+-    const drained = createDeferred();
+-    const input = correction("pending-native-authority", "already-draining-correction");
+-    const runFollowup = vi.fn(async () => drained.resolve());
+-    const nativeDrain = gatewayWork.runWithGatewayDetachedWorkContinuation;
+-    let drain: Promise<unknown> | undefined;
+-    vi.spyOn(gatewayWork, "runWithGatewayDetachedWorkContinuation").mockImplementation(
+-      (...args) => {
+-        const work = nativeDrain(...args);
+-        drain ??= work;
+-        return work;
+-      },
+-    );
+-    vi.spyOn(queueHelpers, "waitForQueueDebounce").mockImplementationOnce(async () => {
+-      debounceEntered.resolve();
+-      await releaseDebounce.promise;
+-    });
+-    try {
+-      enqueueFollowupRun(
+-        sessionKey,
+-        input.followupRun,
+-        input.resolvedQueue,
+-        "message-id",
+-        runFollowup,
+-      );
+-      await withinTest(debounceEntered.promise, signal);
+-      scheduleFollowupDrainAfterAgentRun({ target, queueKey: sessionKey, runFollowup });
+-      releaseDebounce.resolve();
+-      await withinTest(drain!, signal);
+-      expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
+-      expect(getExistingFollowupQueue(sessionKey)?.inFlight.size).toBe(0);
+-      expect(runFollowup).not.toHaveBeenCalled();
+-      entry.controller.abort();
+-      expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
+-      expect(removeChatAbortControllerEntry(entries, runId, entry)).toBe(true);
+-      await withinTest(drained.promise, signal);
+-      expect(runFollowup).toHaveBeenCalledExactlyOnceWith(input.followupRun);
+-    } finally {
+-      releaseDebounce.resolve();
+-      clearFollowupQueueForTest(sessionKey);
+-      removeChatAbortControllerEntry(entries, runId, entry);
+-      await drain;
+-    }
+-  });
+-
+-  it("cancels foreground publication observation without cancelling queued input custody", async ({
+-    signal,
+-  }) => {
+-    const instance = createOperationalRunInstanceRef(runId);
+-    const entry: ChatAbortControllerEntry = {
+-      kind: "agent",
+-      controller: new AbortController(),
+-      operationalRunInstance: instance,
+-      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-      sessionKey,
+-      sessionId,
+-      startedAtMs: 1,
+-      expiresAtMs: Number.MAX_SAFE_INTEGER,
+-    };
+-    const entries = new Map([[runId, entry]]);
+-    const captured = capturePendingAgentMessageInjectionTarget({ entries, sessionKey, sessionId });
+-    expect(captured).toBeDefined();
+-    const dispatch = new AbortController();
+-    const queued = new AbortController();
+-    const input = correction("pending-native-authority", "split-signal-correction");
+-    input.opts = { abortSignal: dispatch.signal };
+-    input.followupRun.abortSignal = queued.signal;
+-    input.pendingAgentMessageInjectionTarget = captured;
+-    const entered = createDeferred();
+-    const waitForPublication = publicationWait.waitForEmbeddedRunPublication;
+-    vi.spyOn(publicationWait, "waitForEmbeddedRunPublication").mockImplementation((params) => {
+-      const wait = waitForPublication(params);
+-      entered.resolve();
+-      return wait;
+-    });
+-    const pending = runActiveReplySteer(input);
+-    try {
+-      await withinTest(entered.promise, signal);
+-      expect(EMBEDDED_RUN_WAITERS.get(sessionId)?.size).toBe(1);
+-      dispatch.abort(new Error("original dispatcher ended"));
+-      await expect(pending).rejects.toThrow("original dispatcher ended");
+-      expect(EMBEDDED_RUN_WAITERS.has(sessionId)).toBe(false);
+-      expect(queued.signal.aborted).toBe(false);
+-      expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
+-      expect(input.runFollowup).not.toHaveBeenCalled();
+-      const terminal = waitForAgentMessageInjectionTargetRelease(captured!, queued.signal);
+-      // Retire only this captured native owner. A successor may not inherit its observation.
+-      clearFollowupQueueForTest(sessionKey);
+-      expect(removeChatAbortControllerEntry(entries, runId, entry)).toBe(true);
+-      await expect(terminal).resolves.toBe(true);
+-      expect(input.runFollowup).not.toHaveBeenCalled();
+-    } finally {
+-      dispatch.abort();
+-      clearFollowupQueueForTest(sessionKey);
+-      removeChatAbortControllerEntry(entries, runId, entry);
+-      await pending.catch(() => undefined);
+-    }
+-  });
+-
+-  it("keeps a restrictive caller queued instead of borrowing the direct owner's tools", async () => {
+-    await withDirectRequester(async (owner) => {
+-      const entry: ChatAbortControllerEntry = {
+-        kind: "agent",
+-        controller: new AbortController(),
+-        operationalRunInstance: owner.instance,
+-        lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-        sessionKey,
+-        sessionId,
+-        startedAtMs: 1,
+-        expiresAtMs: Number.MAX_SAFE_INTEGER,
+-      };
+-      const entries = new Map([[runId, entry]]);
+-      const input = correction(owner.fingerprint, "restricted-correction");
+-      input.pendingAgentMessageInjectionTarget = capturePendingAgentMessageInjectionTarget({
+-        entries,
+-        sessionKey,
+-        sessionId,
+-      });
+-      expect(input.pendingAgentMessageInjectionTarget).toBeDefined();
+-      input.followupRun.toolsAllow = ["read"];
+-      input.sessionCtx = { ...input.sessionCtx, Provider: "discord" };
+-      try {
+-        await expect(runActiveReplySteer(input)).resolves.toBe("handled");
+-        expect(owner.injected).not.toHaveBeenCalled();
+-        expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
+-        expect(input.runFollowup).not.toHaveBeenCalled();
+-      } finally {
+-        clearFollowupQueueForTest(sessionKey);
+-        removeChatAbortControllerEntry(entries, runId, entry);
+-      }
+-    });
+-  });
+-
+   it("adopts an owner correction through the live admitted target without a reply operation", async ({
+     signal,
+   }) => {
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+index 82869e0a25ecb6071601d2d6463b4a9e126e61a1..87811d4538a521052a3855fcb7e986a90c32694f 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+@@ -4,17 +4,12 @@ import { waitForEmbeddedRunPublication } from "../../agents/embedded-agent-runne
+ import { isIngressAdoptionLostError } from "../../channels/message/ingress-drain.js";
+ import { resolveRestartRecoverySteeringBlockReason } from "../../config/sessions/restart-recovery-receipt.js";
+ import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+-import {
+-  resolveAgentMessageInjectionTarget,
+-  type PendingAgentMessageInjectionTarget,
+-} from "../../gateway/agent-message-injection-target.js";
+ import { logVerbose } from "../../globals.js";
+ import { formatErrorMessage } from "../../infra/errors.js";
+ import { markReplyPayloadForSourceSuppressionDelivery } from "../reply-payload.js";
+ import type { ReplyPayload } from "../types.js";
+ import {
+   scheduleFollowupDrainAfterReplyOperationClear,
+-  scheduleFollowupDrainAfterAgentRun,
+   type RunReplyAgentParams,
+ } from "./agent-runner-core.js";
+ import { resolveReplySteeringAuthority } from "./agent-runner-fallback-authority.js";
+@@ -37,13 +32,11 @@ import {
+ } from "./reply-run-registry.js";
+ import { getAttachedBackend } from "./reply-run-registry.state.js";
+ import { refreshReplyOperationTyping } from "./reply-run-typing.js";
+-import { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority.js";
+ import { buildChannelSourceTurnId } from "./source-turn-id.js";
+ import type { TypingSignaler } from "./typing-mode.js";
+ 
+ export type ActiveReplySteerParams = {
+   retainedReservation?: ParkedSteerReservation;
+-  pendingAgentMessageInjectionTarget?: PendingAgentMessageInjectionTarget;
+   followupRun: RunReplyAgentParams["followupRun"];
+   opts: RunReplyAgentParams["opts"];
+   providedReplyOperation: ReplyOperation | undefined;
+@@ -114,8 +107,7 @@ export async function runActiveReplySteer(
+   // Direct requester continuations publish an admitted embedded owner without
+   // a reply operation. The shared resolver preserves that owner's native guards.
+   const injectionKey = activeReplyOperation?.key ?? sessionKey;
+-  let injectionTarget =
+-    !params.pendingAgentMessageInjectionTarget &&
++  const injectionTarget =
+     injectionKey &&
+     (!activeReplyOperation ||
+       replyRunRegistry.get(activeReplyOperation.key) === activeReplyOperation)
+@@ -134,13 +126,7 @@ export async function runActiveReplySteer(
+   }
+   const scheduleParkedFallback = () => {
+     const owner = replyRunRegistry.get(queueKey);
+-    if (params.pendingAgentMessageInjectionTarget) {
+-      scheduleFollowupDrainAfterAgentRun({
+-        target: params.pendingAgentMessageInjectionTarget,
+-        queueKey,
+-        runFollowup,
+-      });
+-    } else if (owner) {
++    if (owner) {
+       scheduleFollowupDrainAfterReplyOperationClear({
+         operation: owner,
+         queueKey,
+@@ -183,18 +169,6 @@ export async function runActiveReplySteer(
+     if (admission === "fallback") {
+       return await fallback();
+     }
+-    if (params.pendingAgentMessageInjectionTarget) {
+-      const queuedSignal = resolveFollowupAbortSignal(followupRun);
+-      const dispatchSignal = params.opts?.abortSignal;
+-      const observationSignal =
+-        dispatchSignal && queuedSignal
+-          ? AbortSignal.any([dispatchSignal, queuedSignal])
+-          : (dispatchSignal ?? queuedSignal);
+-      injectionTarget = await resolveAgentMessageInjectionTarget(
+-        params.pendingAgentMessageInjectionTarget,
+-        observationSignal,
+-      );
+-    }
+     if (!injectionTarget) {
+       return await fallback("no injectable reply operation");
+     }
+@@ -250,23 +224,6 @@ export async function runActiveReplySteer(
+           followupRun.run.inputProvenance.kind === "external_user"),
+       terminalReplyExpectation: followupRun.run.terminalReplyExpectation,
+       toolAuthorityFingerprint: params.toolAuthorityFingerprint,
+-      ...(params.pendingAgentMessageInjectionTarget
+-        ? {
+-            toolAuthorityOverlay: resolveInboundReplyToolAuthorityOverlay({
+-              ctx: params.sessionCtx,
+-              cfg: followupRun.run.config,
+-              sessionEntry: {
+-                spawnedBy: followupRun.run.spawnedBy,
+-                permissionMode: followupRun.run.permissionMode,
+-                toolOverrides: followupRun.run.toolOverrides,
+-              },
+-              senderIsOwner: followupRun.run.senderIsOwner === true,
+-              operatorAuthority: followupRun.operatorAuthority,
+-              toolsAllow: followupRun.toolsAllow,
+-              disableTools: followupRun.disableTools === true,
+-            }),
+-          }
+-        : {}),
+       personalToolParticipant: {
+         operatorAuthority: followupRun.operatorAuthority,
+         senderId: followupRun.run.senderId,
+diff --git a/src/auto-reply/reply/dispatch-from-config.lifecycle.ts b/src/auto-reply/reply/dispatch-from-config.lifecycle.ts
+index faef4f7957bc9e0db08830949ae9e3e47b694c4f..0a7b3f19787dd624c27591682d8983c2bd964564 100644
+--- a/src/auto-reply/reply/dispatch-from-config.lifecycle.ts
++++ b/src/auto-reply/reply/dispatch-from-config.lifecycle.ts
+@@ -12,10 +12,6 @@ import {
+ import { isRecoverableTerminalSessionStatus } from "../../config/sessions/terminal-status.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import {
+-  capturePendingAgentMessageInjectionTarget,
+-  type PendingAgentMessageInjectionTarget,
+-} from "../../gateway/agent-message-injection-target.js";
+ import {
+   prepareSessionWorkerPlacementMutationCheck,
+   resolveWorkerPlacementArchiveRestoreError,
+@@ -177,7 +173,6 @@ export function createDispatchReplyOperationCoordinator(params: {
+   routeThreadId?: string | number;
+ }) {
+   let dispatchReplyOperation: ReplyOperation | undefined;
+-  let pendingAgentMessageInjectionTarget: PendingAgentMessageInjectionTarget | undefined;
+   let admittedExpectedSessionId: string | undefined;
+   let dispatchAbortOperation: ReplyOperation | undefined;
+   let preDispatchAbortOperation: ReplyOperation | undefined;
+@@ -353,25 +348,12 @@ export function createDispatchReplyOperationCoordinator(params: {
+     const replyTurnKind = resolveReplyTurnKind(params.replyOptions);
+     const activeReplyOperation = replyRunRegistry.get(dispatchOperationSessionKey);
+     const activeEmbeddedSessionId = resolveActiveEmbeddedRunSessionId(dispatchOperationSessionKey);
+-    const gatewayContext = (
+-      readChannelContextGatewayContextResolver(params.ctx) ??
+-      getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext
+-    )?.();
+-    if (replyTurnKind === "visible" && !activeReplyOperation && gatewayContext) {
+-      pendingAgentMessageInjectionTarget ??= capturePendingAgentMessageInjectionTarget({
+-        entries: gatewayContext.chatAbortControllers,
+-        sessionKey: dispatchOperationSessionKey,
+-        sessionId: operationSessionId,
+-        excludeRunId: params.replyOptions?.runId,
+-      });
+-    }
+     const allowGatewayEmbeddedQueueResolution =
+       replyTurnKind === "visible" &&
+       (params.replyOptions?.turnAdoptionLifecycle !== undefined ||
+         params.allowActiveQueueResolution === true) &&
+       activeReplyOperation === undefined &&
+-      (activeEmbeddedSessionId === operationSessionId ||
+-        pendingAgentMessageInjectionTarget !== undefined);
++      activeEmbeddedSessionId === operationSessionId;
+     if (allowGatewayEmbeddedQueueResolution) {
+       // An embedded owner can outlive its reply-operation registration. Do not
+       // create a competing operation for the same session before queue policy
+@@ -614,7 +596,6 @@ export function createDispatchReplyOperationCoordinator(params: {
+         params.replyOptions?.onAgentRunTerminalOutcome?.(outcome);
+       },
+       ...(dispatchReplyOperation ? { replyOperation: dispatchReplyOperation } : {}),
+-      ...(pendingAgentMessageInjectionTarget ? { pendingAgentMessageInjectionTarget } : {}),
+     };
+   };
+ 
+diff --git a/src/auto-reply/reply/get-reply-run-admission.ts b/src/auto-reply/reply/get-reply-run-admission.ts
+index e3a3559c30f17f639185560868a84223dad0e4cf..93944879fc73724b32895fab4f98e4979adc970d 100644
+--- a/src/auto-reply/reply/get-reply-run-admission.ts
++++ b/src/auto-reply/reply/get-reply-run-admission.ts
+@@ -3,8 +3,8 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
+ import { clearAutoFallbackPrimaryProbeSelection } from "../../agents/agent-scope.js";
+ import { resolveSessionAuthSelection } from "../../agents/auth-profiles/session-override.js";
+ import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
++import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../agents/main-session-recovery/main-session-recovery-admission.js";
+ import { hasResolvedThinkingCatalogEntry } from "../../agents/thinking-runtime.js";
+-import { readChannelContextGatewayContextResolver } from "../../channels/message-access/admission-evidence.js";
+ import { resolveCollapsedSessionAuthPinSource } from "../../config/sessions/auth-profile-override-provenance.js";
+ import { formatSqliteSessionFileMarker } from "../../config/sessions/legacy-sqlite-marker.js";
+ import {
+@@ -13,18 +13,13 @@ import {
+ } from "../../config/sessions/paths.js";
+ import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
+-import {
+-  capturePendingAgentMessageInjectionTarget,
+-  waitForAgentMessageInjectionTargetRelease,
+-} from "../../gateway/agent-message-injection-target.js";
+ import { logVerbose } from "../../globals.js";
+ import { isFastTestRuntimeEnv } from "../../infra/env.js";
+-import {
+-  getGatewayContextResolver,
+-  getPluginRuntimeGatewayRequestScope,
+-} from "../../plugins/runtime/gateway-request-scope.js";
+ import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
+-import { interruptSessionWorkAdmissions } from "../../sessions/session-lifecycle-admission.js";
++import {
++  getSessionWorkAdmissionOwnerRelease,
++  interruptSessionWorkAdmissions,
++} from "../../sessions/session-lifecycle-admission.js";
+ import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
+ import { resolveCommandTurnTargetSessionKey } from "../command-turn-context.js";
+ import {
+@@ -43,7 +38,6 @@ import {
+ } from "./get-reply-run-helpers.js";
+ import {
+   REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
+-  resolvePreparedReplyQueueBusyState,
+   waitForPreparedReplyQueue,
+ } from "./get-reply-run-queue.js";
+ import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
+@@ -489,37 +483,40 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
+     resolveActiveEmbeddedSessionId() ??
+     resolveActiveReplyOperationSessionId() ??
+     preparedSessionState.sessionId;
+-  const gatewayContext = (
+-    providedReplyOperation
+-      ? getGatewayContextResolver(providedReplyOperation)
+-      : (readChannelContextGatewayContextResolver(ctx) ??
+-          getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext)
+-  )?.();
+-  const pendingAgentMessageInjectionTarget =
+-    opts?.pendingAgentMessageInjectionTarget ??
+-    (sessionKey && gatewayContext
+-      ? capturePendingAgentMessageInjectionTarget({
+-          entries: gatewayContext.chatAbortControllers,
+-          sessionKey,
+-          sessionId: preparedSessionState.sessionId,
+-          excludeRunId: opts?.runId,
+-        })
+-      : undefined);
+   let recoveryOwnerActive = false;
+   const resolveQueueBusyState = () => {
+-    const state = resolvePreparedReplyQueueBusyState({
+-      storePath,
+-      sessionKey,
+-      sessionId: preparedSessionState.sessionId,
+-      embeddedSessionId: resolveActiveEmbeddedSessionId(),
+-      replySessionId: resolveActiveReplyOperationSessionId(),
+-      hasEmbeddedRuntime: embeddedAgentRuntime !== null,
+-      isEmbeddedActive: (id) => embeddedAgentRuntime?.isEmbeddedAgentRunActive(id) ?? false,
+-      isOwnPreDispatchOperationSession,
+-      pendingAgentMessageInjectionTarget,
+-    });
+-    recoveryOwnerActive = state.recoveryOwnerActive;
+-    return state;
++    const embeddedActiveSessionId = resolveActiveEmbeddedSessionId();
++    const replyOperationActiveSessionId = resolveActiveReplyOperationSessionId();
++    const recoveryOwnerRelease = storePath
++      ? getSessionWorkAdmissionOwnerRelease({
++          scope: storePath,
++          identities: [sessionKey, preparedSessionState.sessionId],
++          owner: MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER,
++        })
++      : undefined;
++    recoveryOwnerActive = recoveryOwnerRelease !== undefined;
++    const activeSessionId =
++      embeddedActiveSessionId ?? replyOperationActiveSessionId ?? preparedSessionState.sessionId;
++    if (
++      !activeSessionId ||
++      (!embeddedAgentRuntime && !replyOperationActiveSessionId && !recoveryOwnerActive)
++    ) {
++      return { activeSessionId: undefined, isActive: false };
++    }
++    if (!recoveryOwnerRelease && isOwnPreDispatchOperationSession(activeSessionId)) {
++      return { activeSessionId, isActive: false };
++    }
++    const replyOperationActive =
++      replyOperationActiveSessionId != null &&
++      isReplyRunActiveForSessionId(replyOperationActiveSessionId);
++    return {
++      activeSessionId,
++      isActive:
++        (embeddedActiveSessionId != null &&
++          (embeddedAgentRuntime?.isEmbeddedAgentRunActive(embeddedActiveSessionId) ?? false)) ||
++        replyOperationActive ||
++        recoveryOwnerActive,
++    };
+   };
+   if (commandTurnContinuationTargetKey && providedReplyOperation) {
+     const adoption = await admitReplyTurn({
+@@ -608,15 +605,10 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
+           : false;
+       },
+       waitForActiveRunEnd: (activeRunSessionId) =>
+-        pendingAgentMessageInjectionTarget
+-          ? waitForAgentMessageInjectionTargetRelease(
+-              pendingAgentMessageInjectionTarget,
+-              opts?.abortSignal,
+-            )
+-          : isReplyRunActiveForSessionId(activeRunSessionId)
+-            ? waitForReplyRunEndBySessionId(activeRunSessionId, REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS)
+-            : (embeddedAgentRuntime?.waitForEmbeddedAgentRunEnd(activeRunSessionId) ??
+-              Promise.resolve(undefined)),
++        isReplyRunActiveForSessionId(activeRunSessionId)
++          ? waitForReplyRunEndBySessionId(activeRunSessionId, REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS)
++          : (embeddedAgentRuntime?.waitForEmbeddedAgentRunEnd(activeRunSessionId) ??
++            Promise.resolve(undefined)),
+       refreshPreparedState: async () => {
+         preparedSessionState = resolvePreparedSessionState();
+         ({ authProfileId, authProfileIdSource } = await resolveRuntimeAuthProfile());
+@@ -664,7 +656,6 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
+     currentInboundContext,
+     isRoomEvent,
+     providedReplyOperation,
+-    pendingAgentMessageInjectionTarget,
+     preparedSessionState,
+     resolvedQueue,
+     embeddedAgentRuntime,
+diff --git a/src/auto-reply/reply/get-reply-run-execute.ts b/src/auto-reply/reply/get-reply-run-execute.ts
+index b3eb1fbca1aaed03bea4d383a25b4fb80ae303b5..c601272e75407a5f6cb432999690f09a6d323a9c 100644
+--- a/src/auto-reply/reply/get-reply-run-execute.ts
++++ b/src/auto-reply/reply/get-reply-run-execute.ts
+@@ -84,7 +84,6 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+     currentInboundContext,
+     isRoomEvent,
+     providedReplyOperation,
+-    pendingAgentMessageInjectionTarget,
+     preparedSessionState,
+     resolvedQueue,
+     embeddedAgentRuntime,
+@@ -666,7 +665,6 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission)
+       shouldFollowup,
+       hasQueuedFollowups,
+       isActive,
+-      pendingAgentMessageInjectionTarget,
+       isRunActive: () => {
+         const latestSessionState = resolvePreparedSessionState();
+         const latestActiveSessionId =
+diff --git a/src/auto-reply/reply/get-reply-run-queue.ts b/src/auto-reply/reply/get-reply-run-queue.ts
+index 2baac4244b9227673631d8c054e9ba0fb78e6ac0..496706a56ad8f03a4c66867ccbc5f086d02185d5 100644
+--- a/src/auto-reply/reply/get-reply-run-queue.ts
++++ b/src/auto-reply/reply/get-reply-run-queue.ts
+@@ -1,13 +1,6 @@
+ /** Active-run queue admission for prepared reply turns. */
+-import { MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER } from "../../agents/main-session-recovery/main-session-recovery-admission.js";
+-import {
+-  isAgentMessageInjectionTargetActive,
+-  type PendingAgentMessageInjectionTarget,
+-} from "../../gateway/agent-message-injection-target.js";
+-import { getSessionWorkAdmissionOwnerRelease } from "../../sessions/session-lifecycle-admission.js";
+ import type { ReplyPayload } from "../types.js";
+ import type { QueueSettings } from "./queue.js";
+-import { isReplyRunActiveForSessionId } from "./reply-run-registry.js";
+ 
+ export const REPLY_RUN_STILL_SHUTTING_DOWN_TEXT =
+   "⚠️ Previous run is still shutting down. Please try again in a moment.";
+@@ -31,51 +24,3 @@ export async function waitForPreparedReplyQueue(params: {
+     ? { text: REPLY_RUN_STILL_SHUTTING_DOWN_TEXT }
+     : undefined;
+ }
+-
+-/** Resolve queue custody independently of whether the current owner has published a backend. */
+-export function resolvePreparedReplyQueueBusyState(params: {
+-  storePath?: string;
+-  sessionKey?: string;
+-  sessionId: string;
+-  embeddedSessionId?: string;
+-  replySessionId?: string;
+-  hasEmbeddedRuntime: boolean;
+-  isEmbeddedActive: (sessionId: string) => boolean;
+-  isOwnPreDispatchOperationSession: (sessionId: string | undefined) => boolean;
+-  pendingAgentMessageInjectionTarget?: PendingAgentMessageInjectionTarget;
+-}) {
+-  const { embeddedSessionId, replySessionId, pendingAgentMessageInjectionTarget } = params;
+-  const recoveryOwnerRelease = params.storePath
+-    ? getSessionWorkAdmissionOwnerRelease({
+-        scope: params.storePath,
+-        identities: [params.sessionKey, params.sessionId],
+-        owner: MAIN_SESSION_RECOVERY_WORK_ADMISSION_OWNER,
+-      })
+-    : undefined;
+-  const recoveryOwnerActive = recoveryOwnerRelease !== undefined;
+-  if (
+-    pendingAgentMessageInjectionTarget &&
+-    isAgentMessageInjectionTargetActive(pendingAgentMessageInjectionTarget)
+-  ) {
+-    return {
+-      activeSessionId: pendingAgentMessageInjectionTarget.publication.sessionId,
+-      isActive: true,
+-      recoveryOwnerActive,
+-    };
+-  }
+-  const activeSessionId = embeddedSessionId ?? replySessionId ?? params.sessionId;
+-  if (!activeSessionId || (!params.hasEmbeddedRuntime && !replySessionId && !recoveryOwnerActive)) {
+-    return { activeSessionId: undefined, isActive: false, recoveryOwnerActive };
+-  }
+-  if (!recoveryOwnerRelease && params.isOwnPreDispatchOperationSession(activeSessionId)) {
+-    return { activeSessionId, isActive: false, recoveryOwnerActive };
+-  }
+-  return {
+-    activeSessionId,
+-    isActive:
+-      (embeddedSessionId != null && params.isEmbeddedActive(embeddedSessionId)) ||
+-      (replySessionId != null && isReplyRunActiveForSessionId(replySessionId)) ||
+-      recoveryOwnerActive,
+-    recoveryOwnerActive,
+-  };
+-}
+diff --git a/src/auto-reply/reply/get-reply.types.ts b/src/auto-reply/reply/get-reply.types.ts
+index faebc19dc6e2c62e880aa1b2bbe4811d69043d62..4fd167d0782239b64eafde76d8181db9eda1f896 100644
+--- a/src/auto-reply/reply/get-reply.types.ts
++++ b/src/auto-reply/reply/get-reply.types.ts
+@@ -10,7 +10,6 @@ import type { PrepareAssistantTranscriptMessage } from "../../config/sessions/tr
+ import type { SessionEntry, SessionToolOverrides } from "../../config/sessions/types.js";
+ // Shared get-reply type contracts for command, directive, and runtime layers.
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import type { PendingAgentMessageInjectionTarget } from "../../gateway/agent-message-injection-target.js";
+ import type { DashboardMessageReadAdmission } from "../../gateway/message-action-turn-capability.js";
+ import type { ExtractedFileImage } from "../../media-understanding/extracted-file-images.js";
+ import type { PluginCommandReplyOptions } from "../../plugins/plugin-command-dispatch-contract.js";
+@@ -44,8 +43,6 @@ export type ReplyRunVerbosity = {
+ };
+ 
+ type InternalReplySessionOptions = {
+-  /** Exact admitted direct owner captured before channel reply preparation. */
+-  pendingAgentMessageInjectionTarget?: PendingAgentMessageInjectionTarget;
+   /** Source-owned cancellation retained when dispatch borrows an active lane for queued followups. */
+   queuedFollowupAbortSignal?: AbortSignal;
+   /** Host-minted original operator authority; never restored from session metadata. */
+diff --git a/src/auto-reply/reply/queue/drain.ts b/src/auto-reply/reply/queue/drain.ts
+index 88ddeced2a8f87243ef1235f89e700f598242c9a..a18930a37d71b3304adae7ff9b77340a0791f80a 100644
+--- a/src/auto-reply/reply/queue/drain.ts
++++ b/src/auto-reply/reply/queue/drain.ts
+@@ -8,7 +8,6 @@ import { runOutsidePreparedModelRuntimePluginGenerationScope } from "../../../ag
+ import { normalizeChatType } from "../../../channels/chat-type.js";
+ import { resolveSessionStorePathCore } from "../../../config/sessions.js";
+ import { loadSessionEntryReadOnly } from "../../../config/sessions/session-accessor.js";
+-import type { PendingAgentMessageInjectionTarget } from "../../../gateway/agent-message-injection-target.js";
+ import {
+   channelRouteCompactKey,
+   channelRouteDedupeKey,
+@@ -61,8 +60,7 @@ import {
+ import {
+   clearFollowupQueue,
+   FOLLOWUP_QUEUES,
+-  bindNativeQueueAdmission,
+-  prepareStaleFollowupQueueRetirement,
++  followupQueueSources,
+   trimSummaryElisionsToCap,
+ } from "./state.js";
+ import { consumeQueueSummaryDelivery } from "./summary-consumption.js";
+@@ -138,32 +136,85 @@ export function kickFollowupDrainIfIdle(key: string): void {
+ 
+ type FollowupQueueState = NonNullable<ReturnType<typeof FOLLOWUP_QUEUES.get>>;
+ 
+-function isWaitingForQueueAdmission(queue: FollowupQueueState): boolean {
+-  return (
+-    (queue.drainAdmissionOwner !== undefined && "publication" in queue.drainAdmissionOwner) ||
+-    queue.items.some((item) => item.steerPending)
+-  );
+-}
+-
+-/** Bind every drain kick to this generation's exact native terminal custody. */
+-export function scheduleFollowupDrainAfterAgentRun(params: {
+-  target: PendingAgentMessageInjectionTarget;
+-  queueKey: string;
+-  runFollowup: (run: FollowupRun) => Promise<void>;
+-}): void {
+-  if (!FOLLOWUP_QUEUES.has(params.queueKey)) {
+-    return;
++/** Capture one exact active drain generation for post-recovery retirement. */
++export function prepareStaleFollowupDrainRetirement(key: string): (() => void) | undefined {
++  const queue = FOLLOWUP_QUEUES.get(key);
++  if (!queue?.draining) {
++    return undefined;
+   }
+-  rememberFollowupDrainCallback(params.queueKey, params.runFollowup);
+-  bindNativeQueueAdmission(params.queueKey, params.target, kickFollowupDrainIfIdle);
+-}
++  const drainOwner = queue.drainOwner;
++  if (!drainOwner) {
++    return undefined;
++  }
++  const activeSources = new Set(queue.inFlight);
++  if (activeSources.size === 0) {
++    return undefined;
++  }
++  // Recovery awaits owner cleanup before redeeming this closure. Revalidation
++  // prevents an old recovery from fencing a queue that advanced to fresh work.
++  return () => {
++    if (
++      FOLLOWUP_QUEUES.get(key) !== queue ||
++      !queue.draining ||
++      queue.drainOwner !== drainOwner ||
++      activeSources.size !== queue.inFlight.size ||
++      ![...activeSources].every((source) => queue.inFlight.has(source))
++    ) {
++      return;
++    }
+ 
+-/** Retire only the captured drain through the existing queue-state owner. */
+-export function prepareStaleFollowupDrainRetirement(key: string): (() => void) | undefined {
+-  return prepareStaleFollowupQueueRetirement(key, {
+-    onEmpty: clearFollowupDrainCallback,
+-    onPending: kickFollowupDrainIfIdle,
+-  });
++    // Active identities may already be side-effecting, so remove rather than replay them.
++    removeQueuedItemsByRef(queue.items, [...activeSources]);
++    const activeSummarySources = [...activeSources].filter((source) =>
++      queue.activeSummarySources.has(source),
++    );
++    consumeQueueSummaryDelivery(
++      queue,
++      { droppedCount: activeSummarySources.length, sources: activeSummarySources },
++      false,
++    );
++    const replacement = {
++      ...queue,
++      abortController: new AbortController(),
++      items: [...queue.items],
++      draining: false,
++      drainOwner: undefined,
++      inFlight: new Set<FollowupRun>(),
++      summaryLines: [...queue.summaryLines],
++      summarySources: [...queue.summarySources],
++      activeSummarySources: new WeakSet<FollowupRun>(),
++      summaryElisions: queue.summaryElisions.map((entry) => ({
++        ...entry,
++        sources: [...entry.sources],
++        summaryLines: [...entry.summaryLines],
++        // A late summary delivery must not resolve an old source into pending state.
++        sourceRefs: new WeakMap<FollowupRun, FollowupRun>(),
++      })),
++    };
++    for (const source of followupQueueSources(replacement)) {
++      source.queueAbortSignal = replacement.abortController.signal;
++    }
++    const hasPendingWork = replacement.items.length > 0 || replacement.droppedCount > 0;
++    if (hasPendingWork) {
++      FOLLOWUP_QUEUES.set(key, replacement);
++    } else {
++      FOLLOWUP_QUEUES.delete(key);
++      clearFollowupDrainCallback(key);
++    }
++    queue.items.length = 0;
++    queue.droppedCount = 0;
++    queue.summaryLines = [];
++    queue.summarySources = [];
++    queue.summaryElisions = [];
++    queue.evictedSummaryCount = 0;
++    queue.abortController.abort();
++    for (const source of activeSources) {
++      completeFollowupRunLifecycle(source);
++    }
++    if (hasPendingWork) {
++      kickFollowupDrainIfIdle(key);
++    }
++  };
+ }
+ 
+ function renderCollectItem(item: FollowupRun, idx: number): string {
+@@ -897,11 +948,6 @@ export function scheduleFollowupDrain(
+     return;
+   }
+   const operation = replyRunRegistry.get(key);
+-  if (existingQueue?.drainAdmissionOwner && "publication" in existingQueue.drainAdmissionOwner) {
+-    // Every kick shares this queue's exact native terminal-custody barrier.
+-    rememberFollowupDrainCallback(key, runFollowup);
+-    return;
+-  }
+   if (existingQueue && operation) {
+     rememberFollowupDrainCallback(key, runFollowup);
+     if (existingQueue.drainAdmissionOwner !== operation) {
+@@ -928,17 +974,7 @@ export function scheduleFollowupDrain(
+   }
+   const drainOwner = {};
+   queue.drainOwner = drainOwner;
+-  const currentRunFollowup = FOLLOWUP_RUN_CALLBACKS.get(key) ?? runFollowup;
+-  const effectiveRunFollowup = (run: FollowupRun) => {
+-    if (
+-      queue.drainAdmissionOwner &&
+-      "publication" in queue.drainAdmissionOwner &&
+-      !isFollowupRunAborted(run)
+-    ) {
+-      throw new FollowupRunDeferredError("The native owner still retains terminal custody");
+-    }
+-    return currentRunFollowup(run);
+-  };
++  const effectiveRunFollowup = FOLLOWUP_RUN_CALLBACKS.get(key) ?? runFollowup;
+   const reserveOptions = {
+     inFlight: queue.inFlight,
+     shouldRestoreOnError: () =>
+@@ -947,7 +983,7 @@ export function scheduleFollowupDrain(
+   };
+   // Cache callback only when a drain actually starts. Avoid keeping stale
+   // callbacks around from finalize calls where no queue work is pending.
+-  rememberFollowupDrainCallback(key, currentRunFollowup);
++  rememberFollowupDrainCallback(key, effectiveRunFollowup);
+   const drainQueuedFollowups = async (): Promise<void> => {
+     let waitingForSteer = false;
+     try {
+@@ -957,7 +993,7 @@ export function scheduleFollowupDrain(
+         if (queue.items.length === 0 && queue.droppedCount === 0) {
+           break;
+         }
+-        if (isWaitingForQueueAdmission(queue)) {
++        if (queue.items.some((item) => item.steerPending)) {
+           waitingForSteer = true;
+           break;
+         }
+@@ -966,17 +1002,13 @@ export function scheduleFollowupDrain(
+         if (queue.items.length === 0 && queue.droppedCount === 0) {
+           break;
+         }
+-        if (isWaitingForQueueAdmission(queue)) {
++        if (queue.items.some((item) => item.steerPending)) {
+           waitingForSteer = true;
+           break;
+         }
+         if (await drainProtectedPriorityFollowup(queue, effectiveRunFollowup)) {
+           continue;
+         }
+-        if (isWaitingForQueueAdmission(queue)) {
+-          waitingForSteer = true;
+-          break;
+-        }
+         if (
+           queue.droppedCount > 0 &&
+           (await drainOverflowSummaryGroup({
+@@ -986,10 +1018,6 @@ export function scheduleFollowupDrain(
+         ) {
+           continue;
+         }
+-        if (isWaitingForQueueAdmission(queue)) {
+-          waitingForSteer = true;
+-          break;
+-        }
+         if (queue.mode === "collect") {
+           // Recheck remaining routes after each individual drain so a later
+           // compatible suffix can collect without mixing destinations.
+@@ -1021,10 +1049,6 @@ export function scheduleFollowupDrain(
+           }
+ 
+           for (const groupItems of contextGroups) {
+-            if (isWaitingForQueueAdmission(queue)) {
+-              waitingForSteer = true;
+-              break;
+-            }
+             // Earlier groups await model work. Recheck membership so overflow
+             // eviction cannot leave a stale snapshot eligible for delivery.
+             const currentGroupItems = groupItems.filter((item) => queue.items.includes(item));
+@@ -1194,14 +1218,14 @@ export function scheduleFollowupDrain(
+         delete queue.drainOwner;
+         const hasPendingQueueWork = queue.items.length > 0 || queue.droppedCount > 0;
+         if (waitingForSteer && hasPendingQueueWork) {
+-          if (!isWaitingForQueueAdmission(queue)) {
+-            scheduleFollowupDrain(key, currentRunFollowup);
++          if (!queue.items.some((item) => item.steerPending)) {
++            scheduleFollowupDrain(key, effectiveRunFollowup);
+           }
+         } else if (!hasPendingQueueWork) {
+           FOLLOWUP_QUEUES.delete(key);
+           clearFollowupDrainCallback(key);
+         } else {
+-          scheduleFollowupDrain(key, currentRunFollowup);
++          scheduleFollowupDrain(key, effectiveRunFollowup);
+         }
+       }
+     }
+diff --git a/src/auto-reply/reply/queue/state.ts b/src/auto-reply/reply/queue/state.ts
+index 5682bcefa7e5ed9c470e18d9d612f9794ebd90b8..5ef26b5bb77e1bcd80e8423040e29f3eca4a0726 100644
+--- a/src/auto-reply/reply/queue/state.ts
++++ b/src/auto-reply/reply/queue/state.ts
+@@ -4,18 +4,12 @@ import type { ModelCatalogEntry } from "../../../agents/model-catalog.types.js";
+ import type { ModelFallbackRouteResolution } from "../../../agents/model-fallback.types.js";
+ import { resolveThinkingSelection } from "../../../agents/model-thinking-default.js";
+ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+-import {
+-  waitForAgentMessageInjectionTargetRelease,
+-  type PendingAgentMessageInjectionTarget,
+-} from "../../../gateway/agent-message-injection-target.js";
+-import { logVerbose } from "../../../globals.js";
+ import { normalizeAgentId } from "../../../routing/session-key.js";
+ import { resolveGlobalMap } from "../../../shared/global-singleton.js";
+-import { applyQueueRuntimeSettings, removeQueuedItemsByRef } from "../../../utils/queue-helpers.js";
++import { applyQueueRuntimeSettings } from "../../../utils/queue-helpers.js";
+ import { normalizeThinkLevel } from "../../thinking.js";
+ import type { ReplyOperation } from "../reply-run-registry.contracts.js";
+ import { completeFollowupRunLifecycle } from "./lifecycle.js";
+-import { consumeQueueSummaryDelivery } from "./summary-consumption.js";
+ import type { FollowupRun, QueueDropPolicy, QueueSettings } from "./types.js";
+ 
+ type FollowupQueueState = {
+@@ -25,7 +19,7 @@ type FollowupQueueState = {
+   /** Exact operational drain generation; recovery may retire only this owner. */
+   drainOwner?: object;
+   /** The native foreground operation whose clearance admits this queue's next drain. */
+-  drainAdmissionOwner?: ReplyOperation | PendingAgentMessageInjectionTarget;
++  drainAdmissionOwner?: ReplyOperation;
+   /** Identities retained in `items` while delivery awaits; pending cap and depth must exclude them. */
+   inFlight: Set<FollowupRun>;
+   lastEnqueuedAt: number;
+@@ -326,134 +320,3 @@ export function refreshQueuedFollowupSession(params: {
+     rewriteRun(item.run);
+   }
+ }
+-
+-export function bindNativeQueueAdmission(
+-  queueKey: string,
+-  target: PendingAgentMessageInjectionTarget,
+-  onReleased: (key: string) => void,
+-): void {
+-  const queue = FOLLOWUP_QUEUES.get(queueKey);
+-  if (!queue) {
+-    return;
+-  }
+-  const previous = queue.drainAdmissionOwner;
+-  if (
+-    previous &&
+-    "publication" in previous &&
+-    previous.publication.entry === target.publication.entry
+-  ) {
+-    return;
+-  }
+-  queue.drainAdmissionOwner = target;
+-  // One input's foreground cancellation cannot release surviving queue custody.
+-  void waitForAgentMessageInjectionTargetRelease(target, queue.abortController.signal)
+-    .then((released) => {
+-      if (
+-        released &&
+-        FOLLOWUP_QUEUES.get(queueKey) === queue &&
+-        queue.drainAdmissionOwner === target
+-      ) {
+-        delete queue.drainAdmissionOwner;
+-        onReleased(queueKey);
+-      }
+-    })
+-    .catch((error: unknown) => {
+-      if (!queue.abortController.signal.aborted) {
+-        logVerbose(`queue: direct owner terminal settlement failed: ${String(error)}`);
+-      }
+-    });
+-}
+-
+-/** Capture one exact active drain generation for post-recovery retirement. */
+-export function prepareStaleFollowupQueueRetirement(
+-  key: string,
+-  callbacks: { onEmpty: (key: string) => void; onPending: (key: string) => void },
+-): (() => void) | undefined {
+-  const queue = FOLLOWUP_QUEUES.get(key);
+-  if (!queue?.draining) {
+-    return undefined;
+-  }
+-  const drainOwner = queue.drainOwner;
+-  if (!drainOwner) {
+-    return undefined;
+-  }
+-  const activeSources = new Set(queue.inFlight);
+-  if (activeSources.size === 0) {
+-    return undefined;
+-  }
+-  // Recovery awaits owner cleanup before redeeming this closure. Revalidation
+-  // prevents an old recovery from fencing a queue that advanced to fresh work.
+-  return () => {
+-    if (
+-      FOLLOWUP_QUEUES.get(key) !== queue ||
+-      !queue.draining ||
+-      queue.drainOwner !== drainOwner ||
+-      activeSources.size !== queue.inFlight.size ||
+-      ![...activeSources].every((source) => queue.inFlight.has(source))
+-    ) {
+-      return;
+-    }
+-
+-    // Active identities may already be side-effecting, so remove rather than replay them.
+-    removeQueuedItemsByRef(queue.items, [...activeSources]);
+-    const activeSummarySources = [...activeSources].filter((source) =>
+-      queue.activeSummarySources.has(source),
+-    );
+-    consumeQueueSummaryDelivery(
+-      queue,
+-      { droppedCount: activeSummarySources.length, sources: activeSummarySources },
+-      false,
+-    );
+-    const replacement = {
+-      ...queue,
+-      abortController: new AbortController(),
+-      items: [...queue.items],
+-      draining: false,
+-      drainOwner: undefined,
+-      inFlight: new Set<FollowupRun>(),
+-      summaryLines: [...queue.summaryLines],
+-      summarySources: [...queue.summarySources],
+-      activeSummarySources: new WeakSet<FollowupRun>(),
+-      summaryElisions: queue.summaryElisions.map((entry) => ({
+-        ...entry,
+-        sources: [...entry.sources],
+-        summaryLines: [...entry.summaryLines],
+-        // A late summary delivery must not resolve an old source into pending state.
+-        sourceRefs: new WeakMap<FollowupRun, FollowupRun>(),
+-      })),
+-    };
+-    const nativeOwner =
+-      queue.drainAdmissionOwner && "publication" in queue.drainAdmissionOwner
+-        ? queue.drainAdmissionOwner
+-        : undefined;
+-    if (nativeOwner) {
+-      delete replacement.drainAdmissionOwner;
+-    }
+-    for (const source of followupQueueSources(replacement)) {
+-      source.queueAbortSignal = replacement.abortController.signal;
+-    }
+-    const hasPendingWork = replacement.items.length > 0 || replacement.droppedCount > 0;
+-    if (hasPendingWork) {
+-      FOLLOWUP_QUEUES.set(key, replacement);
+-      if (nativeOwner) {
+-        bindNativeQueueAdmission(key, nativeOwner, callbacks.onPending);
+-      }
+-    } else {
+-      FOLLOWUP_QUEUES.delete(key);
+-      callbacks.onEmpty(key);
+-    }
+-    queue.items.length = 0;
+-    queue.droppedCount = 0;
+-    queue.summaryLines = [];
+-    queue.summarySources = [];
+-    queue.summaryElisions = [];
+-    queue.evictedSummaryCount = 0;
+-    queue.abortController.abort();
+-    for (const source of activeSources) {
+-      completeFollowupRunLifecycle(source);
+-    }
+-    if (hasPendingWork) {
+-      callbacks.onPending(key);
+-    }
+-  };
+-}
 diff --git a/src/auto-reply/reply/reply-run-registry.contracts.ts b/src/auto-reply/reply/reply-run-registry.contracts.ts
 index 3fa1bc05e1ce8dd0ac9f630ae508ae64decf97a1..a99c74cb7be516596d28d87beed4c905b1e512f7 100644
 --- a/src/auto-reply/reply/reply-run-registry.contracts.ts
@@ -5480,7 +8573,7 @@ index 7a73e85f05ca57723f75a6c52321b5c62a590269..00000000000000000000000000000000
 -}
 diff --git a/src/auto-reply/reply/session.renewal.test.ts b/src/auto-reply/reply/session.renewal.test.ts
 deleted file mode 100644
-index 61728e2b4b74416e383da0377735325298b9bf9f..0000000000000000000000000000000000000000
+index 6c5bd5285659802735fa0e121347a22a2a3a9aeb..0000000000000000000000000000000000000000
 --- a/src/auto-reply/reply/session.renewal.test.ts
 +++ /dev/null
 @@ -1,221 +0,0 @@
@@ -5560,7 +8653,7 @@ index 61728e2b4b74416e383da0377735325298b9bf9f..00000000000000000000000000000000
 -        });
 -
 -        subagentRuns.set(runId, {
--          ...expectDefined(subagentRuns.get(runId)),
+-          ...expectDefined(subagentRuns.get(runId), "seeded child run"),
 -          execution: { status: "terminal", endedAt: Date.now() },
 -          delivery: { status: "delivered", disposition: "delivered" },
 -          cleanupCompletedAt: Date.now(),
@@ -6088,6 +9181,174 @@ index bb7de2d16d2e5b107b9dbfbf4d2c43c4d237683b..4fc057ea2f763f6ceb9179f8ed8a8854
    );
    return { ...target, storePath };
  }
+diff --git a/src/gateway/agent-message-injection-target.ts b/src/gateway/agent-message-injection-target.ts
+deleted file mode 100644
+index 0b72e797b275b3c47afaabbf7496bd0ff6b9d232..0000000000000000000000000000000000000000
+--- a/src/gateway/agent-message-injection-target.ts
++++ /dev/null
+@@ -1,162 +0,0 @@
+-import type { OperationalRunInstanceRef } from "../agents/admitted-run-context.js";
+-import { allowsDirectMessageInjectionOwner } from "../agents/embedded-agent-runner/message-injection-target.js";
+-import { waitForEmbeddedRunPublication } from "../agents/embedded-agent-runner/runs.publication-wait.js";
+-import type { ReplyMessageInjectionTarget } from "../auto-reply/reply/reply-run-registry.js";
+-import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
+-import {
+-  isChatAbortTerminalPersistenceSettled,
+-  waitForChatAbortControllerRemoval,
+-} from "./chat-abort-lifecycle-internal.js";
+-import type { ChatAbortControllerEntry } from "./chat-abort.js";
+-
+-export type PendingAgentMessageInjectionTarget = {
+-  publication: {
+-    sessionKey: string;
+-    sessionId: string;
+-    operationalRunInstance: OperationalRunInstanceRef;
+-    abortSignal: AbortSignal;
+-    entry: ChatAbortControllerEntry;
+-    entries: ReadonlyMap<string, ChatAbortControllerEntry>;
+-    isCurrent: () => boolean;
+-  };
+-};
+-
+-/** Capture one admitted direct owner before any backend/publication wait. */
+-export function capturePendingAgentMessageInjectionTarget(params: {
+-  entries: ReadonlyMap<string, ChatAbortControllerEntry>;
+-  sessionKey: string;
+-  sessionId: string | undefined;
+-  excludeRunId?: string;
+-}): PendingAgentMessageInjectionTarget | undefined {
+-  const { entries, sessionKey, sessionId, excludeRunId } = params;
+-  if (!allowsDirectMessageInjectionOwner(sessionKey)) {
+-    return undefined;
+-  }
+-  const generation = getAgentEventLifecycleGeneration();
+-  const candidates = [...entries].filter(
+-    ([runId, candidate]) =>
+-      runId !== excludeRunId &&
+-      candidate.kind === "agent" &&
+-      candidate.sessionKey === sessionKey &&
+-      candidate.sessionId === sessionId &&
+-      candidate.operationalRunInstance?.runId === runId &&
+-      candidate.lifecycleGeneration === generation &&
+-      !candidate.registrationCleanupRequested &&
+-      candidate.projectSessionActive !== false &&
+-      !candidate.controller.signal.aborted,
+-  );
+-  const candidate = candidates.length === 1 ? candidates[0]?.[1] : undefined;
+-  const instance = candidate?.operationalRunInstance;
+-  if (candidate && instance && sessionId) {
+-    const controller = candidate.controller;
+-    const isCurrent = () =>
+-      entries.get(instance.runId) === candidate &&
+-      candidate.controller === controller &&
+-      candidate.operationalRunInstance === instance &&
+-      candidate.sessionKey === sessionKey &&
+-      candidate.sessionId === sessionId &&
+-      candidate.lifecycleGeneration === generation &&
+-      generation === getAgentEventLifecycleGeneration() &&
+-      !candidate.registrationCleanupRequested &&
+-      candidate.projectSessionActive !== false &&
+-      !controller.signal.aborted;
+-    return {
+-      publication: {
+-        sessionKey,
+-        sessionId,
+-        operationalRunInstance: instance,
+-        abortSignal: controller.signal,
+-        entry: candidate,
+-        entries,
+-        isCurrent,
+-      },
+-    };
+-  }
+-  return undefined;
+-}
+-
+-/** Retiring executions retain custody until their exact terminal writer settles. */
+-export function isAgentMessageInjectionTargetActive(
+-  captured: PendingAgentMessageInjectionTarget,
+-): boolean {
+-  const owner = captured.publication;
+-  return (
+-    owner.entries.get(owner.operationalRunInstance.runId) === owner.entry ||
+-    !isChatAbortTerminalPersistenceSettled(owner.entry)
+-  );
+-}
+-
+-/** Join exact terminal custody; an abort alone does not release its session claim. */
+-export async function waitForAgentMessageInjectionTargetRelease(
+-  captured: PendingAgentMessageInjectionTarget,
+-  signal?: AbortSignal,
+-): Promise<boolean> {
+-  const owner = captured.publication;
+-  return await waitForChatAbortControllerRemoval({
+-    entries: owner.entries,
+-    targets: [{ runId: owner.operationalRunInstance.runId, entry: owner.entry }],
+-    timeoutMs: null,
+-    signal: signal ?? new AbortController().signal,
+-  });
+-}
+-
+-/** Join the existing publication/retirement owners outside the session writer barrier. */
+-export async function resolveAgentMessageInjectionTarget(
+-  captured: ReplyMessageInjectionTarget | PendingAgentMessageInjectionTarget | undefined,
+-  abortSignal?: AbortSignal,
+-): Promise<ReplyMessageInjectionTarget | undefined> {
+-  if (!captured || !("publication" in captured)) {
+-    return captured;
+-  }
+-  const owner = captured.publication;
+-  const observer = new AbortController();
+-  const signal = AbortSignal.any([
+-    ...(abortSignal ? [abortSignal] : []),
+-    owner.abortSignal,
+-    observer.signal,
+-  ]);
+-  const ownerReleased = waitForChatAbortControllerRemoval({
+-    entries: owner.entries,
+-    targets: [{ runId: owner.operationalRunInstance.runId, entry: owner.entry }],
+-    timeoutMs: null,
+-    signal,
+-  }).then(
+-    () => undefined,
+-    (error: unknown) => {
+-      if (!signal.aborted) {
+-        throw error;
+-      }
+-    },
+-  );
+-  try {
+-    let target: ReplyMessageInjectionTarget | undefined;
+-    const result = await waitForEmbeddedRunPublication({
+-      sessionKey: owner.sessionKey,
+-      sessionId: owner.sessionId,
+-      directOwner: {
+-        kind: "direct",
+-        operationalRunInstance: owner.operationalRunInstance,
+-        isCurrent: owner.isCurrent,
+-      },
+-      ownerReleased,
+-      abortSignal: signal,
+-      onRegistered: (registered) => {
+-        target = registered;
+-      },
+-    });
+-    if (result !== "registered" || !owner.isCurrent()) {
+-      return undefined;
+-    }
+-    // Correlation never grants authority. The published native target still owns
+-    // delegated, tool, participant, visibility and transcript-commit admission.
+-    return target?.runId === owner.operationalRunInstance.runId ? target : undefined;
+-  } catch (error) {
+-    abortSignal?.throwIfAborted();
+-    if (!owner.isCurrent()) {
+-      return undefined;
+-    }
+-    throw error;
+-  } finally {
+-    observer.abort();
+-  }
+-}
 diff --git a/src/gateway/config-reload-recovery.ts b/src/gateway/config-reload-recovery.ts
 index fcba518ce5442350bddac119a58bd01667e333f6..44c1977195c2680678c4659a491431bf4d0672dc 100644
 --- a/src/gateway/config-reload-recovery.ts
@@ -6217,11 +9478,11 @@ index 6801e56dcdd942aa9e48be65e36f023685808ce5..f5fd00ba5a1ff8bf291c8331e9ebe223
      capturedOperator.authority?.assertCurrent();
 diff --git a/src/gateway/server-methods/chat-send-run-targets.test.ts b/src/gateway/server-methods/chat-send-run-targets.test.ts
 deleted file mode 100644
-index a6d032dc6b90526f07d8db1100b6dcd5780089ac..0000000000000000000000000000000000000000
+index d1b5048a667afd1f5a54173f53aba57d798b5580..0000000000000000000000000000000000000000
 --- a/src/gateway/server-methods/chat-send-run-targets.test.ts
 +++ /dev/null
-@@ -1,223 +0,0 @@
--import { afterEach, describe, expect, it, vi } from "vitest";
+@@ -1,244 +0,0 @@
+-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 -import {
 -  createOperationalRunInstanceRef,
 -  prepareAgentRunAdmission,
@@ -6242,10 +9503,12 @@ index a6d032dc6b90526f07d8db1100b6dcd5780089ac..00000000000000000000000000000000
 -import { replyMessageInjectionTargetOwner } from "../../auto-reply/reply/reply-run-registry.contracts.js";
 -import {
 -  beginReplyMessageInjectionTarget,
+-  createReplyOperation,
 -  replyRunRegistry,
 -} from "../../auto-reply/reply/reply-run-registry.js";
 -import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 -import { createDeferredCore } from "../../shared/deferred.js";
+-import { capturePendingAgentMessageInjectionTarget } from "../agent-message-injection-target.js";
 -import { removeChatAbortControllerEntry } from "../chat-abort-lifecycle-internal.js";
 -import type { ChatAbortControllerEntry } from "../chat-abort.types.js";
 -import {
@@ -6288,6 +9551,25 @@ index a6d032dc6b90526f07d8db1100b6dcd5780089ac..00000000000000000000000000000000
 -}
 -
 -describe("chat direct-owner publication custody", () => {
+-  it("recognizes a pending native owner beside an unstarted caller slot, but refuses a started reply owner", () => {
+-    const f = fixture();
+-    const operation = createReplyOperation({
+-      sessionKey: f.sessionKey,
+-      sessionId: f.sessionId,
+-      resetTriggered: false,
+-    });
+-    onTestFinished(() => operation.complete());
+-    const capture = () =>
+-      capturePendingAgentMessageInjectionTarget({
+-        entries: f.entries,
+-        sessionKey: f.sessionKey,
+-        sessionId: f.sessionId,
+-      });
+-    expect(capture()?.publication.operationalRunInstance).toBe(f.original.operationalRunInstance);
+-    operation.setPhase("running");
+-    expect(capture()).toBeUndefined();
+-  });
+-
 -  it("retains the native capability when a same-ID instance replaces it after publication validation", async () => {
 -    const run = createQueueTestRun({ prompt: "accepted work", messageId: "original" });
 -    const f = fixture(run.run.sessionId);
@@ -6446,35 +9728,22 @@ index a6d032dc6b90526f07d8db1100b6dcd5780089ac..00000000000000000000000000000000
 -});
 diff --git a/src/gateway/server-methods/chat-send-run-targets.ts b/src/gateway/server-methods/chat-send-run-targets.ts
 deleted file mode 100644
-index 332e9b71ca61edb42b7340c71b9981197e5b4080..0000000000000000000000000000000000000000
+index 6bce29a163c29ce9bc01d67712583b9cd457f897..0000000000000000000000000000000000000000
 --- a/src/gateway/server-methods/chat-send-run-targets.ts
 +++ /dev/null
-@@ -1,152 +0,0 @@
--import type { OperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
--import { waitForEmbeddedRunPublication } from "../../agents/embedded-agent-runner/runs.publication-wait.js";
+@@ -1,51 +0,0 @@
 -import {
 -  replyRunRegistry,
 -  type ReplyMessageInjectionTarget,
 -} from "../../auto-reply/reply/reply-run-registry.js";
 -import type { SessionEntry } from "../../config/sessions/types.js";
--import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
--import { waitForChatAbortControllerRemoval } from "../chat-abort-lifecycle-internal.js";
--import type { ChatAbortControllerEntry } from "../chat-abort.js";
+-import {
+-  capturePendingAgentMessageInjectionTarget,
+-  type PendingAgentMessageInjectionTarget,
+-} from "../agent-message-injection-target.js";
 -import type { NormalizedChatSendRequest } from "./chat-send-request.js";
 -import type { PreparedChatSendSession } from "./chat-send-session.js";
 -import type { GatewayRequestContext } from "./types.js";
--
--type PendingDirectTarget = {
--  publication: {
--    sessionKey: string;
--    sessionId: string;
--    operationalRunInstance: OperationalRunInstanceRef;
--    abortSignal: AbortSignal;
--    entry: ChatAbortControllerEntry;
--    entries: ReadonlyMap<string, ChatAbortControllerEntry>;
--    isCurrent: () => boolean;
--  };
--};
 -
 -/** Capture exact owners under admission; awaited preparation may never select a successor. */
 -export function captureChatSendRunTargets(
@@ -6488,53 +9757,20 @@ index 332e9b71ca61edb42b7340c71b9981197e5b4080..00000000000000000000000000000000
 -  const { activeRunScopeKey: sessionKey, clientRunId } = params.session;
 -  const queueMode = params.request.p.queueMode;
 -  const expectedActiveReplyOperation = replyRunRegistry.get(sessionKey);
--  let messageInjectionTarget: ReplyMessageInjectionTarget | PendingDirectTarget | undefined =
+-  let messageInjectionTarget:
+-    | ReplyMessageInjectionTarget
+-    | PendingAgentMessageInjectionTarget
+-    | undefined =
 -    queueMode === "steer"
 -      ? replyRunRegistry.resolveCurrentMessageInjectionTarget(sessionKey)
 -      : undefined;
 -  if (queueMode === "steer" && !messageInjectionTarget && !expectedActiveReplyOperation) {
--    const entries = params.context.chatAbortControllers;
--    const sessionId = entry?.sessionId;
--    const generation = getAgentEventLifecycleGeneration();
--    const candidates = [...entries].filter(
--      ([runId, candidate]) =>
--        runId !== clientRunId &&
--        candidate.kind === "agent" &&
--        candidate.sessionKey === sessionKey &&
--        candidate.sessionId === sessionId &&
--        candidate.operationalRunInstance?.runId === runId &&
--        candidate.lifecycleGeneration === generation &&
--        !candidate.registrationCleanupRequested &&
--        candidate.projectSessionActive !== false &&
--        !candidate.controller.signal.aborted,
--    );
--    const candidate = candidates.length === 1 ? candidates[0]?.[1] : undefined;
--    const instance = candidate?.operationalRunInstance;
--    if (candidate && instance && sessionId) {
--      const controller = candidate.controller;
--      const isCurrent = () =>
--        entries.get(instance.runId) === candidate &&
--        candidate.controller === controller &&
--        candidate.operationalRunInstance === instance &&
--        candidate.sessionKey === sessionKey &&
--        candidate.sessionId === sessionId &&
--        candidate.lifecycleGeneration === generation &&
--        generation === getAgentEventLifecycleGeneration() &&
--        !candidate.registrationCleanupRequested &&
--        candidate.projectSessionActive !== false &&
--        !controller.signal.aborted;
--      messageInjectionTarget = {
--        publication: {
--          sessionKey,
--          sessionId,
--          operationalRunInstance: instance,
--          abortSignal: controller.signal,
--          entry: candidate,
--          entries,
--          isCurrent,
--        },
--      };
--    }
+-    messageInjectionTarget = capturePendingAgentMessageInjectionTarget({
+-      entries: params.context.chatAbortControllers,
+-      sessionKey,
+-      sessionId: entry?.sessionId,
+-      excludeRunId: clientRunId,
+-    });
 -  }
 -  return {
 -    messageInjectionTarget,
@@ -6546,62 +9782,7 @@ index 332e9b71ca61edb42b7340c71b9981197e5b4080..00000000000000000000000000000000
 -  };
 -}
 -
--/** Join the existing publication/retirement owners outside the session writer barrier. */
--export async function resolveChatSendMessageInjectionTarget(
--  captured: ReplyMessageInjectionTarget | PendingDirectTarget | undefined,
--  abortSignal: AbortSignal,
--): Promise<ReplyMessageInjectionTarget | undefined> {
--  if (!captured || !("publication" in captured)) {
--    return captured;
--  }
--  const owner = captured.publication;
--  const observer = new AbortController();
--  const signal = AbortSignal.any([abortSignal, owner.abortSignal, observer.signal]);
--  const ownerReleased = waitForChatAbortControllerRemoval({
--    entries: owner.entries,
--    targets: [{ runId: owner.operationalRunInstance.runId, entry: owner.entry }],
--    timeoutMs: null,
--    signal,
--  }).then(
--    () => undefined,
--    (error: unknown) => {
--      if (!signal.aborted) {
--        throw error;
--      }
--    },
--  );
--  try {
--    let target: ReplyMessageInjectionTarget | undefined;
--    const result = await waitForEmbeddedRunPublication({
--      sessionKey: owner.sessionKey,
--      sessionId: owner.sessionId,
--      directOwner: {
--        kind: "direct",
--        operationalRunInstance: owner.operationalRunInstance,
--        isCurrent: owner.isCurrent,
--      },
--      ownerReleased,
--      abortSignal: signal,
--      onRegistered: (registered) => {
--        target = registered;
--      },
--    });
--    if (result !== "registered" || !owner.isCurrent()) {
--      return undefined;
--    }
--    // Correlation never grants authority. The published native target still owns
--    // delegated, tool, participant, visibility and transcript-commit admission.
--    return target?.runId === owner.operationalRunInstance.runId ? target : undefined;
--  } catch (error) {
--    abortSignal.throwIfAborted();
--    if (!owner.isCurrent()) {
--      return undefined;
--    }
--    throw error;
--  } finally {
--    observer.abort();
--  }
--}
+-export { resolveAgentMessageInjectionTarget as resolveChatSendMessageInjectionTarget } from "../agent-message-injection-target.js";
 diff --git a/src/gateway/server-reload-hot.ts b/src/gateway/server-reload-hot.ts
 index b7bf1cde7b6a177248acc5231732d6945dcd1cc7..d4c3693cc203c071b7187930c65338ea82c19b6a 100644
 --- a/src/gateway/server-reload-hot.ts
@@ -6669,18 +9850,45 @@ index b7bf1cde7b6a177248acc5231732d6945dcd1cc7..d4c3693cc203c071b7187930c65338ea
          timeoutMs: MCP_RUNTIME_RELOAD_DISPOSE_TIMEOUT_MS,
          onWarn: params.logReload.warn,
 diff --git a/src/gateway/server.chat-steer-direct-command.test.ts b/src/gateway/server.chat-steer-direct-command.test.ts
-index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894f623f2e5 100644
+index 9ae7831c20d244e478e90da2909922009fd4bbca..1c42c95735e76a26f4a6f847bb731894f623f2e5 100644
 --- a/src/gateway/server.chat-steer-direct-command.test.ts
 +++ b/src/gateway/server.chat-steer-direct-command.test.ts
-@@ -6,7 +6,6 @@ import { expect, it, onTestFinished, vi } from "vitest";
+@@ -4,13 +4,8 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
+ import { createAssistantMessageEventStream, type Model } from "openclaw/plugin-sdk/llm";
+ import { expect, it, onTestFinished, vi } from "vitest";
  import type { RawData } from "ws";
- import { createDeferred, withinTest } from "../../test/helpers/promise.js";
+-import {
+-  awaitGateBeforeSettlement,
+-  createDeferred,
+-  withinTest,
+-} from "../../test/helpers/promise.js";
++import { createDeferred, withinTest } from "../../test/helpers/promise.js";
  import { readAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 -import * as messageInjectionTargets from "../agents/embedded-agent-runner/message-injection-target.js";
  import { ACTIVE_EMBEDDED_RUN_REGISTRATIONS } from "../agents/embedded-agent-runner/run-state.js";
  import { createAttemptNestedToolActivityState } from "../agents/embedded-agent-runner/run/attempt-nested-tool-activity.js";
  import { prepareEmbeddedAttemptStream } from "../agents/embedded-agent-runner/run/attempt-stream-prepare.js";
-@@ -103,17 +102,14 @@ installGatewayTestHooks({
+@@ -27,19 +22,14 @@ import {
+ } from "../agents/sessions/agent-session-loop-correctness.test-support.js";
+ import { runAnnounceAgentCall } from "../agents/subagents/announce/subagent-announce-completion-delivery.js";
+ import { makeEmbeddedRunnerAttempt } from "../agents/test-helpers/embedded-agent-runner-e2e-fixtures.js";
+-import { withFullRuntimeReplyConfig } from "../auto-reply/reply/get-reply-fast-path.js";
+-import { createReplyDispatcher } from "../auto-reply/reply/reply-dispatcher.js";
+ import { replyRunRegistry } from "../auto-reply/reply/reply-run-registry.js";
+-import * as replyTurnAdmission from "../auto-reply/reply/reply-turn-admission.js";
+ import { getRuntimeConfig, writeConfigFile } from "../config/config.js";
+ import { getAgentRunContext } from "../infra/agent-run-registry.js";
+ import { createDiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
+ import { rawDataToString } from "../infra/ws.js";
+ import { createDiagnosticEmbeddedRunOwner } from "../logging/diagnostic-run-activity.js";
+ import { diagnosticLogger } from "../logging/diagnostic-runtime.js";
+-import { withPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
+ import { closeSkillsWatchers } from "../skills/runtime/refresh.js";
+-import * as pendingAgentTargets from "./agent-message-injection-target.js";
+ import {
+   agentCommandMock,
+   connectOk,
+@@ -112,28 +102,14 @@ installGatewayTestHooks({
  });
  
  it.for([
@@ -6689,12 +9897,23 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
 -  { source: "browser", publication: "delayed", sessionKind: "new", disposition: "steered" },
 -  { source: "system", publication: "published", sessionKind: "existing", disposition: "followup" },
 -  { source: "system", publication: "delayed", sessionKind: "existing", disposition: "followup" },
+-  {
+-    source: "channel",
+-    publication: "maintenance",
+-    sessionKind: "existing",
+-    disposition: "steered",
+-  },
 +  { source: "browser", disposition: "steered" },
 +  { source: "system", disposition: "followup" },
  ] as const)(
--  "routes browser corrections to a $source direct command with $publication publication in a $sessionKind session as $disposition",
+-  "routes corrections to a $source direct command with $publication publication in a $sessionKind session as $disposition",
 -  async ({ source, publication, sessionKind, disposition: expectedDisposition }, { signal }) => {
--    const sessionKey = `agent:main:direct-steering-${source}-${publication}-${sessionKind}`;
+-    const fixtureChannelId = "123456789012345678";
+-    const childSessionKey = "agent:main:subagent:completed-child";
+-    const sessionKey =
+-      source === "channel"
+-        ? `agent:main:discord:channel:${fixtureChannelId}`
+-        : `agent:main:direct-steering-${source}-${publication}-${sessionKind}`;
 -    let sessionId = `direct-steering-session-${source}-${publication}-${sessionKind}`;
 -    const runId = `announce:direct-steering-${source}-${publication}-${sessionKind}`;
 +  "routes browser corrections to a $source direct command as $disposition",
@@ -6705,7 +9924,16 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
      const model: Model = {
        id: "mock-1",
        name: "Steering fixture",
-@@ -175,18 +171,15 @@ it.for([
+@@ -156,7 +132,7 @@ it.for([
+     testState.agentConfig = {
+       model: { primary: `${model.provider}/${model.id}` },
+       thinkingDefault: "off",
+-      compaction: { enabled: publication === "maintenance" },
++      compaction: { enabled: false },
+     };
+     testState.gatewayAuth = { mode: "token", token: gatewayToken };
+     testState.gatewayControlUi = { allowedOrigins: [browserOrigin] };
+@@ -195,40 +171,15 @@ it.for([
      onTestFinished(() => discoverySpy.mockRestore());
      await prepareGatewayReplyRuntimeForTest({ force: true });
      await writeSessionStore({
@@ -6718,7 +9946,29 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
 -                agentHarnessId: "openclaw",
 -                permissionMode: "full",
 -                restartRecoveryTerminalRunIds: ["unrelated-completed-source"],
+-                ...(source === "channel"
+-                  ? {
+-                      // This is the persisted requester state after its original
+-                      // source yielded delivery to a completed child cohort.
+-                      status: "running" as const,
+-                      chatType: "channel" as const,
+-                      groupId: fixtureChannelId,
+-                      groupChannel: "#fixture",
+-                      groupSpace: "fixture-guild",
+-                    }
+-                  : {}),
 -              },
+-              ...(source === "channel"
+-                ? {
+-                    [childSessionKey]: {
+-                      sessionId: "completed-child-session",
+-                      spawnedBy: sessionKey,
+-                      spawnDepth: 1,
+-                      updatedAt: Date.now(),
+-                      permissionMode: "full" as const,
+-                    },
+-                  }
+-                : {}),
 -            }
 -          : {},
 +      entries: {
@@ -6733,18 +9983,46 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
      });
  
      const command = await import("../agents/agent-command.js");
-@@ -196,10 +189,6 @@ it.for([
+@@ -238,49 +189,17 @@ it.for([
        ),
      );
      const releaseModel = createDeferred();
 -    const releasePublication = createDeferred();
 -    const beforePublication = createDeferred();
 -    const capturedBeforePublication = createDeferred();
+-    let maintenanceHeld = false;
+-    let maintenanceClaim: { runId?: string; sourceRunId?: string; ingress?: string } | undefined;
+-    if (publication === "maintenance") {
+-      const memory = await import("../auto-reply/reply/agent-runner-memory.js");
+-      const compact = vi
+-        .spyOn(memory, "runSessionCompactionIfNeeded")
+-        .mockImplementation(async (params) => {
+-          // The genuine command has already committed its recovery claim, but
+-          // automatic maintenance precedes its embedded/native injection handle.
+-          expect(params.sessionEntry?.restartRecoveryDeliveryRunId).toBe(runId);
+-          maintenanceClaim = {
+-            runId: params.sessionEntry?.restartRecoveryDeliveryRunId,
+-            sourceRunId: params.sessionEntry?.restartRecoveryDeliverySourceRunId,
+-            ingress: params.sessionEntry?.restartRecoverySourceIngress,
+-          };
+-          maintenanceHeld = true;
+-          beforePublication.resolve();
+-          await releasePublication.promise;
+-          maintenanceHeld = false;
+-          return params.sessionEntry;
+-        });
+-      onTestFinished(() => compact.mockRestore());
+-    }
 -    let providerStarted = false;
      const modelStarted = createDeferred();
      const ownerReady = createDeferred<{
        attempt: EmbeddedRunAttemptParams;
-@@ -211,11 +200,6 @@ it.for([
+       handle: ReturnType<typeof prepareEmbeddedAttemptStream>["queueHandle"];
+     }>();
+     const disposition = createDeferred<"steered" | "followup">();
+-    dispatchInboundMessageMock.mockClear().mockImplementation(async () => {
++    dispatchInboundMessageMock.mockImplementation(async () => {
+       disposition.resolve("followup");
        return { queuedFinal: false, counts: { tool: 0, block: 0, final: 0 } };
      });
      runAttempt.mockImplementation(async (attempt) => {
@@ -6756,7 +10034,7 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
        const modelStream = createAssistantMessageEventStream();
        streamMocks.streamSimple
          .mockImplementation(() =>
-@@ -224,7 +208,6 @@ it.for([
+@@ -289,7 +208,6 @@ it.for([
            ),
          )
          .mockImplementationOnce(() => {
@@ -6764,11 +10042,11 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
            modelStarted.resolve();
            return modelStream;
          });
-@@ -269,12 +252,6 @@ it.for([
+@@ -334,12 +252,6 @@ it.for([
          onBlockReplyFlush: undefined,
        });
        embeddedRunMock.activeIds.add(sessionId);
--      if (publication === "delayed") {
+-      if (publication === "delayed" || publication === "maintenance") {
 -        // Both outcomes release the fixture. The regression must prove steering
 -        // reaches the genuine owner before its first provider request.
 -        await disposition.promise;
@@ -6777,7 +10055,39 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
        const prompt = session.prompt(attempt.prompt);
        try {
          await modelStarted.promise;
-@@ -366,41 +343,14 @@ it.for([
+@@ -402,29 +314,15 @@ it.for([
+             agentParams: {
+               sessionKey,
+               message: "Continue the requester task after its child completed.",
+-              deliver: source === "channel",
+-              ...(source === "channel"
+-                ? { channel: "discord", accountId: "default", to: "channel:123456789012345678" }
+-                : {}),
++              deliver: false,
+               idempotencyKey: runId,
+               inputProvenance: {
+                 kind: "inter_session",
+-                sourceSessionKey: childSessionKey,
++                sourceSessionKey: "agent:main:subagent:completed-child",
+                 sourceChannel: "internal",
+                 sourceTool: "subagent_settle",
+               },
+             },
+-            ...(source === "channel"
+-              ? {
+-                  delegatedToolPolicyHandoff: {
+-                    sourceSessionKey: childSessionKey,
+-                    targetSessionKey: sessionKey,
+-                    targetSessionId: sessionId,
+-                    idempotencyKey: runId,
+-                    settleBatch: { sourceSessionKeys: [childSessionKey], isCurrent: () => true },
+-                  },
+-                }
+-              : {}),
+             expectFinal: true,
+             isExecutionAllowed: () => true,
+             resolveGatewayContext: () => kernel.gatewayRequestContext,
+@@ -445,171 +343,14 @@ it.for([
          }),
        );
      }
@@ -6794,10 +10104,59 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
 -      });
 +    const capture = vi.spyOn(replyRunRegistry, "resolveCurrentMessageInjectionTarget");
      onTestFinished(() => capture.mockRestore());
+-    const capturePending = pendingAgentTargets.capturePendingAgentMessageInjectionTarget;
+-    const pendingCapture = vi
+-      .spyOn(pendingAgentTargets, "capturePendingAgentMessageInjectionTarget")
+-      .mockImplementation((params) => {
+-        const target = capturePending(params);
+-        if (params.sessionKey === sessionKey && target) {
+-          capturedBeforePublication.resolve();
+-        }
+-        return target;
+-      });
+-    onTestFinished(() => pendingCapture.mockRestore());
+-    const admitReplyTurn = replyTurnAdmission.admitReplyTurn;
+-    const competingAdmissions: string[] = [];
+-    const admission = vi
+-      .spyOn(replyTurnAdmission, "admitReplyTurn")
+-      .mockImplementation((params) => {
+-        if (source === "channel" && maintenanceHeld && params.sessionKey === sessionKey) {
+-          competingAdmissions.push(params.sessionKey);
+-          capturedBeforePublication.resolve();
+-        }
+-        return admitReplyTurn(params);
+-      });
+-    onTestFinished(() => admission.mockRestore());
 -    const nativeCapture = vi.spyOn(messageInjectionTargets, "captureReplyMessageInjectionTarget");
 -    onTestFinished(() => nativeCapture.mockRestore());
      const diagnostics = vi.spyOn(diagnosticLogger, "info");
      onTestFinished(() => diagnostics.mockRestore());
+-    const runner = await import("../auto-reply/reply/agent-runner.runtime.js");
+-    const runReply = runner.runReplyAgent;
+-    const replyCalls: unknown[] = [];
+-    const replyCall = vi.spyOn(runner, "runReplyAgent").mockImplementation((params) => {
+-      replyCalls.push({
+-        queue: params.resolvedQueue.mode,
+-        isActive: params.isActive,
+-        shouldSteer: params.shouldSteer,
+-        pendingNative: Boolean(params.pendingAgentMessageInjectionTarget),
+-        replyPhase: params.replyOperation?.phase,
+-        claimRunId: params.sessionEntry?.restartRecoveryDeliveryRunId,
+-        claimStatus: params.sessionEntry?.status,
+-        senderIsOwner: params.followupRun.run.senderIsOwner,
+-        traceAuthorized: params.followupRun.run.traceAuthorized,
+-        permissionMode: params.followupRun.run.permissionMode,
+-        groupId: params.followupRun.run.groupId,
+-        chatType: params.followupRun.run.chatType,
+-      });
+-      return runReply(params);
+-    });
+-    onTestFinished(() => replyCall.mockRestore());
+-    const globals = await import("../globals.js");
+-    const verbose = vi.spyOn(globals, "logVerbose");
+-    onTestFinished(() => verbose.mockRestore());
+-    const correctionAbort = new AbortController();
+-    let originalOutcomes: PromiseSettledResult<unknown>[];
      try {
        if (accepted) {
          expect(await accepted).toMatchObject({ ok: true, payload: { status: "accepted" } });
@@ -6810,21 +10169,102 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
 -        idempotencyKey: `browser-direct-command-correction-${source}-${publication}-${sessionKind}`,
 -        queueMode: "steer",
 -      };
--      let earlyResponse: ReturnType<typeof rpcReq> | undefined;
--      if (publication === "delayed") {
--        earlyResponse = rpcReq(harness.ws, "chat.send", correction);
--        await withinTest(capturedBeforePublication.promise, signal);
+-      const submitCorrection = async () => {
+-        if (source !== "channel") {
+-          return await rpcReq(harness.ws, "chat.send", correction);
+-        }
+-        const { dispatchInboundMessage } = await vi.importActual<
+-          typeof import("../auto-reply/dispatch.js")
+-        >("../auto-reply/dispatch.js");
+-        const { getReplyFromConfig } = await vi.importActual<
+-          typeof import("../auto-reply/reply/get-reply.js")
+-        >("../auto-reply/reply/get-reply.js");
+-        const { dispatchLowLevelChannelReplyFromConfig } = await vi.importActual<
+-          typeof import("../auto-reply/reply/dispatch-from-config.js")
+-        >("../auto-reply/reply/dispatch-from-config.js");
+-        const result = await withPluginRuntimeGatewayRequestScope(
+-          {
+-            resolveGatewayContext: () => kernel.gatewayRequestContext,
+-            isWebchatConnect: () => false,
+-          },
+-          () =>
+-            dispatchInboundMessage({
+-              ctx: {
+-                SessionKey: sessionKey,
+-                Body: correction.message,
+-                RawBody: correction.message,
+-                BodyForAgent: correction.message,
+-                Provider: "discord",
+-                Surface: "discord",
+-                ChatType: "channel",
+-                GroupChannel: "#fixture",
+-                GroupSubject: "#fixture",
+-                GroupSpace: "fixture-guild",
+-                From: `discord:channel:${fixtureChannelId}`,
+-                To: "channel:123456789012345678",
+-                OriginatingChannel: "discord",
+-                OriginatingTo: "channel:123456789012345678",
+-                AccountId: "default",
+-                MessageSid: correction.idempotencyKey,
+-                SenderId: "owner",
+-                InboundAccessAuthorized: true,
+-                InboundEventKind: "user_request",
+-                CommandAuthorized: true,
+-              },
+-              cfg: withFullRuntimeReplyConfig(getRuntimeConfig()),
+-              dispatcher: createReplyDispatcher({ deliver: async () => {} }),
+-              dispatchReplyFromConfig: dispatchLowLevelChannelReplyFromConfig,
+-              replyOptions: { queueModeOverride: "steer", abortSignal: correctionAbort.signal },
+-              replyResolver: (ctx, opts, cfg) =>
+-                getReplyFromConfig(
+-                  ctx,
+-                  opts,
+-                  withFullRuntimeReplyConfig(cfg ?? getRuntimeConfig()),
+-                ),
+-            }),
+-        );
+-        if (result.deferredToActiveRun !== "steer") {
+-          disposition.resolve("followup");
+-        }
+-        expect(
+-          result.deferredToActiveRun,
+-          JSON.stringify({
+-            replyCalls,
+-            verbose: verbose.mock.calls.filter(([message]) => message.startsWith("queue:")),
+-            direct: diagnostics.mock.calls.filter(([message]) =>
+-              message.startsWith("direct steering"),
+-            ),
+-          }),
+-        ).toBe("steer");
+-        return { ok: true, payload: {} };
+-      };
+-      let earlyResponse: ReturnType<typeof submitCorrection> | undefined;
+-      if (publication === "delayed" || publication === "maintenance") {
+-        earlyResponse = submitCorrection();
+-        void earlyResponse.catch(() => disposition.resolve("followup"));
+-        await withinTest(
+-          awaitGateBeforeSettlement(
+-            capturedBeforePublication.promise,
+-            earlyResponse,
+-            "The correction finished before capturing the admitted requester continuation",
+-          ),
+-          signal,
+-        );
+-        expect(
+-          competingAdmissions,
+-          "The pending continuation already owns native admission",
+-        ).toEqual([]);
 -        expect(replyRunRegistry.get(sessionKey)).toBeUndefined();
 -        releasePublication.resolve();
 -      }
        const { attempt, handle } = await withinTest(
          Promise.race([
            ownerReady.promise,
-@@ -438,9 +388,15 @@ it.for([
+@@ -647,12 +388,15 @@ it.for([
          injectionVersion: 2,
          supportsTranscriptCommitWait: true,
        });
--      const response = await (earlyResponse ?? rpcReq(harness.ws, "chat.send", correction));
+-      const response = await (earlyResponse ?? submitCorrection());
 +      const response = await rpcReq(harness.ws, "chat.send", {
 +        sessionKey,
 +        sessionId,
@@ -6833,12 +10273,15 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
 +        queueMode: "steer",
 +      });
        expect(response.ok).toBe(true);
+-      if (publication === "maintenance") {
+-        expect(maintenanceClaim).toEqual({ runId, sourceRunId: runId, ingress: "internal" });
+-      }
 -      const captured = nativeCapture.mock.results.find(
 +      const captured = capture.mock.results.find(
          (result) => result.type === "return" && result.value?.runId === runId,
        );
        expect(captured?.value).toMatchObject({
-@@ -455,9 +411,6 @@ it.for([
+@@ -667,9 +411,6 @@ it.for([
        ).toBe(expectedDisposition);
        if (expectedDisposition === "steered") {
          expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
@@ -6848,15 +10291,31 @@ index 780c90f464ad0ad2b0e6546d9e69c82177a1520d..1c42c95735e76a26f4a6f847bb731894
        }
      } finally {
        // The fixture prevents completion until release; only then does its response budget begin.
-@@ -465,8 +418,6 @@ it.for([
+@@ -677,16 +418,15 @@ it.for([
          source === "browser" && !browserTerminalObserved
            ? Promise.allSettled([onceMessage(harness.ws, isOriginalTerminal)])
            : originalSettled;
 -      releasePublication.resolve();
 -      disposition.resolve("followup");
        releaseModel.resolve();
-       const outcomes = await settled;
-       expect
+-      correctionAbort.abort();
+-      originalOutcomes = await settled;
++      const outcomes = await settled;
++      expect
++        .soft(
++          outcomes.flatMap((outcome) =>
++            outcome.status === "rejected" ? [String(outcome.reason)] : [],
++          ),
++        )
++        .toEqual([]);
+     }
+-    expect(
+-      originalOutcomes.flatMap((outcome) =>
+-        outcome.status === "rejected" ? [String(outcome.reason)] : [],
+-      ),
+-    ).toEqual([]);
+   },
+ );
 diff --git a/src/plugins/api-facades.background.test.ts b/src/plugins/api-facades.background.test.ts
 index a15cd2c6270b6f77afba66cc2e29b700e650b582..40c4edcad44172e2690258b953e5959e64ac6c58 100644
 --- a/src/plugins/api-facades.background.test.ts
