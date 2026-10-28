@@ -96625,10 +96625,10 @@ index 5407da90d321329e0f40c8ce11953c1382c89fef..bf91cfbe19dca1f91a5d9f57eda38283
 +}
 diff --git a/src/browser-task-completion-cleanup.test.ts b/src/browser-task-completion-cleanup.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a2fa36d4588b36f9b8764c316a2bfbcd66a3dd4d
+index 0000000000000000000000000000000000000000..649aa5896546238cacf6e7c28bfe441becc655d8
 --- /dev/null
 +++ b/src/browser-task-completion-cleanup.test.ts
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,254 @@
 +import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 +import { clearFollowupQueue, getFollowupQueue } from "./auto-reply/reply/queue/state.js";
 +import { createMockFollowupRun } from "./auto-reply/reply/test-helpers.js";
@@ -96675,6 +96675,7 @@ index 0000000000000000000000000000000000000000..a2fa36d4588b36f9b8764c316a2bfbcd
 +}));
 +vi.mock("./infra/agent-events.js", () => ({
 +  getAgentEventLifecycleGeneration: () => owner.generation,
++  registerAgentEventLifecycleRotationHandler: vi.fn(),
 +}));
 +vi.mock("./agents/embedded-agent-runner/runs.js", () => ({
 +  resolveActiveEmbeddedRunOwner: () =>
@@ -107714,6 +107715,409 @@ index 4356f6d178d8e24a907c6471fab92b4353bfc7bb..71453eacc0eec775a79b85e73e410b10
  export function revokeMessageActionTurnCapability(token: string | undefined): boolean {
    return token ? capabilitiesByToken.delete(token) : false;
  }
+diff --git a/src/gateway/probe.auth.integration.test.ts b/src/gateway/probe.auth.integration.test.ts
+index 0e6058c78f241636c91679633a43e917e0e0fbc9..f03125632a5d11f62f13041d90544dd61acbbac4 100644
+--- a/src/gateway/probe.auth.integration.test.ts
++++ b/src/gateway/probe.auth.integration.test.ts
+@@ -13,6 +13,8 @@ import { createStatusGatewayProbeBudget } from "../commands/status.gateway-probe
+ import { resolveGatewayProbeSnapshot } from "../commands/status.scan.shared.js";
+ import * as deviceAuthStore from "../infra/device-auth-store.js";
+ import { listDevicePairing, removePairedDevice } from "../infra/device-pairing.js";
++import { collectDeepProbeFindings } from "../security/audit-deep-probe-findings.js";
++import { probeSecurityAuditGateway } from "../security/audit-gateway-probe.js";
+ import { resolveGatewayDeviceAuthRoute } from "./connection-details.js";
+ import { createGatewaySuiteHarness, installGatewayTestHooks, testState } from "./test-helpers.js";
+ 
+@@ -86,13 +88,17 @@ function expectRecord(value: unknown, label: string): Record<string, unknown> {
+   return value as Record<string, unknown>;
+ }
+ 
+-async function seedCachedOperatorToken(scopes: string[]) {
++async function seedCachedOperatorToken(
++  scopes: string[],
++  metadata: { platform?: string; deviceFamily?: string } = {},
++) {
+   const identity = loadOrCreateDeviceIdentity();
+   const pairing = await requestDevicePairing({
+     deviceId: identity.deviceId,
+     publicKey: publicKeyRawBase64UrlFromPem(identity.publicKeyPem),
+     displayName: "vitest probe",
+-    platform: process.platform,
++    platform: metadata.platform ?? process.platform,
++    ...(metadata.deviceFamily ? { deviceFamily: metadata.deviceFamily } : {}),
+     clientId: "test",
+     clientMode: "probe",
+     role: "operator",
+@@ -324,4 +330,118 @@ describe("probeGateway auth integration", () => {
+       read.mockRestore();
+     }
+   });
++
++  it("completes the deep security probe with explicit auth despite a stale origin device token", async () => {
++    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
++    const localAuth = await seedCachedOperatorToken(["operator.read"], {
++      platform: "macOS 27.0.1",
++      deviceFamily: "Mac",
++    });
++    const url = `ws://127.0.0.1:${gatewayHarness.port}`;
++    const lookup = { deviceId: localAuth.deviceId, role: "operator" };
++    const originLookup = { ...lookup, gatewayScope: url };
++    try {
++      await deviceAuthStore.clearDeviceAuthToken(lookup);
++      seedOriginDeviceToken({
++        ...originLookup,
++        token: "stale-origin-token",
++        scopes: localAuth.scopes,
++      });
++      const before = await listDevicePairing();
++      const beforeOrigin = await deviceAuthStore.loadOriginDeviceTokenReadOnly(originLookup);
++      expect(await deviceAuthStore.loadDeviceAuthTokenReadOnly(lookup)).toBeNull();
++      const token = requireGatewayToken();
++      const cfg = {
++        gateway: { port: gatewayHarness.port, auth: { mode: "token" as const, token } },
++      };
++      const result = await probeSecurityAuditGateway({
++        cfg,
++        env: process.env,
++        timeoutMs: 10_000,
++        explicitAuth: { token },
++      });
++      expect(result.deep?.gateway?.ok).toBe(true);
++      expect(result.deep?.gateway?.error).toBeNull();
++      expect(collectDeepProbeFindings(result)).toEqual([]);
++
++      const invalid = await probeSecurityAuditGateway({
++        cfg,
++        env: process.env,
++        timeoutMs: 10_000,
++        explicitAuth: { token: "invalid-shared-token" },
++      });
++      expect(invalid.deep?.gateway?.ok).toBe(false);
++      expect(invalid.deep?.gateway?.error).toMatch(/unauthorized|token mismatch/iu);
++      const unauthenticated = await probeGateway({ url, timeoutMs: 10_000 });
++      expect(unauthenticated.ok).toBe(false);
++      expect(unauthenticated.connectErrorDetails).toMatchObject({
++        code: ConnectErrorDetailCodes.DEVICE_IDENTITY_REQUIRED,
++      });
++
++      const after = await listDevicePairing();
++      expect(after.pending).toEqual(before.pending);
++      expect(
++        after.paired.map(({ deviceId, publicKey, platform, deviceFamily }) => ({
++          deviceId,
++          publicKey,
++          platform,
++          deviceFamily,
++        })),
++      ).toEqual(
++        before.paired.map(({ deviceId, publicKey, platform, deviceFamily }) => ({
++          deviceId,
++          publicKey,
++          platform,
++          deviceFamily,
++        })),
++      );
++      expect(await deviceAuthStore.loadDeviceAuthTokenReadOnly(lookup)).toBeNull();
++      expect(await deviceAuthStore.loadOriginDeviceTokenReadOnly(originLookup)).toEqual(
++        beforeOrigin,
++      );
++    } finally {
++      platformSpy.mockRestore();
++      await removePairedDevice(localAuth.deviceId);
++      await deviceAuthStore.clearDeviceAuthToken(lookup);
++      await deviceAuthStore.clearOriginDeviceToken(originLookup);
++    }
++  });
++
++  it("completes the deep security probe with the same approved Mac app device pin", async () => {
++    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
++    try {
++      const localAuth = await seedCachedOperatorToken(["operator.read"], {
++        platform: "macOS 27.0.1",
++        deviceFamily: "Mac",
++      });
++      try {
++        seedDeviceAuthToken(localAuth);
++        const before = await listDevicePairing();
++        const token = requireGatewayToken();
++        const result = await probeSecurityAuditGateway({
++          cfg: { gateway: { port: gatewayHarness.port, auth: { mode: "token", token } } },
++          env: process.env,
++          timeoutMs: 10_000,
++          explicitAuth: { token },
++        });
++        expect(result.deep?.gateway?.ok).toBe(true);
++        expect(result.deep?.gateway?.error).toBeNull();
++        expect(collectDeepProbeFindings(result)).toEqual([]);
++        const after = await listDevicePairing();
++        expect(after.pending).toEqual(before.pending);
++        expect(
++          after.paired.map(({ platform, deviceFamily }) => ({ platform, deviceFamily })),
++        ).toEqual(before.paired.map(({ platform, deviceFamily }) => ({ platform, deviceFamily })));
++      } finally {
++        await removePairedDevice(localAuth.deviceId);
++        await deviceAuthStore.clearDeviceAuthToken(localAuth);
++        await deviceAuthStore.clearOriginDeviceToken({
++          ...localAuth,
++          gatewayScope: `ws://127.0.0.1:${gatewayHarness.port}`,
++        });
++      }
++    } finally {
++      platformSpy.mockRestore();
++    }
++  });
+ });
+diff --git a/src/gateway/probe.test.ts b/src/gateway/probe.test.ts
+index 3a8cfcc1f2dc85bb4fbae3a5e25f72a099d3415c..23342953839a836df615ba84d5260ed9ee9709ac 100644
+--- a/src/gateway/probe.test.ts
++++ b/src/gateway/probe.test.ts
+@@ -6,6 +6,7 @@ import {
+   retainGatewayResponsePayload,
+ } from "../../packages/gateway-client/src/protocol-request.js";
+ import { GatewayClientRequestError as MockGatewayClientRequestError } from "../../packages/gateway-client/src/request-error.js";
++import type { PairedDevice } from "../infra/device-pairing.types.js";
+ 
+ const { gatewayClientState, createGatewayClientState } = vi.hoisted(() => {
+   const createState = () => ({
+@@ -53,6 +54,9 @@ const { deviceIdentityState, createDeviceIdentityState } = vi.hoisted(() => {
+     identityPaths: [] as unknown[],
+     tokenParams: [] as unknown[],
+     originTokenParams: [] as unknown[],
++    paired: null as PairedDevice | null,
++    pairingReadFails: false,
++    replaceCachedTokenDuringPairingRead: false,
+   });
+   return { deviceIdentityState: createState(), createDeviceIdentityState: createState };
+ });
+@@ -163,6 +167,7 @@ vi.mock("./client.js", () => ({
+ }));
+ 
+ vi.mock("../infra/device-identity.js", () => ({
++  publicKeyRawBase64UrlFromPem: () => "test-public-key",
+   loadOrCreateDeviceIdentity: () => {
+     if (deviceIdentityState.throwOnLoad) {
+       throw new Error("read-only identity dir");
+@@ -178,6 +183,18 @@ vi.mock("../infra/device-identity.js", () => ({
+   },
+ }));
+ 
++vi.mock("../infra/device-pairing-store-readonly.js", () => ({
++  loadPairedDevicePairingStoreRecordReadOnly: async () => {
++    if (deviceIdentityState.pairingReadFails) {
++      throw new Error("pairing reader unavailable");
++    }
++    if (deviceIdentityState.replaceCachedTokenDuringPairingRead) {
++      deviceIdentityState.cachedToken = { token: "replacement-token" };
++    }
++    return deviceIdentityState.paired;
++  },
++}));
++
+ vi.mock("../infra/device-auth-store.js", () => ({
+   loadDeviceAuthTokenReadOnly: (params: unknown) => {
+     deviceIdentityState.tokenParams.push(params);
+@@ -301,6 +318,80 @@ describe("probeGateway", () => {
+     expect(clampProbeTimeoutMs(2_000)).toBe(2_000);
+     expect(clampProbeTimeoutMs(3_000_000_000)).toBe(2_147_483_647);
+   });
++
++  it.each(
++    ["token", "password"].flatMap((credential) =>
++      [
++        "matching",
++        "cache-changed",
++        "foreign-key",
++        "foreign-token",
++        "stale-origin",
++        "no-cache",
++        "revoked",
++        "remote",
++        "configured-remote",
++        "unreadable",
++      ].map((kind) => ({ kind, credential })),
++    ),
++  )(
++    "uses only verified local device metadata ($kind, $credential)",
++    async ({ kind, credential }) => {
++      const platform = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
++      deviceIdentityState.paired = {
++        deviceId: "test-device-identity",
++        publicKey: kind === "foreign-key" ? "different-public-key" : "test-public-key",
++        platform: "macOS 27.0.1",
++        deviceFamily: "Mac",
++        createdAtMs: 1,
++        approvedAtMs: 1,
++        tokens: {
++          operator: {
++            role: "operator",
++            scopes: ["operator.read"],
++            token: kind === "foreign-token" ? "different-token" : "cached-operator-token",
++            createdAtMs: 1,
++            ...(kind === "revoked" ? { revokedAtMs: 1 } : {}),
++          },
++        },
++      };
++      deviceIdentityState.pairingReadFails = kind === "unreadable";
++      deviceIdentityState.replaceCachedTokenDuringPairingRead = kind === "cache-changed";
++      deviceIdentityState.cachedOriginToken = deviceIdentityState.cachedToken;
++      if (kind === "stale-origin" || kind === "no-cache") {
++        deviceIdentityState.cachedToken = null;
++        deviceIdentityState.cachedOriginToken =
++          kind === "no-cache" ? null : { token: "stale-origin-token", scopes: ["operator.read"] };
++      }
++      const auth =
++        credential === "token" ? { token: "explicit-token" } : { password: "explicit-password" };
++      try {
++        await runTokenLightweightProbe({
++          url: nextProbeUrl("metadata"),
++          auth,
++          ...(kind === "remote" ? { originScopedDeviceAuth: true } : {}),
++          ...(kind === "configured-remote" ? { configuredRemote: true } : {}),
++        });
++        const options = lastGatewayClientOptions();
++        const verifiedCache = kind === "matching" || kind === "cache-changed";
++        const matched =
++          verifiedCache ||
++          kind === "foreign-token" ||
++          kind === "stale-origin" ||
++          kind === "no-cache";
++        expect(options?.platform).toBe(matched ? "macOS 27.0.1" : undefined);
++        expect(options?.deviceFamily).toBe(matched ? "Mac" : undefined);
++        expect(options?.preparedDeviceAuth).toEqual(
++          verifiedCache ? expect.objectContaining({ token: "cached-operator-token" }) : undefined,
++        );
++        expect(options?.token).toBe(auth.token);
++        expect(options?.password).toBe(auth.password);
++        expect(options?.deviceIdentity).toEqual(deviceIdentityState.value);
++      } finally {
++        platform.mockRestore();
++      }
++    },
++  );
+   it("waits for event-loop readiness before connecting", async () => {
+     await probeGateway({
+       url: "ws://127.0.0.1:18789",
+diff --git a/src/gateway/probe.ts b/src/gateway/probe.ts
+index 414dbd0dfdbb061ffd7854867b246dd84a78b03b..34af198cc2182c4416d4170e95a3647bc9db7865 100644
+--- a/src/gateway/probe.ts
++++ b/src/gateway/probe.ts
+@@ -21,6 +21,7 @@ import {
+ import { formatErrorMessage } from "../infra/errors.js";
+ import { pruneMapToMaxSize } from "../infra/map-size.js";
+ import type { SystemPresence } from "../infra/system-presence.js";
++import { resolvePairedGatewayClientPlatformIdentity } from "../shared/gateway-client-platform.js";
+ import type { StatusSummary } from "../status/summary.js";
+ import { resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
+ import {
+@@ -285,6 +286,7 @@ export async function probeGateway(opts: {
+       ? undefined
+       : (route.deviceAuthScope ?? gatewayOriginScope(opts.url));
+   let preparedDeviceAuth: GatewayClientOptions["preparedDeviceAuth"];
++  let pairedClientMetadata: Pick<GatewayClientOptions, "platform" | "deviceFamily"> | undefined;
+ 
+   const deviceIdentity = await (async () => {
+     try {
+@@ -302,13 +304,13 @@ export async function probeGateway(opts: {
+       if (!identity) {
+         return null;
+       }
+-      // Keep probes non-mutating: only attach a device identity when this CLI
+-      // already has a cached operator device token. Fresh diagnostics should not
+-      // create a read-only pairing baseline that later blocks admin commands.
++      // Fresh diagnostics must not create a read-only pairing baseline. An
++      // existing cache or verified local pairing can bind this identity.
+       const lookup = { deviceId: identity.deviceId, role: "operator", env: opts.env };
+       // A retired tunnel's origin token must not displace the local client's token.
+       let cachedOperatorToken =
+         !remote && loopback ? await loadDeviceAuthTokenReadOnly(lookup) : null;
++      const hasLocalDeviceToken = Boolean(cachedOperatorToken);
+       if (cachedOperatorToken) {
+         deviceAuthScope = undefined;
+       } else {
+@@ -316,29 +318,57 @@ export async function probeGateway(opts: {
+           ...lookup,
+           gatewayScope: deviceAuthScope,
+         });
+-        if (cachedOperatorToken && !remote && loopback && !hasProbeAuth(opts.auth)) {
+-          const { loadPairedDevicePairingStoreRecordReadOnly } =
+-            await import("../infra/device-pairing-store-readonly.js");
+-          const { verifyPairingToken } = await import("../infra/pairing-token.js");
+-          const paired = await loadPairedDevicePairingStoreRecordReadOnly(
+-            identity.deviceId,
+-            resolveStateDir(opts.env),
+-          );
+-          const issuedToken = paired?.tokens?.operator;
+-          if (
+-            paired?.publicKey !==
+-              identityModule.publicKeyRawBase64UrlFromPem(identity.publicKeyPem) ||
+-            !issuedToken ||
+-            issuedToken.revokedAtMs ||
+-            !verifyPairingToken(cachedOperatorToken.token.trim(), issuedToken.token)
+-          ) {
++      }
++      if (!remote && loopback && (cachedOperatorToken || hasProbeAuth(opts.auth))) {
++        const { loadPairedDevicePairingStoreRecordReadOnly } =
++          await import("../infra/device-pairing-store-readonly.js");
++        const { verifyPairingToken } = await import("../infra/pairing-token.js");
++        // Unavailable optional metadata retains the normal strict handshake.
++        const paired = await loadPairedDevicePairingStoreRecordReadOnly(
++          identity.deviceId,
++          resolveStateDir(opts.env),
++        ).catch(() => null);
++        const issuedToken = paired?.tokens?.operator;
++        const currentLocalPairing = Boolean(
++          paired?.deviceId === identity.deviceId &&
++          paired.publicKey === identityModule.publicKeyRawBase64UrlFromPem(identity.publicKeyPem) &&
++          issuedToken &&
++          issuedToken.role === "operator" &&
++          !issuedToken.revokedAtMs,
++        );
++        const verifiedCachedToken =
++          currentLocalPairing &&
++          cachedOperatorToken &&
++          issuedToken &&
++          verifyPairingToken(cachedOperatorToken.token.trim(), issuedToken.token)
++            ? cachedOperatorToken
++            : undefined;
++        if (!hasLocalDeviceToken && !hasProbeAuth(opts.auth)) {
++          if (!verifiedCachedToken) {
+             return null;
+           }
+           // Pin local issuance evidence; a later cache read could select another Gateway's token.
+-          preparedDeviceAuth = cachedOperatorToken;
++          preparedDeviceAuth = verifiedCachedToken;
++        }
++        if (
++          currentLocalPairing &&
++          (hasProbeAuth(opts.auth) || verifiedCachedToken) &&
++          paired &&
++          !opts.configuredRemote &&
++          opts.config?.gateway?.mode !== "remote"
++        ) {
++          pairedClientMetadata = resolvePairedGatewayClientPlatformIdentity(
++            process.platform,
++            paired,
++          );
++          if (pairedClientMetadata && verifiedCachedToken) {
++            // Explicit shared auth owns its bearer independently of the cache.
++            // Pin only a cached bearer verified against this same pairing read.
++            preparedDeviceAuth = verifiedCachedToken;
++          }
+         }
+       }
+-      return cachedOperatorToken ? identity : null;
++      return cachedOperatorToken || pairedClientMetadata ? identity : null;
+     } catch {
+       // Read-only or restricted environments should still be able to run
+       // token/password-auth detail probes without mutating identity state.
+@@ -477,6 +507,7 @@ export async function probeGateway(opts: {
+       sharedStateMode: "read-only",
+       instanceId,
+       deviceIdentity,
++      ...pairedClientMetadata,
+       onConnectError: (err) => {
+         connectError = formatErrorMessage(err);
+         connectErrorDetails = err instanceof GatewayClientRequestError ? err.details : null;
 diff --git a/src/gateway/server-close.test-support.ts b/src/gateway/server-close.test-support.ts
 index 9c4251070f942e604d0272495859edbdc9fa3132..424c90372f7cad71254c1203c9c29929126b7944 100644
 --- a/src/gateway/server-close.test-support.ts
@@ -120608,6 +121012,72 @@ index 27ac78ba89780e77c08635b82b4c082e051e6a6e..d048e8b2078e241f91cc341a9731eea2
  export async function waitForGatewayRestartFenceSettlement(): Promise<void> {
    if (!GATEWAY_WORK_ADMISSION_STATE.restartSignalPending) {
      return;
+diff --git a/src/shared/gateway-client-platform.test.ts b/src/shared/gateway-client-platform.test.ts
+index c180ec1fb14ff8b9459fdffdebcda9cf5ba2b76d..c5955a0e5add060ded919303134df3679a1b7ff3 100644
+--- a/src/shared/gateway-client-platform.test.ts
++++ b/src/shared/gateway-client-platform.test.ts
+@@ -1,5 +1,8 @@
+ import { describe, expect, it } from "vitest";
+-import { resolveGatewayClientPlatformIdentity } from "./gateway-client-platform.js";
++import {
++  resolveGatewayClientPlatformIdentity,
++  resolvePairedGatewayClientPlatformIdentity,
++} from "./gateway-client-platform.js";
+ 
+ describe("gateway client platform metadata", () => {
+   it.each([
+@@ -13,4 +16,23 @@ describe("gateway client platform metadata", () => {
+       ...(deviceFamily ? { deviceFamily } : {}),
+     });
+   });
++
++  it.each(["macOS 27.0.1", "macos", "darwin"])(
++    "preserves a verified local Mac platform pin %s",
++    (platform) => {
++      expect(
++        resolvePairedGatewayClientPlatformIdentity("darwin", { platform, deviceFamily: "Mac" }),
++      ).toEqual({ platform, deviceFamily: "Mac" });
++    },
++  );
++
++  it.each([
++    { runtime: "linux", platform: "macOS 27.0.1", deviceFamily: "Mac" },
++    { runtime: "darwin", platform: "windows", deviceFamily: "Mac" },
++    { runtime: "darwin", platform: "macOS 27.0.1", deviceFamily: "iPhone" },
++    { runtime: "darwin", platform: "macOS custom", deviceFamily: "Mac" },
++    { runtime: "darwin", platform: "macOS 27.0.1", deviceFamily: undefined },
++  ])("does not adopt incompatible paired metadata: %j", ({ runtime, ...paired }) => {
++    expect(resolvePairedGatewayClientPlatformIdentity(runtime, paired)).toBeUndefined();
++  });
+ });
+diff --git a/src/shared/gateway-client-platform.ts b/src/shared/gateway-client-platform.ts
+index 56fbe324030fa4f75ba4f652809601b41a4e804c..73484e0bacfe543245526e68aba071094087fe3b 100644
+--- a/src/shared/gateway-client-platform.ts
++++ b/src/shared/gateway-client-platform.ts
+@@ -13,3 +13,23 @@ export function resolveGatewayClientPlatformIdentity(platform: string): {
+       return { platform };
+   }
+ }
++
++/** Consume only metadata from a verified, current local pairing for this device. */
++export function resolvePairedGatewayClientPlatformIdentity(
++  runtimePlatform: string,
++  paired: { platform?: string; deviceFamily?: string },
++): { platform: string; deviceFamily: string } | undefined {
++  const platform = paired.platform?.trim();
++  const deviceFamily = paired.deviceFamily?.trim();
++  // The native Mac app and local CLI share a device key. Its approved versioned
++  // platform is compatible with Darwin, but an unrelated OS/family is not.
++  if (
++    runtimePlatform !== "darwin" ||
++    !platform ||
++    deviceFamily?.toLowerCase() !== "mac" ||
++    !/^(?:darwin|macos(?: \d+(?:\.\d+){0,2})?)$/iu.test(platform)
++  ) {
++    return undefined;
++  }
++  return { platform, deviceFamily };
++}
 diff --git a/src/state/agent-database-startup.ts b/src/state/agent-database-startup.ts
 index a6120f7206f6de9b8ffa82669ac79052ed3ee6c0..c2e81ae2e5da4d3186cc9d03b5450adda4d91eff 100644
 --- a/src/state/agent-database-startup.ts

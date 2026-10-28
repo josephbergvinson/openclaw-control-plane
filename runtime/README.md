@@ -26,6 +26,11 @@ current source includes these targeted reliability repairs:
 - Current valid MCP OAuth bearers use a fresh canonical state read without taking
   the exclusive renewal or consent lease. Expired or rejected bearers and pending
   consent retain that leased path.
+- Local gateway probes reuse compatible Mac client metadata for the same paired
+  device key and current, unrevoked operator issuance. Explicit shared authentication
+  does not require a matching cached device token; a cached token is reused only
+  after native issuance verification. Remote targets and identity mismatches retain
+  normal pairing checks.
 - Stable identity and preference facts already explicit in trusted loaded profile
   context can be answered directly. Source and audience constraints still apply;
   missing, conflicting, historical and volatile facts require the appropriate source.
