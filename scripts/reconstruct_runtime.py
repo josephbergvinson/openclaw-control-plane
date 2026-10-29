@@ -364,7 +364,7 @@ def validate_companion_paths(paths: frozenset[str]) -> None:
     if not isinstance(paths, frozenset) or not paths:
         raise ReconstructionError("Companion delta requires a nonempty exact source-path set")
     for name in paths:
-        if (not isinstance(name, str) or not name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/"))
+        if (not isinstance(name, str) or not name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/"))
                 or "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name)
                 or any(part in ("", ".", "..", ".git", "node_modules") for part in name.split("/"))):
             raise ReconstructionError("Companion delta contains an unsupported source path")

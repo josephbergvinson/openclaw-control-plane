@@ -162,7 +162,9 @@ class RuntimeReconstructionTests(unittest.TestCase):
 
     def test_declared_companion_scope_reconstructs_the_complete_retained_tree(self) -> None:
         extra = ("src/auto-reply/reply/session.ts", "docs/concepts/session.md",
-                 "scripts/check-changed.mts", "test/scripts/changed-lanes.test.ts")
+                 "scripts/check-changed.mts", "test/scripts/changed-lanes.test.ts",
+                 "packages/ai/src/providers/openai-responses-terminal-usage.ts",
+                 "packages/ai/src/providers/openai-responses-terminal-usage.test.ts")
         package, contents = self.companion_package(extra)
         opener = Mock()
         opener.open.return_value = io.BytesIO(contents)
@@ -182,7 +184,9 @@ class RuntimeReconstructionTests(unittest.TestCase):
                    frozenset(), frozenset({"src/../outside"}),
                    frozenset({"src/.git/config"}), frozenset({"operator.json"}),
                    frozenset({"scripts/../outside"}), frozenset({"scripts/.git/config"}),
-                   frozenset({"scripts/node_modules/package/index.js"})]
+                   frozenset({"scripts/node_modules/package/index.js"}),
+                   frozenset({"packages/../outside"}), frozenset({"packages/.git/config"}),
+                   frozenset({"packages/node_modules/package/index.js"})]
         with patch.object(RUNTIME, "build_opener") as opener:
             for paths in invalid:
                 with self.subTest(paths=paths):

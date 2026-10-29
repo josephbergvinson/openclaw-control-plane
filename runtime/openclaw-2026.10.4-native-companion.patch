@@ -4506,6 +4506,71 @@ index d94879de64d994324c0a453738a69f8e36f614b0..5268a63f1f5c88d6ff5cda4aa5e933da
      ...sessionGuidance,
      outcomeGuidance,
      citationGuidance,
+diff --git a/packages/ai/src/providers/openai-responses-terminal-usage.test.ts b/packages/ai/src/providers/openai-responses-terminal-usage.test.ts
+index 7ab19884af3f8ef72c5a94bb2db982ce8f8d81c0..8376c5897ad81ec6327c65c076349c5881a0cc98 100644
+--- a/packages/ai/src/providers/openai-responses-terminal-usage.test.ts
++++ b/packages/ai/src/providers/openai-responses-terminal-usage.test.ts
+@@ -24,7 +24,6 @@ describe("mapResponsesTerminalUsage", () => {
+       output: 10,
+       cacheRead: 20,
+       cacheWrite: 30,
+-      cacheTelemetry: { state: "available" },
+       contextUsage: { state: "available", promptTokens: 100, totalTokens: 110 },
+       totalTokens: 110,
+     });
+@@ -36,7 +35,6 @@ describe("mapResponsesTerminalUsage", () => {
+       output: 12,
+       cacheRead: 0,
+       cacheWrite: 0,
+-      cacheTelemetry: { state: "unavailable" },
+       contextUsage: { state: "available", promptTokens: 30, totalTokens: 42 },
+       totalTokens: 42,
+     });
+@@ -56,7 +54,6 @@ describe("mapResponsesTerminalUsage", () => {
+       output: 5,
+       cacheRead: 4,
+       cacheWrite: 0,
+-      cacheTelemetry: { state: "available" },
+       contextUsage: { state: "unavailable" },
+       totalTokens: 9,
+     });
+diff --git a/packages/ai/src/providers/openai-responses-terminal-usage.ts b/packages/ai/src/providers/openai-responses-terminal-usage.ts
+index 8384b31c98918f6a5bfdfa1e8604b2dc97fb3e60..184e41833a49f43f11fec61f8ab1063c0f9b784d 100644
+--- a/packages/ai/src/providers/openai-responses-terminal-usage.ts
++++ b/packages/ai/src/providers/openai-responses-terminal-usage.ts
+@@ -60,22 +60,12 @@ function readCount(value: number | null | undefined): number {
+ export function mapResponsesTerminalUsage(
+   usage: ResponsesTerminalUsagePayload | undefined | null,
+ ):
+-  | Pick<
+-      Usage,
+-      | "input"
+-      | "output"
+-      | "cacheRead"
+-      | "cacheWrite"
+-      | "cacheTelemetry"
+-      | "contextUsage"
+-      | "totalTokens"
+-    >
++  | Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite" | "contextUsage" | "totalTokens">
+   | undefined {
+   if (!usage) {
+     return undefined;
+   }
+-  const reportedCacheRead = readReportedCount(usage.input_tokens_details?.cached_tokens);
+-  const cacheRead = reportedCacheRead ?? 0;
++  const cacheRead = readCount(usage.input_tokens_details?.cached_tokens);
+   const cacheWrite = readCount(usage.input_tokens_details?.cache_write_tokens);
+   const input = Math.max(0, readCount(usage.input_tokens) - cacheRead - cacheWrite);
+   const output = readCount(usage.output_tokens);
+@@ -94,7 +84,6 @@ export function mapResponsesTerminalUsage(
+     output,
+     cacheRead,
+     cacheWrite,
+-    cacheTelemetry: { state: reportedCacheRead === undefined ? "unavailable" : "available" },
+     contextUsage: hasCoherentContext
+       ? {
+           state: "available",
 diff --git a/scripts/check-changed.mts b/scripts/check-changed.mts
 index d8aafcba963970541e43f7a69ed940772b759eb1..17888ce2c3580ed5dead87c4e913dda124825016 100644
 --- a/scripts/check-changed.mts
@@ -4807,6 +4872,26 @@ index b1f291809a3407b9a0350ed022c7464f03405238..14333495d4ca802c0ab04417cf2e633f
        sourceReplyDeliveryMode:
          opts.sourceReplyDeliveryMode ?? (harnessCompletion ? ("automatic" as const) : undefined),
      },
+diff --git a/src/agents/agent-delete-databases.ts b/src/agents/agent-delete-databases.ts
+index f20d3c106534ee1ec08d602df7004a380f272a8a..b1cbc5ef0836929f2d756fe2811f9f5f699f6696 100644
+--- a/src/agents/agent-delete-databases.ts
++++ b/src/agents/agent-delete-databases.ts
+@@ -7,7 +7,6 @@ import { isPathInside } from "../infra/path-guards.js";
+ import { resolveSqliteDatabaseFilePaths } from "../infra/sqlite-files.js";
+ import { normalizeAgentId } from "../routing/session-key.js";
+ import { assertNoOpenClawAgentDatabaseLeases } from "../state/openclaw-agent-db-lease.js";
+-import { drainAgentDatabaseReaders } from "../state/openclaw-agent-db-readers.js";
+ import { invalidateRegisteredAgentDatabasesMemo } from "../state/openclaw-agent-db-registry-listing.js";
+ import { unregisterOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
+ import {
+@@ -220,7 +219,6 @@ export async function prepareAgentDeleteDatabases(
+   for (const databasePath of databasePaths) {
+     closeAuthProfileReadPool({ kind: "database", databasePath });
+   }
+-  await drainAgentDatabaseReaders(databasePaths);
+   assertNoOpenClawAgentDatabaseLeases(agentId, options);
+   const fileGroups = databasePaths.map(resolveSqliteDatabaseFilePaths);
+   const relocatedFileGroups = fileGroups.filter((fileGroup) => {
 diff --git a/src/agents/embedded-agent-helpers/error-text.test.ts b/src/agents/embedded-agent-helpers/error-text.test.ts
 index 20e7263ce28bd29b97ed17dae7639a0241516ce8..90800f8d9f71c0df57373a268c607b5b625a291a 100644
 --- a/src/agents/embedded-agent-helpers/error-text.test.ts
@@ -4916,6 +5001,141 @@ index f884f258f67878927e995749366baf5463155367..7e9da85c79b40253f8c244e9e5184451
      instance.runId !== handle.runId ||
      !delegatedAuthority
    ) {
+diff --git a/src/agents/embedded-agent-runner/prompt-cache-observability.test.ts b/src/agents/embedded-agent-runner/prompt-cache-observability.test.ts
+index 90947f53403fa2990d1e2544807920a4e3762d6f..978d6d6706529a27182d47f5a933ad86e69a553e 100644
+--- a/src/agents/embedded-agent-runner/prompt-cache-observability.test.ts
++++ b/src/agents/embedded-agent-runner/prompt-cache-observability.test.ts
+@@ -4,12 +4,10 @@ import * as cryptoDigest from "@openclaw/normalization-core/node-crypto";
+ import { Type } from "typebox";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { convertToLlm } from "../../../packages/agent-core/src/harness/messages.js";
+-import { mapResponsesTerminalUsage } from "../../../packages/ai/src/providers/openai-responses-terminal-usage.js";
+ import type { Message, TextContent } from "../../llm/types.js";
+ import { withEnv } from "../../test-utils/env.js";
+ import type { AgentMessage } from "../runtime/index.js";
+ import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
+-import { normalizeUsage } from "../usage.js";
+ import { log } from "./logger.js";
+ import {
+   beginPromptCacheObservation,
+@@ -342,72 +340,6 @@ describe("prompt cache observability", () => {
+     currentTestScope = String(++testScope);
+   });
+ 
+-  it.each([
+-    { name: "omitted details", details: undefined },
+-    { name: "null details", details: null },
+-    { name: "omitted cache count", details: {} },
+-    { name: "null cache count", details: { cached_tokens: null } },
+-    { name: "negative cache count", details: { cached_tokens: -1 } },
+-    { name: "non-finite cache count", details: { cached_tokens: Number.NaN } },
+-    { name: "write-only cache count", details: { cache_write_tokens: 250 } },
+-  ])("preserves missing Responses cache telemetry through $name", ({ details }) => {
+-    const observations = vi.fn();
+-    const observer = createPromptCacheRequestObserver(
+-      { sessionId: scopedKey("responses-cache-" + details?.cached_tokens), streamStrategy: "test" },
+-      observations,
+-    );
+-    const observe = (inputDetails: typeof details) => {
+-      observer.onModelRequest(
+-        { provider: "openai", id: "test-responses", api: "openai-responses" },
+-        { messages: [], systemPrompt: "stable prefix", tools: [] },
+-      );
+-      const mapped = mapResponsesTerminalUsage({
+-        input_tokens: 10_000,
+-        output_tokens: 2,
+-        total_tokens: 10_002,
+-        input_tokens_details: inputDetails,
+-      });
+-      const normalized = normalizeUsage(mapped);
+-      observer.onModelUsage(normalized);
+-      return { mapped, normalized };
+-    };
+-
+-    observe({ cached_tokens: 8_000 });
+-    const missing = observe(details);
+-    const reportedCacheWrite = details?.cache_write_tokens ?? 0;
+-    for (const usage of [missing.mapped, missing.normalized]) {
+-      expect(usage).toMatchObject({
+-        input: 10_000 - reportedCacheWrite,
+-        output: 2,
+-        cacheRead: 0,
+-        cacheWrite: reportedCacheWrite,
+-        cacheTelemetry: { state: "unavailable" },
+-      });
+-    }
+-    expect(missing.mapped?.totalTokens).toBe(10_002);
+-    expect(missing.normalized?.total).toBe(10_002);
+-    observe({ cached_tokens: 0 });
+-    observe({ cached_tokens: 8_000 });
+-
+-    expect(observations.mock.calls.map(([observation]) => observation)).toMatchObject([
+-      { broke: false, cacheRead: 8_000, cacheTelemetry: { state: "available" } },
+-      {
+-        broke: false,
+-        previousCacheRead: 8_000,
+-        cacheRead: undefined,
+-        cacheWrite: undefined,
+-        cacheTelemetry: { state: "unavailable" },
+-      },
+-      {
+-        broke: true,
+-        previousCacheRead: 8_000,
+-        cacheRead: 0,
+-        cacheTelemetry: { state: "available" },
+-      },
+-      { broke: false, cacheRead: 8_000, cacheTelemetry: { state: "available" } },
+-    ]);
+-  });
+-
+   it.each([
+     {
+       name: "three healthy calls then one",
+diff --git a/src/agents/embedded-agent-runner/prompt-cache-observability.ts b/src/agents/embedded-agent-runner/prompt-cache-observability.ts
+index f2f2f8dc72f1a57011baf7bcce8a5fe80103e807..fef48f8b080e883e216d7417c0e6e9e4eab3f073 100644
+--- a/src/agents/embedded-agent-runner/prompt-cache-observability.ts
++++ b/src/agents/embedded-agent-runner/prompt-cache-observability.ts
+@@ -356,9 +356,7 @@ export function completePromptCacheObservation(
+   const changes = tracker.pendingChanges;
+   tracker.pendingChanges = null;
+ 
+-  // Billing defaults do not establish that the provider measured cache reuse.
+-  const cacheRead =
+-    params.usage?.cacheTelemetry?.state === "unavailable" ? undefined : params.usage?.cacheRead;
++  const cacheRead = params.usage?.cacheRead;
+   if (typeof cacheRead !== "number" || !Number.isFinite(cacheRead)) {
+     return null;
+   }
+diff --git a/src/agents/embedded-agent-runner/prompt-cache-request-observer.ts b/src/agents/embedded-agent-runner/prompt-cache-request-observer.ts
+index 420731546861a57f8559755a4a6872ffc02cb9f9..d821f5db111bc47c61c3813cdc9632a89b21d1a0 100644
+--- a/src/agents/embedded-agent-runner/prompt-cache-request-observer.ts
++++ b/src/agents/embedded-agent-runner/prompt-cache-request-observer.ts
+@@ -16,7 +16,6 @@ export type PromptCacheRequestObservation = {
+   input?: number;
+   cacheRead?: number;
+   cacheWrite?: number;
+-  cacheTelemetry?: NormalizedUsage["cacheTelemetry"];
+   previousCacheRead?: number;
+   changes: PromptCacheChange[] | null;
+ };
+@@ -58,15 +57,13 @@ export function createPromptCacheRequestObserver(
+         return;
+       }
+       const cacheBreak = completePromptCacheObservation({ ...params, usage });
+-      const cacheTelemetryUnavailable = usage?.cacheTelemetry?.state === "unavailable";
+       observation = {
+         requestIndex,
+         broke: Boolean(cacheBreak),
+         previousCacheRead: request.previousCacheRead ?? undefined,
+         input: usage?.input,
+-        cacheRead: cacheTelemetryUnavailable ? undefined : usage?.cacheRead,
+-        cacheWrite: cacheTelemetryUnavailable ? undefined : usage?.cacheWrite,
+-        ...(usage?.cacheTelemetry ? { cacheTelemetry: { ...usage.cacheTelemetry } } : {}),
++        cacheRead: usage?.cacheRead,
++        cacheWrite: usage?.cacheWrite,
+         changes: cacheBreak?.changes ?? request.changes,
+       };
+       const { snapshot } = request;
 diff --git a/src/agents/embedded-agent-runner/run-loop.ts b/src/agents/embedded-agent-runner/run-loop.ts
 index 2aed77fffd4deed5aa79a9eef683412ebdcc16a6..4e48819e0434a0f866575ee39a68a18830aeb15b 100644
 --- a/src/agents/embedded-agent-runner/run-loop.ts
@@ -8192,6 +8412,18 @@ index 239d8702aec349c92c766e073d619b5b4438259b..5fee43bce5d12a9c972d25be5f6eb3df
    const expiry = params.cooldownExpiry;
    const nowMs = params.nowMs ?? Date.now();
    if (typeof expiry === "number" && expiry > nowMs) {
+diff --git a/src/agents/openclaw-tools.sessions-send-requester-retirement.test-support.ts b/src/agents/openclaw-tools.sessions-send-requester-retirement.test-support.ts
+index 6806c8390064509ca639566c2ae1179b949dcd44..728ec90a69c80bbf4fda93a6021a3615c25bee4f 100644
+--- a/src/agents/openclaw-tools.sessions-send-requester-retirement.test-support.ts
++++ b/src/agents/openclaw-tools.sessions-send-requester-retirement.test-support.ts
+@@ -457,7 +457,6 @@ export function registerSessionsSendRequesterRetirementTests({
+           runId,
+           childSessionKey,
+           expectsCompletionMessage: true,
+-          completionTarget: "parent",
+         })),
+       );
+       if (!finish) {
 diff --git a/src/agents/openclaw-tools.types.ts b/src/agents/openclaw-tools.types.ts
 index 4842b08d4ff5b00f3070c29b4270bfa29b3083ee..8cb09f00ce297040272ac06495cf3353d8bd03d8 100644
 --- a/src/agents/openclaw-tools.types.ts
@@ -8217,6 +8449,85 @@ index 4842b08d4ff5b00f3070c29b4270bfa29b3083ee..8cb09f00ce297040272ac06495cf3353
    claimYieldCompletion?: () => boolean | Promise<boolean>;
    /** Records hot-path tool-prep stages for reply startup diagnostics. */
    recordToolPrepStage?: (name: string) => void;
+diff --git a/src/agents/prepared-model-catalog-worker.agent-database.integration.test.ts b/src/agents/prepared-model-catalog-worker.agent-database.integration.test.ts
+index 9e7002905dc31dcca7eabbf25741d588e3727355..6430743c13bf2548e1b39c5905c7fdc5c635c378 100644
+--- a/src/agents/prepared-model-catalog-worker.agent-database.integration.test.ts
++++ b/src/agents/prepared-model-catalog-worker.agent-database.integration.test.ts
+@@ -1,17 +1,11 @@
+ import path from "node:path";
+ import { DatabaseSync } from "node:sqlite";
+ import { describe, expect, it, vi } from "vitest";
+-import { isDeletedAgentDatabasePath } from "../infra/agent-database-readers.js";
+ import {
+   closeDeletedAgentDatabases,
+   reviveAgentDatabases,
+ } from "../state/openclaw-agent-db-readers.js";
+-import {
+-  closeOpenClawAgentDatabasesForTest,
+-  openOpenClawAgentDatabase,
+-} from "../state/openclaw-agent-db.js";
+-import { prepareAgentDeleteDatabases } from "./agent-delete-databases.js";
+-import { withAgentDeletion } from "./agent-lifecycle-registry.js";
++import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
+ import { PROVIDER_ID } from "./prepared-model-catalog-worker.test-support.js";
+ import { loadPreparedModelRuntimeAuth } from "./prepared-model-runtime-auth.js";
+ import { retirePreparedModelRuntimeAgent } from "./prepared-model-runtime.js";
+@@ -32,55 +26,6 @@ function leaveWalMode(databasePath: string): unknown {
+ }
+ 
+ describe("Gateway catalog worker agent database readers", () => {
+-  it("drains shared-worker readers before native deletion lease checks without fencing rollback", async () => {
+-    vi.stubEnv("CODEX_HOME", makeTempDir("openclaw-worker-empty-codex-"));
+-    const fixture = await createFleetFixture(undefined, false, { publication: "individual" });
+-    await Promise.all(
+-      fixture.snapshots.map((snapshot) =>
+-        loadPreparedModelRuntimeAuth(snapshot, { providerIds: [PROVIDER_ID] }),
+-      ),
+-    );
+-    const workers = readCatalogWorkers();
+-    expect(workers).toHaveLength(1);
+-    const [worker] = workers;
+-    const [agentId, survivorId] = fixture.agentIds;
+-    if (!worker || !agentId || !survivorId) {
+-      throw new Error("Expected a shared catalog worker and two agent identities");
+-    }
+-    const entry = fixture.entries[agentId];
+-    const survivorEntry = fixture.entries[survivorId];
+-    if (!entry || !survivorEntry) {
+-      throw new Error("Expected both configured fleet entries");
+-    }
+-    const deleted = path.join(entry.agentDir, "openclaw-agent.sqlite");
+-    const survivor = path.join(survivorEntry.agentDir, "openclaw-agent.sqlite");
+-    expect(() => leaveWalMode(deleted)).toThrow(/locked/);
+-    expect(() => leaveWalMode(survivor)).toThrow(/locked/);
+-
+-    await withAgentDeletion(agentId, async (begin) => {
+-      const deletion = begin({
+-        agentId,
+-        agentDir: entry.agentDir,
+-        workspaceDir: entry.workspace,
+-        sessionsDir: path.join(entry.agentDir, "..", "sessions"),
+-        deleteFiles: false,
+-      });
+-      try {
+-        const plan = await prepareAgentDeleteDatabases(fixture.config, agentId, entry.agentDir);
+-        expect(plan.registrationPaths).toContain(deleted);
+-        expect(leaveWalMode(deleted)).toBe("delete");
+-        expect(() => leaveWalMode(survivor)).toThrow(/locked/);
+-      } finally {
+-        deletion.rollback();
+-      }
+-    });
+-
+-    expect(isDeletedAgentDatabasePath(deleted)).toBe(false);
+-    expect(openOpenClawAgentDatabase({ agentId, path: deleted }).db.isOpen).toBe(true);
+-    expect(readCatalogWorkers()).toEqual(workers);
+-    expect(worker.threadId).not.toBe(-1);
+-  });
+-
+   it("closes one agent's database readers without retiring the shared worker", async () => {
+     vi.stubEnv("CODEX_HOME", makeTempDir("openclaw-worker-empty-codex-"));
+     // Full-fleet publication also renews auth and closes readers outside this deletion scope.
 diff --git a/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts b/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts
 index d197c47dd31659a28bb6f0b2ae79ad47fd863cc5..67d943a7192db961251ae3a1503bec573a933c91 100644
 --- a/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts
@@ -8376,6 +8687,51 @@ index d197c47dd31659a28bb6f0b2ae79ad47fd863cc5..67d943a7192db961251ae3a1503bec57
    it("cancels degraded startup acquisition before plugin drain and publishes only its replacement", async () => {
      mocks.configuredAgentIds = ["default", "held"];
      const heldWorkspace = fixture.state.path("held-workspace");
+diff --git a/src/agents/sessions/tools/write.test.ts b/src/agents/sessions/tools/write.test.ts
+index 0327393f8a8d92511762c5ea4b9c13488500d509..b4ffe6ea0520a50b83ea5696c95f5603c64ba44f 100644
+--- a/src/agents/sessions/tools/write.test.ts
++++ b/src/agents/sessions/tools/write.test.ts
+@@ -89,7 +89,7 @@ describe("write tool", () => {
+ 
+     expect(result.content[0]).toEqual({
+       type: "text",
+-      text: `Successfully wrote ${Buffer.byteLength(expectedContent, "utf8")} bytes to ${filePath}; verified saved content by readback.`,
++      text: `Successfully wrote ${Buffer.byteLength(expectedContent, "utf8")} bytes to ${filePath}`,
+     });
+   });
+ 
+@@ -283,7 +283,7 @@ describe("write tool", () => {
+     const result = await tool.execute("call-1", { path: "different.txt", content }, undefined);
+     expect(result.content[0]).toEqual({
+       type: "text",
+-      text: `Successfully wrote ${Buffer.byteLength(content, "utf8")} bytes to different.txt; verified saved content by readback.`,
++      text: `Successfully wrote ${Buffer.byteLength(content, "utf8")} bytes to different.txt`,
+     });
+     expect(result.details).toEqual({
+       changed: true,
+diff --git a/src/agents/sessions/tools/write.ts b/src/agents/sessions/tools/write.ts
+index c8f735dfd6015ce15db3d38f8651776ace6d1ad3..b8183531ea41bbfc4702959f414058b6aec609b6 100644
+--- a/src/agents/sessions/tools/write.ts
++++ b/src/agents/sessions/tools/write.ts
+@@ -358,7 +358,7 @@ function isWriteRecoveryCandidate(error: unknown, signal: AbortSignal | undefine
+ 
+ function successfulWriteResult(path: string, content: string, details: WriteToolDetails) {
+   return textResult(
+-    `Successfully wrote ${Buffer.byteLength(content, "utf8")} bytes to ${path}; verified saved content by readback.`,
++    `Successfully wrote ${Buffer.byteLength(content, "utf8")} bytes to ${path}`,
+     details,
+   );
+ }
+@@ -396,8 +396,7 @@ export function createWriteToolDefinition(
+   return {
+     name: "write",
+     label: "write",
+-    description:
+-      "Write/overwrite file; creates parent directories and verifies the saved bytes by readback before reporting success.",
++    description: "Write/overwrite file; creates parent directories.",
+     promptSnippet: "Create/overwrite files",
+     promptGuidelines: ["Use only new files/complete rewrites."],
+     parameters: writeSchema,
 diff --git a/src/agents/subagents/announce/subagent-announce-active-wake.ts b/src/agents/subagents/announce/subagent-announce-active-wake.ts
 index 8e6104dcb910653ba59c7e5934fc6397253dfcc5..179f76391bbad288c26ea1d409dd55c108e212d8 100644
 --- a/src/agents/subagents/announce/subagent-announce-active-wake.ts
@@ -10784,6 +11140,36 @@ index 7ad332b59989346c7d6c2b4be33e99466eb702a4..8f110fbcc4274791f1ce20c5dbe98a76
          // Not an error: the session already waits for these children through
          // durable registry state, so the model only needs to end the turn.
          return jsonResult({
+diff --git a/src/agents/usage.ts b/src/agents/usage.ts
+index a1e44ee3b2909264855bd8f430a7e4b486c76a8c..403ce9b73163165a70406a7c4403309215bb145b 100644
+--- a/src/agents/usage.ts
++++ b/src/agents/usage.ts
+@@ -27,7 +27,6 @@ export type UsageLike = {
+   output?: number;
+   cacheRead?: number;
+   cacheWrite?: number;
+-  cacheTelemetry?: Usage["cacheTelemetry"];
+   cacheWrite1h?: number;
+   contextUsage?: ContextUsage;
+   total?: number;
+@@ -77,7 +76,6 @@ export type NormalizedUsage = {
+   output?: number;
+   cacheRead?: number;
+   cacheWrite?: number;
+-  cacheTelemetry?: Usage["cacheTelemetry"];
+   cacheWrite1h?: number;
+   contextUsage?: ContextUsage;
+   reasoningTokens?: number;
+@@ -323,9 +321,6 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
+     output,
+     cacheRead,
+     cacheWrite,
+-    ...(raw.cacheTelemetry?.state === "available" || raw.cacheTelemetry?.state === "unavailable"
+-      ? { cacheTelemetry: { state: raw.cacheTelemetry.state } }
+-      : {}),
+     ...(cacheWrite1h !== undefined ? { cacheWrite1h } : {}),
+     ...(cost ? { cost } : {}),
+     ...(contextUsage ? { contextUsage } : {}),
 diff --git a/src/auto-reply/get-reply-options.types.ts b/src/auto-reply/get-reply-options.types.ts
 index 3099e312a0db6a575bc0dc23b96de9b590c33014..4caddbcbcb11937f2fdf0d54ab546983000249d1 100644
 --- a/src/auto-reply/get-reply-options.types.ts
@@ -15444,6 +15830,207 @@ index 34af198cc2182c4416d4170e95a3647bc9db7865..414dbd0dfdbb061ffd7854867b246dd8
        onConnectError: (err) => {
          connectError = formatErrorMessage(err);
          connectErrorDetails = err instanceof GatewayClientRequestError ? err.details : null;
+diff --git a/src/gateway/server-methods/agents-mutate.test-support.ts b/src/gateway/server-methods/agents-mutate.test-support.ts
+index de935893db97f762cabf22334b0f42db7e649dc0..f3e2b71da4526e5f988774c43f0687753cb61d95 100644
+--- a/src/gateway/server-methods/agents-mutate.test-support.ts
++++ b/src/gateway/server-methods/agents-mutate.test-support.ts
+@@ -176,92 +176,3 @@ export function expectStringNotContaining(value: unknown, text: string) {
+   expect(typeof value).toBe("string");
+   expect(value as string).not.toContain(text);
+ }
+-
+-/** Shared ownership must survive both pre-commit drainage and committed deletion cleanup. */
+-export function registerAgentDeleteSurvivingOwnerTest(fixture: {
+-  mocks: {
+-    findAgentEntryIndex: Mock;
+-    readAgentDeletionJournal: Mock;
+-    resolveRegisteredAgentIdForDir: Mock;
+-    isPathOwnedByAnotherRegisteredAgent: Mock;
+-    unregisterResolvedAgentDir: Mock;
+-    listOpenClawRegisteredAgentDatabases: Mock;
+-    unregisterOpenClawAgentDatabase: Mock;
+-    closeOpenClawAgentDatabaseByPath: Mock;
+-    assertNoOpenClawAgentDatabaseLeases: Mock;
+-    drainAgentDatabaseReaders: Mock;
+-    closeDeletedAgentDatabases: Mock;
+-    beginAgentDeletionFinish: Mock;
+-  };
+-  call: (method: "agents.delete", params: Record<string, unknown>) => Promise<Mock>;
+-  expectNotTrashed: (pathname: string) => void;
+-  expectTrashedWithinParent: (pathname: string, declaredPath?: string) => void;
+-}): void {
+-  const { mocks, call, expectNotTrashed, expectTrashedWithinParent } = fixture;
+-  it("settles recovery without touching a journaled directory claimed by another agent", async () => {
+-    const directoryOwners = new Map([["/journal/agent", "other-agent"]]);
+-    const databaseRows = [
+-      { agentId: "test-agent", path: "/journal/agent/openclaw-agent.sqlite" },
+-      { agentId: "other-agent", path: "/journal/agent/openclaw-agent.sqlite" },
+-    ];
+-    mocks.findAgentEntryIndex.mockReturnValue(-1);
+-    mocks.readAgentDeletionJournal.mockReturnValue(
+-      deletionJournal({ workspaceDir: "/journal", sessionsDir: "/deleted/sessions" }),
+-    );
+-    mocks.resolveRegisteredAgentIdForDir.mockImplementation((pathname?: string) =>
+-      directoryOwners.get(pathname ?? ""),
+-    );
+-    mocks.isPathOwnedByAnotherRegisteredAgent.mockImplementation(
+-      ({ agentId, pathname }: { agentId: string; pathname: string }) =>
+-        (pathname === "/journal/agent" || pathname.startsWith("/journal/agent/")) &&
+-        directoryOwners.get("/journal/agent") !== agentId,
+-    );
+-    mocks.unregisterResolvedAgentDir.mockImplementation(
+-      ({ agentId, agentDir }: { agentId: string; agentDir: string }) => {
+-        if (directoryOwners.get(agentDir) !== agentId) {
+-          return false;
+-        }
+-        return directoryOwners.delete(agentDir);
+-      },
+-    );
+-    mocks.listOpenClawRegisteredAgentDatabases.mockImplementation(() => databaseRows);
+-    mocks.unregisterOpenClawAgentDatabase.mockImplementation(
+-      ({ agentId, path: databasePath }: { agentId: string; path: string }) => {
+-        const index = databaseRows.findIndex(
+-          (entry) => entry.agentId === agentId && entry.path === databasePath,
+-        );
+-        if (index >= 0) {
+-          databaseRows.splice(index, 1);
+-        }
+-      },
+-    );
+-
+-    const respond = await call("agents.delete", { agentId: "test-agent" });
+-
+-    expectRespondOk(respond, { ok: true });
+-    expect(mocks.listOpenClawRegisteredAgentDatabases).toHaveBeenCalled();
+-    expect(mocks.closeOpenClawAgentDatabaseByPath).toHaveBeenCalledWith(
+-      "/journal/agent/openclaw-agent.sqlite",
+-      "test-agent",
+-    );
+-    expect(mocks.assertNoOpenClawAgentDatabaseLeases).toHaveBeenCalledWith("test-agent", {});
+-    expect(mocks.drainAgentDatabaseReaders).toHaveBeenCalledWith([]);
+-    expect(mocks.closeDeletedAgentDatabases).toHaveBeenCalledWith("test-agent", []);
+-    expectNotTrashed("/journal/agent");
+-    expectNotTrashed("/journal");
+-    expectTrashedWithinParent("/deleted/sessions");
+-    expect(mocks.unregisterOpenClawAgentDatabase).toHaveBeenCalledWith({
+-      agentId: "test-agent",
+-      path: "/journal/agent/openclaw-agent.sqlite",
+-    });
+-    expect(databaseRows).toEqual([
+-      { agentId: "other-agent", path: "/journal/agent/openclaw-agent.sqlite" },
+-    ]);
+-    expect(mocks.unregisterResolvedAgentDir).toHaveBeenCalledWith({
+-      agentId: "test-agent",
+-      agentDir: "/journal/agent",
+-    });
+-    expect(directoryOwners.get("/journal/agent")).toBe("other-agent");
+-    expect(mocks.beginAgentDeletionFinish).toHaveBeenCalledOnce();
+-  });
+-}
+diff --git a/src/gateway/server-methods/agents-mutate.test.ts b/src/gateway/server-methods/agents-mutate.test.ts
+index dc998e46f364369354d52cead619b5e5461180bc..b47e01d1c82a21ec6a21fc2eb241e7e590afccbb 100644
+--- a/src/gateway/server-methods/agents-mutate.test.ts
++++ b/src/gateway/server-methods/agents-mutate.test.ts
+@@ -21,7 +21,6 @@ import {
+   makeFileStat,
+   mockCallArg,
+   registerAgentCreationCommitTests,
+-  registerAgentDeleteSurvivingOwnerTest,
+ } from "./agents-mutate.test-support.js";
+ const mocks = vi.hoisted(() => ({
+   sharedAuthStoreOwnership: { location: "legacy-main" } as {
+@@ -53,7 +52,6 @@ const mocks = vi.hoisted(() => ({
+   assertAgentDeletionCurrent: vi.fn(),
+   beginAgentDeletionRollback: vi.fn(),
+   beginAgentDeletionFinish: vi.fn(),
+-  drainAgentDatabaseReaders: vi.fn(async (_databasePaths: readonly string[]) => {}),
+   closeDeletedAgentDatabases: vi.fn(async () => {}),
+   hasDeletedAgentDatabases: vi.fn(() => false),
+   reviveAgentDatabases: vi.fn(async (_agentIds: readonly string[]) => {}),
+@@ -275,7 +273,6 @@ vi.mock("../../agents/agent-lifecycle-registry.js", () => ({
+ }));
+ 
+ vi.mock("../../state/openclaw-agent-db-readers.js", () => ({
+-  drainAgentDatabaseReaders: mocks.drainAgentDatabaseReaders,
+   closeDeletedAgentDatabases: mocks.closeDeletedAgentDatabases,
+   reviveAgentDatabases: mocks.reviveAgentDatabases,
+ }));
+@@ -1556,11 +1553,70 @@ describe("agents.delete", () => {
+     expect(mocks.beginAgentDeletionFinish).toHaveBeenCalledOnce();
+   });
+ 
+-  registerAgentDeleteSurvivingOwnerTest({
+-    mocks,
+-    call,
+-    expectNotTrashed,
+-    expectTrashedWithinParent,
++  it("settles recovery without touching a journaled directory claimed by another agent", async () => {
++    const directoryOwners = new Map([["/journal/agent", "other-agent"]]);
++    const databaseRows = [
++      { agentId: "test-agent", path: "/journal/agent/openclaw-agent.sqlite" },
++      { agentId: "other-agent", path: "/journal/agent/openclaw-agent.sqlite" },
++    ];
++    mocks.findAgentEntryIndex.mockReturnValue(-1);
++    mocks.readAgentDeletionJournal.mockReturnValue(
++      deletionJournal({ workspaceDir: "/journal", sessionsDir: "/deleted/sessions" }),
++    );
++    mocks.resolveRegisteredAgentIdForDir.mockImplementation((pathname?: string) =>
++      directoryOwners.get(pathname ?? ""),
++    );
++    mocks.isPathOwnedByAnotherRegisteredAgent.mockImplementation(
++      ({ agentId, pathname }: { agentId: string; pathname: string }) =>
++        (pathname === "/journal/agent" || pathname.startsWith("/journal/agent/")) &&
++        directoryOwners.get("/journal/agent") !== agentId,
++    );
++    mocks.unregisterResolvedAgentDir.mockImplementation(
++      ({ agentId, agentDir }: { agentId: string; agentDir: string }) => {
++        if (directoryOwners.get(agentDir) !== agentId) {
++          return false;
++        }
++        return directoryOwners.delete(agentDir);
++      },
++    );
++    mocks.listOpenClawRegisteredAgentDatabases.mockImplementation(() => databaseRows);
++    mocks.unregisterOpenClawAgentDatabase.mockImplementation(
++      ({ agentId, path: databasePath }: { agentId: string; path: string }) => {
++        const index = databaseRows.findIndex(
++          (entry) => entry.agentId === agentId && entry.path === databasePath,
++        );
++        if (index >= 0) {
++          databaseRows.splice(index, 1);
++        }
++      },
++    );
++
++    const respond = await call("agents.delete", { agentId: "test-agent" });
++
++    expectRespondOk(respond, { ok: true });
++    expect(mocks.listOpenClawRegisteredAgentDatabases).toHaveBeenCalled();
++    expect(mocks.closeOpenClawAgentDatabaseByPath).toHaveBeenCalledWith(
++      "/journal/agent/openclaw-agent.sqlite",
++      "test-agent",
++    );
++    expect(mocks.assertNoOpenClawAgentDatabaseLeases).toHaveBeenCalledWith("test-agent", {});
++    expect(mocks.closeDeletedAgentDatabases).toHaveBeenCalledWith("test-agent", []);
++    expectNotTrashed("/journal/agent");
++    expectNotTrashed("/journal");
++    expectTrashedWithinParent("/deleted/sessions");
++    expect(mocks.unregisterOpenClawAgentDatabase).toHaveBeenCalledWith({
++      agentId: "test-agent",
++      path: "/journal/agent/openclaw-agent.sqlite",
++    });
++    expect(databaseRows).toEqual([
++      { agentId: "other-agent", path: "/journal/agent/openclaw-agent.sqlite" },
++    ]);
++    expect(mocks.unregisterResolvedAgentDir).toHaveBeenCalledWith({
++      agentId: "test-agent",
++      agentDir: "/journal/agent",
++    });
++    expect(directoryOwners.get("/journal/agent")).toBe("other-agent");
++    expect(mocks.beginAgentDeletionFinish).toHaveBeenCalledOnce();
+   });
+ 
+   it("revalidates database ownership after earlier filesystem cleanup", async () => {
 diff --git a/src/gateway/server-methods/chat-send-admission.ts b/src/gateway/server-methods/chat-send-admission.ts
 index 6801e56dcdd942aa9e48be65e36f023685808ce5..f5fd00ba5a1ff8bf291c8331e9ebe2235900a528 100644
 --- a/src/gateway/server-methods/chat-send-admission.ts
@@ -17255,6 +17842,25 @@ index 73484e0bacfe543245526e68aba071094087fe3b..56fbe324030fa4f75ba4f652809601b4
 -  }
 -  return { platform, deviceFamily };
 -}
+diff --git a/src/state/openclaw-agent-db-readers.ts b/src/state/openclaw-agent-db-readers.ts
+index bc541e22960c9fba222c0b2ba9038f361ea3555d..4313c65ce11888386832a7d269b3686441b53360 100644
+--- a/src/state/openclaw-agent-db-readers.ts
++++ b/src/state/openclaw-agent-db-readers.ts
+@@ -15,14 +15,6 @@ function resolveUnique(pathnames: readonly string[]): string[] {
+   return [...new Set(pathnames.map((pathname) => path.resolve(pathname)))];
+ }
+ 
+-/** Drain retained readers before checking deletion leases; rollback may reopen them. */
+-export async function drainAgentDatabaseReaders(databasePaths: readonly string[]): Promise<void> {
+-  const candidates = resolveUnique(databasePaths).map((pathname) => ({ path: pathname }));
+-  if (candidates.length > 0) {
+-    await applyAcrossProcess({ kind: "close", candidates, deleted: false });
+-  }
+-}
+-
+ /** Deletion closes the databases everywhere and refuses reopening them until the agent returns. */
+ export async function closeDeletedAgentDatabases(
+   agentId: string,
 diff --git a/src/state/openclaw-agent-schema.sql b/src/state/openclaw-agent-schema.sql
 index e414050ec7b8232e1dc657bd9a1ecc078bc142de..79216473995f8d721b14fd91d79bdb8b779a738d 100644
 --- a/src/state/openclaw-agent-schema.sql
