@@ -72231,7 +72231,7 @@ index 8ca273135894bc448ae83df26755d1c6422bc14c..c05eef6de2e3612d3ca732ae29175a65
          requesterAgentId: params.requesterAgentId,
          steerMessage: runtimeContextFragments.length
 diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
-index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade950ce57f47 100644
+index 965f31fd9470e57e4de39b139cce88949b2b0004..508d44970f95f44ef1726e9a3e7a8191b997eb4d 100644
 --- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 +++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 @@ -36,6 +36,7 @@ import {
@@ -72265,7 +72265,15 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
    completionRequesterSessionId?: string;
    completionRequesterLifecycleRevision?: string;
    requireVisibleReply?: boolean;
-@@ -125,6 +131,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -95,6 +101,7 @@ export type SubagentAnnounceDirectParams = {
+   sourceTool?: string;
+   settleWakeSourceSessionKeys?: readonly string[];
+   isSourceSessionEffectsAllowed?: () => boolean;
++  deliverRequesterFinal?: import("../requester-final-attachment.js").RequesterFinalAttachmentDelivery;
+   sourceReceiptAdmission?: GatewayToolCallerReceiptAdmission;
+   /** Additional source guard released by the accepting Gateway or injection owner. */
+   isSourceSessionAdmissionAllowed?: () => boolean;
+@@ -125,6 +132,7 @@ export async function sendSubagentAnnounceDirectly(
      return { delivered: false, path: "none" };
    }
    const parentOnly = params.completionTarget === "parent";
@@ -72273,7 +72281,19 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
    const cfg = getSubagentAnnounceRuntimeConfig();
    const announceTimeoutMs = resolveSubagentAnnounceTimeoutMs(cfg);
    const runtimeContextFragments = buildAgentInternalEventContext(params.internalEvents);
-@@ -219,7 +226,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -210,8 +218,9 @@ export async function sendSubagentAnnounceDirectly(
+       deliveryTarget.deliver &&
+       isDirectMessageDeliveryTarget(deliveryTarget, canonicalRequesterSessionKey);
+     const requiresMessageToolDelivery =
+-      completionRouteRequiresMessageToolDelivery ||
+-      subagentDirectMessageCompletionRequiresMessageTool;
++      !params.deliverRequesterFinal &&
++      (completionRouteRequiresMessageToolDelivery ||
++        subagentDirectMessageCompletionRequiresMessageTool);
+     const requesterActivity = resolveRequesterSessionActivity(
+       params.targetRequesterSessionKey,
+       requester,
+@@ -219,7 +228,7 @@ export async function sendSubagentAnnounceDirectly(
      // Private findings bind to the requester incarnation that produced them,
      // including a deliverable settle continuation that is no longer parentOnly.
      const requesterSessionBound =
@@ -72282,7 +72302,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
        (sourceToolId === "subagent_settle" && params.completionRequesterSessionId !== undefined);
      if (
        requesterSessionBound &&
-@@ -272,7 +279,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -272,7 +281,7 @@ export async function sendSubagentAnnounceDirectly(
      // A recovered requester already owns this admitted input. Reuse its final
      // receipt through the normal delivery checks; never execute the old wake again.
      const recovery =
@@ -72291,23 +72311,64 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
          ? resolveRequesterRecoveryDelivery(requesterEntry, params.directIdempotencyKey)
          : undefined;
      if (recovery?.kind === "delivery") {
-@@ -299,12 +306,13 @@ export async function sendSubagentAnnounceDirectly(
-     // A private settle turn never delivers; automatic only keeps a tool-only mode from
-     // suppressing its internal final. A deliverable yielded turn omits the mode so the
-     // conversation's configured reply policy decides, as for any other requester turn.
+@@ -283,28 +292,34 @@ export async function sendSubagentAnnounceDirectly(
+       contentKind: "completed_result" | "failed_notice" = textCompletionDirectDeliveryKind,
+       agentResult?: { payloads?: unknown },
+     ) =>
+-      deliverCompletionDirect({
+-        cfg,
+-        requesterSessionKey: canonicalRequesterSessionKey,
+-        requesterAgentId: params.requesterAgentId,
+-        directIdempotencyKey: params.directIdempotencyKey,
+-        deliveryTarget,
+-        internalEvents: params.internalEvents,
+-        contentKind,
+-        agentResult,
+-        signal: params.signal,
+-        onDeliveryResult: params.onDeliveryResult,
+-        isSourceSessionEffectsAllowed: isCompletionDeliveryAllowed,
+-      });
+-    // A private settle turn never delivers; automatic only keeps a tool-only mode from
+-    // suppressing its internal final. A deliverable yielded turn omits the mode so the
+-    // conversation's configured reply policy decides, as for any other requester turn.
 -    const completionSourceReplyDeliveryMode = parentOnly
-+    const completionSourceReplyDeliveryMode = privateCompletion
-       ? "automatic"
-       : requiresMessageToolDelivery
-         ? "message_tool_only"
-         : undefined;
+-      ? "automatic"
+-      : requiresMessageToolDelivery
+-        ? "message_tool_only"
+-        : undefined;
 -    const shouldDeliverAgentFinal = deliveryTarget.deliver && !requiresMessageToolDelivery;
++      params.deliverRequesterFinal
++        ? Promise.resolve(undefined)
++        : deliverCompletionDirect({
++            cfg,
++            requesterSessionKey: canonicalRequesterSessionKey,
++            requesterAgentId: params.requesterAgentId,
++            directIdempotencyKey: params.directIdempotencyKey,
++            deliveryTarget,
++            internalEvents: params.internalEvents,
++            contentKind,
++            agentResult,
++            signal: params.signal,
++            onDeliveryResult: params.onDeliveryResult,
++            isSourceSessionEffectsAllowed: isCompletionDeliveryAllowed,
++          });
++    // Private and retained-sink turns synthesize internally; the captured sink owns its
++    // final effect. Other yielded turns retain the conversation's configured reply policy.
++    const completionSourceReplyDeliveryMode =
++      privateCompletion || params.deliverRequesterFinal
++        ? "automatic"
++        : requiresMessageToolDelivery
++          ? "message_tool_only"
++          : undefined;
 +    const shouldDeliverAgentFinal =
-+      !privateCompletion && deliveryTarget.deliver && !requiresMessageToolDelivery;
++      !privateCompletion &&
++      !params.deliverRequesterFinal &&
++      deliveryTarget.deliver &&
++      !requiresMessageToolDelivery;
      const requesterQueueSettings = resolveQueueSettings({
        cfg,
        channel:
-@@ -314,7 +322,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -314,7 +329,7 @@ export async function sendSubagentAnnounceDirectly(
        sessionEntry: requesterEntry,
      });
      if (
@@ -72316,7 +72377,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
        params.expectsCompletionMessage &&
        requesterActivity.sessionId &&
        requesterActivity.isActive
-@@ -322,6 +330,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -322,6 +337,7 @@ export async function sendSubagentAnnounceDirectly(
        const wakeOptions: EmbeddedAgentQueueMessageOptions = {
          deliveryTimeoutMs: announceTimeoutMs,
          steeringMode: "all",
@@ -72324,7 +72385,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
          ...(completionSourceReplyDeliveryMode
            ? { sourceReplyDeliveryMode: completionSourceReplyDeliveryMode }
            : {}),
-@@ -385,11 +394,14 @@ export async function sendSubagentAnnounceDirectly(
+@@ -385,11 +401,14 @@ export async function sendSubagentAnnounceDirectly(
      if (params.signal?.aborted) {
        return { delivered: false, path: "none" };
      }
@@ -72344,7 +72405,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
      // A private completion gets its own serialized turn. Steering into a public
      // turn would inherit that turn's delivery policy and expose child output.
      let directAgentParams: Record<string, unknown> = {
-@@ -405,7 +417,10 @@ export async function sendSubagentAnnounceDirectly(
+@@ -405,7 +424,10 @@ export async function sendSubagentAnnounceDirectly(
        deliver: shouldDeliverAgentFinal,
        bestEffortDeliver: params.bestEffortDeliver,
        internalEvents: params.internalEvents,
@@ -72356,7 +72417,15 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
        accountId: directAgentOrigin?.accountId,
        to: directAgentOrigin?.to,
        threadId: stringifyRouteThreadId(directAgentOrigin?.threadId),
-@@ -477,7 +492,7 @@ export async function sendSubagentAnnounceDirectly(
+@@ -443,6 +465,7 @@ export async function sendSubagentAnnounceDirectly(
+       requesterSessionOrigin,
+       textCompletionDirectDeliveryKind,
+       tryTextCompletionDirectDelivery,
++      deliverRequesterFinal: params.deliverRequesterFinal,
+     });
+     let directAnnounceResponse: unknown;
+     let directFailure: SubagentAnnounceDeliveryResult | undefined;
+@@ -477,7 +500,7 @@ export async function sendSubagentAnnounceDirectly(
                        }
                      : undefined,
                  settleWakeSourceSessionKeys: params.settleWakeSourceSessionKeys,
@@ -72365,7 +72434,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
                  delegatedToolPolicyHandoff:
                    ((isSubagentCompletion && trustedCompletionEvent) ||
                      (sourceToolId === "subagent_settle" &&
-@@ -487,6 +502,12 @@ export async function sendSubagentAnnounceDirectly(
+@@ -487,6 +510,12 @@ export async function sendSubagentAnnounceDirectly(
                    requesterActivity.sessionId &&
                    params.isSourceSessionEffectsAllowed?.() !== false
                      ? {
@@ -72378,7 +72447,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
                          sourceSessionKey: params.sourceSessionKey,
                          ...(trustedCompletionEvent?.childSessionId
                            ? { sourceSessionId: trustedCompletionEvent.childSessionId }
-@@ -555,6 +576,16 @@ export async function sendSubagentAnnounceDirectly(
+@@ -555,6 +584,16 @@ export async function sendSubagentAnnounceDirectly(
        };
      }
  
@@ -72395,6 +72464,72 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..64b16c7362fbda06a5616ea6ac9ade95
      const classified = directFailure ?? classifyResponse(directAnnounceResponse);
      const delivery = classified instanceof Promise ? await classified : classified;
      const originalOutcome = buildAgentRunTerminalOutcomeFromWaitResult(
+diff --git a/src/agents/subagents/announce/subagent-announce-direct-response.ts b/src/agents/subagents/announce/subagent-announce-direct-response.ts
+index 84465b6c268477d61678716d66d1ed6641683c18..42bc62f3de70ad85f5e31e4448aac75d212a15b0 100644
+--- a/src/agents/subagents/announce/subagent-announce-direct-response.ts
++++ b/src/agents/subagents/announce/subagent-announce-direct-response.ts
+@@ -48,6 +48,7 @@ type DirectAnnounceResponseContext = {
+     kind: "completed_result" | "failed_notice",
+     agentResult?: { payloads?: unknown },
+   ) => Promise<SubagentAnnounceDeliveryResult | undefined>;
++  deliverRequesterFinal?: import("../requester-final-attachment.js").RequesterFinalAttachmentDelivery;
+ };
+ 
+ function missingVisibleReplyResult(): SubagentAnnounceDeliveryResult {
+@@ -76,6 +77,7 @@ export function createDirectAnnounceResponseClassifier(context: DirectAnnounceRe
+     requesterSessionOrigin,
+     textCompletionDirectDeliveryKind,
+     tryTextCompletionDirectDelivery,
++    deliverRequesterFinal,
+   } = context;
+   return (
+     directAnnounceResponse: unknown,
+@@ -132,6 +134,32 @@ export function createDirectAnnounceResponseClassifier(context: DirectAnnounceRe
+       directAnnounceRecord?.status === "ok" &&
+       !directAnnounceResult?.meta?.error &&
+       !directAnnounceResult?.meta?.aborted;
++    if (
++      deliverRequesterFinal &&
++      requesterCompletedSuccessfully &&
++      directAnnounceResult?.meta?.yielded !== true &&
++      directAnnounceResult?.meta?.continuationPending !== true &&
++      hasVisibleNonSilentGatewayPayload
++    ) {
++      const final = buildRequesterCompletionDeliveryResult(
++        true,
++        directAnnounceResult?.meta?.finalAssistantVisibleText,
++      );
++      if (final.finalAssistantVisibleText) {
++        const appended = deliverRequesterFinal(final.finalAssistantVisibleText) === "appended";
++        return appended
++          ? { ...final, requesterFinalAttachmentHandled: true }
++          : {
++              delivered: false,
++              path: "direct",
++              terminal: true,
++              reason: "delivery_suppressed",
++              disposition: "intentional_non_delivery",
++              error: "retained requester final sink is no longer available",
++              requesterFinalAttachmentHandled: true,
++            };
++      }
++    }
+     const requiresSettleReply =
+       requesterSessionBound &&
+       params.sourceTool === "subagent_settle" &&
+diff --git a/src/agents/subagents/announce/subagent-announce-dispatch.ts b/src/agents/subagents/announce/subagent-announce-dispatch.ts
+index f583dc746e54a111ec0474bab454149f6d5a56fa..0cd701f745c989a6985852004ccaa52e2b42d18d 100644
+--- a/src/agents/subagents/announce/subagent-announce-dispatch.ts
++++ b/src/agents/subagents/announce/subagent-announce-dispatch.ts
+@@ -29,6 +29,8 @@ export type SubagentAnnounceDeliveryResult = {
+   enqueuedAt?: number;
+   /** Direct delivery that already committed the requester's visible final. */
+   requesterVisibleFinalDelivered?: true;
++  /** The captured requester sink was attempted; later settlement must not reselect it. */
++  requesterFinalAttachmentHandled?: true;
+   storeReplaced?: true;
+   /** Bounded visible final returned by the direct requester synthesis turn. */
+   finalAssistantVisibleText?: string;
 diff --git a/src/agents/subagents/announce/subagent-announce-handoff.ts b/src/agents/subagents/announce/subagent-announce-handoff.ts
 index 04b054992a8e15b12a3ef3b1a894d771a404bf90..7ca4dcb5ace8186e9b68ef214d212a3236968ea3 100644
 --- a/src/agents/subagents/announce/subagent-announce-handoff.ts
@@ -72475,6 +72610,373 @@ index 04b054992a8e15b12a3ef3b1a894d771a404bf90..7ca4dcb5ace8186e9b68ef214d212a32
 +    params.handoff?.model === params.model?.trim()
    );
  }
+diff --git a/src/agents/subagents/announce/subagent-announce-requester-final.test.ts b/src/agents/subagents/announce/subagent-announce-requester-final.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c663ebe57aa4cb032ed2d482527d719a8d945d2a
+--- /dev/null
++++ b/src/agents/subagents/announce/subagent-announce-requester-final.test.ts
+@@ -0,0 +1,361 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { callGateway as runtimeCallGateway } from "../../../gateway/call.js";
++import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
++import type { sendMessage as runtimeSendMessage } from "../../../infra/outbound/message.js";
++import {
++  consumeRequesterFinalAttachment,
++  finalizeRequesterFinalAttachment,
++  prepareRequesterFinalAttachmentDelivery,
++  promoteRequesterFinalAttachment,
++  registerRequesterFinalAttachment,
++  transferRequesterFinalAttachment,
++} from "../requester-final-attachment.js";
++import { deliverSubagentAnnouncement, testing } from "./subagent-announce-delivery.test-support.js";
++import { createDirectAnnounceResponseClassifier } from "./subagent-announce-direct-response.js";
++import { prepareRequesterSettleFinalDelivery } from "./subagent-announce.requester-settle-transitions.js";
++
++const target = {
++  requesterAgentId: "main",
++  requesterSessionKey: "agent:main:conversation",
++  requesterSessionId: "requester-session",
++  batchRunIds: ["child-run"],
++  rearmGeneration: 1,
++};
++const registrations: ReturnType<typeof registerRequesterFinalAttachment>[] = [];
++
++afterEach(() => {
++  testing.setDepsForTest();
++  for (const registration of registrations.splice(0)) {
++    registration.revoke();
++  }
++  vi.useRealTimers();
++});
++
++function registerFinal(append: (text: string) => boolean, onSettled?: () => void) {
++  const registration = registerRequesterFinalAttachment({
++    ...target,
++    requesterTurnRunId: "requester-turn",
++    lifecycleGeneration: getAgentEventLifecycleGeneration(),
++    timeoutMs: 60_000,
++    append,
++    onSettled,
++  });
++  registrations.push(registration);
++  expect(promoteRequesterFinalAttachment({ ...target, requesterTurnRunId: "requester-turn" })).toBe(
++    true,
++  );
++  registration.releaseProvisional();
++  return registration;
++}
++
++function classifyCompletion(
++  deliverRequesterFinal?: ReturnType<typeof prepareRequesterFinalAttachmentDelivery>,
++  meta: Record<string, unknown> = {},
++  parentOnly = false,
++  text = "The delegated review is complete.",
++) {
++  const context = {
++    params: {
++      sourceTool: "subagent_settle",
++      expectsCompletionMessage: false,
++      requireVisibleReply: true,
++      requesterIsSubagent: false,
++    },
++    parentOnly,
++    requesterSessionBound: true,
++    deliveryTarget: { deliver: false, channel: "discord" },
++    shouldDeliverAgentFinal: false,
++    requiresMessageToolDelivery: false,
++    isSubagentCompletion: false,
++    hasSuccessfulTrustedSubagentNoOutputCompletion: false,
++    hasRequiredSubagentNoOutputCompletion: false,
++    subagentDirectMessageCompletionRequiresMessageTool: false,
++    effectiveDirectOrigin: { channel: "discord" },
++    requesterSessionOrigin: { channel: "discord" },
++    textCompletionDirectDeliveryKind: "completed_result" as const,
++    tryTextCompletionDirectDelivery: async () => undefined,
++    deliverRequesterFinal,
++  };
++  return createDirectAnnounceResponseClassifier(context)({
++    status: "ok",
++    result: {
++      payloads: [{ text }],
++      meta: { finalAssistantVisibleText: text, ...meta },
++    },
++  });
++}
++
++describe("retained requester final delivery", () => {
++  it.each(["appended", "rejected", "missing"] as const)(
++    "selects only the retained requester sink before dispatch when it is %s",
++    async (outcome) => {
++      const final = "The delegated review is complete.";
++      const callGateway = vi.fn<typeof runtimeCallGateway>();
++      callGateway.mockResolvedValue({
++        status: "ok",
++        result: {
++          payloads: [{ text: final }],
++          meta: { finalAssistantVisibleText: final },
++        },
++      });
++      const sendMessage = vi.fn<typeof runtimeSendMessage>();
++      const cfg = { tools: { deny: ["message"] } };
++      const requesterSessionKey = "agent:main:discord:dm:requester";
++      testing.setDepsForTest({
++        callGateway,
++        sendMessage,
++        getRuntimeConfig: () => cfg,
++        getRequesterSessionActivity: () => ({ sessionId: "requester-session", isActive: false }),
++        loadRequesterSessionEntry: () => ({
++          cfg,
++          canonicalKey: requesterSessionKey,
++          entry: { sessionId: "requester-session", updatedAt: 1 },
++        }),
++      });
++      const deliverRequesterFinal = vi.fn(() => outcome);
++      const delivery = await deliverSubagentAnnouncement({
++        requesterSessionKey,
++        targetRequesterSessionKey: requesterSessionKey,
++        triggerMessage: "The child has completed.",
++        directIdempotencyKey: "settle-test",
++        directOrigin: { channel: "discord", to: "dm:requester" },
++        requesterIsSubagent: false,
++        deliverRequesterFinal,
++        expectsCompletionMessage: false,
++        sourceTool: "subagent_settle",
++        requireVisibleReply: true,
++        requireDirectDelivery: true,
++      });
++      expect(delivery).toMatchObject({
++        delivered: outcome === "appended",
++        requesterFinalAttachmentHandled: true,
++      });
++      expect(deliverRequesterFinal).toHaveBeenCalledExactlyOnceWith(final);
++      expect(callGateway).toHaveBeenCalledOnce();
++      expect(callGateway.mock.calls[0]?.[0].params).toMatchObject({
++        deliver: false,
++        sourceReplyDeliveryMode: "automatic",
++      });
++      expect(sendMessage).not.toHaveBeenCalled();
++      if (outcome !== "appended") {
++        expect(delivery).toMatchObject({ terminal: true, disposition: "intentional_non_delivery" });
++      }
++    },
++  );
++
++  it("delivers a visible continuation through its registered nonnetwork sink exactly once", async () => {
++    const append = vi.fn(() => true);
++    registerFinal(append);
++    const delivery = await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target));
++
++    expect(delivery).toMatchObject({ delivered: true, path: "direct" });
++    expect(append).toHaveBeenCalledExactlyOnceWith("The delegated review is complete.");
++    expect(consumeRequesterFinalAttachment({ ...target, text: "replay" })).toBe("missing");
++  });
++
++  it.each(["session", "batch", "rearm"] as const)(
++    "preserves unresolved external delivery when no exact %s target is registered",
++    async (mismatch) => {
++      const append = vi.fn(() => true);
++      registerFinal(append);
++      const mismatched = {
++        ...target,
++        ...(mismatch === "session" ? { requesterSessionId: "other-session" } : {}),
++        ...(mismatch === "batch" ? { batchRunIds: ["other-child"] } : {}),
++        ...(mismatch === "rearm" ? { rearmGeneration: 2 } : {}),
++      };
++      expect(prepareRequesterFinalAttachmentDelivery(mismatched)).toBeUndefined();
++      expect(await classifyCompletion()).toMatchObject({
++        delivered: false,
++        reason: "visible_reply_missing",
++      });
++      expect(append).not.toHaveBeenCalled();
++      expect(consumeRequesterFinalAttachment({ ...target, text: "correct target" })).toBe(
++        "appended",
++      );
++    },
++  );
++
++  it.each(["revoked", "expired", "replaced", "transferred", "rearmed"] as const)(
++    "retires a captured %s sink without consuming another target or retrying delivery",
++    async (change) => {
++      vi.useFakeTimers();
++      const append = vi.fn(() => true);
++      const registration = registerFinal(append);
++      const deliver = prepareRequesterFinalAttachmentDelivery(target);
++      const newerAppend = vi.fn(() => true);
++      if (change === "revoked") {
++        registration.revoke();
++      }
++      if (change === "expired") {
++        vi.advanceTimersByTime(60_001);
++      }
++      if (change === "replaced") {
++        registerFinal(newerAppend);
++      }
++      if (change === "transferred") {
++        transferRequesterFinalAttachment({ ...target, requesterTurnRunId: "new-turn" });
++      }
++      if (change === "rearmed") {
++        promoteRequesterFinalAttachment({
++          ...target,
++          requesterTurnRunId: "requester-turn",
++          batchRunIds: ["new-child"],
++          rearmGeneration: 2,
++        });
++      }
++      const delivery = await classifyCompletion(deliver);
++      expect(delivery).toMatchObject({
++        delivered: false,
++        terminal: true,
++        disposition: "intentional_non_delivery",
++        requesterFinalAttachmentHandled: true,
++      });
++      finalizeRequesterFinalAttachment({
++        ...target,
++        requesterYieldBatch: true,
++        pause: false,
++        ...delivery,
++      });
++      expect(append).not.toHaveBeenCalled();
++      expect(newerAppend).not.toHaveBeenCalled();
++      if (change === "replaced") {
++        expect(consumeRequesterFinalAttachment({ ...target, text: "new final" })).toBe("appended");
++      }
++      if (change === "rearmed") {
++        expect(
++          consumeRequesterFinalAttachment({
++            ...target,
++            batchRunIds: ["new-child"],
++            rearmGeneration: 2,
++            text: "new final",
++          }),
++        ).toBe("appended");
++      }
++    },
++  );
++
++  it.each([false, "throw"] as const)(
++    "does not retry a sink that rejects with %s",
++    async (outcome) => {
++      const append = vi.fn(() => {
++        if (outcome === "throw") {
++          throw new Error("call closed");
++        }
++        return false;
++      });
++      registerFinal(append);
++      const delivery = await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target));
++      expect(delivery).toMatchObject({
++        delivered: false,
++        terminal: true,
++        disposition: "intentional_non_delivery",
++      });
++      expect(append).toHaveBeenCalledOnce();
++      expect(consumeRequesterFinalAttachment({ ...target, text: "replay" })).toBe("missing");
++    },
++  );
++
++  it("preserves the bounded final text and does not consume a newer attachment during finalization", async () => {
++    const append = vi.fn(() => true);
++    registerFinal(append);
++    const delivery = await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target), {
++      finalAssistantVisibleText: ` ${"x".repeat(11_999)}😀remaining `,
++    });
++    expect(append).toHaveBeenCalledExactlyOnceWith("x".repeat(11_999));
++    const newer = vi.fn(() => true);
++    registerFinal(newer);
++    finalizeRequesterFinalAttachment({
++      ...target,
++      requesterYieldBatch: true,
++      pause: false,
++      ...delivery,
++    });
++    expect(newer).not.toHaveBeenCalled();
++    expect(consumeRequesterFinalAttachment({ ...target, text: "new final" })).toBe("appended");
++  });
++
++  it.each(["false", "throw"] as const)(
++    "settles only the captured owner when authority returns %s",
++    async (mode) => {
++      const append = vi.fn(() => true);
++      const settled = vi.fn();
++      registerFinal(append, settled);
++      let current = true;
++      const deliver = prepareRequesterFinalAttachmentDelivery(target, () => {
++        if (!current && mode === "throw") {
++          throw new Error("authority closed");
++        }
++        return current;
++      });
++      current = false;
++      expect(await classifyCompletion(deliver)).toMatchObject({ delivered: false, terminal: true });
++      expect(settled).toHaveBeenCalledOnce();
++      expect(append).not.toHaveBeenCalled();
++      const newer = vi.fn(() => true);
++      registerFinal(newer);
++      await classifyCompletion(deliver);
++      expect(settled).toHaveBeenCalledOnce();
++      expect(consumeRequesterFinalAttachment({ ...target, text: "new final" })).toBe("appended");
++    },
++  );
++
++  it("reuses only the same attempt's accepted final receipt without repeating append", async () => {
++    const append = vi.fn(() => true);
++    registerFinal(append);
++    const deliver = prepareRequesterFinalAttachmentDelivery(target);
++    expect(await classifyCompletion(deliver)).toMatchObject({ delivered: true });
++    expect(await classifyCompletion(deliver)).toMatchObject({ delivered: true });
++    expect(append).toHaveBeenCalledOnce();
++    expect(deliver?.("different final")).toBe("rejected");
++  });
++
++  it.each([{ yielded: true }, { continuationPending: true }, { aborted: true }, { error: {} }])(
++    "does not append a nonfinal response: %j",
++    async (meta) => {
++      const append = vi.fn(() => true);
++      registerFinal(append);
++      await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target), meta);
++      expect(append).not.toHaveBeenCalled();
++      expect(consumeRequesterFinalAttachment({ ...target, text: "actual final" })).toBe("appended");
++    },
++  );
++
++  it("keeps explicitly private parent consumption separate from a retained spoken final", async () => {
++    const append = vi.fn(() => true);
++    registerFinal(append);
++    await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target), {}, true);
++    expect(append).not.toHaveBeenCalled();
++  });
++
++  it.each(["NO_REPLY", ""])(
++    "does not turn intentional silence or empty output into a sink final: %j",
++    async (text) => {
++      const append = vi.fn(() => true);
++      registerFinal(append);
++      await classifyCompletion(prepareRequesterFinalAttachmentDelivery(target), {}, false, text);
++      expect(append).not.toHaveBeenCalled();
++    },
++  );
++
++  it("transfers a private yielded cohort without exposing its retained final", () => {
++    const append = vi.fn(() => true);
++    registerFinal(append);
++    const deliver = prepareRequesterSettleFinalDelivery({
++      ...target,
++      requesterTurnRunId: "private-successor",
++      enabled: true,
++      parentOnly: true,
++      isCurrent: () => true,
++      state: { status: "pending", attemptCount: 0, requesterYieldBatch: true, rearmGeneration: 1 },
++    });
++    expect(deliver).toBeUndefined();
++    expect(
++      promoteRequesterFinalAttachment({ ...target, requesterTurnRunId: "requester-turn" }),
++    ).toBe(false);
++    expect(
++      promoteRequesterFinalAttachment({ ...target, requesterTurnRunId: "private-successor" }),
++    ).toBe(true);
++    expect(append).not.toHaveBeenCalled();
++  });
++});
 diff --git a/src/agents/subagents/announce/subagent-announce-requester-presentation.ts b/src/agents/subagents/announce/subagent-announce-requester-presentation.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..45073f46f48ffb9eeec5ffa1619710c89d8649ac
@@ -75142,13 +75644,17 @@ index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba
    };
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-transitions.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-transitions.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..b4f9481588c42a5b3822c67361c84ba4a9a4a6b0
+index 0000000000000000000000000000000000000000..e97ef01556bf7fd25e366d66fe0e27b4ee93ba7c
 --- /dev/null
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-transitions.ts
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,153 @@
 +import { logWarn } from "../../../logger.js";
 +import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
-+import { finalizeRequesterFinalAttachment } from "../requester-final-attachment.js";
++import {
++  finalizeRequesterFinalAttachment,
++  prepareRequesterFinalAttachmentDelivery,
++  transferRequesterFinalAttachment,
++} from "../requester-final-attachment.js";
 +import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
 +import type { createRequesterDescendantReader } from "./subagent-announce.requester-settle-descendants.js";
 +import {
@@ -75255,13 +75761,48 @@ index 0000000000000000000000000000000000000000..b4f9481588c42a5b3822c67361c84ba4
 +        requesterYieldBatch: state.requesterYieldBatch,
 +        pause: params.pause,
 +        delivered: delivery?.delivered,
++        requesterFinalAttachmentHandled: delivery?.requesterFinalAttachmentHandled,
 +        finalAssistantVisibleText: delivery?.finalAssistantVisibleText,
 +      }),
 +    );
 +  };
 +}
++
++export function prepareRequesterSettleFinalDelivery(params: {
++  requesterAgentId?: string;
++  requesterSessionKey: string;
++  requesterSessionId: string;
++  requesterTurnRunId: string;
++  batchRunIds: readonly string[];
++  state: RequesterSettleWakeBatchState;
++  enabled: boolean;
++  parentOnly: boolean;
++  isCurrent: () => boolean;
++}): ReturnType<typeof prepareRequesterFinalAttachmentDelivery> {
++  if (
++    !params.enabled ||
++    !params.isCurrent() ||
++    !params.requesterAgentId ||
++    !params.state.requesterYieldBatch ||
++    params.state.rearmGeneration === undefined
++  ) {
++    return undefined;
++  }
++  const target = {
++    ...params,
++    requesterAgentId: params.requesterAgentId,
++    rearmGeneration: params.state.rearmGeneration,
++  };
++  if (!transferRequesterFinalAttachment(target)) {
++    return undefined;
++  }
++  if (params.parentOnly) {
++    return undefined;
++  }
++  return prepareRequesterFinalAttachmentDelivery(target, params.isCurrent);
++}
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
-index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0c7efe0bb 100644
+index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..7ac3c7fb65c481672fb63f5b4a13a360cc3f5978 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
 @@ -4,10 +4,7 @@ import { isSystemEventStoreCurrent } from "../../../infra/system-event-ownership
@@ -75288,7 +75829,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
  import {
    getLatestLiveSubagentRunByChildSessionKey,
    listSubagentRunsForRequester,
-@@ -32,24 +26,24 @@ import {
+@@ -32,24 +26,23 @@ import {
    hasRequesterCompletionCohort,
    resolveCurrentRequesterSettleWakeBatch,
  } from "../registry/subagent-requester-settle-identity.js";
@@ -75299,7 +75840,6 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
 -  finalizeRequesterFinalAttachment,
 -  transferRequesterFinalAttachment,
 -} from "../requester-final-attachment.js";
-+import { transferRequesterFinalAttachment } from "../requester-final-attachment.js";
  import { getSubagentDepthFromSessionStore } from "../spawn/subagent-depth.js";
  import { isPermanentAnnounceDeliveryError } from "./subagent-announce-delivery-retry.js";
  import {
@@ -75321,7 +75861,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
  import { createRequesterDescendantReader } from "./subagent-announce.requester-settle-descendants.js";
  import { buildRequesterSettleWakeMessage } from "./subagent-announce.requester-settle-message.js";
  import { createRequesterSettleReceiptAdmission } from "./subagent-announce.requester-settle-receipt.js";
-@@ -61,23 +55,21 @@ import {
+@@ -61,23 +54,22 @@ import {
    retainedYieldIdentity,
    startRequesterSettleWakeAttempt,
    type RequesterSettleWakeBatchState,
@@ -75330,6 +75870,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
  } from "./subagent-announce.requester-settle-state.js";
 +import {
 +  createRequesterSettleWakeCompletion,
++  prepareRequesterSettleFinalDelivery,
 +  createRequesterSettleWakeDeferral,
 +  REQUESTER_SETTLE_WAKE_RETRY_DELAYS_MS,
 +} from "./subagent-announce.requester-settle-transitions.js";
@@ -75603,18 +76144,35 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
      // Unfrozen waves with unsettled descendants returned above; a frozen wave
      // defers until its stale-descendant wait is spent.
      if (hasUnsettledDescendants && !(await deferBatch())) {
-@@ -591,6 +476,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -590,24 +475,86 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+       }
        return false;
      };
-     if (
-+      !cronRequester &&
-       isSourceSessionEffectsAllowed() &&
-       !pauseNotice &&
-       requesterAgentId &&
-@@ -606,8 +492,75 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
-         requesterTurnRunId: directIdempotencyKey,
-       });
-     }
+-    if (
+-      isSourceSessionEffectsAllowed() &&
+-      !pauseNotice &&
+-      requesterAgentId &&
+-      state.requesterYieldBatch &&
+-      state.rearmGeneration !== undefined
+-    ) {
+-      transferRequesterFinalAttachment({
+-        requesterAgentId,
+-        requesterSessionKey,
+-        requesterSessionId: requesterEntry.sessionId,
+-        batchRunIds,
+-        rearmGeneration: state.rearmGeneration,
+-        requesterTurnRunId: directIdempotencyKey,
++    const deliverRequesterFinal = prepareRequesterSettleFinalDelivery({
++      requesterAgentId,
++      requesterSessionKey,
++      requesterSessionId: requesterEntry.sessionId,
++      batchRunIds,
++      state,
++      requesterTurnRunId: directIdempotencyKey,
++      enabled: !cronRequester && !pauseNotice,
++      parentOnly,
++      isCurrent: isSourceSessionEffectsAllowed,
++    });
 +    if (cronRequester) {
 +      if (!followup?.offerInPlace || followup.request.continuationMode !== "in-place") {
 +        await completeBatch(settledBatch, state, {
@@ -75641,7 +76199,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
 +          }
 +        }),
 +        prompt: wakeMessage,
-+      });
+       });
 +      let joinError: unknown;
 +      try {
 +        const outcome = await receipt.result;
@@ -75668,7 +76226,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
 +      } finally {
 +        receipt.joined(joinError);
 +      }
-+    }
+     }
      let delivery: Awaited<ReturnType<typeof deliverSubagentAnnouncement>>;
      try {
 +      const onExecutionStarted = prepareRequesterSynthesisStart({
@@ -75687,7 +76245,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
        const dispatch = () =>
          subagentRuns.runWithCompletionBatchAuthority(settledBatch, () =>
            withRequesterCronAuthority(
-@@ -622,6 +575,16 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -622,6 +569,16 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
              },
              () =>
                deliverSubagentAnnouncement({
@@ -75704,7 +76262,7 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
                  requesterSessionKey,
                  requesterAgentId,
                  triggerMessage: wakeMessage,
-@@ -635,8 +598,27 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+@@ -635,11 +592,31 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
                  expectsCompletionMessage: false,
                  requireDirectDelivery: true,
                  ...privateBinding,
@@ -75732,6 +76290,10 @@ index 27695ef8460a4a9c783ac2db5b93b6aa24edf9a8..910622cf8ef84b6bc7ab6b548cc242c0
                  signal: params.signal,
                  resolveGatewayContext,
                  isSourceSessionEffectsAllowed,
++                deliverRequesterFinal,
+                 sourceReceiptAdmission,
+               }),
+           ),
 diff --git a/src/agents/subagents/announce/subagent-announce.ts b/src/agents/subagents/announce/subagent-announce.ts
 index 65bfba97edbf51a7df22e0e7b32eda10834f40b9..cc3c9b7280acb7f1b929ece02f4e36925d0fd113 100644
 --- a/src/agents/subagents/announce/subagent-announce.ts
@@ -81534,10 +82096,10 @@ index 329349e9ec5421ccfc32b6c010b9d334ef58f428..5d3a7e173f20142fc11532f4513186ba
 +  });
  });
 diff --git a/src/agents/subagents/requester-final-attachment.ts b/src/agents/subagents/requester-final-attachment.ts
-index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749df52dc9e 100644
+index ad94135f3fbd2886b2e10cae17c6991235650adb..1b5cfbc67956c2ddbac013f59bc2601c3fe6c758 100644
 --- a/src/agents/subagents/requester-final-attachment.ts
 +++ b/src/agents/subagents/requester-final-attachment.ts
-@@ -2,15 +2,13 @@ import {
+@@ -2,40 +2,66 @@ import {
    getAgentEventLifecycleGeneration,
    registerAgentEventLifecycleRotationHandler,
  } from "../../infra/agent-events.js";
@@ -81556,9 +82118,13 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
  
  type RequesterFinalAttachmentBatch = {
    batchRunIds: readonly string[];
-@@ -18,24 +16,48 @@ type RequesterFinalAttachmentBatch = {
+   rearmGeneration: number;
  };
  
++export type RequesterFinalAttachmentDelivery = (
++  text: string,
++) => "appended" | "rejected" | "missing";
++
  type RequesterFinalAttachment = {
 +  requesterAgentId: string;
 +  requesterSessionKey: string;
@@ -81607,7 +82173,7 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
  function ownerKey(requesterAgentId: string, requesterSessionKey: string): string {
    return `${requesterAgentId}\u0000${requesterSessionKey}`;
  }
-@@ -44,63 +66,101 @@ function sameRunIds(left: readonly string[], right: readonly string[]): boolean
+@@ -44,63 +70,101 @@ function sameRunIds(left: readonly string[], right: readonly string[]): boolean
    return left.length === right.length && left.every((runId, index) => runId === right[index]);
  }
  
@@ -81659,8 +82225,17 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
    }
 -  return attachment;
 +  return state.byOwner.get(key);
-+}
-+
+ }
+ 
+-export function registerRequesterFinalAttachment(
+-  params: RequesterFinalAttachmentOwner & {
+-    requesterSessionId: string;
+-    requesterTurnRunId: string;
+-    lifecycleGeneration: string;
+-    timeoutMs: number;
+-    append: (text: string) => boolean;
+-  },
+-): {
 +function getCurrentAttachment(params: {
 +  requesterAgentId: string;
 +  requesterSessionKey: string;
@@ -81684,17 +82259,8 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
 +        (params.rearmGeneration === undefined ||
 +          attachment.batch?.rearmGeneration === params.rearmGeneration),
 +    );
- }
- 
--export function registerRequesterFinalAttachment(
--  params: RequesterFinalAttachmentOwner & {
--    requesterSessionId: string;
--    requesterTurnRunId: string;
--    lifecycleGeneration: string;
--    timeoutMs: number;
--    append: (text: string) => boolean;
--  },
--): {
++}
++
 +export function registerRequesterFinalAttachment(params: {
 +  requesterAgentId: string;
 +  requesterSessionKey: string;
@@ -81749,7 +82315,7 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
      }
    };
    return {
-@@ -109,15 +169,17 @@ export function registerRequesterFinalAttachment(
+@@ -109,15 +173,17 @@ export function registerRequesterFinalAttachment(
    };
  }
  
@@ -81773,7 +82339,7 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
    });
    if (!attachment || attachment.requesterTurnRunId !== params.requesterTurnRunId) {
      return false;
-@@ -129,14 +191,21 @@ export function promoteRequesterFinalAttachment(
+@@ -129,14 +195,21 @@ export function promoteRequesterFinalAttachment(
    return true;
  }
  
@@ -81803,7 +82369,7 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
    if (!attachment) {
      return false;
    }
-@@ -145,38 +214,59 @@ export function transferRequesterFinalAttachment(
+@@ -145,41 +218,128 @@ export function transferRequesterFinalAttachment(
    return true;
  }
  
@@ -81864,15 +82430,26 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
    if (!attachment) {
      return "missing";
    }
++  return consumeAttachment(key, attachment, params.text);
++}
++
++function consumeAttachment(
++  key: string,
++  attachment: RequesterFinalAttachment,
++  text: string,
++): ReturnType<RequesterFinalAttachmentDelivery> {
    // Claim before invoking provider code so replay and callback failure cannot double-append.
 -  state.byOwner.delete(key);
 +  const attachments = state.byOwner.get(key);
-+  attachments?.delete(attachment);
++  if (!attachments?.delete(attachment)) {
++    return "missing";
++  }
 +  if (attachments?.size === 0) {
 +    state.byOwner.delete(key);
 +  }
    try {
-     return attachment.append(params.text) ? "appended" : "rejected";
+-    return attachment.append(params.text) ? "appended" : "rejected";
++    return attachment.append(text) ? "appended" : "rejected";
    } catch {
      return "rejected";
 +  } finally {
@@ -81880,7 +82457,80 @@ index ad94135f3fbd2886b2e10cae17c6991235650adb..b5a4230670cc2064c40189ed3a3ca749
    }
  }
  
-@@ -222,5 +312,5 @@ export function finalizeRequesterFinalAttachment(params: {
++/** Capture the exact sink before awaiting synthesis; never reselect a replacement afterward. */
++export function prepareRequesterFinalAttachmentDelivery(
++  params: {
++    requesterAgentId: string;
++    requesterSessionKey: string;
++    requesterSessionId: string;
++    batchRunIds: readonly string[];
++    rearmGeneration: number;
++  },
++  isCurrent?: () => boolean,
++): RequesterFinalAttachmentDelivery | undefined {
++  const attachment = getCurrentAttachment(params);
++  if (!attachment) {
++    return undefined;
++  }
++  const key = ownerKey(params.requesterAgentId, params.requesterSessionKey);
++  const sessionId = params.requesterSessionId;
++  const batchRunIds = params.batchRunIds.toSorted();
++  const { rearmGeneration } = params;
++  const turnRunId = attachment.requesterTurnRunId;
++  let appendedText: string | undefined;
++  return (text) => {
++    // Reclassification in this same attempt reuses its actual append receipt.
++    if (appendedText !== undefined) {
++      return appendedText === text ? "appended" : "rejected";
++    }
++    if (
++      !getOwnerAttachments(key)?.has(attachment) ||
++      attachment.expiresAt <= Date.now() ||
++      attachment.lifecycleGeneration !== getAgentEventLifecycleGeneration() ||
++      attachment.requesterSessionId !== sessionId ||
++      attachment.requesterTurnRunId !== turnRunId ||
++      !attachment.batch ||
++      !sameRunIds(attachment.batch.batchRunIds, batchRunIds) ||
++      attachment.batch.rearmGeneration !== rearmGeneration
++    ) {
++      return "missing";
++    }
++    let current = false;
++    try {
++      current = isCurrent?.() !== false;
++    } catch {
++      // A retired authority can throw; it cannot retain or deliver this exact sink.
++    }
++    if (!current) {
++      removeAttachment(key, attachment);
++      return "missing";
++    }
++    const result = consumeAttachment(key, attachment, text);
++    if (result === "appended") {
++      appendedText = text;
++    }
++    return result;
++  };
++}
++
+ /** A settled yield batch either attaches its visible final or releases the attachment. */
+ export function finalizeRequesterFinalAttachment(params: {
+   requesterAgentId?: string;
+@@ -190,11 +350,13 @@ export function finalizeRequesterFinalAttachment(params: {
+   requesterYieldBatch?: boolean;
+   pause: boolean;
+   delivered?: boolean;
++  requesterFinalAttachmentHandled?: true;
+   finalAssistantVisibleText?: string;
+ }): void {
+   const { requesterAgentId, rearmGeneration } = params;
+   if (
+     params.pause ||
++    params.requesterFinalAttachmentHandled ||
+     !requesterAgentId ||
+     params.requesterYieldBatch !== true ||
+     rearmGeneration === undefined
+@@ -222,5 +384,5 @@ export function finalizeRequesterFinalAttachment(params: {
  }
  
  registerAgentEventLifecycleRotationHandler("requester-final-attachments", () => {

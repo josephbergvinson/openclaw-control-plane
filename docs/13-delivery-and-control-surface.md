@@ -90,6 +90,13 @@ missing capability. Authorized work retains its original requester and destinati
 the assistant follows up with the verified result rather than only promising work.
 The trusted channel wrapper preserves the result callback when the agent yields
 to a worker, so the eventual answer can return to the original voice session.
+That callback owns the deferred answer even when the request originated in
+Discord: returning speech does not require a separate text-channel post. The
+runtime captures the current callback before resuming the agent and checks that
+it still belongs to the same live request before delivering. An expired or
+replaced callback cannot redirect the answer into a newer session or an unrelated
+text message. Confirmed delivery survives settlement retries without replaying
+the same answer.
 
 Playback queueing, interruption preferences and provider recovery have independent
 owners. A generated reply is not proof that the full audio played. Measure first
