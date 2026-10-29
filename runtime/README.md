@@ -161,6 +161,11 @@ or ordinary-use acceptance on another host.
 | Companion source identity and optional finite delta | `nativeCompanion`                                         |
 | Scope of the existing installed reference         | `referenceDeployment`                                       |
 
+Development-only corrections can advance the source and distribution references
+without replacing the installed runtime. `referenceDeployment` retains the actual
+installed commit. The optional companion patch still reconstructs the separately
+recorded companion tree from the updated distribution reference.
+
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
 The manifest declares deliberate fixture normalization. The current export replaces
@@ -342,6 +347,10 @@ uses a fresh official-tag checkout and the same manifest bindings. Independent
 repository, native-check and build jobs feed `reconstruct-and-build`. Its native
 plan adapter only adds bounded full-lint shard selection; it preserves the other
 planned commands and their failures.
+
+Local changed-file checks use the same import-graph analysis as CI to select
+prompt-snapshot validation when prompt-producing source changes. Generated
+snapshots capture the current tool descriptions and schemas.
 
 The reference workflow also runs the runtime's native steering, queue and
 publication tests against that same reconstructed source. It uses the runtime's

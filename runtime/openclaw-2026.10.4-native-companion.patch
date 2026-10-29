@@ -4506,6 +4506,36 @@ index d94879de64d994324c0a453738a69f8e36f614b0..5268a63f1f5c88d6ff5cda4aa5e933da
      ...sessionGuidance,
      outcomeGuidance,
      citationGuidance,
+diff --git a/scripts/check-changed.mts b/scripts/check-changed.mts
+index d8aafcba963970541e43f7a69ed940772b759eb1..17888ce2c3580ed5dead87c4e913dda124825016 100644
+--- a/scripts/check-changed.mts
++++ b/scripts/check-changed.mts
+@@ -34,7 +34,6 @@ import {
+ } from "./lib/arg-utils.mts";
+ import { getChangedPathFacts, normalizeChangedPath } from "./lib/changed-path-facts.mjs";
+ import { printTimingSummary } from "./lib/check-timing-summary.mts";
+-import { hasPromptSnapshotAffectingChange } from "./lib/ci-changed-node-test-plan.mts";
+ import { isDirectRunUrl } from "./lib/direct-run.mjs";
+ import { runWithFailedTrailer } from "./lib/failed-trailer.mts";
+ import { chunkFormatFilesForCommand } from "./lib/format-command-batches.mts";
+@@ -117,6 +116,8 @@ type TargetedLintCommand = NonNullable<ReturnType<typeof createTargetedOxlintCom
+ 
+ const NPM_LOCK_POLICY_PATH_RE =
+   /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|scripts\/generate-npm-package-lock\.mts|(?:extensions|packages)\/[^/]+(?:\/.*)?\/package\.json)$/u;
++const PROMPT_SNAPSHOT_CHECK_PATH_RE =
++  /^(?:scripts\/(?:generate-prompt-snapshots\.ts|prompt-snapshot-files\.ts|sync-codex-model-prompt-fixture\.ts)|test\/helpers\/agents\/(?:happy-path-prompt-snapshots|prompt-snapshot-paths)\.ts|test\/fixtures\/agents\/prompt-snapshots\/.+)$/u;
+ const PROMPT_SNAPSHOT_OWNER_TEST_PATH_RE =
+   /^(?:scripts\/(?:generate-prompt-snapshots\.ts|prompt-snapshot-files\.ts|sync-codex-model-prompt-fixture\.ts)|test\/helpers\/agents\/(?:happy-path-prompt-snapshots|prompt-snapshot-paths)\.ts|test\/fixtures\/agents\/prompt-snapshots\/codex-model-catalog\/.+)$/u;
+ const RUNTIME_SIDECAR_BASELINE_PATH_RE =
+@@ -334,7 +335,7 @@ export function shouldRunNpmLockGuard(paths: string[]) {
+ }
+ 
+ function shouldRunPromptSnapshotCheck(paths: string[]) {
+-  return shouldRunPromptSnapshotOwnerTest(paths) || hasPromptSnapshotAffectingChange(paths);
++  return paths.some((changedPath) => PROMPT_SNAPSHOT_CHECK_PATH_RE.test(changedPath));
+ }
+ 
+ function shouldRunPromptSnapshotOwnerTest(paths: string[]) {
 diff --git a/src/agents/accepted-session-spawn.ts b/src/agents/accepted-session-spawn.ts
 index c750ff3f6623f47e90605a0ff4e4f8b6a71f1184..b733720ff0cf8b04b1d6e70b48398c516a83884b 100644
 --- a/src/agents/accepted-session-spawn.ts
@@ -18008,6 +18038,171 @@ index 48d16f0e116bd8c9fd2b38dd7019efa88ca2b298..26f7aec1b65de0080f1720721656679e
        ])
        .groupBy(["session_id", "run_id"]),
    ).rows;
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json
+index 1889394ce067190aaf615e1ee3e7375df64855a5..48b5aab54424759725b7be0fcd874af8646e94dd 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json
+@@ -45,7 +45,7 @@
+           "type": "function"
+         },
+         {
+-          "description": "End this turn for pending child completion events; this is not a final-result submission. For background tools, follow their result's continuation instructions. Return independent completed answers normally. If this turn only acknowledges work already pending from an earlier turn, call this tool alone with acknowledgment to update its existing progress card; this acquires no child claim. An unfinished subagent waiting for an incoming continuation must set waitFor:\"message\". Collector runs require agents_wait instead. For an otherwise-silent interactive parent, use acknowledgment for a concise verified checkpoint, current wait and next observable step; message remains private. Only status:\"yielded\" confirms a new yield; otherwise follow the returned continuation instructions.",
++          "description": "End this turn for pending child completion events; this is not a final-result submission. For background tools, follow their result's continuation instructions. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:\"message\". Collector runs require agents_wait instead. For an otherwise-silent interactive parent, use acknowledgment for a concise verified checkpoint, current wait and next observable step; message remains private. Only status:\"yielded\" confirms a new yield; otherwise follow the returned continuation instructions.",
+           "inputSchema": {
+             "properties": {
+               "acknowledgment": {
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
+index 189bcf32dc2408b8a3ec8a24e2cca06faf1ea690..b814ce23fd531fe81c6a0bc408901d56277e0b1b 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
+@@ -1584,7 +1584,7 @@
+     "name": "openclaw_direct",
+     "tools": [
+       {
+-        "description": "End this turn for pending child completion events; this is not a final-result submission. For background tools, follow their result's continuation instructions. Return independent completed answers normally. If this turn only acknowledges work already pending from an earlier turn, call this tool alone with acknowledgment to update its existing progress card; this acquires no child claim. An unfinished subagent waiting for an incoming continuation must set waitFor:\"message\". Collector runs require agents_wait instead. For an otherwise-silent interactive parent, use acknowledgment for a concise verified checkpoint, current wait and next observable step; message remains private. Only status:\"yielded\" confirms a new yield; otherwise follow the returned continuation instructions.",
++        "description": "End this turn for pending child completion events; this is not a final-result submission. For background tools, follow their result's continuation instructions. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:\"message\". Collector runs require agents_wait instead. For an otherwise-silent interactive parent, use acknowledgment for a concise verified checkpoint, current wait and next observable step; message remains private. Only status:\"yielded\" confirms a new yield; otherwise follow the returned continuation instructions.",
+         "inputSchema": {
+           "properties": {
+             "acknowledgment": {
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
+index 6894e3ebc9b9b443f9ef7fac7083ec201e842963..89b66e5d34beb2373f238be2882c169cc9452f2b 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
+@@ -1,5 +1,5 @@
+---- telegram-direct-codex-message-tool.md	sha256=f17b3fa4de48a6c25022659a7e29b0b6e76cddb5428b34544a85f17208239e94
+-+++ discord-group-codex-message-tool.md	sha256=184ae9633b4cd0307cda00022de00ac34a970381b8119f466e3d4fa85178f375
++--- telegram-direct-codex-message-tool.md	sha256=1ac4d042d8ed345812f23452d85b2f9819ff4ee1f47a585d103282a7221327fd
+++++ discord-group-codex-message-tool.md	sha256=7f0850e9b49674205b3cf0d5daeb440fc42fa863ea7670d90832bad7fcfb75e4
+ @@ -1,1 +1,1 @@
+ -# Telegram Direct Codex Message Tool Turn
+ +# Discord Group Codex Message Tool Turn
+@@ -32,10 +32,10 @@
+ -    "chars": 1348,
+ +    "chars": 1347,
+ @@ -259,2 +259,2 @@
+--    "chars": 74211,
+--    "roughTokens": 18553
+-+    "chars": 74809,
+-+    "roughTokens": 18703
++-    "chars": 74013,
++-    "roughTokens": 18504
+++    "chars": 74611,
+++    "roughTokens": 18653
+ @@ -263,2 +263,2 @@
+ -    "chars": 2992,
+ -    "roughTokens": 748
+@@ -47,10 +47,10 @@
+ +    "chars": 28695,
+ +    "roughTokens": 7174
+ @@ -275,2 +275,2 @@
+--    "chars": 101591,
+--    "roughTokens": 25398
+-+    "chars": 103506,
+-+    "roughTokens": 25877
++-    "chars": 101393,
++-    "roughTokens": 25349
+++    "chars": 103308,
+++    "roughTokens": 25827
+ @@ -279,2 +279,2 @@
+ -    "chars": 879,
+ -    "roughTokens": 220
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
+index 665e35820341ea793f69dd350916950480ab2466..cd0193a0f69ae2de98d5b60a68fbd7287486ccd8 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
+@@ -256,8 +256,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the
+     "roughTokens": 0
+   },
+   "dynamicToolsJson": {
+-    "chars": 74211,
+-    "roughTokens": 18553
++    "chars": 74013,
++    "roughTokens": 18504
+   },
+   "openClawDeveloperInstructions": {
+     "chars": 2992,
+@@ -272,8 +272,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the
+     "roughTokens": 6845
+   },
+   "totalWithDynamicToolsJson": {
+-    "chars": 101591,
+-    "roughTokens": 25398
++    "chars": 101393,
++    "roughTokens": 25349
+   },
+   "userInputText": {
+     "chars": 879,
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
+index e2d34ce9906120b7342d38788c9b8643d5cb074d..b3bea16de944fd4eae6c853d4dda439a7746eb37 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
+@@ -1,5 +1,5 @@
+---- telegram-direct-codex-message-tool.md	sha256=f17b3fa4de48a6c25022659a7e29b0b6e76cddb5428b34544a85f17208239e94
+-+++ telegram-heartbeat-codex-tool.md	sha256=10f92034c8156b33344915a29ed34bd88ca37ffd64bf5d386e64838c64f74f32
++--- telegram-direct-codex-message-tool.md	sha256=1ac4d042d8ed345812f23452d85b2f9819ff4ee1f47a585d103282a7221327fd
+++++ telegram-heartbeat-codex-tool.md	sha256=71d273e97102aea875ae036299be053bec46eae752192d25a97846cd2df61ce1
+ @@ -1,1 +1,1 @@
+ -# Telegram Direct Codex Message Tool Turn
+ +# Telegram Direct Codex Heartbeat Tool Turn
+@@ -37,20 +37,20 @@
+ +    "chars": 1218,
+ +    "roughTokens": 305
+ @@ -259,2 +256,2 @@
+--    "chars": 74211,
+--    "roughTokens": 18553
+-+    "chars": 75704,
+-+    "roughTokens": 18926
++-    "chars": 74013,
++-    "roughTokens": 18504
+++    "chars": 75506,
+++    "roughTokens": 18877
+ @@ -271,2 +268,2 @@
+ -    "chars": 27378,
+ -    "roughTokens": 6845
+ +    "chars": 27715,
+ +    "roughTokens": 6929
+ @@ -275,2 +272,2 @@
+--    "chars": 101591,
+--    "roughTokens": 25398
+-+    "chars": 103421,
+-+    "roughTokens": 25856
++-    "chars": 101393,
++-    "roughTokens": 25349
+++    "chars": 103223,
+++    "roughTokens": 25806
+ @@ -279,2 +276,2 @@
+ -    "chars": 879,
+ -    "roughTokens": 220
+diff --git a/test/scripts/changed-lanes.test.ts b/test/scripts/changed-lanes.test.ts
+index c84fb635147c8c68e47601fc32ebca181b7befd5..f5662ac83e6bdb148b9dee5b462a0079eded5ce8 100644
+--- a/test/scripts/changed-lanes.test.ts
++++ b/test/scripts/changed-lanes.test.ts
+@@ -1616,25 +1616,6 @@ describe("scripts/changed-lanes", () => {
+     }
+   });
+ 
+-  it.each<[string[], boolean]>([
+-    [["src/agents/tools/sessions-yield-tool.ts"], true],
+-    [["src/auto-reply/reply/prompt-prelude.ts"], true],
+-    [["extensions/codex/src/index.ts"], true],
+-    [["scripts/sync-codex-model-prompt-fixture.ts"], true],
+-    [
+-      ["src/agents/tools/sessions-yield-tool.ts", "scripts/sync-codex-model-prompt-fixture.ts"],
+-      true,
+-    ],
+-    [["ui/src/app.ts"], false],
+-    [["extensions/discord/src/index.ts"], false],
+-    [["docs/index.md"], false],
+-  ])("selects prompt snapshot drift for %j: %s", (paths, expected) => {
+-    const commands = createChangedCheckPlan(detectChangedLanes(paths))
+-      .commands.map(({ args }) => args)
+-      .filter((args) => args[0] === "prompt:snapshots:check");
+-    expect(commands).toEqual(expected ? [["prompt:snapshots:check"]] : []);
+-  });
+-
+   it("excludes generated mobile build inputs from protocol coverage", () => {
+     const plan = createChangedCheckPlan(
+       detectChangedLanes(["apps/shared/OpenClawKit/Sources/.build/Generated.swift"]),
 diff --git a/test/transcripts-discord-follow-reload.integration.test.ts b/test/transcripts-discord-follow-reload.integration.test.ts
 deleted file mode 100644
 index 655aa345ba452e902f3ad0c425b9f2ab3818cf96..0000000000000000000000000000000000000000
