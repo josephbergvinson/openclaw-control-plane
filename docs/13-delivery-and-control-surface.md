@@ -88,6 +88,8 @@ speaker can acknowledge a request and consult the normal agent for relevant reco
 delegation or actions. Conversation-only settings should not be presented as a
 missing capability. Authorized work retains its original requester and destination;
 the assistant follows up with the verified result rather than only promising work.
+The trusted channel wrapper preserves the result callback when the agent yields
+to a worker, so the eventual answer can return to the original voice session.
 
 Playback queueing, interruption preferences and provider recovery have independent
 owners. A generated reply is not proof that the full audio played. Measure first

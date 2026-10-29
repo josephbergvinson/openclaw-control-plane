@@ -62,6 +62,7 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | Request accounting | Transport metadata and accepted response identities distinguish configured model/reasoning preferences, outgoing requests, returned usage and goal totals. They do not expose hidden reasoning. |
 | Cache measurements | Provider usage mapping preserves whether cached-token counts were reported. A reported zero is distinct from missing or invalid telemetry, so the observer does not diagnose a cache miss from absent data. Billing totals retain their existing calculation. |
 | Initial context reads | `src/agents/sessions` prepares and validates an unsent initial snapshot in its existing reader. A same-generation append can trigger one fresh read; rewrites, changed selection, cancellation and repeated changes remain rejected. Ordinary admitted reads keep their existing strict validation. |
+| ACP session stores | Configured ACP-only session owners use the existing session/index preparation without requiring an unrelated local model authentication profile. Configured paths and database integrity checks still apply. |
 | SDK and plugin contracts | Compiled SDK surfaces, generated schemas and plugin metadata travel with their consumers and tests. A source export must include the dependency closure rather than a few hand-selected fixes. |
 
 [Memory and context](08-memory-and-context.md) explains loading boundaries and

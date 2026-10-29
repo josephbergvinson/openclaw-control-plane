@@ -9813,6 +9813,22 @@ index fcfed917c3cb9d0a28373664a8f6507cdfcc4808..364096d9c35ab1e04f37aec75573d406
  
      Related OpenAI docs:
      - [Responses API WebSocket mode](https://developers.openai.com/api/docs/guides/websocket-mode)
+diff --git a/docs/reference/database-schemas/integrity-and-recovery.md b/docs/reference/database-schemas/integrity-and-recovery.md
+index 03a8844cf1ab4ec7fb274a1fb3710c89e8cf6c2a..e6eaacf33fc80de8dc8494c37b46e3863753bf85 100644
+--- a/docs/reference/database-schemas/integrity-and-recovery.md
++++ b/docs/reference/database-schemas/integrity-and-recovery.md
+@@ -11,7 +11,10 @@ title: "Integrity, troubleshooting, and recovery"
+ 
+ Gateway agent inspections share a five-second foreground wait. Unfinished stores
+ remain unavailable while the startup admission owner completes their inspection
+-and session/model preparation after the listener is ready. Other agents and the
++and session preparation after the listener is ready. Local agents also require
++credential and model preparation. ACP session-store owners without a local agent
++entry receive session/index preparation without a local model or credential store;
++their existing ACP execution configuration is unchanged. Other agents and the
+ Control UI can start in the meantime. Inspection starts during foreground
+ readiness and continues without an idle retry delay. Deferred preparation starts
+ when plugins and sidecars are ready, without waiting for restored subagent work
 diff --git a/docs/reference/database-schemas/versioning.md b/docs/reference/database-schemas/versioning.md
 index e31acef2c64816b1f8c8c61d08172b18989ef283..ed1169013e86b0cd864faf75570c1f3cc022bc5d 100644
 --- a/docs/reference/database-schemas/versioning.md
@@ -12014,7 +12030,7 @@ index 4e97ad01b1d8007087d47c8ad5007108c1d091a4..84d847a61de7062c1af9efc2c619f45f
    api.session.controls.registerControlUiDescriptor({
      id: "dashboard",
 diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
-index 889e7fa47592461e98ecf2394d2788c2d96337fe..618014ee300272bbd042f7890cfa0acc1d42589f 100644
+index 889e7fa47592461e98ecf2394d2788c2d96337fe..47345a631072f83fe31e958b9dda2be5644d261f 100644
 --- a/extensions/browser/skills/browser-automation/SKILL.md
 +++ b/extensions/browser/skills/browser-automation/SKILL.md
 @@ -38,7 +38,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
@@ -12022,7 +12038,7 @@ index 889e7fa47592461e98ecf2394d2788c2d96337fe..618014ee300272bbd042f7890cfa0acc
     - Debug network failures with `action="requests"`, optional URL/type `filter`, and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Use a managed profile; existing-session profiles do not support this log.
     - Debug page errors with `action="errors"` and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Existing-session profiles do not support this log.
 -   - If the page needs login, permission, captcha, 2FA, camera/microphone approval, or another manual step, stop and tell the user exactly what is needed.
-+   - Use the task's existing authorization for routine login, account selection, onboarding and permission steps through supported tools. Ask only when the visible flow requires a new consequential choice or verification the tools cannot complete. Explain that specific boundary and continue independent work; a dialog label alone is not a blocker.
++   - Use the task's existing authorization for routine login, account selection, onboarding and permission steps needed for its requested outcome. Once that outcome is verified, report it; make separate optional changes only when the request or an established preference covers them. Ask only when the visible flow requires a new consequential choice or verification the tools cannot complete. Explain that specific boundary and continue independent work; a dialog label alone is not a blocker.
     - Do not claim the browser is not logged in just because the current page shows a permission or onboarding dialog. Inspect the visible UI first.
  
  ## Browser batch CLI
@@ -113513,6 +113529,403 @@ index 414dbd0dfdbb061ffd7854867b246dd84a78b03b..34af198cc2182c4416d4170e95a3647b
        onConnectError: (err) => {
          connectError = formatErrorMessage(err);
          connectErrorDetails = err instanceof GatewayClientRequestError ? err.details : null;
+diff --git a/src/gateway/server-agent-database-startup.test.ts b/src/gateway/server-agent-database-startup.test.ts
+index dc2ebd696ea4a0c9ca12016e264536d9890960eb..0fcb7005507d73ac77294b1e1a339ea021ee8b6e 100644
+--- a/src/gateway/server-agent-database-startup.test.ts
++++ b/src/gateway/server-agent-database-startup.test.ts
+@@ -11,14 +11,17 @@ import {
+   markPreparedModelRuntimeSnapshotsStale,
+   refreshPreparedModelRuntimeSnapshots,
+ } from "../agents/prepared-model-runtime.js";
+-import { getRuntimeConfig } from "../config/io.js";
++import { getRuntimeConfig, setRuntimeConfigSnapshot } from "../config/io.js";
+ import { resolveStateDir } from "../config/paths.js";
++import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
+ import {
+   persistSessionTranscriptTurn,
+   upsertSessionEntryCore,
+ } from "../config/sessions/session-accessor.js";
+ import { sessionTranscriptIndexNeedsReconcile } from "../config/sessions/session-transcript-index.js";
+ import { waitForSessionTranscriptIndexReconcile } from "../config/sessions/session-transcript-reconcile.js";
++import { runSessionRegistryMaintenance } from "../cron/session-registry-maintenance.js";
++import { waitForAbortSignal } from "../infra/abort-signal.js";
+ import { sqliteWorkerPreloadEnv } from "../infra/sqlite-worker-preload.test-support.js";
+ import { runExec } from "../process/exec.js";
+ import * as spawnBroker from "../process/spawn-broker/context.js";
+@@ -28,7 +31,10 @@ import {
+   AgentDatabaseAdmissionError,
+   readAgentDatabaseAdmissionRefusal,
+ } from "../state/agent-database-admission.js";
+-import { withAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
++import {
++  type getAgentDatabaseStartupAdmission,
++  withAgentDatabaseStartupAdmission,
++} from "../state/agent-database-startup.js";
+ import { withOpenClawAgentDatabaseReadOnly } from "../state/openclaw-agent-db-readonly.js";
+ import { unregisterOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
+ import {
+@@ -41,8 +47,9 @@ import { assertOpenClawDatabasesReady } from "../state/openclaw-database-preflig
+ import { clearOpenClawAgentIntegrityVerification } from "../state/openclaw-quarantine-store.js";
+ import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
+ import { acquireTestPortBlock, type TestPortClaim } from "../test-utils/port-claims.js";
++import { broadcastSessionActivitySummary } from "./session-activity-summary-events.js";
+ import { loadGatewayTestConfig } from "./test-helpers.config-runtime.js";
+-import { testState } from "./test-helpers.runtime-state.js";
++import { testConfigRoot, testState } from "./test-helpers.runtime-state.js";
+ import { installGatewayTestHooks, startTestGatewayServer } from "./test-helpers.server.js";
+ 
+ installGatewayTestHooks();
+@@ -121,6 +128,9 @@ DatabaseSync.prototype.prepare = function(sql) {
+ 
+ it.for([
+   { outcome: "recover", agentId: "worker" },
++  { outcome: "recover", agentId: "acp-worker" },
++  { outcome: "superseded", agentId: "acp-worker" },
++  { outcome: "shutdown", agentId: "acp-worker" },
+   { outcome: "corrupt", agentId: "worker" },
+   { outcome: "physical-corrupt", agentId: "main" },
+   { outcome: "shutdown", agentId: "worker" },
+@@ -133,6 +143,17 @@ it.for([
+ ] as const)(
+   "applies startup admission while $agentId follows its $outcome lifecycle",
+   async ({ outcome, agentId }, { signal }) => {
++    const retainedOwner = agentId === "acp-worker";
++    let retainedProjection: import("./session-row-projection.js").SessionRowProjection | undefined;
++    if (retainedOwner) {
++      const rows = await import("./session-row-projection.js");
++      const create = rows.createSessionRowProjection;
++      vi.spyOn(rows, "createSessionRowProjection").mockImplementation(async (options) => {
++        const projection = await create(options);
++        retainedProjection = projection;
++        return projection;
++      });
++    }
+     const holdSubagentRestoration = outcome === "recover" && agentId === "worker";
+     const checkHostJournalReads = outcome === "recover" && !holdSubagentRestoration;
+     const restorationEntered = createDeferredCore();
+@@ -161,8 +182,15 @@ it.for([
+         ["recover", "shutdown", "shutdown-preparation"].includes(outcome));
+     testState.agentsConfig = { ownership: "explicit", entries: { main: {}, worker: {} } };
+     testState.agentConfig = { systemAgent: { agentId: "main" } };
++    if (retainedOwner) {
++      // ACP declares a session store without a local agent or local model/auth runtime.
++      fs.writeFileSync(
++        path.join(testConfigRoot.value, "openclaw.json"),
++        JSON.stringify({ acp: { defaultAgent: agentId } }),
++      );
++    }
+     const recoverySecret = "synthetic-startup-recovery-secret";
+-    if (outcome === "recover") {
++    if (outcome === "recover" && !retainedOwner) {
+       vi.stubEnv("OPENCLAW_TEST_RECOVERY_SECRET", recoverySecret);
+     }
+     const env = { ...process.env };
+@@ -185,7 +213,7 @@ it.for([
+     });
+     await waitForSessionTranscriptIndexReconcile(scope);
+     const database = openOpenClawAgentDatabase(scope);
+-    if (outcome === "recover") {
++    if (outcome === "recover" && !retainedOwner) {
+       saveAuthProfileStore(
+         {
+           version: 1,
+@@ -272,7 +300,11 @@ it.for([
+       }
+       return broker;
+     });
+-    if (outcome === "recover" || outcome === "superseded") {
++    if (
++      outcome === "recover" ||
++      outcome === "superseded" ||
++      (retainedOwner && outcome === "shutdown")
++    ) {
+       const session = await import("./server-startup-session-migration.js");
+       const migrate = session.runStartupSessionMigration;
+       vi.spyOn(session, "runStartupSessionMigration").mockImplementation(async (params) => {
+@@ -290,7 +322,7 @@ it.for([
+         }
+       });
+     }
+-    if (outcome === "superseded") {
++    if (outcome === "superseded" && !retainedOwner) {
+       const model = await import("../agents/prepared-model-runtime.js");
+       const refresh = model.refreshPreparedModelRuntimeSnapshots;
+       vi.spyOn(model, "refreshPreparedModelRuntimeSnapshots").mockImplementation(
+@@ -305,6 +337,7 @@ it.for([
+       );
+     }
+     let server: Awaited<ReturnType<typeof startTestGatewayServer>> | undefined;
++    let startupAdmission: ReturnType<typeof getAgentDatabaseStartupAdmission>;
+     let suppliedBroker: Awaited<ReturnType<typeof spawnBroker.startGatewaySpawnBroker>>;
+     let unadoptedPortClaim: TestPortClaim | undefined;
+     try {
+@@ -325,7 +358,8 @@ it.for([
+       const portClaim = await acquireTestPortBlock({ offsets: [0, 1, 2, 3, 4] });
+       unadoptedPortClaim = portClaim;
+       const port = portClaim.port;
+-      const startup = withAgentDatabaseStartupAdmission(async () => {
++      const startup = withAgentDatabaseStartupAdmission(async (admission) => {
++        startupAdmission = admission;
+         await assertOpenClawDatabasesReady({ env, operation: "gateway-startup", config: cfg });
+         // Other Unix hosts exercise the broker context without pretending their OS is Linux.
+         if (brokerExpected && !nativeBroker) {
+@@ -358,6 +392,10 @@ it.for([
+         return;
+       }
+       server = await startup;
++      const admission = startupAdmission;
++      if (!admission) {
++        throw new Error("Gateway did not retain its startup admission owner");
++      }
+       void server.startupSettled.then(
+         () => {
+           startupSettled = true;
+@@ -397,9 +435,11 @@ it.for([
+           ? bootstrapSecrets
+           : getActiveSecretsRuntimeSnapshot();
+         expect(snapshot?.authStores.some((entry) => entry.databasePath === agentPath)).toBe(false);
+-        expect(snapshot?.degradedOwners?.some((owner) => owner.paths.includes(agentPath))).toBe(
+-          true,
+-        );
++        if (!retainedOwner) {
++          expect(snapshot?.degradedOwners?.some((owner) => owner.paths.includes(agentPath))).toBe(
++            true,
++          );
++        }
+       }
+       if (agentId === "main") {
+         // Minimal Gateway skips the real post-bind model phase; exercise that owner
+@@ -417,8 +457,9 @@ it.for([
+       }
+       const hostJournalRead = createDeferredCore();
+       let hostJournalReads = 0;
++      let hostJournalObservation: ReturnType<typeof observeHostDataSql> | undefined;
+       if (checkHostJournalReads) {
+-        observeHostDataSql((sql) => {
++        hostJournalObservation = observeHostDataSql((sql) => {
+           if (sql.includes("agent_deletion_journal")) {
+             hostJournalReads++;
+             hostJournalRead.resolve();
+@@ -440,15 +481,38 @@ it.for([
+         expect(fs.existsSync(pause!.preparationReleasePath)).toBe(false);
+         const pid = Number(fs.readFileSync(preparationEnteredPath, "utf8"));
+         expect(() => process.kill(pid, 0)).toThrow();
+-      } else if (outcome === "recover" || outcome === "superseded") {
++      } else if (
++        outcome === "recover" ||
++        outcome === "superseded" ||
++        (retainedOwner && outcome === "shutdown")
++      ) {
+         fs.writeFileSync(releasePath, "resume");
+-        await withinTest(
+-          Promise.race([
+-            preparationEntered.promise,
+-            hostJournalRead.promise.then(() => expect(hostJournalReads).toBe(0)),
+-          ]),
+-          signal,
+-        );
++        const preparationTerminal = retainedOwner
++          ? admission.waitForPendingPreparation(signal)
++          : undefined;
++        if (preparationTerminal) {
++          await withinTest(
++            Promise.race([
++              preparationEntered.promise,
++              preparationTerminal.then(() => {
++                const refusal = readAgentDatabaseAdmissionRefusal(agentId, { env });
++                if (refusal) {
++                  throw new AgentDatabaseAdmissionError(refusal);
++                }
++                throw new Error("Retained preparation settled without entering session migration");
++              }),
++            ]),
++            signal,
++          );
++        } else {
++          await withinTest(
++            Promise.race([
++              preparationEntered.promise,
++              hostJournalRead.promise.then(() => expect(hostJournalReads).toBe(0)),
++            ]),
++            signal,
++          );
++        }
+         expect(sessionPrepared).toBe(true);
+         if (outcome === "recover") {
+           expect(preparationParent).toBe(brokerExpected ? brokerPid : process.pid);
+@@ -456,8 +520,42 @@ it.for([
+         expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+           code: "agent-database-inspection-pending",
+         });
++        if (retainedOwner && outcome === "shutdown") {
++          const aborted = waitForAbortSignal(admission.signal);
++          const closing = server.close();
++          await withinTest(aborted, signal);
++          preparationRelease.resolve();
++          await closing;
++          expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
++            code: "agent-database-inspection-pending",
++          });
++          expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
++          expect(
++            getActiveSecretsRuntimeSnapshot()?.authStores.some(
++              (entry) => entry.databasePath === agentPath,
++            ),
++          ).not.toBe(true);
++          return;
++        }
++        if (retainedOwner && outcome === "superseded") {
++          setRuntimeConfigSnapshot({ ...getRuntimeConfig() });
++        }
+         preparationRelease.resolve();
+-        if (outcome === "superseded") {
++        if (preparationTerminal) {
++          await withinTest(preparationTerminal, signal);
++          if (outcome === "superseded") {
++            expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
++              code: "agent-database-inspection-failed",
++              reason: expect.stringContaining("retained database preparation was superseded"),
++            });
++            expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
++            expect(
++              listConfiguredOwnerInputs(getRuntimeConfig(), undefined, true),
++            ).not.toContainEqual(expect.objectContaining({ agentId }));
++            return;
++          }
++          expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toBeUndefined();
++        } else if (outcome === "superseded") {
+           await vi.waitFor(
+             () =>
+               expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+@@ -468,10 +566,12 @@ it.for([
+           );
+           return;
+         }
+-        await vi.waitFor(
+-          () => expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toBeUndefined(),
+-          { timeout: 10000 },
+-        );
++        if (!preparationTerminal) {
++          await vi.waitFor(
++            () => expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toBeUndefined(),
++            { timeout: 10000 },
++          );
++        }
+         expect(
+           withOpenClawAgentDatabaseReadOnly(
+             ({ db }) => sessionTranscriptIndexNeedsReconcile(db, scope.sessionId),
+@@ -481,14 +581,54 @@ it.for([
+         const input = listConfiguredOwnerInputs(getRuntimeConfig(), undefined, true).find(
+           (entry) => entry.agentId === agentId,
+         );
+-        expect(input).toBeDefined();
+-        expect(input && getPreparedModelRuntimeSnapshot(input)).toBeDefined();
+         const snapshot = getActiveSecretsRuntimeSnapshot();
+-        expect(
+-          snapshot?.authStores.find((entry) => entry.databasePath === agentPath)?.store.profiles[
+-            "anthropic:startup-recovery"
+-          ],
+-        ).toMatchObject({ key: recoverySecret });
++        if (retainedOwner) {
++          expect(input).toBeUndefined();
++          expect(getRuntimeConfig().agents?.entries?.[agentId]).toBeUndefined();
++          expect(
++            snapshot?.authStores.find((entry) => entry.databasePath === agentPath),
++          ).toBeUndefined();
++          expect(hostJournalReads).toBe(0);
++          // End the startup-only observation before deliberately exercising maintenance SQL.
++          hostJournalObservation?.restore();
++          const projection = retainedProjection;
++          if (!projection) {
++            throw new Error("Gateway did not create its session projection");
++          }
++          await projection.ensureMaterialized();
++          const broadcast = vi.fn();
++          await broadcastSessionActivitySummary(
++            {
++              key: scope.sessionKey,
++              agentId,
++              storePath: resolveSessionStorePathCore(cfg.session?.store, { agentId, env }),
++            },
++            { getSessionRowProjection: () => projection, broadcast },
++          );
++          expect(broadcast).toHaveBeenCalledExactlyOnceWith(
++            "sessions.changed",
++            expect.objectContaining({
++              reason: "activity-summary",
++              session: expect.objectContaining({
++                key: scope.sessionKey,
++                sessionId: scope.sessionId,
++              }),
++            }),
++            expect.objectContaining({ agentId, dropIfSlow: true }),
++          );
++          const maintenance = await runSessionRegistryMaintenance({ apply: false });
++          expect(maintenance.stores).toContainEqual(
++            expect.objectContaining({ agentId, beforeCount: expect.any(Number) }),
++          );
++        } else {
++          expect(input).toBeDefined();
++          expect(input && getPreparedModelRuntimeSnapshot(input)).toBeDefined();
++          expect(
++            snapshot?.authStores.find((entry) => entry.databasePath === agentPath)?.store.profiles[
++              "anthropic:startup-recovery"
++            ],
++          ).toMatchObject({ key: recoverySecret });
++        }
+         expect(snapshot?.degradedOwners?.some((owner) => owner.paths.includes(agentPath))).toBe(
+           false,
+         );
+diff --git a/src/gateway/server-agent-database-startup.ts b/src/gateway/server-agent-database-startup.ts
+index f183f3581032a2d811ea7910fe8e69d573ff7fdc..2ee8e2b87039b7db0b9dc1dca337dbe3f12c6240 100644
+--- a/src/gateway/server-agent-database-startup.ts
++++ b/src/gateway/server-agent-database-startup.ts
+@@ -1,4 +1,4 @@
+-import { resolveAgentDir } from "../agents/agent-scope-config.js";
++import { listAgentIds, resolveAgentDir } from "../agents/agent-scope-config.js";
+ import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.js";
+ import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+@@ -41,8 +41,6 @@ export function activateGatewayAgentDatabaseStartup(params: {
+         ]);
+         assertCurrent();
+         const beforeConfig = params.getConfig();
+-        const previousSecretsRevision = getActiveSecretsRuntimeSnapshotRevision();
+-        const previousSecrets = getActiveSecretsRuntimeSnapshot();
+         const configuredPaths = resolveConfiguredAgentDatabaseTargets(beforeConfig, { env }).filter(
+           (target) => target.agentId === agentId,
+         );
+@@ -59,6 +57,30 @@ export function activateGatewayAgentDatabaseStartup(params: {
+             `Agent ${agentId} database configuration changed during startup inspection`,
+           );
+         }
++        if (!listAgentIds(beforeConfig).includes(agentId)) {
++          // ACP can own a session store without a local agent/model/auth runtime.
++          // Its history still needs the same session/index preparation.
++          const assertRetainedCurrent = () => {
++            signal.throwIfAborted();
++            assertCurrent();
++            if (!params.isCurrent() || params.getConfig() !== beforeConfig) {
++              throw new Error(`Agent ${agentId} retained database preparation was superseded`);
++            }
++          };
++          await withAgentDatabasePreparationGuard(assertRetainedCurrent, async () => {
++            await runStartupSessionMigration({
++              cfg: beforeConfig,
++              env,
++              agentIds: new Set([agentId]),
++              assertCurrent: assertRetainedCurrent,
++              log: params.log,
++            });
++            assertRetainedCurrent();
++          });
++          return;
++        }
++        const previousSecretsRevision = getActiveSecretsRuntimeSnapshotRevision();
++        const previousSecrets = getActiveSecretsRuntimeSnapshot();
+         if (
+           !previousSecrets ||
+           !(await refreshActiveSecretsRuntimeSnapshotForConfig({
 diff --git a/src/gateway/server-close.test-support.ts b/src/gateway/server-close.test-support.ts
 index 9c4251070f942e604d0272495859edbdc9fa3132..424c90372f7cad71254c1203c9c29929126b7944 100644
 --- a/src/gateway/server-close.test-support.ts
@@ -127195,6 +127608,379 @@ index 8362860fbb075d0082f7cbe5d4a4cf71156c1e51..a697428a83516c1e11f08c40d0b4566e
      }
    }
  
+diff --git a/src/plugins/registry-runtime.channel-ingress.test-support.ts b/src/plugins/registry-runtime.channel-ingress.test-support.ts
+index 987c0c019c8bf71e9ef0c1253f6ec556efd255fd..074f9a925ed97b87fe2123a216363dc5c270e905 100644
+--- a/src/plugins/registry-runtime.channel-ingress.test-support.ts
++++ b/src/plugins/registry-runtime.channel-ingress.test-support.ts
+@@ -1,3 +1,9 @@
++import { expect, it, vi } from "vitest";
++import { prepareAgentCommandExecutionIdentity } from "../agents/agent-command-execution-identity.js";
++import {
++  consumeRequesterFinalAttachment,
++  promoteRequesterFinalAttachment,
++} from "../agents/subagents/requester-final-attachment.js";
+ import {
+   buildChannelInboundEventContext,
+   type BuildChannelInboundEventContextParams,
+@@ -14,11 +20,13 @@ import type {
+   GatewayContextResolver,
+   GatewayRequestContext,
+ } from "../gateway/server-methods/types.js";
++import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
+ import { getPluginInstance } from "./plugin-instance-scope.js";
+ import type { PluginOrigin } from "./plugin-origin.types.js";
+ import { markPluginRegistryActive } from "./registry-lifecycle.js";
+ import { createPluginRegistry } from "./registry.js";
+ import { bindGatewayContextResolver } from "./runtime/gateway-request-scope.js";
++import { createPluginRuntime } from "./runtime/index.js";
+ import type { PluginRuntime } from "./runtime/types.js";
+ import { createPluginRecord } from "./status.test-fixtures.js";
+ import type { OpenClawPluginApi } from "./types.js";
+@@ -182,3 +190,200 @@ export function contextParams(params: {
+ export function inspect(context: object) {
+   return consumeChannelAdmissionEvidence(readChannelContextAdmissionEvidence(context));
+ }
++
++export function registerAuthenticatedOwnerIngressTests() {
++  it("binds authenticated owner turns to the exact live trusted channel plugin", async () => {
++    const runtime = createPluginRuntime();
++    const command = vi.fn(async () => ({ payloads: [] }));
++    Object.defineProperty(runtime.agent, "runCommandFromIngress", {
++      configurable: true,
++      value: command,
++    });
++    const registryBuilder = createPluginRegistry({
++      logger: { info() {}, warn() {}, error() {}, debug() {} },
++      runtime,
++      activateGlobalSideEffects: false,
++    });
++    const owner = createPluginRecord({ id: "discord", origin: "bundled" });
++    const foreign = createPluginRecord({ id: "foreign", origin: "bundled" });
++    const untrusted = createPluginRecord({ id: "impostor", origin: "workspace" });
++    const ownerApi = registryBuilder.createApi(owner, { config: {} as OpenClawConfig });
++    const foreignApi = registryBuilder.createApi(foreign, { config: {} as OpenClawConfig });
++    const untrustedApi = registryBuilder.createApi(untrusted, { config: {} as OpenClawConfig });
++    registryBuilder.registry.plugins.push(owner, foreign, untrusted);
++    registryBuilder.registry.channels.push(
++      {
++        pluginId: "discord",
++        plugin: { id: "discord" },
++        source: owner.source,
++      } as never,
++      {
++        pluginId: "impostor",
++        plugin: { id: "community" },
++        source: untrusted.source,
++      } as never,
++    );
++    markPluginRegistryActive(registryBuilder.registry);
++    const options = {
++      message: "owner turn",
++      messageChannel: "discord" as const,
++      senderIsOwner: true,
++      allowModelOverride: false,
++    };
++    const commandRuntime = { log: vi.fn(), error: vi.fn() } as never;
++    const retained = ownerApi.runtime.agent.runCommandFromIngress;
++
++    await expect(retained(options, commandRuntime)).resolves.toEqual({ payloads: [] });
++    expect(command).toHaveBeenCalledWith(options, commandRuntime, { requesterFinal: undefined });
++    await expect(
++      foreignApi.runtime.agent.runCommandFromIngress(options, commandRuntime),
++    ).rejects.toThrow('Plugin "foreign" cannot admit authenticated owner authority');
++    const guestOptions = { ...options, messageChannel: "community", senderIsOwner: false };
++    const retainedGuest = untrustedApi.runtime.agent.runCommandFromIngress;
++    await expect(retainedGuest(guestOptions, commandRuntime)).resolves.toEqual({ payloads: [] });
++    expect(command).toHaveBeenLastCalledWith(guestOptions, commandRuntime, {
++      requesterFinal: undefined,
++    });
++    let ownerClaimReads = 0;
++    let channelReads = 0;
++    const changingGuestOptions = {
++      ...guestOptions,
++      get senderIsOwner() {
++        return ownerClaimReads++ > 0;
++      },
++      get messageChannel() {
++        return channelReads++ === 0 ? "community" : "discord";
++      },
++    };
++    await expect(retainedGuest(changingGuestOptions, commandRuntime)).resolves.toEqual({
++      payloads: [],
++    });
++    expect(command).toHaveBeenLastCalledWith(
++      expect.objectContaining({ messageChannel: "community", senderIsOwner: false }),
++      commandRuntime,
++      { requesterFinal: undefined },
++    );
++    expect(ownerClaimReads).toBe(1);
++    expect(channelReads).toBe(1);
++    await expect(
++      retainedGuest({ ...guestOptions, senderIsOwner: true }, commandRuntime),
++    ).rejects.toThrow('Plugin "impostor" cannot admit authenticated owner authority');
++
++    const requesterFinal = { append: vi.fn(() => true) };
++    await expect(retainedGuest(guestOptions, commandRuntime, { requesterFinal })).rejects.toThrow(
++      'Plugin "impostor" cannot admit authenticated owner authority',
++    );
++    expect(requesterFinal.append).not.toHaveBeenCalled();
++
++    registryBuilder.rollbackPluginGlobalSideEffects(owner.id, owner);
++    await expect(retained(options, commandRuntime)).rejects.toThrow(
++      'Plugin "discord" cannot admit authenticated owner authority',
++    );
++    await expect(retained(options, commandRuntime, { requesterFinal })).rejects.toThrow(
++      'Plugin "discord" cannot admit authenticated owner authority',
++    );
++    registryBuilder.rollbackPluginGlobalSideEffects(untrusted.id, untrusted);
++    await expect(retainedGuest(guestOptions, commandRuntime)).rejects.toThrow(
++      'Plugin "impostor" cannot admit authenticated owner authority',
++    );
++    expect(command).toHaveBeenCalledTimes(3);
++  });
++
++  it.each([
++    { origin: "bundled" as const, trustedOfficialInstall: false, senderIsOwner: true },
++    { origin: "global" as const, trustedOfficialInstall: true, senderIsOwner: false },
++  ])("retains a native requester final for a trusted $origin channel", async (provenance) => {
++    const runtime = createPluginRuntime();
++    const requester = {
++      requesterAgentId: "main",
++      requesterSessionKey: "agent:main:discord:channel:scoped-requester-final",
++      requesterSessionId: "post-preparation-session",
++    };
++    const runId = "scoped-voice-requester-run";
++    let admission: ReturnType<typeof prepareAgentCommandExecutionIdentity> | undefined;
++    type RunIngress = PluginRuntime["agent"]["runCommandFromIngress"];
++    const command = vi.fn(
++      async (
++        params: Parameters<RunIngress>[0],
++        _commandRuntime: Parameters<RunIngress>[1],
++        host?: Parameters<RunIngress>[2],
++      ) => {
++        admission = prepareAgentCommandExecutionIdentity({
++          opts: { ...params, requesterFinalBinding: host?.requesterFinal },
++          prepared: {
++            cfg: { logging: { audit: { enabled: false, executionIdentity: false } } },
++            runId,
++            sessionAgentId: requester.requesterAgentId,
++            sessionId: requester.requesterSessionId,
++            sessionKey: requester.requesterSessionKey,
++            timeoutMs: 60_000,
++          },
++          ingress: { kind: "api", boundary: "agent-command.from-ingress", state: "unknown" },
++          lifecycleGeneration: getAgentEventLifecycleGeneration(),
++        });
++        await admission.admit("embedded");
++        return { payloads: [] };
++      },
++    );
++    Object.defineProperty(runtime.agent, "runCommandFromIngress", {
++      configurable: true,
++      value: command,
++    });
++    const registryBuilder = createPluginRegistry({
++      logger: { info() {}, warn() {}, error() {}, debug() {} },
++      runtime,
++      activateGlobalSideEffects: false,
++    });
++    const { senderIsOwner, ...pluginProvenance } = provenance;
++    const record = createPluginRecord({ id: "discord", ...pluginProvenance });
++    const api = registryBuilder.createApi(record, { config: {} as OpenClawConfig });
++    registryBuilder.registry.plugins.push(record);
++    registryBuilder.registry.channels.push({
++      pluginId: "discord",
++      plugin: { id: "discord" },
++      source: record.source,
++    } as never);
++    markPluginRegistryActive(registryBuilder.registry);
++    const requesterFinal = {
++      append: vi.fn(() => true),
++      onRegistration: vi.fn(),
++      onSettled: vi.fn(),
++    };
++    let hostReads = 0;
++    const host = {
++      get requesterFinal() {
++        hostReads += 1;
++        return requesterFinal;
++      },
++    };
++    try {
++      await api.runtime.agent.runCommandFromIngress(
++        {
++          message: "Check the fixture records",
++          messageChannel: "discord",
++          senderIsOwner,
++          allowModelOverride: false,
++        },
++        { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
++        host,
++      );
++      expect(requesterFinal.onRegistration).toHaveBeenCalledTimes(1);
++      expect(hostReads).toBe(1);
++      expect(command.mock.calls[0]?.[2]?.requesterFinal).toBe(requesterFinal);
++      const batch = { ...requester, batchRunIds: ["native-child"], rearmGeneration: 1 };
++      expect(promoteRequesterFinalAttachment({ ...batch, requesterTurnRunId: runId })).toBe(true);
++      await admission?.finish();
++      expect(consumeRequesterFinalAttachment({ ...batch, text: "Verified native result" })).toBe(
++        "appended",
++      );
++      expect(consumeRequesterFinalAttachment({ ...batch, text: "Duplicate result" })).toBe(
++        "missing",
++      );
++      expect(requesterFinal.append).toHaveBeenCalledExactlyOnceWith("Verified native result");
++      expect(requesterFinal.onSettled).toHaveBeenCalledTimes(1);
++    } finally {
++      admission?.close();
++      registryBuilder.rollbackPluginGlobalSideEffects(record.id, record);
++    }
++  });
++}
+diff --git a/src/plugins/registry-runtime.channel-ingress.test.ts b/src/plugins/registry-runtime.channel-ingress.test.ts
+index 3f2e4d35022d67f979faac2abb5922382dff1262..cc457648f6499d012c297fe23b13cd98d2927d5b 100644
+--- a/src/plugins/registry-runtime.channel-ingress.test.ts
++++ b/src/plugins/registry-runtime.channel-ingress.test.ts
+@@ -26,6 +26,7 @@ import {
+   contextParams,
+   createRuntimeBuilder,
+   inspect,
++  registerAuthenticatedOwnerIngressTests,
+   resolveIngressForRuntime,
+ } from "./registry-runtime.channel-ingress.test-support.js";
+ import { createPluginRegistry } from "./registry.js";
+@@ -33,7 +34,6 @@ import {
+   bindGatewayContextResolver,
+   hasGatewayContextOwner,
+ } from "./runtime/gateway-request-scope.js";
+-import { createPluginRuntime } from "./runtime/index.js";
+ import type { PluginRuntime } from "./runtime/types.js";
+ import { createPluginRecord } from "./status.test-fixtures.js";
+ 
+@@ -302,90 +302,7 @@ describe("bundled channel ingress runtime ownership", () => {
+     },
+   );
+ 
+-  it("binds authenticated owner turns to the exact live trusted channel plugin", async () => {
+-    const runtime = createPluginRuntime();
+-    const command = vi.fn(async () => ({ payloads: [] }));
+-    Object.defineProperty(runtime.agent, "runCommandFromIngress", {
+-      configurable: true,
+-      value: command,
+-    });
+-    const registryBuilder = createPluginRegistry({
+-      logger: { info() {}, warn() {}, error() {}, debug() {} },
+-      runtime,
+-      activateGlobalSideEffects: false,
+-    });
+-    const owner = createPluginRecord({ id: "discord", origin: "bundled" });
+-    const foreign = createPluginRecord({ id: "foreign", origin: "bundled" });
+-    const untrusted = createPluginRecord({ id: "impostor", origin: "workspace" });
+-    const ownerApi = registryBuilder.createApi(owner, { config: {} as OpenClawConfig });
+-    const foreignApi = registryBuilder.createApi(foreign, { config: {} as OpenClawConfig });
+-    const untrustedApi = registryBuilder.createApi(untrusted, { config: {} as OpenClawConfig });
+-    registryBuilder.registry.plugins.push(owner, foreign, untrusted);
+-    registryBuilder.registry.channels.push(
+-      {
+-        pluginId: "discord",
+-        plugin: { id: "discord" },
+-        source: owner.source,
+-      } as never,
+-      {
+-        pluginId: "impostor",
+-        plugin: { id: "community" },
+-        source: untrusted.source,
+-      } as never,
+-    );
+-    markPluginRegistryActive(registryBuilder.registry);
+-    const options = {
+-      message: "owner turn",
+-      messageChannel: "discord" as const,
+-      senderIsOwner: true,
+-      allowModelOverride: false,
+-    };
+-    const commandRuntime = { log: vi.fn(), error: vi.fn() } as never;
+-    const retained = ownerApi.runtime.agent.runCommandFromIngress;
+-
+-    await expect(retained(options, commandRuntime)).resolves.toEqual({ payloads: [] });
+-    expect(command).toHaveBeenCalledWith(options, commandRuntime);
+-    await expect(
+-      foreignApi.runtime.agent.runCommandFromIngress(options, commandRuntime),
+-    ).rejects.toThrow('Plugin "foreign" cannot admit authenticated owner authority');
+-    const guestOptions = { ...options, messageChannel: "community", senderIsOwner: false };
+-    const retainedGuest = untrustedApi.runtime.agent.runCommandFromIngress;
+-    await expect(retainedGuest(guestOptions, commandRuntime)).resolves.toEqual({ payloads: [] });
+-    expect(command).toHaveBeenLastCalledWith(guestOptions, commandRuntime);
+-    let ownerClaimReads = 0;
+-    let channelReads = 0;
+-    const changingGuestOptions = {
+-      ...guestOptions,
+-      get senderIsOwner() {
+-        return ownerClaimReads++ > 0;
+-      },
+-      get messageChannel() {
+-        return channelReads++ === 0 ? "community" : "discord";
+-      },
+-    };
+-    await expect(retainedGuest(changingGuestOptions, commandRuntime)).resolves.toEqual({
+-      payloads: [],
+-    });
+-    expect(command).toHaveBeenLastCalledWith(
+-      expect.objectContaining({ messageChannel: "community", senderIsOwner: false }),
+-      commandRuntime,
+-    );
+-    expect(ownerClaimReads).toBe(1);
+-    expect(channelReads).toBe(1);
+-    await expect(
+-      retainedGuest({ ...guestOptions, senderIsOwner: true }, commandRuntime),
+-    ).rejects.toThrow('Plugin "impostor" cannot admit authenticated owner authority');
+-
+-    registryBuilder.rollbackPluginGlobalSideEffects(owner.id, owner);
+-    await expect(retained(options, commandRuntime)).rejects.toThrow(
+-      'Plugin "discord" cannot admit authenticated owner authority',
+-    );
+-    registryBuilder.rollbackPluginGlobalSideEffects(untrusted.id, untrusted);
+-    await expect(retainedGuest(guestOptions, commandRuntime)).rejects.toThrow(
+-      'Plugin "impostor" cannot admit authenticated owner authority',
+-    );
+-    expect(command).toHaveBeenCalledTimes(3);
+-  });
++  registerAuthenticatedOwnerIngressTests();
+ 
+   it("defers and preserves the exact active runtime across an inactive prepared load", async () => {
+     const audit = createChannelAdmissionAudit({ enabled: true });
+diff --git a/src/plugins/registry-runtime.ts b/src/plugins/registry-runtime.ts
+index ea49622035de64e2e5aef593b51a070a649ead67..68856c550bc99864502c57efe4698d92780e24d9 100644
+--- a/src/plugins/registry-runtime.ts
++++ b/src/plugins/registry-runtime.ts
+@@ -600,14 +600,16 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
+           const runCommandFromIngress: PluginRuntime["agent"]["runCommandFromIngress"] = async (
+             params,
+             commandRuntime,
++            host,
+           ) => {
++            const requesterFinal = host?.requesterFinal;
+             const { senderIsOwner: claimedOwner, messageChannel, ...remainingParams } = params;
+             const senderIsOwner = claimedOwner === true;
+             // Validate and dispatch the same host-owned values; never re-read plugin-owned authority.
+             const ingressParams = { ...remainingParams, senderIsOwner, messageChannel };
+             if (
+-              // Community channels may admit guests; trusted provenance is required only for owner elevation.
+-              (senderIsOwner &&
++              // Owner elevation and retained host delivery require trusted channel provenance.
++              ((senderIsOwner || requesterFinal !== undefined) &&
+                 record.origin !== "bundled" &&
+                 record.trustedOfficialInstall !== true) ||
+               currentRegistry().plugins.find((entry) => entry.id === pluginId) !== record ||
+@@ -621,7 +623,7 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
+               );
+             }
+             return await runWithPluginScope(() =>
+-              agent.runCommandFromIngress(ingressParams, commandRuntime),
++              agent.runCommandFromIngress(ingressParams, commandRuntime, { requesterFinal }),
+             );
+           };
+           const scopedAgent = Object.create(
 diff --git a/src/plugins/runtime/runtime-agent.ts b/src/plugins/runtime/runtime-agent.ts
 index c1403518a6052c6dfda943e8540a28b049169944..ba899de62eb9c6b263588eb3dab4cde4fdd100d5 100644
 --- a/src/plugins/runtime/runtime-agent.ts
