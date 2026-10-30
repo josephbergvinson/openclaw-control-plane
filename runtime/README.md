@@ -38,12 +38,21 @@ current source includes these targeted reliability repairs:
   directly. A search for one missing fact starts with one candidate and expands
   when the evidence is ambiguous or conflicting; configured score thresholds stay
   unchanged. Unstated personal preferences still require relevant memory.
+- Updates from an authenticated owner can change a known memory record directly.
+  The agent reads existing contents when needed to preserve them and searches for
+  missing records, missing facts or conflicting information.
+- Runbooks and reference documents are consulted only when relevant and
+  permitted by the task's source scope.
 - Memory helpers return evidence from completed work and identify incomplete
   results. Skipping deeper recall does not establish that prior context is irrelevant.
-- Corrections arriving while an agent waits for a child or compacts its context
-  remain attached to the same task. They wait for its continuation instead of
-  starting a competing run. Task replacement cannot redirect them to a different
-  run, and completion handoffs retain their original authority checks.
+- Corrections target the original running task. If it has ended, they wait in
+  order instead of reaching a replacement task. With progress cards enabled, an
+  acknowledgment of the same pending work can update its existing card without
+  another message when no separate reply has begun. Other queued work keeps its
+  own updates and answer. The original task still owes a separate final result.
+- A background result intended only for its parent task stays private through
+  handoffs and restart recovery. If a scheduled parent chooses not to send a
+  reply, its child's internal report is not sent in its place.
 - A successful explicit yield with accepted completion children retains the same
   requester continuation and progress-card handoff. Internal prompt cleanup does
   not close the owed reply. Final delivery remains separately owned.
@@ -75,6 +84,30 @@ current source includes these targeted reliability repairs:
   model-attempt completion cannot cancel a still-authorized final handoff.
   A later save failure cannot replace the original execution error or change its
   cancellation classification; a save-only failure is still reported.
+
+- Scheduled agents are instructed to report a failed required outcome. A
+  recovered error or a limitation the job permits does not by itself require a
+  failure report. Coverage gaps stay explicit; scheduler retries and alerts keep
+  their existing rules.
+
+- Managed Chrome opens task pages without an extra unused tab and reuses the
+  selected profile's running browser. After configured task-tab cleanup, it can
+  close an idle browser it started while keeping profile data and sign-ins. Other
+  pages, unrecognized background targets, unfinished downloads, concurrent work
+  or incomplete activity tracking keep the browser open. Recognized extension
+  background-only targets do not by themselves keep it open. Externally managed
+  browsers remain under their owner's control.
+  Completion cleanup covers ordinary and already-delivered replies. It waits
+  for the final-delivery record to finish updating and retains its own tracked
+  lifetime, so foreground request teardown does not cancel it. Current task,
+  unfinished-delivery and cancellation checks remain binding.
+
+- Nested tool results use compact JSON formatting without changing their
+  decoded contents. This reduces formatting overhead in retained tool history;
+  it does not change the compaction policy or establish a latency improvement.
+
+- Trajectory export credential masking preserves JSON and JSONL syntax and
+  leaves retained transcripts unchanged.
 
 The regression tests cover these behaviors in source. Verify delivery and memory
 quality on the installed runtime before treating a deployment as accepted.
@@ -127,6 +160,11 @@ or ordinary-use acceptance on another host.
 | Native distribution tree, overlay and archive     | `nativeDistribution`                                        |
 | Companion source identity and optional finite delta | `nativeCompanion`                                         |
 | Scope of the existing installed reference         | `referenceDeployment`                                       |
+
+Development-only corrections can advance the source and distribution references
+without replacing the installed runtime. `referenceDeployment` retains the actual
+installed commit. The optional companion patch still reconstructs the separately
+recorded companion tree from the updated distribution reference.
 
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
@@ -309,6 +347,10 @@ uses a fresh official-tag checkout and the same manifest bindings. Independent
 repository, native-check and build jobs feed `reconstruct-and-build`. Its native
 plan adapter only adds bounded full-lint shard selection; it preserves the other
 planned commands and their failures.
+
+Local changed-file checks use the same import-graph analysis as CI to select
+prompt-snapshot validation when prompt-producing source changes. Generated
+snapshots capture the current tool descriptions and schemas.
 
 The reference workflow also runs the runtime's native steering, queue and
 publication tests against that same reconstructed source. It uses the runtime's

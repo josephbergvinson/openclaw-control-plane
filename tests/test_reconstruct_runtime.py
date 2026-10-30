@@ -161,7 +161,10 @@ class RuntimeReconstructionTests(unittest.TestCase):
             opener.assert_not_called()
 
     def test_declared_companion_scope_reconstructs_the_complete_retained_tree(self) -> None:
-        extra = ("src/auto-reply/reply/session.ts", "docs/concepts/session.md")
+        extra = ("src/auto-reply/reply/session.ts", "docs/concepts/session.md",
+                 "scripts/check-changed.mts", "test/scripts/changed-lanes.test.ts",
+                 "packages/ai/src/providers/openai-responses-terminal-usage.ts",
+                 "packages/ai/src/providers/openai-responses-terminal-usage.test.ts")
         package, contents = self.companion_package(extra)
         opener = Mock()
         opener.open.return_value = io.BytesIO(contents)
@@ -179,7 +182,11 @@ class RuntimeReconstructionTests(unittest.TestCase):
         invalid = [frozenset(RUNTIME.NATIVE_COMPANION_DELTA_PATHS),
                    package.companion.delta_paths | {"src/unexpected.ts"},
                    frozenset(), frozenset({"src/../outside"}),
-                   frozenset({"src/.git/config"}), frozenset({"operator.json"})]
+                   frozenset({"src/.git/config"}), frozenset({"operator.json"}),
+                   frozenset({"scripts/../outside"}), frozenset({"scripts/.git/config"}),
+                   frozenset({"scripts/node_modules/package/index.js"}),
+                   frozenset({"packages/../outside"}), frozenset({"packages/.git/config"}),
+                   frozenset({"packages/node_modules/package/index.js"})]
         with patch.object(RUNTIME, "build_opener") as opener:
             for paths in invalid:
                 with self.subTest(paths=paths):

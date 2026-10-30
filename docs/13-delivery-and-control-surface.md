@@ -88,6 +88,15 @@ speaker can acknowledge a request and consult the normal agent for relevant reco
 delegation or actions. Conversation-only settings should not be presented as a
 missing capability. Authorized work retains its original requester and destination;
 the assistant follows up with the verified result rather than only promising work.
+The trusted channel wrapper preserves the result callback when the agent yields
+to a worker, so the eventual answer can return to the original voice session.
+That callback owns the deferred answer even when the request originated in
+Discord: returning speech does not require a separate text-channel post. The
+runtime captures the current callback before resuming the agent and checks that
+it still belongs to the same live request before delivering. An expired or
+replaced callback cannot redirect the answer into a newer session or an unrelated
+text message. Confirmed delivery survives settlement retries without replaying
+the same answer.
 
 Playback queueing, interruption preferences and provider recovery have independent
 owners. A generated reply is not proof that the full audio played. Measure first
@@ -136,6 +145,10 @@ Supported compaction preserves task continuity but is separate from the next mod
 request. If a provider request fails after compaction, retain the original task and
 use supported bounded recovery; do not claim the task finished or require a new
 conversation when normal continuation can recover it.
+
+Discord uses `agents.defaults.compaction.notifyUser` to control written compaction
+notices. Only `true` enables that maintenance text; disabling it leaves reaction
+status, task errors and the final reply under their existing owners.
 
 Background maintenance and manual compaction can have different notice paths.
 Test the actual foreground owner instead of adding a parallel warning monitor.
