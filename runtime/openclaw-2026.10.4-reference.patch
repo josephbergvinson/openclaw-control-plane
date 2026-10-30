@@ -9728,6 +9728,25 @@ index 52d316bfe5ea6c080141c167c11d098dd9966aba..a0eb3787083e6134167d94db25b95364
  discarded so stale background updates are not prepended to the first prompt in
  the new session.
  
+diff --git a/docs/nodes/computer-use.md b/docs/nodes/computer-use.md
+index 4abd76a2ef4c4e6e58f5eedd7a1da292355144a8..48e92bb294d8867296d01b5b9c59ab386add1f99 100644
+--- a/docs/nodes/computer-use.md
++++ b/docs/nodes/computer-use.md
+@@ -77,10 +77,14 @@ Coordinates are non-negative integer pixels in the most recent screenshot; the p
+ 
+ Providers with the v2 window/element family can additionally expose `list_apps`, `list_windows`, `get_accessibility_tree`, `get_cursor_position`, `get_window_state`, `launch_app`, `kill_app`, `bring_to_front`, `set_value`, `zoom`, `escalate_scope`, and `invoke_menu`. The provider descriptor is authoritative; unavailable actions are omitted rather than emulated through another provider.
+ 
++CUA window listings include `ownerPid`, the owning process ID at observation time. This helps distinguish windows with identical app names and titles. Actions still require the returned `windowRef`; `ownerPid` is not an action selector or a durable browser-profile identity.
++
+ Window input coordinates follow the observation's `details.coordinateSpace`. CUA reports `image-pixels`: use pixels in the delivered image, including when OpenClaw resized it. Peekaboo reports `global-logical-points`: use desktop logical points. Accessibility element bounds retain their native screen coordinates; prefer `elementRef` when targeting those elements. Browser coordinate inputs use viewport CSS pixels.
+ 
+ For a window image, use `get_window_state` with `windowRef` and `includeScreenshot: true`, then pass the returned `observationId` with window input. With CUA, `includeScreenshot: false` skips capture and refreshes accessibility elements and their references. This opt-out requires an updated node; default and `true` observations remain compatible with older nodes. Use those references for element actions; window pixel input still requires an observation with a delivered image. The native macOS Peekaboo provider rejects `includeScreenshot: false` because its window observations require capture. A desktop `frameId` cannot replace a window observation: the images can use different coordinate spaces. Like `screenshot`, `wait` returns a desktop capture and rejects target and observation references.
+ 
++The CUA error `type_text_incomplete` means insertion was not verified. Some or all requested text may already be present. Observe the target field again before deciding whether to replace or complete its contents; the driver's inferred character count is not proof of which text was entered.
++
+ The CUA provider also exposes the v2 browser family: `get_browser_state`, `browser_prepare`, `browser_navigate`, `browser_click`, `browser_type`, `browser_dialog`, `browser_set_input_files`, `browser_download`, and `browser_pointer`. Use `list_windows` to discover a native browser's `windowRef`, then pass it to `get_browser_state` to obtain an opaque `browserRef` and page references. Subsequent `get_browser_state` page snapshots and browser actions require both `browserRef` and `pageRef`; snapshots return the observation and element references needed for input. `browser_prepare` also requires the discovered `windowRef`, even for an isolated profile. These references belong to one Computer Use execution and driver generation; navigation invalidates page-element observations, and a driver restart invalidates the complete browser reference set.
+ 
+ CUA additionally exposes `get_recording_state`, `start_recording`, `stop_recording`, and `replay_trajectory`. Recording and browser file operations use opaque `openclaw:computer-resource` handles. The selected computer host creates and validates the underlying files and directories; agent actions never accept native paths, output roots, or helper executable paths. Handles belong to one Computer Use execution and cannot be reused by another execution.
 diff --git a/docs/plugins/sdk-runtime.md b/docs/plugins/sdk-runtime.md
 index b2a9f809b196aba5d270916b936ac2399c967a65..6e66a4c1ae591e0c2d8cead4a756866fb6932397 100644
 --- a/docs/plugins/sdk-runtime.md
@@ -12030,10 +12049,22 @@ index 4e97ad01b1d8007087d47c8ad5007108c1d091a4..84d847a61de7062c1af9efc2c619f45f
    api.session.controls.registerControlUiDescriptor({
      id: "dashboard",
 diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
-index 889e7fa47592461e98ecf2394d2788c2d96337fe..47345a631072f83fe31e958b9dda2be5644d261f 100644
+index 889e7fa47592461e98ecf2394d2788c2d96337fe..694b0e8e9e0c325fccc71aad21245be0f8c4470c 100644
 --- a/extensions/browser/skills/browser-automation/SKILL.md
 +++ b/extensions/browser/skills/browser-automation/SKILL.md
-@@ -38,7 +38,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
+@@ -11,10 +11,9 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
+ ## Operating Loop
+ 
+ 1. Check browser state before acting:
++   - `action="tabs"` reports availability and existing tabs in the intended profile; use it before opening a new tab.
+    - `openclaw browser doctor` or `action="status"` when the browser/plugin setup itself may be broken.
+-   - `action="status"` for availability.
+    - `action="profiles"` if login state or profile choice matters.
+-   - `action="tabs"` before opening a new tab if retries/timeouts may have left windows behind.
+ 2. Prefer stable tab handles:
+    - Open important tabs with `label`, for example `label="meet"`.
+    - After `action="tabs"` or `action="open"`, store `suggestedTargetId` and pass it as `targetId` in later calls.
+@@ -38,7 +37,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
  5. Report real blockers:
     - Debug network failures with `action="requests"`, optional URL/type `filter`, and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Use a managed profile; existing-session profiles do not support this log.
     - Debug page errors with `action="errors"` and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Existing-session profiles do not support this log.
@@ -12042,7 +12073,16 @@ index 889e7fa47592461e98ecf2394d2788c2d96337fe..47345a631072f83fe31e958b9dda2be5
     - Do not claim the browser is not logged in just because the current page shows a permission or onboarding dialog. Inspect the visible UI first.
  
  ## Browser batch CLI
-@@ -157,5 +157,5 @@ When creating or joining a Meet:
+@@ -106,6 +105,8 @@ When evaluate is unavailable, keep the loop on structured state only.
+ 
+ ## Tab Hygiene
+ 
++With task-completion cleanup enabled, tracked task-owned tabs may close after final delivery; a pre-final tab listing does not guarantee they remain open.
++
+ Before creating a tab for a named task, list tabs and reuse an existing matching label or URL when it is still usable.
+ 
+ Example:
+@@ -157,5 +158,5 @@ When creating or joining a Meet:
  
  - Treat camera/microphone permission screens as progress, not login failure.
  - If asked whether people can hear you, click the microphone option when voice is required.
@@ -27084,6 +27124,163 @@ index ca75bacf58eaeba8e968d4048e867a64cf47e1a2..045a4bfa4f77a9c50de71ec8580c01c7
        }
      }
    },
+diff --git a/extensions/cua-computer/src/commands.test.ts b/extensions/cua-computer/src/commands.test.ts
+index 96141a6441069d44cb84a843945ac06097e67b1e..5002a5f7d6f6977dbd24eb281aa77384310f3e66 100644
+--- a/extensions/cua-computer/src/commands.test.ts
++++ b/extensions/cua-computer/src/commands.test.ts
+@@ -349,6 +349,55 @@ describe("cua-computer provider", () => {
+     },
+   );
+ 
++  it("distinguishes identical app windows by owner without accepting a process selector", async () => {
++    const { session, callTool } = driver();
++    const windows = [4242, 4343].map((pid) => ({
++      window_id: 99,
++      pid,
++      app_name: "Google Chrome",
++      title: "New Tab",
++      bounds: { x: 40, y: 50, width: 800, height: 600 },
++    }));
++    callTool.mockImplementation(async (name, args) =>
++      name === "list_windows"
++        ? cuaToolResult({ windows })
++        : cuaToolResult({ ...CUA_DRIVER_CONTRACT_FIXTURES.windowState, pid: args.pid }),
++    );
++    const computer = await execution(session, "darwin");
++    try {
++      const listed = JSON.parse(await computer.act('{"action":"list_windows"}')) as {
++        details: { windows: Array<{ windowRef: string; ownerPid: number }> };
++      };
++      expect(listed.details.windows.map((window) => window.ownerPid)).toEqual([4242, 4343]);
++      const [first, second] = listed.details.windows;
++      expect(first!.windowRef).toMatch(/^cua:v2:window:/);
++      expect(second!.windowRef).not.toBe(first!.windowRef);
++      await computer.act(
++        JSON.stringify({ action: "get_window_state", windowRef: second!.windowRef }),
++      );
++      expect(callTool).toHaveBeenLastCalledWith(
++        "get_window_state",
++        expect.objectContaining({ pid: 4343, window_id: 99 }),
++        undefined,
++      );
++      const callsBeforeInvalidSelectors = callTool.mock.calls.length;
++      for (const selector of [{ pid: 4242 }, { ownerPid: 4242 }]) {
++        await expect(
++          computer.act(
++            JSON.stringify({
++              action: "get_window_state",
++              windowRef: second!.windowRef,
++              ...selector,
++            }),
++          ),
++        ).rejects.toThrow("COMPUTER_INVALID_REQUEST");
++      }
++      expect(callTool).toHaveBeenCalledTimes(callsBeforeInvalidSelectors);
++    } finally {
++      await computer.close("completion");
++    }
++  });
++
+   it("rejects forged window, observation, and element refs before native resolution", async () => {
+     const { session, callTool } = windowDriver();
+     const computer = await execution(session);
+@@ -700,6 +749,66 @@ describe("cua-computer provider", () => {
+     );
+   });
+ 
++  it.each(
++    (["window", "desktop"] as const).flatMap((scope) =>
++      [0, 4].map((delivered) => ({ scope, delivered })),
++    ),
++  )(
++    "keeps $scope typing uncertain after an inferred $delivered-character delivery",
++    async ({ scope, delivered }) => {
++      const failure = cuaToolResult(
++        { code: "type_text_incomplete", retryable: true, retry_from_character: delivered },
++        {
++          isError: true,
++          errorCode: "type_text_incomplete",
++          text: `type_text incomplete: delivered ${delivered} of 8 character(s); retry only the remaining suffix`,
++        },
++      );
++      const original = JSON.stringify(failure);
++      const native = windowDriver(() => failure);
++      native.typeText.mockResolvedValue(failure);
++      const computer = await execution(native.session, "darwin");
++      try {
++        let target: Record<string, unknown> = {};
++        if (scope === "window") {
++          const windowRef = await listWindow(computer);
++          const observed = await observeWindow(computer, windowRef);
++          target = {
++            windowRef,
++            observationId: observed.observation.observationId,
++            elementRef: observed.observation.elements[0]!.elementRef,
++            deliveryMode: "foreground",
++          };
++        }
++        const error: unknown = await computer
++          .act(JSON.stringify({ action: "type", text: "abcdefgh", ...target }))
++          .catch((cause: unknown) => cause);
++        expect(error).toBeInstanceOf(Error);
++        expect(error).toMatchObject({
++          message: expect.stringMatching(/^COMPUTER_REFUSED_type_text_incomplete:/),
++        });
++        const message = (error as Error).message;
++        expect(message).toContain("Some or all text may have been entered");
++        expect(message).toContain("fresh observation of the target field");
++        expect(message).not.toContain("delivered");
++        expect(message).not.toContain("remaining suffix");
++        expect(message).not.toContain("retry_from_character");
++        expect(JSON.stringify(failure)).toBe(original);
++        if (scope === "window") {
++          expect(native.callTool.mock.calls.filter(([name]) => name === "type_text")).toHaveLength(
++            1,
++          );
++          expect(native.typeText).not.toHaveBeenCalled();
++        } else {
++          expect(native.typeText).toHaveBeenCalledExactlyOnceWith("abcdefgh", undefined);
++          expect(native.callTool).not.toHaveBeenCalled();
++        }
++      } finally {
++        await computer.close("completion");
++      }
++    },
++  );
++
+   it("maps window delivery refusals to the closed computer error prefix", async () => {
+     const { session } = windowDriver(() => {
+       return cuaToolResult(
+diff --git a/extensions/cua-computer/src/commands.ts b/extensions/cua-computer/src/commands.ts
+index b57d4c7b02cf235a4b5f50c2db1126cbf79c40d0..e4920f89c7897b12a363b796128210910e366771 100644
+--- a/extensions/cua-computer/src/commands.ts
++++ b/extensions/cua-computer/src/commands.ts
+@@ -21,7 +21,12 @@ import {
+   type CuaDriverSession,
+   type CuaToolResult,
+ } from "./driver-client.js";
+-import { actionEnvelope, platformActions, projectedToolDetails } from "./driver-result.js";
++import {
++  actionEnvelope,
++  driverFailureMessage,
++  platformActions,
++  projectedToolDetails,
++} from "./driver-result.js";
+ import { createLazyCuaExecutionResources } from "./execution-resources.js";
+ import {
+   adoptGeneration,
+@@ -126,10 +131,7 @@ function assertPrimaryDisplay(screenIndex: number | undefined): void {
+ 
+ function assertToolSuccess(result: CuaToolResult, tool: string): CuaToolResult {
+   if (result.isError) {
+-    const code = result.errorCode
+-      ? `COMPUTER_REFUSED_${result.errorCode}`
+-      : "COMPUTER_DRIVER_ERROR";
+-    throw new Error(`${code}: ${result.text || `${tool} failed`}`);
++    throw new Error(driverFailureMessage(result, tool));
+   }
+   return result;
+ }
 diff --git a/extensions/cua-computer/src/driver-artifacts-resolution.test.ts b/extensions/cua-computer/src/driver-artifacts-resolution.test.ts
 index 7a15e5e75369fe561e966f399115b713b6d65cf6..46cd6da0a293a37d7402785e53eb0457cd9ebf94 100644
 --- a/extensions/cua-computer/src/driver-artifacts-resolution.test.ts
@@ -27123,7 +27320,7 @@ index 38ddbc0017c453480c8a53633e0bec143a43a425..67c2bcc9edc5133540283a4ed183a43f
  // These numeric values are part of the pinned SDK contract. Keeping
  // them local avoids loading the native library while OpenClaw is only
 diff --git a/extensions/cua-computer/src/driver-result.ts b/extensions/cua-computer/src/driver-result.ts
-index b58c605f762d0c53d501a1ddffd92bd00c3c3bd7..90f911be3f62ed90155bf339ee1ccfa4ee094be4 100644
+index b58c605f762d0c53d501a1ddffd92bd00c3c3bd7..819fd106a59fc8fd42c2618f4f1971723362fb9b 100644
 --- a/extensions/cua-computer/src/driver-result.ts
 +++ b/extensions/cua-computer/src/driver-result.ts
 @@ -7,6 +7,7 @@ import { canonicalizeBase64 } from "openclaw/plugin-sdk/media-runtime";
@@ -27134,7 +27331,31 @@ index b58c605f762d0c53d501a1ddffd92bd00c3c3bd7..90f911be3f62ed90155bf339ee1ccfa4
  import {
    adoptGeneration,
    invalidateBrowserReferences,
-@@ -230,7 +231,11 @@ export async function callWindowTool(
+@@ -220,6 +221,23 @@ export function actionEnvelope(
+   };
+ }
+ 
++export function driverFailureMessage(
++  result: CuaToolResult,
++  tool: string,
++  errorCode = result.errorCode,
++): string {
++  const code = errorCode ? `COMPUTER_REFUSED_${errorCode}` : "COMPUTER_DRIVER_ERROR";
++  // The driver can infer partial delivery from a value-length change without
++  // proving that the observed value contains the requested text.
++  const detail =
++    errorCode === "type_text_incomplete"
++      ? "Text insertion is unverified. Some or all text may have been entered. " +
++        "Take a fresh observation of the target field before deciding whether to replace or " +
++        "complete the text. Do not retry from an inferred character offset."
++      : result.text || `${tool} failed`;
++  return `${code}: ${detail}`;
++}
++
+ export async function callWindowTool(
+   driver: CuaDriverSession,
+   state: CuaFrameState,
+@@ -230,7 +248,11 @@ export async function callWindowTool(
    const callGeneration = driver.generation;
    const stateWasCurrent = state.generation === callGeneration;
    const result = await driver.callTool(name, args, signal);
@@ -27147,6 +27368,24 @@ index b58c605f762d0c53d501a1ddffd92bd00c3c3bd7..90f911be3f62ed90155bf339ee1ccfa4
      adoptGeneration(state, driver.generation);
      throw new Error("COMPUTER_STALE_OBSERVATION: computer driver generation changed during action");
    }
+@@ -251,8 +273,7 @@ export async function callWindowTool(
+       invalidateBrowserReferences(state);
+       throw new Error("COMPUTER_STALE_OBSERVATION: take a fresh browser observation and retry");
+     }
+-    const code = refusalCode ? `COMPUTER_REFUSED_${refusalCode}` : "COMPUTER_DRIVER_ERROR";
+-    throw new Error(`${code}: ${result.text || `${name} failed`}`);
++    throw new Error(driverFailureMessage(result, name, refusalCode));
+   }
+   return result;
+ }
+@@ -305,6 +326,7 @@ export function projectWindows(
+   return {
+     windows: bounded.items.map((window) => ({
+       windowRef: issueWindowRef(state, { pid: window.pid!, windowId: window.window_id }),
++      ownerPid: window.pid!,
+       ...(window.app_name ? { appName: window.app_name } : {}),
+       ...(window.title ? { title: window.title } : {}),
+       bounds: window.bounds,
 diff --git a/extensions/cua-computer/src/driver-session-recovery.ts b/extensions/cua-computer/src/driver-session-recovery.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..f0891c630d2204a057219ba787b4dbf49b6dc14d

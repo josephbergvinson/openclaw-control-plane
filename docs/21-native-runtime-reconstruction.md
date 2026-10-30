@@ -29,10 +29,10 @@ deployment or user acceptance.
 
 The optional companion target reproduces a separately retained complete source
 tree. Its exact finite patch includes every difference from the declared native
-distribution, including native credential-form changes and inverse gateway-only
-changes needed to reach that older component. Reversing those changes for the
-companion does not roll back the selected external gateway or claim newer gateway
-behavior in the older app. Source and deployment remain independently bound.
+distribution, including native credential-form and Computer-tool changes and
+inverse gateway-only changes needed to reach that component. Reversing those
+changes for the companion does not roll back the selected external gateway or
+claim newer gateway behavior in the app. Source and deployment remain independently bound.
 
 Read the exact companion commit, full tree and build label from
 `nativeCompanion`; source reconstruction and build labels are not installed-app

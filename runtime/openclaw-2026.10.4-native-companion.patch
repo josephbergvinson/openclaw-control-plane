@@ -1787,10 +1787,22 @@ index 46a8b86de19eeefc891bd033eaa0783f6b678b67..5f97e33ec51b8ec615b244d0cdbd4419
    transcriptPath?: string;
    searchDebug?: ActiveMemorySearchDebug;
 diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
-index 47345a631072f83fe31e958b9dda2be5644d261f..889e7fa47592461e98ecf2394d2788c2d96337fe 100644
+index 694b0e8e9e0c325fccc71aad21245be0f8c4470c..889e7fa47592461e98ecf2394d2788c2d96337fe 100644
 --- a/extensions/browser/skills/browser-automation/SKILL.md
 +++ b/extensions/browser/skills/browser-automation/SKILL.md
-@@ -38,7 +38,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
+@@ -11,9 +11,10 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
+ ## Operating Loop
+ 
+ 1. Check browser state before acting:
+-   - `action="tabs"` reports availability and existing tabs in the intended profile; use it before opening a new tab.
+    - `openclaw browser doctor` or `action="status"` when the browser/plugin setup itself may be broken.
++   - `action="status"` for availability.
+    - `action="profiles"` if login state or profile choice matters.
++   - `action="tabs"` before opening a new tab if retries/timeouts may have left windows behind.
+ 2. Prefer stable tab handles:
+    - Open important tabs with `label`, for example `label="meet"`.
+    - After `action="tabs"` or `action="open"`, store `suggestedTargetId` and pass it as `targetId` in later calls.
+@@ -37,7 +38,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
  5. Report real blockers:
     - Debug network failures with `action="requests"`, optional URL/type `filter`, and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Use a managed profile; existing-session profiles do not support this log.
     - Debug page errors with `action="errors"` and `limit` (default 50 recent entries). `clear=true` clears the collected log after reading. Existing-session profiles do not support this log.
@@ -1799,7 +1811,16 @@ index 47345a631072f83fe31e958b9dda2be5644d261f..889e7fa47592461e98ecf2394d2788c2
     - Do not claim the browser is not logged in just because the current page shows a permission or onboarding dialog. Inspect the visible UI first.
  
  ## Browser batch CLI
-@@ -157,5 +157,5 @@ When creating or joining a Meet:
+@@ -105,8 +106,6 @@ When evaluate is unavailable, keep the loop on structured state only.
+ 
+ ## Tab Hygiene
+ 
+-With task-completion cleanup enabled, tracked task-owned tabs may close after final delivery; a pre-final tab listing does not guarantee they remain open.
+-
+ Before creating a tab for a named task, list tabs and reuse an existing matching label or URL when it is still usable.
+ 
+ Example:
+@@ -158,5 +157,5 @@ When creating or joining a Meet:
  
  - Treat camera/microphone permission screens as progress, not login failure.
  - If asked whether people can hear you, click the microphone option when voice is required.

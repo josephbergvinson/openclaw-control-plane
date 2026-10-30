@@ -125,9 +125,9 @@ interval or response-time guarantee.
 The managed Codex 0.160.0 archive and the selected external gateway retain their
 separate manifest bindings. The optional Mac companion target reproduces its
 separately retained complete source tree. Its finite patch includes native
-credential-form changes and every inverse gateway-only change needed to reach
-that older component. These inverse changes do not roll back the selected
-external gateway. New finite declarations list their exact paths; legacy packets
+credential-form and Computer-tool changes, along with every inverse gateway-only
+change needed to reach that component. These inverse changes do not roll back the
+selected external gateway. New finite declarations list their exact paths; legacy packets
 retain their original eight-path contract. The existing native owner still
 verifies the Apple process, current host and local principal, exact form, focused
 secure field and single-use entry scope. Its source commit, full tree and build
