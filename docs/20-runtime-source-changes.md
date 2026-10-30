@@ -98,13 +98,14 @@ The Mac companion and bundled worker retain explicit source and build identities
 The companion may use the native distribution's exact source identity or one of
 the [declared finite deltas](21-native-runtime-reconstruction.md#optional-companion-source).
 A descriptive installed companion identity is also permitted; it grants no
-reconstruction target without a supported binding. The optional companion delta supports retained native credential forms through
+reconstruction target without a supported binding. The optional companion delta
+supports retained native credential forms and Computer tools. Credential forms use
 the existing `NativeCredentialBinding` and `NativeCredentialPromptContext` owners. Verified Apple process identity, current host/local principal, native
 form and focused secure-field checks, and single-use entry/revalidation remain
 binding. The finite source replay includes every inverse gateway-only difference
 needed to reproduce the separately retained complete companion tree. Its exact
 path set is declared for review; legacy packets retain their eight-path scope. This does not roll back the selected external
-gateway or claim newer gateway behavior in the older companion. The external
+gateway or claim newer gateway behavior in the separately retained companion. The external
 gateway and native distribution retain their own source identities. The installed
 companion's separately retained Bun security payload is
 not reconstructed by this packet; see the
@@ -126,6 +127,12 @@ should identify the observed capability; it does not prove the whole app or acco
 is inaccessible. Computer RPC deadlines follow the action budget while preserving
 explicit shorter timeout caps.
 
+Computer window listings expose the owning process ID so the agent can distinguish
+otherwise identical windows. Actions still use the returned window reference;
+a process ID does not identify a browser profile. If typing cannot be verified,
+the tool reports that some or all text may already be present and asks for a fresh
+observation. It does not recommend appending text from an inferred character count.
+
 Managed Chrome reuses the running instance of the selected profile and opens task
 pages without an unused startup tab. Configured completion cleanup closes only
 owned task tabs. It may then stop that exact idle instance after downloads settle,
@@ -133,6 +140,12 @@ with complete observation and no other pages, unrecognized background targets
 or concurrent work. Recognized extension background-only targets may remain.
 Profile data and sign-in state remain; externally attached browsers retain
 their own lifecycle. Unknown observation leaves the browser running.
+
+The bundled browser guidance starts with the selected profile's existing tabs;
+setup diagnostics are for suspected setup failures. It also explains that configured
+cleanup can close task-owned tabs after final delivery, so a pre-final tab listing
+does not establish that those tabs will remain open.
+
 Completion cleanup covers ordinary and already-delivered replies. The existing
 delivery owner waits for the final-delivery record to finish updating before
 releasing cleanup. Cleanup has its own tracked async lifetime, so closing the
