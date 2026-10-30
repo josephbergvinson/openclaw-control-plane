@@ -62,6 +62,13 @@ current source includes these targeted reliability repairs:
 - A confirmed progress card keeps its role through the existing durable handoff
   and restart recovery. Explicit final delivery uses a separate message;
   corrections to completed answers remain supported.
+- Discord edits return the provider's actual message ID through the shared action
+  result. Continuation can recognize a successful progress edit without posting
+  another interim reply; missing or mismatched IDs remain unconfirmed.
+- Corrections arriving after the parent yields reuse the same pending worker
+  progress card through the existing continuation owner. A sole confirmed terminal
+  acknowledgment avoids a redundant reply; mixed tool batches, independent answers
+  and errors retain normal delivery. Queued and direct turns use the same checks.
 - Session recovery honors a successfully started, current native invocation
   with no execution deadline. A quiet command stays owned while it runs; its actual exit starts
   the existing bounded result-collection allowance. Cancellation, expired
