@@ -146,6 +146,10 @@ request. If a provider request fails after compaction, retain the original task 
 use supported bounded recovery; do not claim the task finished or require a new
 conversation when normal continuation can recover it.
 
+Discord uses `agents.defaults.compaction.notifyUser` to control written compaction
+notices. Only `true` enables that maintenance text; disabling it leaves reaction
+status, task errors and the final reply under their existing owners.
+
 Background maintenance and manual compaction can have different notice paths.
 Test the actual foreground owner instead of adding a parallel warning monitor.
 A checkpoint, typing indicator or retained child is not a substitute for useful

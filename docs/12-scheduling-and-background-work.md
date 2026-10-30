@@ -167,6 +167,8 @@ error remains visible; coverage and prior delivery do not advance. Incomplete,
 branched, truncated or ambiguous evidence stays held, and this reconciliation
 does not send a message or replay the failed task.
 
+When an isolated agent times out before its runner starts, repair the runtime fault before retrying. The collector can then reconcile the exact failed run against its empty session and settled execution owner. Temporarily pause the existing job during reconciliation, retain the failed-run evidence, and release only its unstaged checkpoint. Source coverage and confirmed delivery must stay unchanged. Later attempts qualify for the same recovery only if they stopped on that checkpoint before execution or delivery. Restore the original schedule and enablement, then verify a fresh run and its configured delivery.
+
 ## Independent safety nets
 
 Put checks in a different failure domain where that improves coverage. A host timer can inspect whether an expected period's result exists even when the gateway scheduler did not dispatch it. An internal backup supervisor can still request a pause while external workspace storage is unavailable.

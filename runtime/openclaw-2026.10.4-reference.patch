@@ -29595,14 +29595,17 @@ index e8ee3ce55368af8d276f35dfff3fae4e3b53cf01..f465fafca3d8606cfe92db64d576e02b
        if (!draftStream || !text) {
          return;
 diff --git a/extensions/discord/src/monitor/message-handler.process-progress.ts b/extensions/discord/src/monitor/message-handler.process-progress.ts
-index f4738f88ddf86af265c835936e25daaad090d31b..5314d0ed06da0e369280388712e25e11e7857513 100644
+index f4738f88ddf86af265c835936e25daaad090d31b..1413c45d65bf171a15f59cda02c685c3d1e1bedb 100644
 --- a/extensions/discord/src/monitor/message-handler.process-progress.ts
 +++ b/extensions/discord/src/monitor/message-handler.process-progress.ts
-@@ -158,17 +158,19 @@ export function createDiscordMessageProgressRuntime(params: {
+@@ -158,17 +158,22 @@ export function createDiscordMessageProgressRuntime(params: {
        return await draftPreview.pushApprovalEvent(payload);
      },
      onCompactionStart: async () => {
-+      const visible = await draftPreview.pushMaintenanceStatus("Compacting conversation context…");
++      const visible =
++        cfg.agents?.defaults?.compaction?.notifyUser === true
++          ? await draftPreview.pushMaintenanceStatus("Compacting conversation context…")
++          : false;
        if (!abortSignal?.aborted) {
          await params.reactions.controller.setCompacting();
        }
@@ -29649,14 +29652,58 @@ index 5daaf3badfe54af3dbd7d6d2ba2828b1a984fb40..18b2093f6a4d8327448cbcaf8309bf12
        params.draftPreview.freezeProgress();
      }
      return payload;
+diff --git a/extensions/discord/src/monitor/message-handler.process.ack.test.ts b/extensions/discord/src/monitor/message-handler.process.ack.test.ts
+index 632ed581e6ce8393a5ac168029976c3ee4302fbe..5c68f2777d6ac29e693d25a6adcc803e642439ec 100644
+--- a/extensions/discord/src/monitor/message-handler.process.ack.test.ts
++++ b/extensions/discord/src/monitor/message-handler.process.ack.test.ts
+@@ -242,6 +242,7 @@ describe("processDiscordMessage ack reactions", () => {
+ 
+     const ctx = await createAutomaticSourceDeliveryContext({
+       cfg: {
++        agents: { defaults: { compaction: { notifyUser: false } } },
+         messages: { ackReaction: "👀" },
+         session: { store: "/tmp/openclaw-discord-process-test-sessions.json" },
+       },
 diff --git a/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts b/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
-index 5a332f6c57014ef1683ab617615e80a21eae7c71..3901abba7c567c101a707e7e7078b85a969dd005 100644
+index 5a332f6c57014ef1683ab617615e80a21eae7c71..1036de95203a5d08a431654d85cde9105e90a802 100644
 --- a/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
 +++ b/extensions/discord/src/monitor/message-handler.process.draft-progress.test.ts
-@@ -54,6 +54,78 @@ async function runProgressScenario(
+@@ -54,6 +54,110 @@ async function runProgressScenario(
  }
  
  describe("processDiscordMessage draft streaming progress", () => {
++  it.each([false, undefined, true])(
++    "respects compaction notifyUser=%s with progress cards enabled",
++    async (notifyUser) => {
++      const elapseProgressDraftStartDelay = useProgressDraftStartDelay();
++      const draftStream = createMockDraftStreamForTest();
++      const failure = "Auto-compaction failed before the next model request.";
++      dispatchInboundMessage.mockImplementationOnce(async (params) => {
++        await startToolProgress(params);
++        await elapseProgressDraftStartDelay();
++        await params?.replyOptions?.onCompactionStart?.();
++        expect(draftStream.lastDeliveredText().includes("Compacting conversation context…")).toBe(
++          notifyUser === true,
++        );
++        await params?.replyOptions?.onCompactionEnd?.({ completed: false });
++        expect(draftStream.lastDeliveredText()).not.toContain("Compacting conversation context…");
++        await params?.dispatcher.sendFinalReply({ text: failure, isError: true });
++        return { queuedFinal: true, counts: { final: 1, tool: 0, block: 0 } };
++      });
++
++      await runProcessDiscordMessage(
++        await createAutomaticDraftContext({
++          cfg: { agents: { defaults: { compaction: { notifyUser } } } },
++          discordConfig: {
++            streaming: { mode: "progress", progress: { toolProgress: true, commentary: true } },
++          },
++        }),
++      );
++
++      expect(getDeliveredFinalTexts()).toEqual([failure]);
++    },
++  );
++
 +  it("binds a fresh queued-turn card while keeping the prior publication retired", async () => {
 +    createMockDraftStreamForTest();
 +    dispatchBufferedReplyForTest.mockImplementationOnce(async (params) => {
@@ -51581,6 +51628,81 @@ index 477d17d1e09236b48b113478ef2972cd186ba2b0..69b3030a44a98d818b53ea04e984565d
      beforeTerminalDelivery: undefined,
      prepareAssistantTranscriptMessage: undefined,
      internalDeliverySuppressErrors: undefined,
+diff --git a/src/agents/agent-command-local.ts b/src/agents/agent-command-local.ts
+index f063ac5d7a84fa6a213018b732f30dc7d8c675cf..4530a915ae248c4d4e9d760c7f5f2b04e482ad12 100644
+--- a/src/agents/agent-command-local.ts
++++ b/src/agents/agent-command-local.ts
+@@ -24,7 +24,7 @@ import {
+   createCronCreatorAuthorityCapability,
+   runWithCronCreatorAuthorityCapability,
+ } from "./cron-creator-authority-context.js";
+-import { withPreparedModelRuntimePluginGenerationScope } from "./prepared-model-runtime-generation-scope.js";
++import { scopePreparedModelRuntimeLease } from "./prepared-model-runtime-generation-scope.js";
+ import { acquireAgentRunPreparedModelRuntime } from "./prepared-model-runtime.js";
+ import { withAgentPluginRegistry } from "./runtime-plugins.js";
+ import { measureAgentStartup } from "./startup-timing.js";
+@@ -94,37 +94,32 @@ export async function runLocalAgentCommand<TResult>(params: {
+                     config: admittedPrepared.cfg,
+                     workspaceDir: admittedPrepared.workspaceDir,
+                     run: async () => {
+-                      await using lease = await acquireAgentRunPreparedModelRuntime(
+-                        {
+-                          config: admittedPrepared.cfg,
+-                          agentId: admittedPrepared.sessionAgentId,
+-                          agentDir: admittedPrepared.agentDir,
+-                          workspaceDir: admittedPrepared.workspaceDir,
+-                        },
+-                        { abortSignal: admittedPrepared.opts.abortSignal },
++                      await using lease = scopePreparedModelRuntimeLease(
++                        await acquireAgentRunPreparedModelRuntime(
++                          {
++                            config: admittedPrepared.cfg,
++                            agentId: admittedPrepared.sessionAgentId,
++                            agentDir: admittedPrepared.agentDir,
++                            workspaceDir: admittedPrepared.workspaceDir,
++                          },
++                          { abortSignal: admittedPrepared.opts.abortSignal },
++                        ),
++                        admittedPrepared.opts.abortSignal,
+                       );
+-                      let active = true;
+-                      try {
+-                        return await withPluginRuntimeGenerationScope(lease.snapshot, () =>
+-                          withPreparedModelRuntimePluginGenerationScope(
+-                            lease.pluginGeneration,
+-                            () =>
+-                              params.run(
+-                                {
+-                                  ...admittedPrepared,
+-                                  commandRuntimeContext: {
+-                                    config: lease.snapshot.config,
+-                                    pluginGeneration: lease.pluginGeneration,
+-                                  },
+-                                },
+-                                resolvedDeps,
+-                              ),
+-                            () => (active ? lease.snapshot : undefined),
++                      return await withPluginRuntimeGenerationScope(lease.snapshot, () =>
++                        lease.run(() =>
++                          params.run(
++                            {
++                              ...admittedPrepared,
++                              commandRuntimeContext: {
++                                config: lease.snapshot.config,
++                                pluginGeneration: lease.pluginGeneration,
++                              },
++                            },
++                            resolvedDeps,
+                           ),
+-                        );
+-                      } finally {
+-                        active = false;
+-                      }
++                        ),
++                      );
+                     },
+                   });
+                 return capability
 diff --git a/src/agents/agent-command-restart-recovery.test.ts b/src/agents/agent-command-restart-recovery.test.ts
 index b8d293a57020fb8d25cb9a90e65812892d0899ba..210d078e51192ab6287a91040c48174d008a3698 100644
 --- a/src/agents/agent-command-restart-recovery.test.ts
@@ -56753,9 +56875,18 @@ index 55d43b7d6f9727a2ea1449b8e7d30b487bd957aa..2aed77fffd4deed5aa79a9eef683412e
    }
  }
 diff --git a/src/agents/embedded-agent-runner/run-orchestrator.ts b/src/agents/embedded-agent-runner/run-orchestrator.ts
-index e5790c0bdae0ecb052594705c94a1686f850cab4..2af59b93845cb69268b19d921840c3edc80553b4 100644
+index e5790c0bdae0ecb052594705c94a1686f850cab4..34ad95147336886b6eaed8e06e6de105bbba5a2c 100644
 --- a/src/agents/embedded-agent-runner/run-orchestrator.ts
 +++ b/src/agents/embedded-agent-runner/run-orchestrator.ts
+@@ -52,7 +52,7 @@ import { resolveModelCandidateChain } from "../model-fallback-candidates.js";
+ import {
+   getPreparedModelRuntimePluginGeneration,
+   runOutsidePreparedModelRuntimePluginGenerationScope,
+-  withPreparedModelRuntimePluginGenerationScope,
++  scopePreparedModelRuntimeLease,
+ } from "../prepared-model-runtime-generation-scope.js";
+ import {
+   acquireAgentRunPreparedModelRuntime,
 @@ -66,11 +66,6 @@ import {
  } from "../run-session-target.js";
  import { resolveAgentRunErrorLifecycleFields } from "../run-termination.js";
@@ -56807,6 +56938,84 @@ index e5790c0bdae0ecb052594705c94a1686f850cab4..2af59b93845cb69268b19d921840c3ed
    const laneController = createEmbeddedRunLaneController({
      getLifecycleGeneration: () => lifecycleGeneration,
      getParams: () => params,
+@@ -366,29 +346,33 @@ async function runEmbeddedAgentInternal(
+           // Runtime acquisition owns its build bound before the attempt budget starts.
+           // Suspend lane-idle inference without inventing progress; Stop still cancels admission.
+           laneController.setLaneTaskDeadline({ kind: "unlimited" });
+-          const preparedModelRuntimeLease = await (
+-            params.preparedModelRuntimeMode === "isolated-read-only"
+-              ? // Probe homes outlive only the attempt client, not independent live catalog clients.
+-                acquireReadOnlyPreparedModelRuntime(preparedInput, {
+-                  abortSignal: laneController.abortSignal,
+-                  catalogMode: "static",
+-                })
+-              : acquireAgentRunPreparedModelRuntime(preparedInput, {
+-                  retainIdleRunOwner,
+-                  // Turns need only configured admission facts. Full live model inventory remains
+-                  // available through the snapshot's lazy control-plane loader.
+-                  catalogMode: "static",
+-                  ...(params.pluginGeneration ? { pluginGeneration: params.pluginGeneration } : {}),
+-                  abortSignal: laneController.abortSignal,
+-                })
+-          ).finally(() => {
+-            noteLaneTaskProgress();
+-            laneController.setLaneTaskDeadline(undefined);
+-          });
++          const preparedModelRuntimeLease = scopePreparedModelRuntimeLease(
++            await (
++              params.preparedModelRuntimeMode === "isolated-read-only"
++                ? // Probe homes outlive only the attempt client, not independent live catalog clients.
++                  acquireReadOnlyPreparedModelRuntime(preparedInput, {
++                    abortSignal: laneController.abortSignal,
++                    catalogMode: "static",
++                  })
++                : acquireAgentRunPreparedModelRuntime(preparedInput, {
++                    retainIdleRunOwner,
++                    // Turns need only configured admission facts. Full live model inventory remains
++                    // available through the snapshot's lazy control-plane loader.
++                    catalogMode: "static",
++                    ...(params.pluginGeneration
++                      ? { pluginGeneration: params.pluginGeneration }
++                      : {}),
++                    abortSignal: laneController.abortSignal,
++                  })
++            ).finally(() => {
++              noteLaneTaskProgress();
++              laneController.setLaneTaskDeadline(undefined);
++            }),
++            laneController.abortSignal,
++          );
+           preparedRuntimeResource = preparedModelRuntimeLease;
+           startupStages.mark("prepared-runtime");
+           const preparedModelRuntimeOwnerSnapshot = preparedModelRuntimeLease.snapshot;
+-          let preparedLeaseActive = true;
+           try {
+             throwIfAborted();
+             if (
+@@ -600,13 +584,7 @@ async function runEmbeddedAgentInternal(
+                 context = AsyncLocalStorage.snapshot();
+                 return runPrepared();
+               });
+-            return params.pluginGeneration
+-              ? await withPreparedModelRuntimePluginGenerationScope(
+-                  preparedModelRuntimeLease.pluginGeneration,
+-                  runWithPreparedRuntime,
+-                  () => (preparedLeaseActive ? preparedModelRuntimeOwnerSnapshot : undefined),
+-                )
+-              : await runWithPreparedRuntime();
++            return await preparedModelRuntimeLease.run(runWithPreparedRuntime);
+           } finally {
+             const initialWriter = initialWriterResource;
+             if (initialWriter) {
+@@ -615,7 +593,7 @@ async function runEmbeddedAgentInternal(
+               );
+               void initialWriterCleanup.catch(() => {});
+             }
+-            preparedLeaseActive = false;
++            preparedModelRuntimeLease.closeAdmission();
+           }
+         };
+         // The lane reports its existing result while this owner retains actual cleanup work.
 diff --git a/src/agents/embedded-agent-runner/run-state.ts b/src/agents/embedded-agent-runner/run-state.ts
 index 64507a978a69b2b5524917c8762359fe0a6c46a9..77a91f25a660cabca1affb37053fa78c38ec41b6 100644
 --- a/src/agents/embedded-agent-runner/run-state.ts
@@ -69354,6 +69563,568 @@ index e0d1e1b1b753065bee08e491af957f9143bb3a9b..d1734cf328842f7cf7bf66fa86d80ee1
        taskChannel.unsubscribe(recordFailure);
        observed.close();
        unregister();
+diff --git a/src/agents/prepared-model-runtime-generation-scope.ts b/src/agents/prepared-model-runtime-generation-scope.ts
+index 043dd59878e89f8f7b1fd33be74deffb7b93fab5..07058ecae3934d8e90df008ce1380d198213356f 100644
+--- a/src/agents/prepared-model-runtime-generation-scope.ts
++++ b/src/agents/prepared-model-runtime-generation-scope.ts
+@@ -1,4 +1,5 @@
+ import { AsyncLocalStorage } from "node:async_hooks";
++import { createAbortError } from "../infra/abort-signal.js";
+ import {
+   runOutsideRemoteModelCatalogSnapshot,
+   withRemoteModelCatalogSnapshot,
+@@ -13,6 +14,7 @@ import type {
+ type PreparedModelRuntimeGenerationScope = Readonly<{
+   generation: PreparedModelRuntimePluginGeneration;
+   borrowSnapshot?: () => PreparedModelRuntimeSnapshot | undefined;
++  borrowLease?: () => PreparedModelRuntimeLease | undefined;
+ }>;
+ 
+ // Global singleton keeps one scope instance across lazy module boundaries so a
+@@ -25,22 +27,61 @@ const preparedModelRuntimePluginGenerationScope = resolveGlobalSingleton<
+   AsyncLocalStorage<PreparedModelRuntimeGenerationScope | undefined>
+ >(PREPARED_MODEL_RUNTIME_PLUGIN_GENERATION_SCOPE_KEY, () => new AsyncLocalStorage());
+ 
+-/** Borrow authority closes before the retained generation begins asynchronous disposal. */
+-export function scopePreparedModelRuntimeLease(lease: PreparedModelRuntimeLease) {
++/** Each admitted reference retains the generation; only the final release disposes it. */
++export function scopePreparedModelRuntimeLease(
++  lease: PreparedModelRuntimeLease,
++  abortSignal?: AbortSignal,
++) {
+   let open = true;
+-  let disposal: Promise<void> | undefined;
++  const isOpen = () => open && !abortSignal?.aborted;
++  let references = 0;
++  const retain = () => {
++    references++;
++    let completion: Promise<void> | undefined;
++    return () =>
++      (completion ??=
++        --references === 0
++          ? Promise.resolve().then(() => lease[Symbol.asyncDispose]())
++          : Promise.resolve());
++  };
++  const releaseOwner = retain();
++  const borrowLease = (): PreparedModelRuntimeLease | undefined => {
++    if (!isOpen()) {
++      return undefined;
++    }
++    return {
++      snapshot: lease.snapshot,
++      pluginGeneration: lease.pluginGeneration,
++      [Symbol.asyncDispose]: retain(),
++    };
++  };
+   return {
+     ...lease,
++    closeAdmission() {
++      open = false;
++    },
+     [Symbol.asyncDispose]() {
+       open = false;
+-      return (disposal ??= lease[Symbol.asyncDispose]());
++      // Admission can hand a child to its caller before that child executes.
++      // Releasing this reference must not join the child and block the handoff.
++      return releaseOwner();
+     },
+     run<T>(run: () => T): T {
+-      if (!open) {
++      if (!isOpen()) {
+         throw new Error("Captured reply runtime lease is closed");
+       }
+-      return withPreparedModelRuntimePluginGenerationScope(lease.pluginGeneration, run, () =>
+-        open ? lease.snapshot : undefined,
++      return withPreparedModelRuntimePluginGenerationScope(
++        lease.pluginGeneration,
++        run,
++        () => {
++          if (abortSignal?.aborted) {
++            throw createAbortError("Captured model runtime lease aborted", {
++              cause: abortSignal.reason,
++            });
++          }
++          return open ? lease.snapshot : undefined;
++        },
++        borrowLease,
+       );
+     },
+   };
+@@ -51,13 +92,21 @@ export function withPreparedModelRuntimePluginGenerationScope<T>(
+   generation: PreparedModelRuntimePluginGeneration,
+   run: () => T,
+   borrowSnapshot?: () => PreparedModelRuntimeSnapshot | undefined,
++  borrowLease?: () => PreparedModelRuntimeLease | undefined,
+ ): T {
+   const inherited = preparedModelRuntimePluginGenerationScope.getStore();
+   const borrow =
+     borrowSnapshot ?? (inherited?.generation === generation ? inherited.borrowSnapshot : undefined);
++  const lender =
++    borrowLease ??
++    (!borrowSnapshot && inherited?.generation === generation ? inherited.borrowLease : undefined);
+   return withRemoteModelCatalogSnapshot(generation.remoteCatalog, () =>
+     preparedModelRuntimePluginGenerationScope.run(
+-      { generation, ...(borrow ? { borrowSnapshot: borrow } : {}) },
++      {
++        generation,
++        ...(borrow ? { borrowSnapshot: borrow } : {}),
++        ...(lender ? { borrowLease: lender } : {}),
++      },
+       run,
+     ),
+   );
+@@ -84,3 +133,14 @@ export function getPreparedModelRuntimeBorrowedSnapshot(
+   const current = preparedModelRuntimePluginGenerationScope.getStore();
+   return current?.generation === generation ? current.borrowSnapshot?.() : undefined;
+ }
++
++/** Retains only an exact still-open lender; closing revokes new borrowing synchronously. */
++export function borrowPreparedModelRuntimeLease(
++  generation: PreparedModelRuntimePluginGeneration,
++  snapshot: PreparedModelRuntimeSnapshot,
++): PreparedModelRuntimeLease | undefined {
++  const current = preparedModelRuntimePluginGenerationScope.getStore();
++  return current?.generation === generation && current.borrowSnapshot?.() === snapshot
++    ? current.borrowLease?.()
++    : undefined;
++}
+diff --git a/src/agents/prepared-model-runtime-lease.ts b/src/agents/prepared-model-runtime-lease.ts
+index abc2edc748c7392756d16308b9f22015418e5289..7e575084fc4874dbceb748cc102e115ac9f71c0e 100644
+--- a/src/agents/prepared-model-runtime-lease.ts
++++ b/src/agents/prepared-model-runtime-lease.ts
+@@ -1,10 +1,17 @@
+ /** Agent-run lease admission for lifecycle-owned prepared model runtimes. */
+ import { createAbortError, racePromiseWithAbortSignal } from "../infra/abort-signal.js";
+ import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
+-import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
++import {
++  projectPluginMetadataSnapshot,
++  resolvePluginMetadataSnapshot,
++} from "../plugins/plugin-metadata-snapshot.js";
+ import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
+ import { assertPreparedModelRuntimeAdmissionCanWait } from "./prepared-model-runtime-admission.js";
+-import { getPreparedModelRuntimeBorrowedSnapshot } from "./prepared-model-runtime-generation-scope.js";
++import {
++  borrowPreparedModelRuntimeLease,
++  getPreparedModelRuntimeBorrowedSnapshot,
++  getPreparedModelRuntimePluginGeneration,
++} from "./prepared-model-runtime-generation-scope.js";
+ import { capturePreparedModelRuntimeCatalog } from "./prepared-model-runtime.capture.js";
+ import {
+   isPreparedModelRuntimeMissingOwnerError,
+@@ -109,6 +116,22 @@ export async function acquirePreparedModelRuntimeLeaseFromOwners(
+   const requestedSelections = deriveSelections
+     ? structuredClone(rawInput.runtimePluginSelections ?? [])
+     : [];
++  const prepareSelections = (
++    candidate: PreparedModelRuntimeInput,
++    metadataSnapshot: NonNullable<PreparedModelRuntimeLeaseOptions["pluginMetadataSnapshot"]>,
++  ) =>
++    withPluginMetadataSnapshotScope(
++      metadataSnapshot,
++      () =>
++        normalizePreparedModelRuntimeInput({
++          ...candidate,
++          runtimePluginSelections: [
++            ...requestedSelections,
++            ...deriveSelections!({ config: candidate.config, metadataSnapshot }),
++          ],
++        }),
++      { trustConfigIdentity: true },
++    );
+   let input = normalizePreparedModelRuntimeInput({
+     ...rawInput,
+     preserveWorkspaceDirOnRefresh:
+@@ -154,6 +177,59 @@ export async function acquirePreparedModelRuntimeLeaseFromOwners(
+     }
+     previousAttempt = attempt;
+     supersededPublication = undefined;
++    // An exact live lender already owns the work that replacement must drain. Finish
++    // covered nested work before waiting, without publishing or admitting new plugin work.
++    const lenderGeneration = admittedGeneration ?? getPreparedModelRuntimePluginGeneration();
++    const lenderSnapshot =
++      lenderGeneration && getPreparedModelRuntimeBorrowedSnapshot(lenderGeneration);
++    const lenderOwner = resolveConfiguredOwner(context.owners, input);
++    if (
++      provenance === "run" &&
++      context.getGatewayLifecycleActive() &&
++      options.catalogMode !== "live" &&
++      lenderGeneration &&
++      lenderSnapshot &&
++      lenderOwner &&
++      !lenderOwner.needsRefresh &&
++      !lenderOwner.pending &&
++      !lenderOwner.refreshError &&
++      lenderSnapshot.isCurrent() &&
++      lenderSnapshot.metadataSnapshot === lenderGeneration.pluginMetadataSnapshot &&
++      (!options.pluginMetadataSnapshot ||
++        options.pluginMetadataSnapshot ===
++          projectPluginMetadataSnapshot(
++            lenderSnapshot.metadataSnapshot,
++            options.pluginMetadataSnapshot.pluginIds,
++          )) &&
++      preparedModelRuntimeConfigsMatch(lenderSnapshot.config, input.config) &&
++      lenderSnapshot.agentId === input.agentId &&
++      lenderSnapshot.agentDir === input.agentDir &&
++      lenderSnapshot.inheritedAuthDir === input.inheritedAuthDir &&
++      lenderSnapshot.workspaceDir === input.workspaceDir &&
++      (!input.allowGatewaySubagentBinding || lenderSnapshot.allowGatewaySubagentBinding) &&
++      (!input.loadRuntimePlugins || lenderSnapshot.pluginRegistry !== undefined) &&
++      !input.readOnly &&
++      !input.skipCredentials &&
++      !input.env
++    ) {
++      const selected = deriveSelections
++        ? prepareSelections(input, lenderSnapshot.metadataSnapshot)
++        : input;
++      if (
++        preparedPluginGenerationSupportsSelections(lenderGeneration, selected) &&
++        lenderSnapshot.isCurrent() &&
++        resolveConfiguredOwner(context.owners, input) === lenderOwner &&
++        !lenderOwner.needsRefresh &&
++        !lenderOwner.pending &&
++        !lenderOwner.refreshError
++      ) {
++        assertAdmission();
++        const lease = borrowPreparedModelRuntimeLease(lenderGeneration, lenderSnapshot);
++        if (lease) {
++          return lease;
++        }
++      }
++    }
+     if (replacement) {
+       lastExternalPublication = replacement.promise;
+       assertPreparedModelRuntimeAdmissionCanWait();
+@@ -210,21 +286,7 @@ export async function acquirePreparedModelRuntimeLeaseFromOwners(
+           workspaceDir: input.workspaceDir,
+           allowWorkspaceScopedCurrent: true,
+         });
+-      const metadataSnapshot = pluginMetadataSnapshot;
+-      input = withPluginMetadataSnapshotScope(
+-        metadataSnapshot,
+-        () => {
+-          const derived = deriveSelections({
+-            config: input.config,
+-            metadataSnapshot,
+-          });
+-          return normalizePreparedModelRuntimeInput({
+-            ...input,
+-            runtimePluginSelections: [...requestedSelections, ...derived],
+-          });
+-        },
+-        { trustConfigIdentity: true },
+-      );
++      input = prepareSelections(input, pluginMetadataSnapshot);
+     }
+     key = ownerKey(input);
+     if (provenance === "run" && context.getGatewayLifecycleActive() && admittedGeneration) {
+diff --git a/src/agents/prepared-model-runtime.admitted-drain.test.ts b/src/agents/prepared-model-runtime.admitted-drain.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7e44d2ef92872b4ec5f226f5928c4236bb48d625
+--- /dev/null
++++ b/src/agents/prepared-model-runtime.admitted-drain.test.ts
+@@ -0,0 +1,301 @@
++// Preserve module setup before modules that consume it.
++// oxfmt-ignore
++import { usePreparedModelRuntimeHarness } from "./prepared-model-runtime.test-harness.js";
++import { AsyncLocalStorage } from "node:async_hooks";
++import { expect, it, vi } from "vitest";
++import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
++import { markPluginRegistryActive } from "../plugins/registry-lifecycle.js";
++import { createTestPluginRegistry } from "../plugins/registry-runtime.test-helpers.js";
++import { runOutsidePluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
++import { createPluginRecord } from "../plugins/status.test-helpers.js";
++import { createDeferredCore } from "../shared/deferred.js";
++import * as pluginSelections from "./harness/runtime-plugin-load-plan.js";
++import { scopePreparedModelRuntimeLease } from "./prepared-model-runtime-generation-scope.js";
++import {
++  acquireAgentRunPreparedModelRuntime,
++  beginPreparedModelRuntimePluginDrain,
++  prepareModelRuntimeSnapshot,
++  markPreparedModelRuntimeSnapshotsStale,
++  refreshPreparedModelRuntimeSnapshots,
++} from "./prepared-model-runtime.js";
++
++const fixture = usePreparedModelRuntimeHarness({ label: "admitted-runtime-drain" });
++
++async function setup(abortSignal?: AbortSignal) {
++  const config = {};
++  fixture.mocks.authStorage.getAll.mockReturnValue({});
++  fixture.mocks.configuredAgentIds = ["default"];
++  await refreshPreparedModelRuntimeSnapshots(config, { gatewayLifecycle: true });
++  const builder = createTestPluginRegistry();
++  const record = createPluginRecord({ id: "admitted-donor", source: "/synthetic/donor.ts" });
++  builder.registry.plugins.push(record);
++  builder.createApi(record, { config });
++  markPluginRegistryActive(builder.registry);
++  fixture.mocks.loadAgentRuntimePluginRegistryHandle.mockReturnValue(builder.registry);
++  const input = {
++    ...fixture.agentInput("default", config),
++    workspaceDir: "/tmp/unused-workspace",
++    loadRuntimePlugins: true,
++  };
++  const parent = scopePreparedModelRuntimeLease(
++    await acquireAgentRunPreparedModelRuntime(input),
++    abortSignal,
++  );
++  return { input, parent, donor: getPluginInstance(record)! };
++}
++
++it.each(["compaction", "synthesis"] as const)(
++  "finishes admitted %s during drain and retains the original work until derived release",
++  async (operation) => {
++    const { input, parent, donor } = await setup();
++    const releaseReplacement = donor.reserveReplacement();
++    const drain = beginPreparedModelRuntimePluginDrain();
++    let nested: Awaited<ReturnType<typeof acquireAgentRunPreparedModelRuntime>> | undefined;
++    try {
++      // These are the executable acquisition paths used by compact.ts and runtime.llm.complete.
++      nested = await parent.run(() =>
++        runOutsidePluginRuntimeGenerationScope(() =>
++          acquireAgentRunPreparedModelRuntime(
++            { ...input, loadRuntimePlugins: operation === "synthesis" },
++            {
++              catalogMode: "static",
++              ...(operation === "compaction" ? { deriveRuntimePluginSelections: () => [] } : {}),
++            },
++          ),
++        ),
++      );
++      expect(nested.snapshot).toBe(parent.snapshot);
++      expect(nested.pluginGeneration).toBe(parent.pluginGeneration);
++      let drained = false;
++      const drainCompletion = donor.waitForRetainedWork(new AbortController().signal).then(() => {
++        drained = true;
++      });
++      let ownerReleased = false;
++      const ownerRelease = parent[Symbol.asyncDispose]().then(() => {
++        ownerReleased = true;
++      });
++      expect(() => parent.run(() => undefined)).toThrow("closed");
++      await prepareModelRuntimeSnapshot(fixture.agentInput("default", input.config), {
++        readPublished: true,
++      });
++      expect(ownerReleased).toBe(true);
++      expect(drained).toBe(false);
++      expect(donor.retainedWorkCount).toBeGreaterThan(0);
++      await nested[Symbol.asyncDispose]();
++      await ownerRelease;
++      await drainCompletion;
++      expect(donor.retainedWorkCount).toBe(0);
++    } finally {
++      await nested?.[Symbol.asyncDispose]();
++      await parent[Symbol.asyncDispose]();
++      drain.release();
++      releaseReplacement();
++      await donor.dispose();
++    }
++  },
++);
++
++it("returns a prepared child from an await-using parent before the child executes", async () => {
++  const { input, parent, donor } = await setup();
++  const prepare = async () => {
++    await using owner = parent;
++    return await owner.run(() => acquireAgentRunPreparedModelRuntime(input));
++  };
++  await using child = await prepare();
++  expect(child.snapshot).toBe(parent.snapshot);
++  expect(donor.retainedWorkCount).toBeGreaterThan(0);
++  await child[Symbol.asyncDispose]();
++  expect(donor.retainedWorkCount).toBe(0);
++});
++
++it("keeps the owner's claim after a child releases and admission closes", async () => {
++  const { input, parent, donor } = await setup();
++  await using owner = parent;
++  const child = await owner.run(() => acquireAgentRunPreparedModelRuntime(input));
++  owner.closeAdmission();
++  expect(() => owner.run(() => undefined)).toThrow("closed");
++  await child[Symbol.asyncDispose]();
++  await child[Symbol.asyncDispose]();
++  expect(donor.retainedWorkCount).toBeGreaterThan(0);
++  await owner[Symbol.asyncDispose]();
++  expect(donor.retainedWorkCount).toBe(0);
++});
++
++it("retains a grandchild after parent handoff and child cancellation", async () => {
++  const { input, parent, donor } = await setup();
++  await using owner = parent;
++  const abort = new AbortController();
++  await using child = scopePreparedModelRuntimeLease(
++    await owner.run(() => acquireAgentRunPreparedModelRuntime(input)),
++    abort.signal,
++  );
++  await owner[Symbol.asyncDispose]();
++  await using grandchild = await child.run(() => acquireAgentRunPreparedModelRuntime(input));
++  abort.abort();
++  expect(() => child.run(() => undefined)).toThrow("closed");
++  await child[Symbol.asyncDispose]();
++  expect(donor.retainedWorkCount).toBeGreaterThan(0);
++  await grandchild[Symbol.asyncDispose]();
++  expect(donor.retainedWorkCount).toBe(0);
++});
++
++it.each(["resolve", "reject"] as const)(
++  "shares final disposal completion when underlying release will %s",
++  async (outcome) => {
++    const { input, parent, donor } = await setup();
++    const gate = createDeferredCore();
++    const failure = new Error("synthetic disposal failure");
++    const release = vi.fn(async () => {
++      try {
++        await gate.promise;
++      } finally {
++        await parent[Symbol.asyncDispose]();
++      }
++    });
++    const owner = scopePreparedModelRuntimeLease({ ...parent, [Symbol.asyncDispose]: release });
++    const child = await owner.run(() => acquireAgentRunPreparedModelRuntime(input));
++    await owner[Symbol.asyncDispose]();
++    expect(release).not.toHaveBeenCalled();
++    let settled = false;
++    const disposal = child[Symbol.asyncDispose]();
++    const observed = disposal.then(
++      () => {
++        settled = true;
++        return undefined;
++      },
++      (error: unknown) => {
++        settled = true;
++        return error;
++      },
++    );
++    expect(child[Symbol.asyncDispose]()).toBe(disposal);
++    await Promise.resolve();
++    expect(release).toHaveBeenCalledOnce();
++    expect(settled).toBe(false);
++    expect(donor.retainedWorkCount).toBeGreaterThan(0);
++    if (outcome === "reject") {
++      gate.reject(failure);
++    } else {
++      gate.resolve();
++    }
++    expect(await observed).toBe(outcome === "reject" ? failure : undefined);
++    expect(child[Symbol.asyncDispose]()).toBe(disposal);
++    expect(release).toHaveBeenCalledOnce();
++    expect(donor.retainedWorkCount).toBe(0);
++  },
++);
++
++it("does not lend a closed lease or admit a fresh reader through a pending drain", async () => {
++  const { input, parent, donor } = await setup();
++  const captured = parent.run(() => AsyncLocalStorage.snapshot());
++  await parent[Symbol.asyncDispose]();
++  const releaseReplacement = donor.reserveReplacement();
++  const drain = beginPreparedModelRuntimePluginDrain();
++  const abort = new AbortController();
++  try {
++    const acquisition = captured(() =>
++      acquireAgentRunPreparedModelRuntime(input, { abortSignal: abort.signal }),
++    );
++    await prepareModelRuntimeSnapshot(fixture.agentInput("default", input.config), {
++      readPublished: true,
++    });
++    abort.abort(new Error("fresh admission remains behind drain"));
++    await expect(acquisition).rejects.toMatchObject({ name: "AbortError" });
++  } finally {
++    abort.abort();
++    drain.release();
++    releaseReplacement();
++    await donor.dispose();
++  }
++});
++
++it("refuses a cancelled nested lease without extending admitted work", async () => {
++  const { input, parent, donor } = await setup();
++  const releaseReplacement = donor.reserveReplacement();
++  const drain = beginPreparedModelRuntimePluginDrain();
++  const abort = new AbortController();
++  abort.abort();
++  try {
++    const count = donor.retainedWorkCount;
++    await expect(
++      parent.run(() => acquireAgentRunPreparedModelRuntime(input, { abortSignal: abort.signal })),
++    ).rejects.toMatchObject({ name: "AbortError" });
++    expect(donor.retainedWorkCount).toBe(count);
++  } finally {
++    await parent[Symbol.asyncDispose]();
++    drain.release();
++    releaseReplacement();
++    await donor.dispose();
++  }
++});
++
++it.each(["config", "agent", "auth", "workspace", "selection", "auth-invalidated"] as const)(
++  "does not lend admitted work to a changed %s request",
++  async (change) => {
++    const { input, parent, donor } = await setup();
++    const captured = parent.run(() => AsyncLocalStorage.snapshot());
++    const releaseReplacement = donor.reserveReplacement();
++    const drain = beginPreparedModelRuntimePluginDrain();
++    const selection =
++      change === "selection"
++        ? vi.spyOn(pluginSelections, "resolveAgentRuntimePluginSelectionOwners").mockReturnValue({
++            pluginIds: ["not-admitted"],
++            forceActivatedPluginIds: ["not-admitted"],
++          })
++        : undefined;
++    try {
++      if (change === "auth-invalidated") {
++        markPreparedModelRuntimeSnapshotsStale("credentials changed");
++      }
++      await expect(
++        captured(() =>
++          acquireAgentRunPreparedModelRuntime({
++            ...input,
++            ...(change === "config" ? { config: { logging: { level: "debug" } } } : {}),
++            ...(change === "agent" ? { agentId: "different" } : {}),
++            ...(change === "auth" ? { inheritedAuthDir: "/synthetic/different-auth" } : {}),
++            ...(change === "workspace" ? { workspaceDir: "/synthetic/different-workspace" } : {}),
++            ...(change === "selection"
++              ? { runtimePluginSelections: [{ provider: "not-admitted", modelId: "model" }] }
++              : {}),
++          }),
++        ),
++      ).rejects.toMatchObject({ admissionBlocked: true });
++    } finally {
++      selection?.mockRestore();
++      await parent[Symbol.asyncDispose]();
++      drain.release();
++      releaseReplacement();
++      await donor.dispose();
++    }
++  },
++);
++
++it("revokes a captured lender on parent cancellation", async () => {
++  const abort = new AbortController();
++  const { input, parent, donor } = await setup(abort.signal);
++  const captured = parent.run(() => AsyncLocalStorage.snapshot());
++  const releaseReplacement = donor.reserveReplacement();
++  const drain = beginPreparedModelRuntimePluginDrain();
++  try {
++    abort.abort();
++    expect(() => parent.run(() => undefined)).toThrow("closed");
++    // Caller omission cannot turn cancellation of its admitting lease into a reload wait.
++    const acquisition = captured(() => acquireAgentRunPreparedModelRuntime(input));
++    const result = acquisition.then(
++      async (lease) => {
++        await lease[Symbol.asyncDispose]();
++        return undefined;
++      },
++      (error: unknown) => error,
++    );
++    releaseReplacement();
++    drain.release();
++    expect(await result).toMatchObject({ name: "AbortError" });
++  } finally {
++    await parent[Symbol.asyncDispose]();
++    drain.release();
++    releaseReplacement();
++    await donor.dispose();
++  }
++});
 diff --git a/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts b/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts
 index 67d943a7192db961251ae3a1503bec573a933c91..d197c47dd31659a28bb6f0b2ae79ad47fd863cc5 100644
 --- a/src/agents/prepared-model-runtime.hot-reload-dispatch.test.ts
@@ -81183,7 +81954,7 @@ index 488655d36b5f20c3669deffecb948286a36a088b..50c7d67d2fa0568d2e2ec1cf2ad25e7d
              await pending;
              expect(subagentRuns.get(runId)).toMatchObject({
 diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
-index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f3088785301 100644
+index d2fc1aa955e0647124f29ef779b643c6ca50ad03..e9523fc446e2ecbb441d2089ff0c2f1ef7125b52 100644
 --- a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
 @@ -58,7 +58,8 @@ type GatewayResponse = {
@@ -81196,7 +81967,15 @@ index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f30
  let agentCallGates = new Map<string, Promise<void>>();
  let releaseAgentCallGate: (() => void) | undefined;
  let agentCallObserved = createDeferred();
-@@ -228,8 +229,10 @@ describe("requester settle wake product flow", () => {
+@@ -100,6 +101,7 @@ const callGatewayMock = vi.fn(async (request: GatewayRequest): Promise<GatewayRe
+       }
+     }
+     return {
++      status: "ok",
+       result: {
+         payloads: [{ text: "completion delivered" }],
+         deliveryStatus: { status: "sent", resultCount: 1 },
+@@ -228,8 +230,10 @@ describe("requester settle wake product flow", () => {
      vi.mocked(callGateway).mockImplementation(callGatewayMock as typeof callGateway);
      vi.mocked(loadAgentRuntimePluginRegistryHandle).mockReset();
      vi.mocked(onAgentEvent).mockImplementation((handler) => {
@@ -81209,7 +81988,7 @@ index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f30
      });
      agentCallGates = new Map();
      agentCallObserved = createDeferred();
-@@ -312,7 +315,7 @@ describe("requester settle wake product flow", () => {
+@@ -312,7 +316,7 @@ describe("requester settle wake product flow", () => {
          await settleRootWork();
        }
      } finally {
@@ -81218,7 +81997,7 @@ index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f30
        subagentAnnounceDeliveryTesting.setDepsForTest();
        subagentAnnounceOutputTesting.setDepsForTest();
        subagentAnnounceTesting.setDepsForTest();
-@@ -383,10 +386,10 @@ describe("requester settle wake product flow", () => {
+@@ -383,10 +387,10 @@ describe("requester settle wake product flow", () => {
      modelRouteChange?: string,
    ) => {
      chatHistoryBySessionKey.set(childSessionKey, [{ role: "assistant", content: text }]);
@@ -81231,7 +82010,7 @@ index d2fc1aa955e0647124f29ef779b643c6ca50ad03..27f39809a5c355aed8d2e7079b4c9f30
        stream: "lifecycle",
        runId,
        seq: 1,
-@@ -401,7 +404,10 @@ describe("requester settle wake product flow", () => {
+@@ -401,7 +405,10 @@ describe("requester settle wake product flow", () => {
            ...(modelRouteChange ? { modelRouteChange } : {}),
          },
        },
@@ -83843,6 +84622,47 @@ index 689576cf359e678401861775bfeb068b2436e600..83d1ea03c7d7766b63f87571479aeebf
        ...skillsSection,
        ...skillWorkshopSection,
        ...memorySection,
+diff --git a/src/agents/test-helpers/embedded-agent-runner-e2e-mocks.ts b/src/agents/test-helpers/embedded-agent-runner-e2e-mocks.ts
+index 7365f88dbd7f616af39565369c9053e9c90cefd3..a978842bb3f2a006a564d4120d14e91750b8337c 100644
+--- a/src/agents/test-helpers/embedded-agent-runner-e2e-mocks.ts
++++ b/src/agents/test-helpers/embedded-agent-runner-e2e-mocks.ts
+@@ -13,6 +13,7 @@ import type { EmbeddedRunAttemptParams } from "../embedded-agent-runner/run/type
+ import { preparedModelRuntimeConfigsMatch } from "../prepared-model-runtime.owner.js";
+ import type {
+   PreparedModelRuntimeInput,
++  PreparedModelRuntimeLease,
+   PreparedModelRuntimeSnapshot,
+ } from "../prepared-model-runtime.types.js";
+ 
+@@ -115,7 +116,9 @@ export function installEmbeddedRunnerBaseE2eMocks(options?: {
+     ),
+   }));
+   vi.doMock("../prepared-model-runtime.js", () => {
+-    const acquire = async (input: PreparedModelRuntimeInput) => {
++    const acquire = async (
++      input: PreparedModelRuntimeInput,
++    ): Promise<PreparedModelRuntimeLease> => {
+       if (!input.readOnly) {
+         const { ensureOpenClawModelsJson } = await import("../models-config.js");
+         await ensureOpenClawModelsJson(
+@@ -124,8 +127,16 @@ export function installEmbeddedRunnerBaseE2eMocks(options?: {
+           input.workspaceDir !== undefined ? { workspaceDir: input.workspaceDir } : {},
+         );
+       }
++      const snapshot = createEmptyPreparedModelRuntimeSnapshot(input, options?.pluginRegistry);
+       return {
+-        snapshot: createEmptyPreparedModelRuntimeSnapshot(input, options?.pluginRegistry),
++        snapshot,
++        pluginGeneration: {
++          remoteCatalog: null,
++          pluginMetadataSnapshot: snapshot.metadataSnapshot,
++          inlineProviderModels: snapshot.inlineProviderModels,
++          configuredCatalogEntries: snapshot.modelCatalog.entries,
++          pluginRegistry: snapshot.pluginRegistry,
++        },
+         [Symbol.asyncDispose]: vi.fn(async () => {}),
+       };
+     };
 diff --git a/src/agents/tool-description-presets.test.ts b/src/agents/tool-description-presets.test.ts
 index a328d2253aae173a0ccb6e946a298caa93bdfe3e..13e68bf0d0dce5b689a24b466c6099fcc3362c56 100644
 --- a/src/agents/tool-description-presets.test.ts
@@ -98723,6 +99543,81 @@ index 0000000000000000000000000000000000000000..f13e78f5bce1c7a645086f489198696b
 +    }
 +  });
 +}
+diff --git a/src/auto-reply/reply/get-reply-run.ts b/src/auto-reply/reply/get-reply-run.ts
+index 80fafbaaf9f5e4deeaa46ab289898b022017068f..a36e06014df26c3ec19bec66553bc29bd3c0c1b4 100644
+--- a/src/auto-reply/reply/get-reply-run.ts
++++ b/src/auto-reply/reply/get-reply-run.ts
+@@ -1,4 +1,4 @@
+-import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prepared-model-runtime-generation-scope.js";
++import { scopePreparedModelRuntimeLease } from "../../agents/prepared-model-runtime-generation-scope.js";
+ import { withPluginRuntimeGenerationScope } from "../../plugins/runtime/generation-scope.js";
+ import type { ReplyPayload } from "../types.js";
+ import { prepareReplyRunAdmission } from "./get-reply-run-admission.js";
+@@ -32,38 +32,31 @@ export async function runPreparedReply(
+ 
+   const { acquireAgentRunPreparedModelRuntime } =
+     await import("../../agents/prepared-model-runtime.js");
+-  await using lease = await acquireAgentRunPreparedModelRuntime(
+-    {
+-      config: dispatchRuntime.config,
+-      agentId: dispatchRuntime.agentId,
+-      agentDir: dispatchRuntime.agentDir,
+-      allowGatewaySubagentBinding: true,
+-      workspaceDir: context.workspaceDir,
+-      runtimePluginSelections: [
+-        {
+-          provider: params.provider,
+-          modelId: params.model,
+-          runtime: context.thinkingRuntime,
+-        },
+-      ],
+-    },
+-    {
+-      catalogMode: "static",
+-      pluginGeneration: dispatchRuntime.pluginGeneration,
+-      abortSignal: params.opts?.abortSignal,
+-    },
++  await using lease = scopePreparedModelRuntimeLease(
++    await acquireAgentRunPreparedModelRuntime(
++      {
++        config: dispatchRuntime.config,
++        agentId: dispatchRuntime.agentId,
++        agentDir: dispatchRuntime.agentDir,
++        allowGatewaySubagentBinding: true,
++        workspaceDir: context.workspaceDir,
++        runtimePluginSelections: [
++          {
++            provider: params.provider,
++            modelId: params.model,
++            runtime: context.thinkingRuntime,
++          },
++        ],
++      },
++      {
++        catalogMode: "static",
++        pluginGeneration: dispatchRuntime.pluginGeneration,
++        abortSignal: params.opts?.abortSignal,
++      },
++    ),
++    params.opts?.abortSignal,
++  );
++  return await lease.run(() =>
++    withPluginRuntimeGenerationScope(lease.snapshot, () => executePreparedReplyContext(context)),
+   );
+-  let leaseActive = true;
+-  try {
+-    return await withPreparedModelRuntimePluginGenerationScope(
+-      lease.pluginGeneration,
+-      () =>
+-        withPluginRuntimeGenerationScope(lease.snapshot, () =>
+-          executePreparedReplyContext(context),
+-        ),
+-      () => (leaseActive ? lease.snapshot : undefined),
+-    );
+-  } finally {
+-    leaseActive = false;
+-  }
+ }
 diff --git a/src/auto-reply/reply/get-reply.types.ts b/src/auto-reply/reply/get-reply.types.ts
 index 8640de17a6f37cd66dc4cbd1c01bdc72b780e5e1..7383a92f7e26b316d3efb3f6852ea85ac39cc6f0 100644
 --- a/src/auto-reply/reply/get-reply.types.ts
@@ -118762,6 +119657,159 @@ index e72d2483734be8026fcaa821b3adf825688f3a03..55c54d52e7f5adf018723cf6514d6a4d
          params.logCron.error(`failed to start: ${String(err)}`);
          // Recovery callbacks must run before this independent root releases its
          // admission fence; restart and suspension cannot race past this point.
+diff --git a/src/gateway/server.agent-late-admission.test.ts b/src/gateway/server.agent-late-admission.test.ts
+index 41d6792b3911a6046435b9582b7e6a4327529ab8..f4167c2da354cca9da24256998dc28b96f57b648 100644
+--- a/src/gateway/server.agent-late-admission.test.ts
++++ b/src/gateway/server.agent-late-admission.test.ts
+@@ -1,10 +1,18 @@
++import { rawDataToString } from "@openclaw/gateway-client/websocket-data";
+ import { describe, expect, it, vi } from "vitest";
+-import { createDeferred } from "../../test/helpers/promise.js";
++import {
++  awaitGateBeforeSettlement,
++  createDeferred,
++  withinTest,
++} from "../../test/helpers/promise.js";
++import * as runtimeScope from "../agents/prepared-model-runtime-generation-scope.js";
++import type { PreparedModelRuntimeLease } from "../agents/prepared-model-runtime.types.js";
+ import { startGatewayServerHarness, type GatewayServerHarness } from "./server.e2e-ws-harness.js";
+ import {
+   agentCommandMock,
+   installGatewayTestHooks,
+   prepareGatewayReplyRuntimeForTest,
++  testState,
+ } from "./test-helpers.js";
+ 
+ describe("Gateway close during agent admission", () => {
+@@ -37,6 +45,128 @@ describe("Gateway close during agent admission", () => {
+     },
+   });
+ 
++  it("hands the borrowed prepared runtime to an ordinary agent turn before releasing it", async ({
++    signal,
++  }) => {
++    testState.agentsConfig = { entries: { main: {} } };
++    testState.agentConfig = { model: { primary: "anthropic/claude-opus-4-6" } };
++    await prepareGatewayReplyRuntimeForTest();
++    const executionModule = await import("./agent-turn/agent-run-execution-phase.js");
++    const execute = executionModule.startAgentRunExecution;
++    let executionCompletion: ReturnType<typeof execute> | undefined;
++    const executionObserver = vi
++      .spyOn(executionModule, "startAgentRunExecution")
++      .mockImplementationOnce((params) => {
++        executionCompletion = execute(params);
++        return executionCompletion;
++      });
++    const borrowed: PreparedModelRuntimeLease[] = [];
++    const released = new Set<PreparedModelRuntimeLease>();
++    const borrow = runtimeScope.borrowPreparedModelRuntimeLease;
++    const borrowObserver = vi
++      .spyOn(runtimeScope, "borrowPreparedModelRuntimeLease")
++      .mockImplementation((...args) => {
++        const lease = borrow(...args);
++        if (lease) {
++          borrowed.push(lease);
++          const dispose = lease[Symbol.asyncDispose].bind(lease);
++          vi.spyOn(lease, Symbol.asyncDispose).mockImplementation(async () => {
++            await dispose();
++            released.add(lease);
++          });
++        }
++        return lease;
++      });
++    const entered = createDeferred();
++    const accepted = createDeferred();
++    const release = createDeferred();
++    const terminal = createDeferred<{
++      ok?: boolean;
++      payload?: { status?: string; result?: { payloads?: Array<{ text?: string }> } };
++    }>();
++    const acceptance: string[] = [];
++    vi.mocked(agentCommandMock).mockReset();
++    vi.mocked(agentCommandMock).mockImplementationOnce(async () => {
++      entered.resolve();
++      await release.promise;
++      return {
++        payloads: [{ text: "prepared runtime handoff completed" }],
++        meta: { durationMs: 1 },
++      };
++    });
++    const { ws } = await harness.openClient();
++    const record = (data: import("ws").RawData) => {
++      const frame = JSON.parse(rawDataToString(data)) as {
++        type?: string;
++        id?: string;
++        ok?: boolean;
++        payload?: { status?: string; result?: { payloads?: Array<{ text?: string }> } };
++      };
++      if (frame.type !== "res" || frame.id !== "prepared-runtime-handoff") {
++        return;
++      }
++      if (frame.payload?.status === "accepted") {
++        acceptance.push(frame.payload.status);
++        accepted.resolve();
++      } else {
++        terminal.resolve(frame);
++      }
++    };
++    ws.on("message", record);
++    try {
++      ws.send(
++        JSON.stringify({
++          type: "req",
++          id: "prepared-runtime-handoff",
++          method: "agent",
++          params: {
++            message: "complete the prepared runtime handoff",
++            sessionKey: "main",
++            deliver: false,
++            idempotencyKey: "prepared-runtime-handoff",
++          },
++        }),
++      );
++      await withinTest(
++        awaitGateBeforeSettlement(
++          Promise.all([entered.promise, accepted.promise]),
++          terminal.promise.then((frame) => {
++            expect(frame).toMatchObject({ ok: true });
++          }),
++          "Agent settled before executing the prepared runtime handoff",
++        ),
++        signal,
++      );
++      expect(borrowed.length).toBeGreaterThan(0);
++      expect(acceptance).toEqual(["accepted"]);
++      release.resolve();
++      expect(await withinTest(terminal.promise, signal)).toMatchObject({
++        ok: true,
++        payload: {
++          status: "ok",
++          result: { payloads: [{ text: "prepared runtime handoff completed" }] },
++        },
++      });
++      expect(agentCommandMock).toHaveBeenCalledOnce();
++      if (!executionCompletion) {
++        throw new Error("Agent execution did not start");
++      }
++      await withinTest(executionCompletion, signal);
++      expect(released.size).toBe(borrowed.length);
++      expect(
++        kernel.gatewayRequestContext.chatAbortControllers.has("prepared-runtime-handoff"),
++      ).toBe(false);
++    } finally {
++      release.resolve();
++      // A failing admission must not keep its retained runtime alive through suite teardown.
++      await Promise.all(borrowed.map((lease) => lease[Symbol.asyncDispose]()));
++      borrowObserver.mockRestore();
++      executionObserver.mockRestore();
++      ws.off("message", record);
++      ws.close();
++    }
++  });
++
+   it("refuses provider execution when close overtakes acquired but unregistered WS work", async ({
+     signal,
+   }) => {
 diff --git a/src/gateway/server.agent.gateway-server-agent-b.test.ts b/src/gateway/server.agent.gateway-server-agent-b.test.ts
 index bb17eb9a4ea8b8f993ef4d165c78860a707241bf..a09cebc67d0cbcd6b0cdfbc414533ea9c2c141f4 100644
 --- a/src/gateway/server.agent.gateway-server-agent-b.test.ts
