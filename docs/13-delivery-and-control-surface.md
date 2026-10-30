@@ -45,6 +45,18 @@ editing the progress card. Do not mix fresh progress posts with edits to an olde
 card for the same request. Policy sets the expected cadence; native run ownership
 keeps continuation updates attached to that card.
 
+The Discord adapter returns the edited message's actual ID in the shared action
+result. This lets continuation confirm a successful progress edit instead of
+mistaking it for a failed delivery and sending another message. A missing or
+different returned ID is not replaced with the requested ID.
+
+A correction received while a worker is still completing can acknowledge the
+change on that same progress card, including after the parent has yielded. The
+existing continuation must still belong to the exact requester, conversation and
+worker cohort. Only a sole confirmed acknowledgment that ends its tool batch
+avoids another reply. Mixed tool batches, independent answers and errors keep
+their normal delivery.
+
 `channels.discord.streaming.progress.narration: false` omits generic tool-status
 narration. Keep authored `commentary` enabled when wanted; `toolProgress` controls
 tool progress separately. The editable progress card uses `streaming.mode:

@@ -3911,6 +3911,110 @@ index 1c6068c1fa7cd41629665c2c05f64ef887c46bb9..6fc6718ce64b732009cf65a4228919b7
  // while runtime-api.js remains the broad runtime surface.
 -export { setDiscordBackgroundRunner, setDiscordRuntime } from "./src/runtime.js";
 +export { setDiscordRuntime } from "./src/runtime.js";
+diff --git a/extensions/discord/src/actions/message-bodies.test.ts b/extensions/discord/src/actions/message-bodies.test.ts
+index f2c8670635ddce6f00ee0fc7a3344718f8157620..d1d9b97749b40f34761ce89b5484bc671aee6983 100644
+--- a/extensions/discord/src/actions/message-bodies.test.ts
++++ b/extensions/discord/src/actions/message-bodies.test.ts
+@@ -50,7 +50,6 @@ let current: { content: string; attachments: (typeof attachment)[] };
+ let unexpectedUrls: string[];
+ let parentChannelType: number;
+ let threadMessageIds: string[];
+-let editedMessageId: string | undefined;
+ 
+ beforeAll(async () => {
+   server = createServer((request, response) => {
+@@ -82,9 +81,6 @@ beforeAll(async () => {
+                 name: "synthetic-channel",
+               }
+           : { id: messageId, channel_id: channelId, ...current, ...body };
+-      if (method === "PATCH") {
+-        result.id = editedMessageId;
+-      }
+       if (method === "POST" && path.endsWith("/threads")) {
+         result = {
+           id: threadId,
+@@ -158,7 +154,6 @@ beforeEach(() => {
+   unexpectedUrls = [];
+   parentChannelType = 0;
+   threadMessageIds = [];
+-  editedMessageId = messageId;
+   current = { content: "Initial caption", attachments: [attachment] };
+ });
+ 
+@@ -231,7 +226,7 @@ describe("Discord retained progress edits", () => {
+         },
+       },
+     };
+-    const result = await discordMessageActions.handleAction?.({
++    await discordMessageActions.handleAction?.({
+       channel: "discord",
+       action: "edit",
+       cfg: accountCfg,
+@@ -252,9 +247,6 @@ describe("Discord retained progress edits", () => {
+     expect(current.content).toContain("Verify the child result");
+     expect(current.content).not.toContain("Generic fallback");
+     expect(current.attachments).toEqual([attachment]);
+-    expect(result?.details).toMatchObject({ ok: true, messageId });
+-    const text = result?.content.find((block) => block.type === "text");
+-    expect(text?.type === "text" ? JSON.parse(text.text) : undefined).toEqual(result?.details);
+   });
+ 
+   it("bounds a retained edit to one configured Discord message", async () => {
+@@ -424,23 +416,11 @@ describe("Discord action message bodies", () => {
+ 
+   it("normalizes identifiers without normalizing the message body", async () => {
+     const content = "  Changed caption\n";
+-    const result = await edit(content, cfg, ` ${messageId} `);
++    await edit(content, cfg, ` ${messageId} `);
+     expectEdit(channelId, content);
+     expect(current).toEqual({ content, attachments: [attachment] });
+-    expect(result.details).toMatchObject({ ok: true, messageId });
+   });
+ 
+-  it.each([undefined, "723456789012345678"])(
+-    "does not replace the provider's edit receipt %j with the requested ID",
+-    async (returnedId) => {
+-      editedMessageId = returnedId;
+-      const result = await edit("Changed caption");
+-      expectEdit(channelId, "Changed caption");
+-      expect(result.details).toMatchObject({ messageId: returnedId });
+-      expect(result.details).not.toMatchObject({ messageId });
+-    },
+-  );
+-
+   it("rejects malformed message IDs before a message mutation", async () => {
+     await expect(edit("Changed caption", cfg, "..")).rejects.toThrow("Invalid Discord message ID");
+     expect(writes()).toEqual([]);
+diff --git a/extensions/discord/src/actions/runtime.messaging.messages.ts b/extensions/discord/src/actions/runtime.messaging.messages.ts
+index e7b1ecf7c26d6650397813b82b141b55297c1037..aef4500fd4a4ff6eeacaf6abfc25643019f36511 100644
+--- a/extensions/discord/src/actions/runtime.messaging.messages.ts
++++ b/extensions/discord/src/actions/runtime.messaging.messages.ts
+@@ -138,7 +138,7 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
+         { content, ...(snapshot ? { allowedMentions: { parse: [] } } : {}) },
+         ctx.withOpts(),
+       );
+-      return jsonResult({ ok: true, messageId: message.id, message });
++      return jsonResult({ ok: true, message });
+     }
+     case "deleteMessage":
+     case "pinMessage":
+diff --git a/extensions/discord/src/actions/runtime.test.ts b/extensions/discord/src/actions/runtime.test.ts
+index 71cf68fb3c038a0c9abf9b6d4b09dc0c272dbdf5..5666cb76a5becd87c79de06e9a132e835f09f132 100644
+--- a/extensions/discord/src/actions/runtime.test.ts
++++ b/extensions/discord/src/actions/runtime.test.ts
+@@ -1439,9 +1439,9 @@ describe("handleDiscordMessagingAction", () => {
+   it.each([
+     {
+       label: "implicit first reply",
+-      reply: { source: "implicit", replyToId: "123456789012345678", mode: "first" } as const,
+-      replyToId: "123456789012345678",
+-      expected: { messageId: "123456789012345678", scope: "first" },
++      reply: { source: "implicit", replyToId: "source-1", mode: "first" } as const,
++      replyToId: "source-1",
++      expected: { messageId: "source-1", scope: "first" },
+     },
+     {
+       label: "explicit reply while configured replies are off",
 diff --git a/extensions/discord/src/internal/client.test.ts b/extensions/discord/src/internal/client.test.ts
 index 2c76b0c85ed3de53a3985b542f3bc19824e8c61b..d6b7f46475c36ea151d6c3ca2122014955bfd177 100644
 --- a/extensions/discord/src/internal/client.test.ts
@@ -11507,7 +11611,7 @@ index 7ac3c7fb65c481672fb63f5b4a13a360cc3f5978..0e080514c07f2ef03d275caec10d7ae0
                }),
            ),
 diff --git a/src/agents/subagents/registry/subagent-registry-progress-projection.ts b/src/agents/subagents/registry/subagent-registry-progress-projection.ts
-index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf08128099f32c0d 100644
+index df7a2a4d4f936bbee323de11e9801ab290e7fee8..b46ad63d894a466c27464f59cf08128099f32c0d 100644
 --- a/src/agents/subagents/registry/subagent-registry-progress-projection.ts
 +++ b/src/agents/subagents/registry/subagent-registry-progress-projection.ts
 @@ -2,7 +2,6 @@ import type {
@@ -11518,13 +11622,13 @@ index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf081280
  import type { ChannelProgressDraftCompositorSnapshot } from "../../../channels/progress-draft-compositor.types.js";
  import type { AgentEventPayload } from "../../../infra/agent-events.js";
  import type {
-@@ -10,112 +9,7 @@ import type {
+@@ -10,136 +9,7 @@ import type {
    SubagentProgressCheckpoint,
  } from "./subagent-progress-checkpoint.js";
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
 -import { getSubagentRunRuntimeKey, isSameSubagentRunOwner } from "./subagent-run-generation.js";
 -
--/** Capture native steer provenance before the requester yields its exact child cohort. */
+-/** Capture an exact child cohort, before native yield or from its adopted continuation. */
 -export function createQueuedRequesterProgressCapture(owner: {
 -  runs: ReadonlyMap<string, SubagentRunRecord>;
 -  presentations: ReadonlySet<Presentation>;
@@ -11539,19 +11643,33 @@ index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf081280
 -    isCurrent: () => boolean;
 -  }) => RequesterProgressPublication | undefined;
 -}) {
--  return (params: {
--    requesterTurnRunId: string;
--    requesterSessionKey: string;
--    requesterSessionId: string;
--    requesterAgentId: string;
--    source: ProgressSource;
--  }) => {
+-  return (
+-    params: {
+-      requesterSessionKey: string;
+-      requesterSessionId: string;
+-      requesterAgentId: string;
+-      source: ProgressSource;
+-    } & (
+-      | { requesterTurnRunId: string; childRunIds?: never }
+-      | { childRunIds: readonly string[]; requesterTurnRunId?: never }
+-    ),
+-  ) => {
 -    owner.ensure();
 -    const generation = owner.getGeneration();
 -    const isGenerationCurrent = () => owner.getGeneration() === generation;
--    const entries = [...owner.runs.values()].filter(
--      (entry) => entry.requesterTurnRunId === params.requesterTurnRunId,
+-    const entries = [...owner.runs.values()].filter((entry) =>
+-      params.childRunIds
+-        ? params.childRunIds.includes(entry.runId)
+-        : entry.requesterTurnRunId === params.requesterTurnRunId,
 -    );
+-    if (
+-      params.childRunIds &&
+-      (new Set(params.childRunIds).size !== entries.length ||
+-        params.childRunIds.length !== entries.length ||
+-        entries.some((entry) => entry.requesterTurnRunId))
+-    ) {
+-      return undefined;
+-    }
 -    const first = entries[0];
 -    if (
 -      !first ||
@@ -11572,8 +11690,28 @@ index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf081280
 -    ) {
 -      return undefined;
 -    }
+-    const matchingPresentations = (requesterTurnRunId?: string) =>
+-      [...owner.presentations].filter(
+-        (presentation) =>
+-          (!requesterTurnRunId || presentation.requesterTurnRunId === requesterTurnRunId) &&
+-          presentation.owner.adopted &&
+-          !presentation.owner.sealed &&
+-          currentPresentation(presentation, owner) &&
+-          presentation.entries.length === entries.length &&
+-          presentation.entries.every((entry) =>
+-            entries.some((original) => isSameSubagentRunOwner(entry, original)),
+-          ),
+-      );
+-    const adopted = params.childRunIds ? matchingPresentations() : undefined;
+-    if (adopted && adopted.length !== 1) {
+-      return undefined;
+-    }
+-    const requesterTurnRunId = params.requesterTurnRunId ?? adopted?.[0]?.requesterTurnRunId;
+-    if (!requesterTurnRunId) {
+-      return undefined;
+-    }
 -    return {
--      requesterTurnRunId: params.requesterTurnRunId,
+-      requesterTurnRunId,
 -      cohortOwners: entries.map(getSubagentRunRuntimeKey),
 -      capture: (
 -        isCurrent: () => boolean,
@@ -11587,17 +11725,7 @@ index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf081280
 -        ) {
 -          return undefined;
 -        }
--        const matching = [...owner.presentations].filter(
--          (presentation) =>
--            presentation.requesterTurnRunId === params.requesterTurnRunId &&
--            presentation.owner.adopted &&
--            !presentation.owner.sealed &&
--            currentPresentation(presentation, owner) &&
--            presentation.entries.length === entries.length &&
--            presentation.entries.every((entry) =>
--              entries.some((original) => isSameSubagentRunOwner(entry, original)),
--            ),
--        );
+-        const matching = matchingPresentations(requesterTurnRunId);
 -        if (!isGenerationCurrent() || matching.length !== 1) {
 -          return undefined;
 -        }
@@ -11633,7 +11761,7 @@ index 0abda81d7fe61fd45bd72734ebad8aec1f4eacb1..b46ad63d894a466c27464f59cf081280
  export type ProgressSource = {
    channel: string;
 diff --git a/src/agents/subagents/registry/subagent-registry-progress.live-requester.test.ts b/src/agents/subagents/registry/subagent-registry-progress.live-requester.test.ts
-index f14128f38d9a3b63490d464ca66debd4869574eb..149f3e79ec96c9078be7c110ca55c3e853c46c2b 100644
+index 2e925cc59a48ba52c1c37206ae0f2b44dc6acbf0..149f3e79ec96c9078be7c110ca55c3e853c46c2b 100644
 --- a/src/agents/subagents/registry/subagent-registry-progress.live-requester.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry-progress.live-requester.test.ts
 @@ -1,4 +1,4 @@
@@ -11642,7 +11770,7 @@ index f14128f38d9a3b63490d464ca66debd4869574eb..149f3e79ec96c9078be7c110ca55c3e8
  import type { RequesterProgressPublication } from "../../../channels/progress-continuation.js";
  import {
    claimAgentRunDelegatedAuthority,
-@@ -158,221 +158,4 @@ describe("live requester child progress", () => {
+@@ -158,273 +158,4 @@ describe("live requester child progress", () => {
      expect(f.edit).toHaveBeenCalledOnce();
      await f.owner.reset();
    });
@@ -11741,6 +11869,58 @@ index f14128f38d9a3b63490d464ca66debd4869574eb..149f3e79ec96c9078be7c110ca55c3e8
 -    expect(f.edit).toHaveBeenCalledOnce();
 -    await f.owner.reset();
 -  });
+-
+-  it.each(["valid", "missing", "duplicate", "route", "session", "cohorts", "sealed"] as const)(
+-    "captures an already-adopted cohort only from exact registered child IDs: %s",
+-    async (mode) => {
+-      const f = fixture();
+-      f.initial.completionRequesterSessionId = "requester";
+-      await f.yieldWithProgressCard();
+-      f.initial.execution = { ...f.initial.execution, status: "terminal", endedAt: 2 };
+-      const childRunIds = mode === "missing" ? ["missing"] : [f.initial.runId];
+-      if (mode === "duplicate") {
+-        childRunIds.push(f.initial.runId);
+-      }
+-      if (mode === "cohorts") {
+-        const other = row({
+-          ...f.initial,
+-          runId: "other-child",
+-          childSessionKey: "agent:main:subagent:other",
+-        });
+-        f.runs.set(other.runId, other);
+-        childRunIds.push(other.runId);
+-      }
+-      if (mode === "sealed") {
+-        await f.captureRequesterProgress()?.beforeFinalDelivery?.();
+-      }
+-      const pending = f.owner.captureQueuedRequesterProgress({
+-        childRunIds,
+-        requesterSessionKey: f.initial.requesterSessionKey,
+-        requesterSessionId: mode === "session" ? "other" : "requester",
+-        requesterAgentId: "main",
+-        source: {
+-          channel: "discord",
+-          accountId: "bot",
+-          to: mode === "route" ? "channel:other" : "channel:parent",
+-        },
+-      });
+-      if (mode === "valid") {
+-        assert(pending);
+-        expect(pending.requesterTurnRunId).toBe("parent-run");
+-        const publication = pending.capture(() => true, childRunIds);
+-        assert(publication);
+-        await expect(publication.publish("The correction is included.")).resolves.toMatchObject({
+-          status: "visible",
+-          messageId: "original-card",
+-        });
+-        expect(f.edit).toHaveBeenCalledOnce();
+-      } else {
+-        expect(pending).toBeUndefined();
+-        expect(f.edit).not.toHaveBeenCalled();
+-      }
+-      await f.owner.reset();
+-    },
+-  );
 -
 -  it("checks the correction owner at the awaited edit without lending its guard to later publishers", async () => {
 -    const f = fixture();
@@ -11865,7 +12045,7 @@ index f14128f38d9a3b63490d464ca66debd4869574eb..149f3e79ec96c9078be7c110ca55c3e8
 -  });
  });
 diff --git a/src/agents/subagents/registry/subagent-registry-progress.test-support.ts b/src/agents/subagents/registry/subagent-registry-progress.test-support.ts
-index 295dfff1f81ae59e2ef3446125c9f0ad9b43f2f8..d871bbe29ab40f03bc5fae90a0817a9052723212 100644
+index 9336b69af7db1bca583c2a52926c63be13d5ee7a..d871bbe29ab40f03bc5fae90a0817a9052723212 100644
 --- a/src/agents/subagents/registry/subagent-registry-progress.test-support.ts
 +++ b/src/agents/subagents/registry/subagent-registry-progress.test-support.ts
 @@ -1,9 +1,6 @@
@@ -11952,10 +12132,30 @@ index 295dfff1f81ae59e2ef3446125c9f0ad9b43f2f8..d871bbe29ab40f03bc5fae90a0817a90
      initial,
      runs,
      publish,
-@@ -169,49 +100,3 @@ export const drain = async () => {
+@@ -169,69 +100,3 @@ export const drain = async () => {
      await Promise.resolve();
    }
  };
+-
+-/** Bind native requester reads to this fixture's rows and actual progress owner. */
+-export async function bindPendingRequesterRegistry(f: ReturnType<typeof fixture>, now?: number) {
+-  const registry = await import("./subagent-registry.js");
+-  const list = vi
+-    .spyOn(registry, "listUnsettledRequesterChildren")
+-    .mockImplementation(async (params) =>
+-      listUnsettledRequesterChildrenInRuns({ ...params, runs: f.runs, now }),
+-    );
+-  const capture = vi
+-    .spyOn(registry, "captureSubagentQueuedRequesterProgress")
+-    .mockImplementation(f.owner.captureQueuedRequesterProgress);
+-  return {
+-    listChildren: registry.listUnsettledRequesterChildren,
+-    restore: () => {
+-      list.mockRestore();
+-      capture.mockRestore();
+-    },
+-  };
+-}
 -
 -/** Compose the native old-cohort producer, retained card and actual acknowledgment tool. */
 -export async function queuedAcknowledgmentFixture(turn: AdmittedFollowupTurn) {
@@ -12946,6 +13146,195 @@ index 3b8470c93f83b74ae2772f9c35b2e2233880f099..93966e3ea7ac6b964e2d2f21779c37c4
    isRunActive?: () => boolean;
    opts?: InternalGetReplyOptions;
    typing: TypingController;
+diff --git a/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts b/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts
+index 384ccf47236d70fea44471b7cd957ecfe0fa567c..b44b9b229196edb9961d5c49ef6726bde91a7493 100644
+--- a/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts
++++ b/src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts
+@@ -6,11 +6,6 @@ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { OAuthRefreshFailureError } from "../../agents/auth-profiles/oauth-refresh-failure.js";
+ import { FailoverError } from "../../agents/failover-error.js";
+ import { SessionManager } from "../../agents/sessions/session-manager.js";
+-import {
+-  bindPendingRequesterRegistry,
+-  fixture as progressFixture,
+-} from "../../agents/subagents/registry/subagent-registry-progress.test-support.js";
+-import { createSessionsYieldTool } from "../../agents/tools/sessions-yield-tool.js";
+ import {
+   appendTranscriptMessage,
+   loadSessionEntry,
+@@ -27,10 +22,7 @@ import { getReplyPayloadMetadata } from "../reply-payload.js";
+ import type { TemplateContext } from "../templating.js";
+ import { SILENT_REPLY_TOKEN } from "../tokens.js";
+ import type { ReplyPayload } from "../types.js";
+-import type { executeAgentTurn } from "./agent-runner-execution.js";
+-import type { SettledAgentTurn } from "./agent-runner-execution.types.js";
+ import { createTestFollowupRun, withTestModelContextTokens } from "./agent-runner.test-fixtures.js";
+-import { captureQueuedFollowupPresentation } from "./followup-presentation.js";
+ import type { QueueSettings } from "./queue.js";
+ import { createReplyDispatcher } from "./reply-dispatcher.js";
+ import type { ReplyDispatchKind } from "./reply-dispatcher.types.js";
+@@ -274,161 +266,6 @@ describe("runReplyAgent runtime config", () => {
+     });
+   });
+ 
+-  it.each([
+-    "ack",
+-    "own-progress",
+-    "answer",
+-    "mixed-batch",
+-    "error",
+-    "uncertain",
+-    "paused",
+-    "unarmed",
+-    "missing-route",
+-  ] as const)(
+-    "accounts for a direct correction after parent yield with a completing child: %s",
+-    async (mode) => {
+-      const { followupRun, replyParams } = createDirectRuntimeReplyParams();
+-      const f = progressFixture();
+-      followupRun.run.sessionKey = f.initial.requesterSessionKey;
+-      followupRun.run.messageProvider = "discord";
+-      followupRun.originatingChannel = "discord";
+-      followupRun.originatingAccountId = "bot";
+-      followupRun.originatingTo = "channel:parent";
+-      replyParams.sessionKey = f.initial.requesterSessionKey;
+-      replyParams.queueKey = f.initial.requesterSessionKey;
+-      replyParams.sessionCtx = {
+-        Provider: "discord",
+-        Surface: "discord",
+-        OriginatingChannel: "discord",
+-        OriginatingTo: "channel:parent",
+-        To: "channel:parent",
+-        AccountId: "bot",
+-        ChatType: "channel",
+-        MessageSid: "correction-message",
+-      };
+-      f.initial.completionRequesterSessionId = followupRun.run.sessionId;
+-      await f.yieldWithProgressCard();
+-      f.initial.execution = { ...f.initial.execution, status: "terminal", endedAt: Date.now() };
+-      if (mode === "paused") {
+-        f.initial.pauseReason = "sessions_yield";
+-      } else if (mode === "unarmed") {
+-        f.initial.requesterSettleWake = undefined;
+-        f.initial.delivery = { status: "pending" };
+-      }
+-      const unavailable = ["paused", "unarmed", "missing-route"].includes(mode);
+-      const registry = await bindPendingRequesterRegistry(f);
+-      const ownNarration = vi.fn();
+-      const pending = vi.fn();
+-      const onYield = vi.fn();
+-      const runState: ReplyOperationRunState = {};
+-      replyParams.opts = {
+-        [REPLY_OPERATION_RUN_STATE]: runState,
+-        onPendingContinuation: pending,
+-        onNarrationUpdate: ownNarration,
+-        requesterProgress:
+-          mode === "missing-route"
+-            ? undefined
+-            : () => ({
+-                source: { channel: "discord", accountId: "bot", to: "channel:parent" },
+-                publish: async () => ({ status: "unbound" }),
+-              }),
+-      };
+-      followupRun.queuedFollowupPresentation = captureQueuedFollowupPresentation(replyParams.opts);
+-      followupRun.run.terminalReplyExpectation = "required";
+-      runSessionCompactionIfNeededMock.mockResolvedValue(undefined);
+-      if (mode === "uncertain") {
+-        f.edit.mockResolvedValue(false);
+-      }
+-      executeAgentTurnMock.mockImplementationOnce(
+-        async (turn: Parameters<typeof executeAgentTurn>[0]) => {
+-          if (unavailable) {
+-            expect(turn.opts?.acknowledgePendingChildren).toBeUndefined();
+-          } else {
+-            expect(turn.opts?.acknowledgePendingChildren).toBeTypeOf("function");
+-          }
+-          if (mode === "own-progress") {
+-            await turn.opts?.onNarrationUpdate?.({ text: "Checking a separate requested fact." });
+-          }
+-          const tool = createSessionsYieldTool({
+-            sessionId: followupRun.run.sessionId,
+-            onYield,
+-            claimYield: async () => ({
+-              pendingChildren: await registry.listChildren({
+-                requesterSessionKey: f.initial.requesterSessionKey,
+-                requesterAgentId: "main",
+-              }),
+-            }),
+-            acknowledgePendingChildren: turn.opts?.acknowledgePendingChildren,
+-          });
+-          const result: SettledAgentTurn["result"] = {
+-            payloads: [],
+-            meta: { durationMs: 0 },
+-          };
+-          if (mode === "uncertain") {
+-            await expect(
+-              tool.execute("ack-call", { acknowledgment: "I included your correction." }),
+-            ).rejects.toThrow("edit was not confirmed");
+-            result.payloads = [
+-              { text: "The progress update could not be confirmed.", isError: true },
+-            ];
+-          } else {
+-            const acknowledgment = await tool.execute("ack-call", {
+-              acknowledgment: "I included your correction.",
+-            });
+-            expect(acknowledgment.terminate === true).toBe(mode !== "own-progress" && !unavailable);
+-            if (acknowledgment.terminate) {
+-              result.meta.intentionalTerminalCompletion = "tool-batch";
+-              result.meta.terminalToolCallIds =
+-                mode === "mixed-batch" ? ["ack-call", "other-call"] : ["ack-call"];
+-            }
+-            if (mode === "answer" || mode === "own-progress" || unavailable) {
+-              const answer = "An independently completed answer.";
+-              result.payloads = [{ text: answer }];
+-              result.meta.finalAssistantVisibleText = answer;
+-            }
+-            if (mode === "error") {
+-              result.payloads = [{ text: "The independent check failed.", isError: true }];
+-            }
+-          }
+-          return {
+-            runId: "direct-correction",
+-            outcome: {
+-              kind: "settled",
+-              status: "ok",
+-              result,
+-              resolved: { provider: followupRun.run.provider, model: followupRun.run.model },
+-              fallback: { exhausted: false, attempts: [] },
+-              autoCompactionCount: 0,
+-              didLogHeartbeatStrip: false,
+-            },
+-          };
+-        },
+-      );
+-      try {
+-        const result = await runReplyAgent(replyParams);
+-        expect(executeAgentTurnMock).toHaveBeenCalledOnce();
+-        expect(onYield).not.toHaveBeenCalled();
+-        expect(f.edit).toHaveBeenCalledTimes(mode === "own-progress" || unavailable ? 0 : 1);
+-        expect(ownNarration).toHaveBeenCalledTimes(mode === "own-progress" ? 1 : 0);
+-        expect(pending).toHaveBeenCalledTimes(mode === "ack" ? 1 : 0);
+-        if (mode === "ack") {
+-          expect(result).toBeUndefined();
+-          expect(runState.replyCompletion?.outcome).toBe("pending");
+-        } else {
+-          expect(result).toBeDefined();
+-          expect(runState.replyCompletion?.outcome).not.toBe("pending");
+-        }
+-        expect(f.initial.requesterSettleWake?.status).toBe(
+-          mode === "unarmed" ? undefined : "pending",
+-        );
+-        expect(f.initial.delivery?.requesterVisibleFinal).toBeUndefined();
+-      } finally {
+-        registry.restore();
+-        await f.owner.reset();
+-      }
+-    },
+-  );
+-
+   it("resolves direct reply runs before early helpers read config", async () => {
+     const { followupRun, replyParams } = createDirectRuntimeReplyParams();
+ 
 diff --git a/src/auto-reply/reply/agent-runner-embedded-candidate.ts b/src/auto-reply/reply/agent-runner-embedded-candidate.ts
 index e8222ec2fb3424f881c2fada64cc96984ce4e4e0..13b34bf03a5d5a76ca9fb83ff4fb3e35bc00aa3d 100644
 --- a/src/auto-reply/reply/agent-runner-embedded-candidate.ts
@@ -12958,6 +13347,75 @@ index e8222ec2fb3424f881c2fada64cc96984ce4e4e0..13b34bf03a5d5a76ca9fb83ff4fb3e35
          bootstrapPromptWarningSignaturesSeen: params.bootstrapPromptWarningSignaturesSeen,
          bootstrapPromptWarningSignature: params.bootstrapPromptWarningSignaturesSeen.at(-1),
          onToolResult: turn.opts?.onToolResult
+diff --git a/src/auto-reply/reply/agent-runner-execute.ts b/src/auto-reply/reply/agent-runner-execute.ts
+index e2c8c24c9dff87e5beac24cb574123f708add331..679cb6fbb779fadefd9d08cb5a337f8a9bca4d2f 100644
+--- a/src/auto-reply/reply/agent-runner-execute.ts
++++ b/src/auto-reply/reply/agent-runner-execute.ts
+@@ -23,10 +23,6 @@ import { finalizeReplyAgentRun } from "./agent-runner-result.js";
+ import type { FinalizeReplyAgentRunInput } from "./agent-runner-result.types.js";
+ import { buildThreadingToolContext } from "./agent-runner-utils.js";
+ import type { CompactionNoticePhase } from "./compaction-notice.js";
+-import {
+-  prepareQueuedFollowupPresentation,
+-  retainAdoptedRequesterProgress,
+-} from "./followup-presentation.js";
+ import { createFollowupRunner } from "./followup-runner.js";
+ import {
+   buildRecoverablePendingFinalDeliveryText,
+@@ -138,7 +134,7 @@ export async function executePreparedReplyAgentRun(
+     defaultModel,
+     followupRun,
+     getActiveSessionEntry,
+-    opts: inputOpts,
++    opts,
+     replyOperation,
+     replyThreadingOverride,
+     returnWithQueuedFollowupDrain,
+@@ -156,7 +152,6 @@ export async function executePreparedReplyAgentRun(
+     typingMode,
+     typingSignals,
+   } = context;
+-  let opts = inputOpts;
+   let activeSessionEntry = getActiveSessionEntry();
+ 
+   await typingSignals.signalRunStart();
+@@ -201,36 +196,6 @@ export async function executePreparedReplyAgentRun(
+   const preflightCompactionApplied =
+     (activeSessionEntry?.compactionCount ?? 0) > prePreflightCompactionCount;
+ 
+-  await retainAdoptedRequesterProgress(followupRun, replyOperation);
+-  if (followupRun.queuedFollowupPresentation?.pendingRequesterProgress) {
+-    const presentation = prepareQueuedFollowupPresentation(followupRun, opts, replyOperation);
+-    opts = {
+-      ...presentation,
+-      // Direct delivery wraps this callback to account for observed partial replies.
+-      onPartialReply: inputOpts?.onPartialReply,
+-      acknowledgePendingChildren: async (acknowledgment) => {
+-        const policy = resolveSourceReplyPolicy({
+-          cfg,
+-          sessionCtx,
+-          sessionEntry: getActiveSessionEntry(),
+-          sessionKey: sessionKey ?? followupRun.run.sessionKey ?? "",
+-          runtimePolicySessionKey,
+-          opts,
+-        });
+-        if (
+-          policy.sendPolicyDenied ||
+-          followupRun.currentInboundEventKind === "room_event" ||
+-          sessionCtx.InboundEventKind === "room_event" ||
+-          followupRun.queuedFollowupReplyDisposition?.kind === "drop"
+-        ) {
+-          return false;
+-        }
+-        return (await presentation?.acknowledgePendingChildren?.(acknowledgment)) ?? false;
+-      },
+-    };
+-    context.opts = opts;
+-  }
+-
+   const runFollowupTurn = createFollowupRunner({
+     resolveGatewayContext: getGatewayContextResolver(replyOperation),
+     opts,
 diff --git a/src/auto-reply/reply/agent-runner-execution-outcome.ts b/src/auto-reply/reply/agent-runner-execution-outcome.ts
 index 649bc1d4fe6f5a2c4578661675168fe0da51430e..f63a6ec9a06b3f7f7a96313f4165e33c33460460 100644
 --- a/src/auto-reply/reply/agent-runner-execution-outcome.ts
@@ -13111,6 +13569,69 @@ index 723fa1b882dd661e8b3f4cdd207bea554b7931e7..63370c6de78ac8102abaf8b93435e5f5
    scheduleReplySessionMaintenance({ context, accounting, sessionEntry: activeSessionEntry });
    return result;
  }
+diff --git a/src/auto-reply/reply/agent-runner-result-payloads.ts b/src/auto-reply/reply/agent-runner-result-payloads.ts
+index 7dd237541f87fba8d184bebccdfa1f6293b1ac24..9063e0a1bff505b5cf87a407bf2ce10d193fe5c0 100644
+--- a/src/auto-reply/reply/agent-runner-result-payloads.ts
++++ b/src/auto-reply/reply/agent-runner-result-payloads.ts
+@@ -40,7 +40,6 @@ import { prepareReplyContinuationSettlement } from "./agent-runner-continuation-
+ import {
+   buildSilentFallbackFailurePayload,
+   hasSuccessfulSourceReplyDelivery,
+-  normalizeAssistantFinalDeliveryText,
+   refreshSessionEntryFromStore,
+   resolveSourceReplyPolicy,
+   resolveTerminalReplyDelivery,
+@@ -56,10 +55,6 @@ import {
+ import type { AccountedAgentTurn } from "./agent-runner-result-accounting.js";
+ import type { FinalizeReplyAgentRunInput } from "./agent-runner-result.types.js";
+ import { resolveResponseUsageLine } from "./agent-runner-usage-line.js";
+-import {
+-  readQueuedRequesterAcknowledgment,
+-  resolvePendingRequesterAcknowledgment,
+-} from "./followup-presentation.js";
+ import { attachMcpAppChannelAction, attachMcpConnectChannelAction } from "./mcp-channel-actions.js";
+ import { normalizeReplyPayload } from "./normalize-reply.js";
+ import { resolveReplyOperationRunState } from "./reply-operation-run-state.js";
+@@ -464,7 +459,6 @@ export async function prepareReplyAgentPayloads(state: {
+     fallbackNoticePayloads.length === 0 &&
+     !shouldDeliverTerminalFailure &&
+     !waitingStatusPayload &&
+-    !readQueuedRequesterAcknowledgment(followupRun, replyOperation) &&
+     (!emptyInteractiveReplyPayload || hasSpecificFallbackFailure)
+   ) {
+     return finishEmptyReply();
+@@ -478,31 +472,6 @@ export async function prepareReplyAgentPayloads(state: {
+       (payload.isCommentary !== true || opts?.commentaryPayloadsEnabled === true),
+   );
+   let replyPayloads = await buildFinalPayloads(payloadCandidates);
+-  const acknowledgment = resolvePendingRequesterAcknowledgment({
+-    queued: followupRun,
+-    operation: replyOperation,
+-    result: runResult,
+-    missingReply: completion.outcome === "missing",
+-    successfulExecution: context.execution.status === "ok",
+-    terminalFailure: Boolean(terminalFailurePayload),
+-    pendingContinuation,
+-    assistantFinalText: normalizeAssistantFinalDeliveryText(
+-      typeof runResult.meta?.finalAssistantVisibleText === "string"
+-        ? runResult.meta.finalAssistantVisibleText
+-        : "",
+-    ),
+-    payloads: replyPayloads,
+-  });
+-  if (acknowledgment) {
+-    if (replyOperationRunState) {
+-      replyOperationRunState.replyCompletion = resolveReplyCompletion(
+-        terminalReplyExpectation,
+-        "pending",
+-      );
+-    }
+-    opts?.onPendingContinuation?.();
+-    return { kind: "return" as const, value: returnWithQueuedFollowupDrain(undefined) };
+-  }
+   if (sourceReplyDelivery !== "delivered" && completion.outcome === "delivered") {
+     await opts?.onObservedReplyDelivery?.();
+   }
 diff --git a/src/auto-reply/reply/agent-runner-result.ts b/src/auto-reply/reply/agent-runner-result.ts
 index a79ba65fa6fce3dd3d0928cc3764cab9e705f9a8..73491a44103c9c7c7ac1c948e0d3d5f3682daff4 100644
 --- a/src/auto-reply/reply/agent-runner-result.ts
@@ -13902,7 +14423,7 @@ index b90363394954d2ee94057a967ee9b5fa30832f99..856fae462386eb6e41441b8f2f517ab0
      tool: "message",
      provider: "discord",
 diff --git a/src/auto-reply/reply/followup-delivery.ts b/src/auto-reply/reply/followup-delivery.ts
-index b1049b8aeb6f5e9689558641bf6c591ac07bcdda..b5e1ac3a6735295cade75fc1c1402e3d006bb5f0 100644
+index 7f0da07878a41b01f1ba7402cdf63c8822efa018..b5e1ac3a6735295cade75fc1c1402e3d006bb5f0 100644
 --- a/src/auto-reply/reply/followup-delivery.ts
 +++ b/src/auto-reply/reply/followup-delivery.ts
 @@ -34,10 +34,7 @@ import {
@@ -13910,43 +14431,39 @@ index b1049b8aeb6f5e9689558641bf6c591ac07bcdda..b5e1ac3a6735295cade75fc1c1402e3d
  import { appendUsageLine, resolveResponseUsageLine } from "./agent-runner-usage-line.js";
  import { resolveFollowupDeliveryPayloads } from "./followup-delivery-payloads.js";
 -import {
--  readQueuedRequesterAcknowledgment,
+-  resolvePendingRequesterAcknowledgment,
 -  resolveQueuedFollowupPresentation,
 -} from "./followup-presentation.js";
 +import { resolveQueuedFollowupPresentation } from "./followup-presentation.js";
  import type { AdmittedFollowupTurn, FollowupRunnerParams } from "./followup-turn-admission.js";
  import type { InternalGetReplyOptions } from "./get-reply.types.js";
  import { resolveOriginMessageProvider } from "./origin-routing.js";
-@@ -253,24 +250,6 @@ export async function resolveFollowupDeliveryDecision(params: {
+@@ -253,20 +250,6 @@ export async function resolveFollowupDeliveryDecision(params: {
    if (!completedSourceDelivery && completion.outcome === "delivered") {
      await opts?.onObservedReplyDelivery?.();
    }
--  const acknowledgment = readQueuedRequesterAcknowledgment(turn.queued, turn.operation);
--  if (
--    acknowledgment &&
--    completion.outcome === "missing" &&
--    execution.outcome.status === "ok" &&
--    !accounting.terminalFailurePayload &&
--    !result.meta.aborted &&
--    !result.meta.error &&
--    result.meta.intentionalTerminalCompletion === "tool-batch" &&
--    result.meta.terminalToolCallIds?.length === 1 &&
--    result.meta.terminalToolCallIds[0] === acknowledgment.toolCallId &&
--    !result.acceptedSessionSpawns?.length &&
--    !pendingContinuation &&
--    !assistantFinalText &&
--    payloads.length === 0
--  ) {
+-  const acknowledgment = resolvePendingRequesterAcknowledgment({
+-    queued: turn.queued,
+-    operation: turn.operation,
+-    result,
+-    missingReply: completion.outcome === "missing",
+-    successfulExecution: execution.outcome.status === "ok",
+-    terminalFailure: Boolean(accounting.terminalFailurePayload),
+-    pendingContinuation,
+-    assistantFinalText,
+-    payloads,
+-  });
+-  if (acknowledgment) {
 -    return { kind: "deliver", payloads: [acknowledgment.payload], resolved: runtimeResolved };
 -  }
    const recovery =
      accounting.terminalFailurePayload || completion.outcome !== "missing"
        ? ({ kind: "none" } as const)
 diff --git a/src/auto-reply/reply/followup-presentation.ts b/src/auto-reply/reply/followup-presentation.ts
-index a5033c07dbf3310ad274306b81044b716624ae1d..7186f64a1a25ef73c53fb3f23634f2fe6995175c 100644
+index ef1167b2b5bc99ded9c6d3417508b3664d86a17b..7186f64a1a25ef73c53fb3f23634f2fe6995175c 100644
 --- a/src/auto-reply/reply/followup-presentation.ts
 +++ b/src/auto-reply/reply/followup-presentation.ts
-@@ -1,14 +1,8 @@
+@@ -1,15 +1,8 @@
 -import type { RequesterProgressPublication } from "../../channels/progress-continuation.js";
 -import { getAgentRunContext } from "../../infra/agent-run-registry.js";
  import { formatErrorMessage } from "../../infra/errors.js";
@@ -13955,24 +14472,25 @@ index a5033c07dbf3310ad274306b81044b716624ae1d..7186f64a1a25ef73c53fb3f23634f2fe
  import type { GetReplyOptions } from "../get-reply-options.types.js";
 -import { setReplyPayloadMetadata } from "../reply-payload.js";
 -import type { ReplyPayload } from "../types.js";
+-import type { AccountedAgentTurn } from "./agent-runner-result-accounting.js";
  import type { InternalGetReplyOptions } from "./get-reply.types.js";
  import type { FollowupRun } from "./queue/types.js";
 -import { replyRunRegistry, type ReplyOperation } from "./reply-run-registry.js";
  
  /** Presentation only: queued execution retains no operator/tool authority in this snapshot. */
  export type QueuedFollowupPresentation = Pick<
-@@ -60,74 +54,7 @@ export type QueuedFollowupPresentation = Pick<
+@@ -61,121 +54,7 @@ export type QueuedFollowupPresentation = Pick<
    | "onPendingContinuation"
    | "adoptProgressContinuation"
    | "onRunVerbosityResolved"
 -> & {
--  /** Derived for one admitted queued operation; never persisted or donated by collection. */
+-  /** Derived for one admitted operation; never persisted or donated by collection. */
 -  admittedProgress?: {
 -    operation: ReplyOperation;
 -    options: InternalGetReplyOptions;
 -    acknowledgment?: { toolCallId: string; payload: ReplyPayload };
 -  };
--  /** Only the original queued-behind requester may lend its retained child card. */
+-  /** Exact registered child custody; never selected from channel history or recency. */
 -  pendingRequesterProgress?: {
 -    requesterTurnRunId: string;
 -    cohortOwners: readonly object[];
@@ -14033,11 +14551,58 @@ index a5033c07dbf3310ad274306b81044b716624ae1d..7186f64a1a25ef73c53fb3f23634f2fe
 -    };
 -  }
 -}
+-
+-/** A direct post-yield input can acknowledge the same already-adopted child card. */
+-export async function retainAdoptedRequesterProgress(
+-  queued: FollowupRun,
+-  operation: ReplyOperation,
+-) {
+-  const presentation = queued.queuedFollowupPresentation;
+-  const { sessionKey, sessionId, agentId } = queued.run;
+-  // Failed-steer provenance takes precedence, even if that older cohort has since closed.
+-  if (!presentation || presentation.pendingRequesterProgress || !sessionKey || !agentId) {
+-    return;
+-  }
+-  const source = presentation.requesterProgress?.()?.source;
+-  if (!source || operation.sessionId !== sessionId) {
+-    return;
+-  }
+-  const assertCurrent = () => {
+-    queued.operatorAuthority?.assertCurrent();
+-    if (
+-      replyRunRegistry.get(operation.key) !== operation ||
+-      operation.result ||
+-      operation.abortSignal.aborted ||
+-      operation.sessionId !== queued.run.sessionId
+-    ) {
+-      throw new Error("Requester progress lost its admitted input");
+-    }
+-  };
+-  assertCurrent();
+-  const { listUnsettledRequesterChildren, captureSubagentQueuedRequesterProgress } =
+-    await import("../../agents/subagents/registry/subagent-registry.js");
+-  assertCurrent();
+-  const children = await listUnsettledRequesterChildren({
+-    requesterSessionKey: sessionKey,
+-    requesterAgentId: agentId,
+-  });
+-  assertCurrent();
+-  if (!children.length || children.some((child) => child.state === "paused" || !child.wakeArmed)) {
+-    return;
+-  }
+-  presentation.pendingRequesterProgress = captureSubagentQueuedRequesterProgress({
+-    childRunIds: children.map((child) => child.runId),
+-    requesterSessionKey: sessionKey,
+-    requesterSessionId: sessionId,
+-    requesterAgentId: agentId,
+-    source,
+-  });
+-}
 +>;
  
  /** Capture explicit absence as well as callbacks, so a newer drain cannot donate its UI. */
  export function captureQueuedFollowupPresentation(
-@@ -185,63 +112,6 @@ export function captureQueuedFollowupPresentation(
+@@ -233,94 +112,6 @@ export function captureQueuedFollowupPresentation(
    };
  }
  
@@ -14098,10 +14663,41 @@ index a5033c07dbf3310ad274306b81044b716624ae1d..7186f64a1a25ef73c53fb3f23634f2fe
 -  return admitted.acknowledgment;
 -}
 -
+-/** The confirmed edit accounts only for its sole terminal tool batch, never another answer. */
+-export function resolvePendingRequesterAcknowledgment(params: {
+-  queued: FollowupRun;
+-  operation: ReplyOperation;
+-  result: AccountedAgentTurn["runResult"];
+-  missingReply: boolean;
+-  successfulExecution: boolean;
+-  terminalFailure: boolean;
+-  pendingContinuation: boolean;
+-  assistantFinalText: string;
+-  payloads: readonly ReplyPayload[];
+-}) {
+-  const acknowledgment = readQueuedRequesterAcknowledgment(params.queued, params.operation);
+-  const { result } = params;
+-  return acknowledgment &&
+-    params.missingReply &&
+-    params.successfulExecution &&
+-    !params.terminalFailure &&
+-    !result.meta.aborted &&
+-    !result.meta.error &&
+-    result.meta.intentionalTerminalCompletion === "tool-batch" &&
+-    result.meta.terminalToolCallIds?.length === 1 &&
+-    result.meta.terminalToolCallIds[0] === acknowledgment.toolCallId &&
+-    !result.acceptedSessionSpawns?.length &&
+-    !params.pendingContinuation &&
+-    !params.assistantFinalText &&
+-    params.payloads.length === 0
+-    ? acknowledgment
+-    : undefined;
+-}
+-
  export function resolveQueuedFollowupPresentation(
    queued: Pick<FollowupRun, "queuedFollowupPresentation">,
    defaults: InternalGetReplyOptions | undefined,
-@@ -251,175 +121,6 @@ export function resolveQueuedFollowupPresentation(
+@@ -330,175 +121,6 @@ export function resolveQueuedFollowupPresentation(
      : { ...defaults, ...queued.queuedFollowupPresentation };
  }
  
@@ -14277,7 +14873,7 @@ index a5033c07dbf3310ad274306b81044b716624ae1d..7186f64a1a25ef73c53fb3f23634f2fe
  /** The final collected source owns progress; every source still settles its own draft. */
  export function collectQueuedFollowupPresentation(
    sources: readonly FollowupRun[],
-@@ -445,21 +146,8 @@ export function collectQueuedFollowupPresentation(
+@@ -524,21 +146,8 @@ export function collectQueuedFollowupPresentation(
        }
      };
    };
@@ -14481,22 +15077,104 @@ index 72eb1c310851dc6f5f768951ba548cc6ec50a3cf..65b0fe2ed7b5948229cfc5dc9abd96a1
        if (
          outcome.kind === "settled" &&
          outcome.result.meta.continuationPending === true &&
+diff --git a/src/auto-reply/reply/followup-turn-admission.test.ts b/src/auto-reply/reply/followup-turn-admission.test.ts
+index 9175204383eff13cb53a27e15042ecaa38753866..e27780c252e67ad3d7b8b3e1ed96d3cde86e3cbd 100644
+--- a/src/auto-reply/reply/followup-turn-admission.test.ts
++++ b/src/auto-reply/reply/followup-turn-admission.test.ts
+@@ -1,13 +1,6 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+-import {
+-  bindPendingRequesterRegistry,
+-  fixture as progressFixture,
+-} from "../../agents/subagents/registry/subagent-registry-progress.test-support.js";
+-import { createSessionsYieldTool } from "../../agents/tools/sessions-yield-tool.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+-import { prepareQueuedFollowupPresentation } from "./followup-presentation.js";
+ import type { FollowupRun } from "./queue.js";
+-import { createReplyOperation } from "./reply-run-registry.js";
+ 
+ const state = vi.hoisted(() => ({
+   admitLifecycle: vi.fn(),
+@@ -130,60 +123,6 @@ beforeEach(() => {
+ });
+ 
+ describe("admitFollowupTurn", () => {
+-  it("retains an already-adopted child card when an input reaches queued admission after yield", async () => {
+-    const queued = createRun();
+-    const f = progressFixture();
+-    f.initial.requesterAgentId = queued.run.agentId;
+-    f.initial.requesterSessionKey = queued.run.sessionKey!;
+-    f.initial.completionRequesterSessionId = queued.run.sessionId;
+-    await f.yieldWithProgressCard();
+-    const operation = createReplyOperation({
+-      sessionKey: "main",
+-      sessionId: queued.run.sessionId,
+-      resetTriggered: false,
+-    });
+-    state.admitReply.mockResolvedValue({ status: "owned", operation });
+-    const registry = await bindPendingRequesterRegistry(f, 0);
+-    const ownAdmission = vi.fn();
+-    const onYield = vi.fn();
+-    queued.originatingChannel = "discord";
+-    queued.originatingAccountId = "bot";
+-    queued.originatingTo = "channel:parent";
+-    queued.run.messageProvider = "discord";
+-    queued.queuedFollowupPresentation = {
+-      onQueuedFollowupAdmitted: ownAdmission,
+-      requesterProgress: () => ({
+-        source: { channel: "discord", accountId: "bot", to: "channel:parent" },
+-        publish: async () => ({ status: "unbound" }),
+-      }),
+-    };
+-    try {
+-      const admitted = await admitFollowupTurn({ queued, defaults: createDefaults() });
+-      expect(admitted.kind).toBe("admitted");
+-      expect(ownAdmission).not.toHaveBeenCalled();
+-      const acknowledgment = await createSessionsYieldTool({
+-        sessionId: queued.run.sessionId,
+-        onYield,
+-        claimYield: async () => ({
+-          pendingChildren: await registry.listChildren({
+-            requesterSessionKey: "main",
+-            requesterAgentId: "agent",
+-          }),
+-        }),
+-        acknowledgePendingChildren: prepareQueuedFollowupPresentation(queued, undefined, operation)
+-          ?.acknowledgePendingChildren,
+-      }).execute("ack-call", { acknowledgment: "The original work includes your correction." });
+-      expect(acknowledgment.terminate).toBe(true);
+-      expect(f.edit).toHaveBeenCalledOnce();
+-      expect(f.edit.mock.calls[0]?.[0].messageId).toBe("original-card");
+-      expect(onYield).not.toHaveBeenCalled();
+-    } finally {
+-      operation.complete();
+-      registry.restore();
+-      await f.owner.reset();
+-    }
+-  });
+-
+   it("reports each active-run deferral without adopting the queued source", async () => {
+     state.admitReply.mockResolvedValue({ status: "skipped", reason: "active-run" });
+     const onDeferredHeartbeat = vi.fn();
 diff --git a/src/auto-reply/reply/followup-turn-admission.ts b/src/auto-reply/reply/followup-turn-admission.ts
-index 84ee09d9ce5d991c8b863c922f00545c0de59c25..278600ca42543a05d71aae4d93e7e32d71711e2e 100644
+index 65fb4bd0b953174545e95d6867cab89e85853e57..278600ca42543a05d71aae4d93e7e32d71711e2e 100644
 --- a/src/auto-reply/reply/followup-turn-admission.ts
 +++ b/src/auto-reply/reply/followup-turn-admission.ts
-@@ -25,7 +25,6 @@ import {
+@@ -25,9 +25,7 @@ import {
    type CompactionNoticePhase,
  } from "./compaction-notice.js";
  import {
 -  prepareQueuedFollowupPresentation,
    resolveQueuedFollowupPresentation,
+-  retainAdoptedRequesterProgress,
    settleQueuedFollowupPresentation,
  } from "./followup-presentation.js";
-@@ -167,10 +166,9 @@ export async function admitFollowupTurn(params: {
+ import type { InternalGetReplyOptions } from "./get-reply.types.js";
+@@ -168,11 +166,9 @@ export async function admitFollowupTurn(params: {
      // Source presentation follows this admitted input; the drain closure still owns
      // current Gateway/session services and never donates another source's callbacks.
      queuedFollowupAdmitted = true;
+-    await retainAdoptedRequesterProgress(params.queued, operation);
 -    await prepareQueuedFollowupPresentation(
 +    await resolveQueuedFollowupPresentation(
        params.queued,

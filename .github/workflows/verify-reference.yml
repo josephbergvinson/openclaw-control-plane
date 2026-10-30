@@ -244,7 +244,7 @@ jobs:
             src/agents/subagents/announce/subagent-announce.requester-settle-wake.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-ownership.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-requester-final-overlap.log"
-      - name: Verify Discord voice yield and guild policy
+      - name: Verify Discord delivery, voice yield and guild policy
         id: discord-voice-yield-policy
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
@@ -252,6 +252,9 @@ jobs:
           node scripts/run-vitest.mjs run \
             --config \
             test/vitest/vitest.extension-discord.config.ts \
+            extensions/discord/src/actions/message-bodies.test.ts \
+            extensions/discord/src/actions/runtime.test.ts \
+            extensions/discord/src/reply-reference.test.ts \
             extensions/discord/src/config-schema.test.ts \
             extensions/discord/src/voice/guild-voice-policy.test.ts \
             extensions/discord/src/voice/realtime-consults.yielded.test.ts \
@@ -504,6 +507,8 @@ jobs:
             src/auto-reply/reply/dispatch-from-config.source-completion.test.ts \
             src/agents/subagents/announce/subagent-announce.requester-settle-dispatch.test.ts \
             src/auto-reply/reply/followup-runner.test.ts \
+            src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts \
+            src/agents/subagents/registry/subagent-registry-progress.live-requester.test.ts \
             test/discord-requester-progress.native.integration.test.ts \
             test/discord-queued-source.native.integration.test.ts \
             test/discord-preflight-custody.integration.test.ts \
