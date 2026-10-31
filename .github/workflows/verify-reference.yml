@@ -302,7 +302,7 @@ jobs:
             test/vitest/vitest.plugins.config.ts \
             src/plugins/runtime/runtime-agent.ingress.integration.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-voice-runtime-ingress.log"
-      - name: Verify shared voice wake policy
+      - name: Verify shared voice wake policy and pending work
         id: voice-wake-policy
         working-directory: ${{ runner.temp }}/openclaw-reference
         run: |
@@ -314,6 +314,10 @@ jobs:
             src/talk/activation-name.test.ts \
             src/talk/agent-consult-tool.test.ts \
             2>&1 | tee "$RUNNER_TEMP/reference-voice-wake-policy.log"
+          pnpm test:serial \
+            src/talk/agent-run-control.test.ts \
+            src/talk/agent-run-control.status.test.ts \
+            2>&1 | tee -a "$RUNNER_TEMP/reference-voice-wake-policy.log"
       - name: Verify realtime provider response and listening lifecycle
         id: realtime-provider-response-lifecycle
         working-directory: ${{ runner.temp }}/openclaw-reference

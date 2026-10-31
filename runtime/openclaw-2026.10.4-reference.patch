@@ -82719,6 +82719,134 @@ index c3bd334e69ff72546ccdfa61c2041f4074d2886b..38e5c20c8e5113d14ca5e4c37f64aa0b
  it("does not retain a removed live-only row as a prepared durable payload", async () => {
    await withPersistedReads(async () => {
      const entry = retainedRun();
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-children.ts b/src/agents/subagents/registry/subagent-registry-requester-children.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4f24406c1bba8518d91c853cc3325c6418ce2d7b
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-requester-children.ts
+@@ -0,0 +1,122 @@
++import { getSubagentRunsForRequesterSession } from "./subagent-registry-memory.js";
++import type { SubagentRunRecord } from "./subagent-registry.types.js";
++import { isRequesterSettleWakeForRun } from "./subagent-requester-settle-identity.js";
++import { recordLatestSubagentRun } from "./subagent-run-generation.js";
++import { hasSubagentRunEnded, isRetainedUnendedSubagentRun } from "./subagent-run-liveness.js";
++import { getSubagentSessionStartedAt } from "./subagent-session-metrics.js";
++
++/** A requester child whose completion is still owed to the requester session. */
++export type UnsettledRequesterChild = {
++  runId: string;
++  childSessionKey: string;
++  label?: string;
++  startedAt?: number;
++  /**
++   * Running children have not ended; completing children ended and still owe
++   * delivery; paused children yielded for an incoming continuation and will
++   * not complete until one arrives.
++   */
++  state: "running" | "completing" | "paused";
++  /** True when an earlier requester yield already armed a settle wake for this child. */
++  wakeArmed: boolean;
++};
++
++/**
++ * Lists this requester session's announcing children whose completion has not
++ * reached the requester yet, regardless of which requester turn spawned them.
++ * Children still bound to `excludeRequesterTurnRunId` belong to that turn's own
++ * claim and are omitted, as is the settle-wake cohort already reaching that turn.
++ */
++export function listUnsettledRequesterChildrenInRuns(params: {
++  requesterSessionKey: string;
++  requesterAgentId?: string;
++  excludeRequesterTurnRunId?: string;
++  runs: Map<string, SubagentRunRecord>;
++  now?: number;
++}): UnsettledRequesterChild[] {
++  const requesterSessionKey = params.requesterSessionKey.trim();
++  if (!requesterSessionKey) {
++    return [];
++  }
++  const excludedTurnRunId = params.excludeRequesterTurnRunId?.trim() || undefined;
++  // Select each child session's latest generation before judging eligibility,
++  // so a superseded generation cannot stand in for a killed or collected successor.
++  const latestByChildSessionKey = new Map<string, SubagentRunRecord>();
++  for (const entry of params.runs.values()) {
++    if (
++      entry.requesterSessionKey === requesterSessionKey &&
++      (!params.requesterAgentId || entry.requesterAgentId === params.requesterAgentId)
++    ) {
++      recordLatestSubagentRun(latestByChildSessionKey, entry.childSessionKey, entry);
++    }
++  }
++  const now = params.now ?? Date.now();
++  const children: UnsettledRequesterChild[] = [];
++  for (const entry of latestByChildSessionKey.values()) {
++    if (
++      entry.collect === true ||
++      entry.expectsCompletionMessage !== true ||
++      (excludedTurnRunId !== undefined &&
++        (entry.requesterTurnRunId === excludedTurnRunId ||
++          isRequesterSettleWakeForRun({
++            entry,
++            runId: excludedTurnRunId,
++            requesterSessionKey,
++            requesterAgentId: params.requesterAgentId,
++            runsById: params.runs,
++          }))) ||
++      entry.killIntent ||
++      entry.killReconciliation ||
++      entry.suppressCompletionDelivery === true
++    ) {
++      continue;
++    }
++    const wake = entry.requesterSettleWake;
++    const wakeArmed = wake?.status === "pending" || wake?.status === "dispatching";
++    let state: UnsettledRequesterChild["state"];
++    if (!hasSubagentRunEnded(entry)) {
++      if (!isRetainedUnendedSubagentRun(entry, now)) {
++        continue;
++      }
++      state = "running";
++    } else if (entry.pauseReason === "sessions_yield") {
++      // markSubagentRunPausedAfterYield records a pause as an ended execution
++      // without an outcome; the child resumes only through a continuation.
++      state = "paused";
++    } else if (
++      wakeArmed ||
++      entry.delivery?.status === "pending" ||
++      entry.delivery?.status === "in_progress"
++    ) {
++      state = "completing";
++    } else {
++      continue;
++    }
++    const startedAt = getSubagentSessionStartedAt(entry);
++    children.push({
++      runId: entry.runId,
++      childSessionKey: entry.childSessionKey,
++      ...(entry.label ? { label: entry.label } : {}),
++      ...(startedAt !== undefined ? { startedAt } : {}),
++      state,
++      wakeArmed,
++    });
++  }
++  return children.toSorted((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
++}
++
++/** Read the current requester cohort without restoring retained state or acquiring control. */
++export function listUnsettledRequesterChildrenForSession(params: {
++  requesterSessionKey: string;
++  requesterAgentId: string;
++}): UnsettledRequesterChild[] {
++  return listUnsettledRequesterChildrenInRuns({
++    ...params,
++    runs: new Map(
++      [...getSubagentRunsForRequesterSession(params.requesterSessionKey)].map((entry) => [
++        entry.runId,
++        entry,
++      ]),
++    ),
++  });
++}
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-claim.ts b/src/agents/subagents/registry/subagent-registry-requester-claim.ts
 index 12e5baf4e6a76e4f2cd91d871cb71b6411cf2942..21aa457eed1c4fe3db78872b19716d8346663b54 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-claim.ts
@@ -82938,7 +83066,7 @@ index 6ffb2af703d328b5ef14885306cee0cb3bdcba10..9d9bb2a84ac61fd92aa9a72c1a97f3ff
      "publishes a nested requester's pause with its wake batch (plan rejection: %s)",
      async (rejectPlan) => {
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086edefb2161d 100644
+index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..3e4630882cbba9ad020e341fe0c536ed19c0ba77 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 @@ -1,4 +1,7 @@
@@ -82950,10 +83078,28 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
  import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
  import type { AcceptedSessionSpawn } from "../../accepted-session-spawn.js";
  import { promoteFollowupYield } from "../completion/session-followup-completion.js";
-@@ -27,6 +30,22 @@ import {
- import { hasSubagentRunEnded, isRetainedUnendedSubagentRun } from "./subagent-run-liveness.js";
- import { getSubagentSessionStartedAt } from "./subagent-session-metrics.js";
- 
+@@ -15,17 +18,28 @@ import {
+ } from "./subagent-registry-persistence.js";
+ import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+-import {
+-  isRequesterYieldCohortMember,
+-  isRequesterSettleWakeForRun,
+-} from "./subagent-requester-settle-identity.js";
+-import {
+-  compareSubagentRunGeneration,
+-  isSameSubagentRunOwner,
+-  recordLatestSubagentRun,
+-} from "./subagent-run-generation.js";
+-import { hasSubagentRunEnded, isRetainedUnendedSubagentRun } from "./subagent-run-liveness.js";
+-import { getSubagentSessionStartedAt } from "./subagent-session-metrics.js";
++import { isRequesterYieldCohortMember } from "./subagent-requester-settle-identity.js";
++import { compareSubagentRunGeneration, isSameSubagentRunOwner } from "./subagent-run-generation.js";
++export {
++  listUnsettledRequesterChildrenInRuns,
++  type UnsettledRequesterChild,
++} from "./subagent-registry-requester-children.js";
++
 +function sameProgressMessage(
 +  left: ProgressContinuationMessage | undefined,
 +  right: ProgressContinuationMessage | undefined,
@@ -82969,11 +83115,10 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
 +      left.messageId === right.messageId)
 +  );
 +}
-+
+ 
  /** Accepted steering keeps the child's execution and transfers only its requester-turn claim. */
  export async function adoptSubagentRunForRequesterTurnInRuns(params: {
-   expected: SubagentRunRecord;
-@@ -76,6 +95,9 @@ export async function adoptSubagentRunForRequesterTurnInRuns(params: {
+@@ -76,6 +90,9 @@ export async function adoptSubagentRunForRequesterTurnInRuns(params: {
          runId: entry.taskRunId ?? entry.runId,
          childSessionKey: entry.childSessionKey,
          expectsCompletionMessage: true,
@@ -82983,7 +83128,114 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
        };
        if (entry.requesterTurnRunId === requesterTurnRunId) {
          return { value: accepted };
-@@ -360,6 +382,15 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -109,106 +126,6 @@ export type RequesterInitialTransfer = (params: {
+   afterRelease?: (entries: readonly SubagentRunRecord[]) => void;
+ }) => Promise<void>;
+ 
+-/** A requester child whose completion is still owed to the requester session. */
+-export type UnsettledRequesterChild = {
+-  runId: string;
+-  childSessionKey: string;
+-  label?: string;
+-  startedAt?: number;
+-  /**
+-   * Running children have not ended; completing children ended and still owe
+-   * delivery; paused children yielded for an incoming continuation and will
+-   * not complete until one arrives.
+-   */
+-  state: "running" | "completing" | "paused";
+-  /** True when an earlier requester yield already armed a settle wake for this child. */
+-  wakeArmed: boolean;
+-};
+-
+-/**
+- * Lists this requester session's announcing children whose completion has not
+- * reached the requester yet, regardless of which requester turn spawned them.
+- * Children still bound to `excludeRequesterTurnRunId` belong to that turn's own
+- * claim and are omitted, as is the settle-wake cohort already reaching that turn.
+- */
+-export function listUnsettledRequesterChildrenInRuns(params: {
+-  requesterSessionKey: string;
+-  requesterAgentId?: string;
+-  excludeRequesterTurnRunId?: string;
+-  runs: Map<string, SubagentRunRecord>;
+-  now?: number;
+-}): UnsettledRequesterChild[] {
+-  const requesterSessionKey = params.requesterSessionKey.trim();
+-  if (!requesterSessionKey) {
+-    return [];
+-  }
+-  const excludedTurnRunId = params.excludeRequesterTurnRunId?.trim() || undefined;
+-  // Select each child session's latest generation before judging eligibility,
+-  // so a superseded generation cannot stand in for a killed or collected successor.
+-  const latestByChildSessionKey = new Map<string, SubagentRunRecord>();
+-  for (const entry of params.runs.values()) {
+-    if (
+-      entry.requesterSessionKey === requesterSessionKey &&
+-      (!params.requesterAgentId || entry.requesterAgentId === params.requesterAgentId)
+-    ) {
+-      recordLatestSubagentRun(latestByChildSessionKey, entry.childSessionKey, entry);
+-    }
+-  }
+-  const now = params.now ?? Date.now();
+-  const children: UnsettledRequesterChild[] = [];
+-  for (const entry of latestByChildSessionKey.values()) {
+-    if (
+-      entry.collect === true ||
+-      entry.expectsCompletionMessage !== true ||
+-      (excludedTurnRunId !== undefined &&
+-        (entry.requesterTurnRunId === excludedTurnRunId ||
+-          isRequesterSettleWakeForRun({
+-            entry,
+-            runId: excludedTurnRunId,
+-            requesterSessionKey,
+-            requesterAgentId: params.requesterAgentId,
+-            runsById: params.runs,
+-          }))) ||
+-      entry.killIntent ||
+-      entry.killReconciliation ||
+-      entry.suppressCompletionDelivery === true
+-    ) {
+-      continue;
+-    }
+-    const wake = entry.requesterSettleWake;
+-    const wakeArmed = wake?.status === "pending" || wake?.status === "dispatching";
+-    let state: UnsettledRequesterChild["state"];
+-    if (!hasSubagentRunEnded(entry)) {
+-      if (!isRetainedUnendedSubagentRun(entry, now)) {
+-        continue;
+-      }
+-      state = "running";
+-    } else if (entry.pauseReason === "sessions_yield") {
+-      // markSubagentRunPausedAfterYield records a pause as an ended execution
+-      // without an outcome; the child resumes only through a continuation.
+-      state = "paused";
+-    } else if (
+-      wakeArmed ||
+-      entry.delivery?.status === "pending" ||
+-      entry.delivery?.status === "in_progress"
+-    ) {
+-      state = "completing";
+-    } else {
+-      continue;
+-    }
+-    const startedAt = getSubagentSessionStartedAt(entry);
+-    children.push({
+-      runId: entry.runId,
+-      childSessionKey: entry.childSessionKey,
+-      ...(entry.label ? { label: entry.label } : {}),
+-      ...(startedAt !== undefined ? { startedAt } : {}),
+-      state,
+-      wakeArmed,
+-    });
+-  }
+-  return children.toSorted((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+-}
+-
+ /** Completion children that a requester turn still claims. */
+ function selectRequesterTurnChildren(
+   runs: Map<string, SubagentRunRecord>,
+@@ -360,6 +277,15 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
  
    const childRunIds = new Set(selectedEntries.map((entry) => entry.runId));
    const batchRunIds = [...childRunIds].toSorted();
@@ -82999,7 +83251,7 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
    let rearmGeneration: number | undefined;
    let needsCohortRelease = false;
    let yieldedFinalDeliverable = false;
-@@ -423,6 +454,10 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -423,6 +349,10 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
              entry.requesterTurnYielded !== true ||
              wake?.status !== "pending" ||
              wake.attemptCount !== 0 ||
@@ -83010,7 +83262,7 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
              (wake.yieldedFinalDeliverable === true) !== yieldedFinalDeliverable ||
              !isRequesterYieldCohortMember(entry, batchRunIds, rearmGeneration)
            );
-@@ -446,6 +481,20 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -446,6 +376,20 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
              "Requester spawn receipt lost its child owner",
            );
          }
@@ -83031,7 +83283,7 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
        }
        const firstEntry = entries[0]!;
        const requester = members.find((entry) => entry.runId === requesterTurnRunId);
-@@ -501,9 +550,39 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -501,9 +445,39 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
          );
        }
        const retired = new Set<string>();
@@ -83072,7 +83324,7 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..8b2837aff35bb8baacfc98b30b4086ed
          for (const entry of entries) {
            const existing = entry.requesterSettleWake;
            const completionEnded = typeof entry.execution.endedAt === "number";
-@@ -529,6 +608,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -529,6 +503,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
              ...(completionEnded ? { afterRequesterYield: true } : {}),
              rearmGeneration,
              progressOperationId,
@@ -132246,6 +132498,224 @@ index e2fbbe82a5279f1bd6ae52a18dec9e8d1998fbc4..2e4e0ea96529b30c37bcee374d5c605f
          ]
        : []),
      'While waiting for OpenClaw data or tool results, use at most one short natural backchannel such as "yeah", "mm-hmm", "got it", or "one sec"; vary it and do not treat it as the final answer.',
+diff --git a/src/talk/agent-run-control-shared.ts b/src/talk/agent-run-control-shared.ts
+index 94320937344f3512b68fef7b00ea5197792f0f18..7cd7d6995306dd1452a0b5bdcd2e0830be088581 100644
+--- a/src/talk/agent-run-control-shared.ts
++++ b/src/talk/agent-run-control-shared.ts
+@@ -321,6 +321,7 @@ export function formatRealtimeVoiceAgentQueueRejection(
+ /** Format a concise spoken status for the active or most recent voice run. */
+ export function formatRealtimeVoiceAgentStatus(params: {
+   active: boolean;
++  pendingChildState?: "running" | "completing" | "paused";
+   recentEvents?: readonly TalkEvent[];
+   activity?: RealtimeVoiceAgentRunActivity;
+ }): string {
+@@ -331,6 +332,15 @@ export function formatRealtimeVoiceAgentStatus(params: {
+       ? "OpenClaw finished the last voice request."
+       : "I'm not working on an active request right now.";
+   }
++  if (params.pendingChildState === "running") {
++    return "OpenClaw is waiting for delegated work to finish.";
++  }
++  if (params.pendingChildState === "paused") {
++    return "OpenClaw's delegated work is waiting for a continuation.";
++  }
++  if (params.pendingChildState === "completing") {
++    return "OpenClaw's delegated work has finished; its final response is still pending.";
++  }
+ 
+   const toolEvent = recent.findLast(
+     (event) =>
+diff --git a/src/talk/agent-run-control.status.test.ts b/src/talk/agent-run-control.status.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b30c04152e47761b970d939cd13e865d7f668bd2
+--- /dev/null
++++ b/src/talk/agent-run-control.status.test.ts
+@@ -0,0 +1,124 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { subagentRuns } from "../agents/subagents/registry/subagent-registry-memory.js";
++import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
++import { controlRealtimeVoiceAgentRun } from "./agent-run-control.js";
++
++vi.mock("../agents/embedded-agent-runner/runs.js", () => {
++  throw new Error("status must not load mutating run commands");
++});
++vi.mock("../agents/subagents/registry/subagent-registry-requester-yield.js", () => {
++  throw new Error("status must not load requester mutation commands");
++});
++
++const SESSION = "agent:voice-status:main";
++const registered: string[] = [];
++
++function child(overrides: Partial<SubagentRunRecord> = {}) {
++  const runId = `voice-status-child-${registered.length}`;
++  const entry: SubagentRunRecord = {
++    runId,
++    childSessionKey: `agent:voice-status:subagent:${runId}`,
++    requesterSessionKey: SESSION,
++    requesterAgentId: "voice-status",
++    requesterDisplayKey: "voice-status",
++    task: "read the delegated source",
++    cleanup: "keep",
++    createdAt: Date.now(),
++    execution: { status: "running", startedAt: Date.now() },
++    expectsCompletionMessage: true,
++    completion: { required: true },
++    delivery: { status: "pending" },
++    ...overrides,
++  };
++  registered.push(runId);
++  subagentRuns.set(runId, entry);
++  return entry;
++}
++
++afterEach(() => {
++  for (const id of registered.splice(0)) {
++    subagentRuns.delete(id);
++  }
++});
++
++const status = (params: Partial<Parameters<typeof controlRealtimeVoiceAgentRun>[0]> = {}) =>
++  controlRealtimeVoiceAgentRun({ sessionKey: SESSION, text: "status", mode: "status", ...params });
++
++describe("voice status after the foreground requester yields", () => {
++  it.each(["queued", "running"] as const)("reports a %s child as pending work", async (state) => {
++    child({ execution: { status: state } });
++    expect(await status()).toMatchObject({
++      ok: true,
++      active: true,
++      message: "OpenClaw is waiting for delegated work to finish.",
++    });
++  });
++
++  it.each(["pending", "dispatching"] as const)(
++    "retains the %s final after child cleanup",
++    async (state) => {
++      child({
++        execution: { status: "terminal", endedAt: Date.now() },
++        cleanupCompletedAt: Date.now(),
++        delivery: { status: "delivered", disposition: "intentional_non_delivery" },
++        requesterSettleWake: { status: state, attemptCount: 1, requesterYieldBatch: true },
++      });
++      expect(await status()).toMatchObject({
++        active: true,
++        message: "OpenClaw's delegated work has finished; its final response is still pending.",
++      });
++    },
++  );
++
++  it("reports a paused child without claiming it is executing", async () => {
++    child({
++      execution: { status: "terminal", endedAt: Date.now() },
++      pauseReason: "sessions_yield",
++    });
++    expect(await status()).toMatchObject({
++      active: true,
++      message: "OpenClaw's delegated work is waiting for a continuation.",
++    });
++  });
++
++  it.each([
++    { execution: { status: "terminal", endedAt: 1 }, delivery: { status: "delivered" } },
++    { requesterSessionKey: "agent:voice-status:other" },
++    { requesterAgentId: "other-agent" },
++    { suppressCompletionDelivery: true },
++  ] satisfies Partial<SubagentRunRecord>[])(
++    "excludes settled or unrelated work: %j",
++    async (row) => {
++      child(row);
++      expect(await status()).toMatchObject({ active: false });
++    },
++  );
++
++  it.each([null, "stale-run"])("does not widen an exact %s selector to its session", async (id) => {
++    child();
++    expect(
++      await status({
++        runTarget: id
++          ? { runId: id, signal: new AbortController().signal, isCurrent: () => false }
++          : null,
++      }),
++    ).toMatchObject({ active: false });
++  });
++
++  it("does not borrow children through an unqualified shared session key", async () => {
++    child({ requesterSessionKey: "main" });
++    expect(await status({ sessionKey: "main" })).toMatchObject({ active: false });
++  });
++
++  it.each(["cancel", "steer", "followup"])(
++    "does not give %s authority over children",
++    async (mode) => {
++      child();
++      expect(await status({ mode })).toMatchObject({
++        ok: false,
++        active: false,
++        reason: "no_active_run",
++      });
++    },
++  );
++});
+diff --git a/src/talk/agent-run-control.ts b/src/talk/agent-run-control.ts
+index 498582c1c42de7a1ba1fed44392ea71b04c897e3..dcdc69917688f0a3892aca77dc6b7d8aac14fb46 100644
+--- a/src/talk/agent-run-control.ts
++++ b/src/talk/agent-run-control.ts
+@@ -12,6 +12,7 @@ import type { ReplyToolAuthorityOverlay } from "../auto-reply/reply/reply-run-re
+ import { isAbortError } from "../infra/abort-signal.js";
+ import { formatErrorMessage } from "../infra/errors.js";
+ import { getDiagnosticSessionActivitySnapshot } from "../logging/diagnostic-run-activity.js";
++import { parseAgentSessionKey } from "../routing/session-key.js";
+ import type { UserTurnTranscriptRecorder } from "../sessions/user-turn-transcript.types.js";
+ import { captureRealtimeVoiceRunOwner } from "./agent-run-control-owner.js";
+ import {
+@@ -55,6 +56,7 @@ export function buildRealtimeVoiceAgentErrorProviderResult(
+ }
+ 
+ type RealtimeVoiceAgentControlDeps = {
++  listUnsettledRequesterChildrenForSession?: typeof import("../agents/subagents/registry/subagent-registry-requester-children.js").listUnsettledRequesterChildrenForSession;
+   queueGuardedEmbeddedAgentMessageWithOutcomeAsync?: typeof import("../agents/embedded-agent-runner/runs.js").queueGuardedEmbeddedAgentMessageWithOutcomeAsync;
+   abortEmbeddedAgentRun: (sessionId: string) => boolean;
+   queueEmbeddedAgentMessageWithOutcomeAsync: (
+@@ -156,16 +158,35 @@ export async function controlRealtimeVoiceAgentRun(
+     current.sessionId || activity?.activeWorkKind || activity?.hasActiveEmbeddedRun,
+   );
+ 
+-  // Without an exact live registration, status stays on lightweight diagnostics
+-  // and remains available even when the mutating runtime cannot load.
++  // Delegated completion debt is status only, never authority to cancel or steer.
+   if (mode === "status") {
++    const requesterAgentId = parseAgentSessionKey(sessionKey)?.agentId;
++    const children =
++      !active && target === undefined && requesterAgentId
++        ? ((
++            await (providedDeps ??
++              import("../agents/subagents/registry/subagent-registry-requester-children.js"))
++          ).listUnsettledRequesterChildrenForSession?.({
++            requesterSessionKey: sessionKey,
++            requesterAgentId,
++          }) ?? [])
++        : [];
++    const pendingChildState = children.some((child) => child.state === "running")
++      ? "running"
++      : children.some((child) => child.state === "paused")
++        ? "paused"
++        : children.length > 0
++          ? "completing"
++          : undefined;
++    const statusActive = active || children.length > 0;
+     return {
+       ok: true,
+       ...controlResultContext,
+       ...(current.sessionId ? { sessionId: current.sessionId } : {}),
+-      active,
++      active: statusActive,
+       message: formatRealtimeVoiceAgentStatus({
+-        active,
++        active: statusActive,
++        pendingChildState,
+         recentEvents: params.recentEvents,
+         activity,
+       }),
 diff --git a/src/talk/realtime-session-policy.test.ts b/src/talk/realtime-session-policy.test.ts
 index 99693e664f87d019e01d7f2ae4853c9488f63306..17dbf2261ac7f2c1731e009e66cdfe898ab06e11 100644
 --- a/src/talk/realtime-session-policy.test.ts
