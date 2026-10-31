@@ -52564,34 +52564,598 @@ index 911b7464f60a18ffdc1b5381fadf63d4b5ea9a72..1b5e91be47798f7e18ff936bcbad1ab1
    it("keeps failed-check guidance alongside a still-live user request", () => {
      const instructions = buildCompactionStructureInstructions(
        undefined,
+diff --git a/src/agents/agent-hooks/compaction-safeguard.fixtures.test-support.ts b/src/agents/agent-hooks/compaction-safeguard.fixtures.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a91951efac2f101e4e3aaaa35d1105402b0efcc8
+--- /dev/null
++++ b/src/agents/agent-hooks/compaction-safeguard.fixtures.test-support.ts
+@@ -0,0 +1,246 @@
++import type { AgentMessage, CompactionPreparation } from "openclaw/plugin-sdk/agent-core";
++import type { ExtensionAPI, ExtensionContext } from "openclaw/plugin-sdk/agent-sessions";
++import type { Model } from "openclaw/plugin-sdk/llm";
++import { expect, vi } from "vitest";
++import type { ExtensionEvent } from "../sessions/extensions/types.js";
++import { castAgentMessage } from "../test-helpers/agent-message-fixtures.js";
++import { setCompactionSafeguardRuntime } from "./compaction-safeguard-runtime.js";
++import compactionSafeguardExtension from "./compaction-safeguard.js";
++
++export function structuredSummary(
++  values: Partial<Record<"decisions" | "todos" | "rules" | "asks" | "identifiers", string>> = {},
++): string {
++  return [
++    "## Decisions",
++    values.decisions ?? "Keep current flow.",
++    "## Open TODOs",
++    values.todos ?? "None.",
++    "## Constraints/Rules",
++    values.rules ?? "Preserve exact context.",
++    "## Pending user asks",
++    values.asks ?? "None.",
++    "## Exact identifiers",
++    values.identifiers ?? "None.",
++  ].join("\n");
++}
++export function stubSessionManager(): ExtensionContext["sessionManager"] {
++  return {
++    getCwd: () => "/stub",
++    getSessionId: () => "stub-id",
++    getSessionTarget: () => undefined,
++    getLeafId: () => null,
++    getAppendParentId: () => null,
++    getAppendMode: () => undefined,
++    getLeafEntry: () => undefined,
++    getEntry: () => undefined,
++    getLabel: () => undefined,
++    getBranch: () => [],
++    getHeader: () => null,
++    getEntries: () => [],
++    getTree: () => [],
++    getSessionName: () => undefined,
++  };
++}
++
++export function createAnthropicModelFixture(overrides: Partial<Model> = {}): Model {
++  return {
++    id: "claude-opus-4-5",
++    name: "Claude Opus 4.5",
++    provider: "anthropic",
++    api: "anthropic" as const,
++    baseUrl: "https://api.anthropic.com",
++    contextWindow: 200000,
++    maxTokens: 4096,
++    reasoning: false,
++    input: ["text"] as const,
++    cost: { input: 15, output: 75, cacheRead: 0, cacheWrite: 0 },
++    ...overrides,
++  };
++}
++
++type SafeguardRuntime = NonNullable<Parameters<typeof setCompactionSafeguardRuntime>[1]>;
++
++export function configuredSession(runtime: SafeguardRuntime) {
++  const sessionManager = stubSessionManager();
++  setCompactionSafeguardRuntime(sessionManager, runtime);
++  return sessionManager;
++}
++
++export function modelSession(runtime: SafeguardRuntime = {}) {
++  return configuredSession({ model: createAnthropicModelFixture(), ...runtime });
++}
++
++export function toolResultMessage(
++  toolCallId: string,
++  text: string,
++  overrides: Partial<
++    Pick<
++      Extract<AgentMessage, { role: "toolResult" }>,
++      "toolName" | "timestamp" | "isError" | "details"
++    >
++  > = {},
++): AgentMessage {
++  return {
++    role: "toolResult",
++    toolCallId,
++    toolName: "read",
++    content: [{ type: "text", text }],
++    timestamp: 1,
++    isError: false,
++    ...overrides,
++  };
++}
++
++export function userMessage(content: string, timestamp: number): AgentMessage {
++  return { role: "user", content, timestamp };
++}
++
++export function toolCallMessage(id: string, name: string, timestamp: number): AgentMessage {
++  return castAgentMessage({
++    role: "assistant",
++    content: [{ type: "toolCall", id, name, arguments: {} }],
++    timestamp,
++  });
++}
++
++export function createQualityGuardSessionManager(
++  overrides: SafeguardRuntime = {},
++): ExtensionContext["sessionManager"] {
++  return modelSession({
++    recentTurnsPreserve: 0,
++    qualityGuardEnabled: true,
++    qualityGuardMaxRetries: 1,
++    ...overrides,
++  });
++}
++
++type CompactionHandler = (event: unknown, ctx: unknown) => Promise<unknown>;
++export const createCompactionHandler = () => {
++  let compactionHandler: CompactionHandler | undefined;
++  const mockApi = {
++    on: vi.fn((event: string, handler: CompactionHandler) => {
++      if (event === "session_before_compact") {
++        compactionHandler = handler;
++      }
++    }),
++  } as unknown as ExtensionAPI;
++  compactionSafeguardExtension(mockApi);
++  if (!compactionHandler) {
++    throw new Error("Expected compaction safeguard to register a handler.");
++  }
++  return compactionHandler;
++};
++
++export const createCompactionEvent = (
++  params: {
++    messageText?: string;
++    tokensBefore?: number;
++    preparation?: Partial<Omit<CompactionPreparation, "fileOps" | "settings">> & {
++      settings?: { reserveTokens: number };
++    };
++    customInstructions?: string;
++    signal?: AbortSignal;
++  } = {},
++) => ({
++  preparation: {
++    messagesToSummarize: [
++      { role: "user", content: params.messageText ?? "summarize me", timestamp: Date.now() },
++    ] as AgentMessage[],
++    turnPrefixMessages: [] as AgentMessage[],
++    firstKeptEntryId: "entry-1",
++    tokensBefore: params.tokensBefore ?? 1_500,
++    fileOps: {
++      read: [],
++      edited: [],
++      written: [],
++    },
++    settings: { reserveTokens: 4_000 },
++    isSplitTurn: false,
++    ...params.preparation,
++  },
++  customInstructions: params.customInstructions ?? "",
++  signal: params.signal ?? new AbortController().signal,
++});
++
++export const createCompactionContext = (params: {
++  sessionManager: ExtensionContext["sessionManager"];
++  getApiKeyAndHeadersMock: ReturnType<typeof vi.fn>;
++}) => ({
++  model: undefined,
++  sessionManager: params.sessionManager,
++  modelRegistry: { getApiKeyAndHeaders: params.getApiKeyAndHeadersMock },
++});
++
++type CompactionEvent = ReturnType<typeof createCompactionEvent> &
++  Pick<Extract<ExtensionEvent, { type: "session_before_compact" }>, "streamFn" | "thinkingLevel">;
++
++function withLatestUnresolvedUserRequest(event: CompactionEvent): CompactionEvent {
++  const { preparation } = event;
++  if ("latestUnresolvedUserRequest" in preparation) {
++    return event;
++  }
++  const latestUser = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
++    .toReversed()
++    .find((message) => message.role === "user");
++  const latestUnresolvedUserRequest =
++    typeof latestUser?.content === "string" ? latestUser.content.trim() : "";
++  return {
++    ...event,
++    preparation: {
++      ...preparation,
++      ...(latestUnresolvedUserRequest ? { latestUnresolvedUserRequest } : {}),
++    },
++  };
++}
++
++export async function runCompactionScenario(
++  sessionManager: ExtensionContext["sessionManager"],
++  event: CompactionEvent,
++  {
++    apiKey = "test-key",
++    latestUnresolvedUserRequest = false,
++  }: { apiKey?: string | null; latestUnresolvedUserRequest?: boolean } = {},
++) {
++  const getApiKeyAndHeadersMock = vi
++    .fn()
++    .mockResolvedValue(
++      apiKey !== null ? { ok: true, apiKey } : { ok: false, error: "missing auth" },
++    );
++  const result = (await createCompactionHandler()(
++    latestUnresolvedUserRequest ? withLatestUnresolvedUserRequest(event) : event,
++    createCompactionContext({ sessionManager, getApiKeyAndHeadersMock }),
++  )) as {
++    cancel?: boolean;
++    compaction?: { summary: string; firstKeptEntryId: string; tokensBefore: number };
++  };
++  return { result, getApiKeyAndHeadersMock };
++}
++
++export function expectCompactionResult(result: {
++  cancel?: boolean;
++  compaction?: {
++    summary: string;
++    firstKeptEntryId: string;
++    tokensBefore: number;
++  };
++}) {
++  expect(result.cancel).not.toBe(true);
++  if (!result.compaction) {
++    throw new Error("Expected compaction result");
++  }
++  return result.compaction;
++}
++
++const CANONICAL_SUMMARY_HEADINGS = [
++  "## Decisions",
++  "## Open TODOs",
++  "## Constraints/Rules",
++  "## Pending user asks",
++  "## Exact identifiers",
++] as const;
++
++export function expectCanonicalSummaryHeadingsOnce(summary: string): void {
++  for (const heading of CANONICAL_SUMMARY_HEADINGS) {
++    expect(summary.split("\n").filter((line) => line.trim() === heading)).toHaveLength(1);
++  }
++}
+diff --git a/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts b/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..94fae21beeeb58ce641b600bf70a0a2a62f761de
+--- /dev/null
++++ b/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts
+@@ -0,0 +1,251 @@
++import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
++import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
++import { afterEach, describe, expect, it } from "vitest";
++import { resetPluginRuntimeStateForTest } from "../../plugins/runtime.js";
++import * as actualCompactionModule from "../compaction.js";
++import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
++import { consumeCompactionSafeguardCancellation } from "./compaction-safeguard-runtime.js";
++import {
++  configuredSession,
++  createAnthropicModelFixture,
++  createCompactionEvent,
++  createQualityGuardSessionManager,
++  expectCanonicalSummaryHeadingsOnce,
++  expectCompactionResult,
++  runCompactionScenario,
++  structuredSummary,
++  toolCallMessage,
++  toolResultMessage,
++  userMessage,
++} from "./compaction-safeguard.fixtures.test-support.js";
++import { testing } from "./compaction-safeguard.test-support.js";
++
++const { MAX_COMPACTION_SUMMARY_CHARS, MAX_SPLIT_TURN_CONTEXT_CHARS } = testing;
++
++afterEach(() => {
++  testing.setSummarizeInStagesForTest();
++  resetPluginRuntimeStateForTest();
++});
++
++describe("compaction-safeguard provider requests", () => {
++  it.each([false, true])(
++    "sends one authoritative format per safeguard summary request (prefix=%s)",
++    async (prefix) => {
++      testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
++      const model = createAnthropicModelFixture({
++        api: "test-api" as never,
++        baseUrl: "",
++        reasoning: true,
++      });
++      const sessionManager = configuredSession({ model, recentTurnsPreserve: 0 });
++
++      const providerPrompts: string[] = [];
++      const providerBudgets: Array<number | undefined> = [];
++      const streamFn: StreamFn = (_activeModel, context, options) => {
++        expect(options?.reasoning).toBe("high");
++        providerPrompts.push(JSON.stringify(context));
++        providerBudgets.push(options?.maxTokens);
++        const stream = createAssistantMessageEventStream();
++        stream.push({
++          type: "done",
++          reason: "stop",
++          message: {
++            role: "assistant",
++            content: [{ type: "text", text: "provider summary" }],
++            api: model.api,
++            provider: model.provider,
++            model: model.id,
++            usage: createZeroUsageFixture(),
++            stopReason: "stop",
++            timestamp: 1,
++          },
++        });
++        stream.end();
++        return stream;
++      };
++      const event = {
++        ...createCompactionEvent({
++          messageText: "summarize me: receipt_90210",
++          tokensBefore: 1_000,
++        }),
++        customInstructions: "Keep the deployment decision.",
++        thinkingLevel: "high" as const,
++        streamFn,
++      };
++      const preparation = {
++        ...event.preparation,
++        isSplitTurn: prefix,
++        messagesToSummarize: prefix ? [] : event.preparation.messagesToSummarize,
++        turnPrefixMessages: prefix ? event.preparation.messagesToSummarize : [],
++        previousSummary: prefix ? undefined : "Earlier deployment decision: use canary staging.",
++      };
++
++      const { result } = await runCompactionScenario(sessionManager, { ...event, preparation });
++
++      expect(result.cancel).not.toBe(true);
++      expect(result.compaction?.summary).toContain("provider summary");
++      expect(result.compaction?.summary).not.toContain("Earlier deployment decision");
++      expect(providerPrompts).toHaveLength(prefix ? 2 : 1);
++      for (const [index, prompt] of providerPrompts.entries()) {
++        const supportingPrefix = index === 1;
++        expect(prompt).toContain("[User]: summarize me");
++        expect(prompt).toContain("receipt_90210");
++        expect(prompt).toContain("Keep the deployment decision.");
++        expect(prompt).toContain(
++          `Keep the final summary body within ${supportingPrefix ? MAX_SPLIT_TURN_CONTEXT_CHARS : MAX_COMPACTION_SUMMARY_CHARS} UTF-16 code units.`,
++        );
++        expect(prompt).toContain("completed-effect facts, and unresolved asks");
++        expect(prompt).toContain("follow the configured identifier policy");
++        expect(prompt).toContain("Preserve all opaque identifiers exactly");
++        expect(prompt).not.toContain("## Goal");
++        expect(prompt).not.toContain("## Constraints & Preferences");
++        expect(prompt).toContain(supportingPrefix ? "## Original Request" : "## Pending user asks");
++        expect(prompt).not.toContain(
++          supportingPrefix ? "## Pending user asks" : "## Original Request",
++        );
++      }
++      expect(providerBudgets).toEqual(prefix ? [3_200, 2_000] : [3_200]);
++      if (!prefix) {
++        expect(providerPrompts[0]).toContain("Earlier deployment decision: use canary staging.");
++      }
++    },
++  );
++
++  it.each(["history", "previous summary"] as const)(
++    "includes split-turn corrections in the canonical summary request after %s",
++    async (earlierContext) => {
++      testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
++      const model = createAnthropicModelFixture({ api: "test-api" as never, baseUrl: "" });
++      const sessionManager = createQualityGuardSessionManager({ model, qualityGuardMaxRetries: 0 });
++      const oldIntent = "Publish the release notes publicly after my final review.";
++      const correction =
++        "My review is complete. Keep the release notes private; cancel publication.";
++      const completedEffect = "Private release notes saved; public publication cancelled.";
++      const unrelatedPending = "Translate the installation guide.";
++      const previousSummary = structuredSummary({ asks: `${oldIntent}\n${unrelatedPending}` });
++      const canonicalSummary = structuredSummary({
++        decisions: completedEffect,
++        rules: "Keep the release notes private.",
++        asks: unrelatedPending,
++      });
++      const prefixSummary = [
++        "## Original Request",
++        correction,
++        "## Early Progress",
++        completedEffect,
++        "## Context for Suffix",
++        "The release notes remain private.",
++      ].join("\n");
++      const providerPrompts: string[] = [];
++      const streamFn: StreamFn = (_activeModel, context) => {
++        providerPrompts.push(JSON.stringify(context));
++        const stream = createAssistantMessageEventStream();
++        stream.push({
++          type: "done",
++          reason: "stop",
++          message: {
++            role: "assistant",
++            content: [
++              {
++                type: "text",
++                text: providerPrompts.length === 1 ? canonicalSummary : prefixSummary,
++              },
++            ],
++            api: model.api,
++            provider: model.provider,
++            model: model.id,
++            usage: createZeroUsageFixture(),
++            stopReason: "stop",
++            timestamp: 1,
++          },
++        });
++        stream.end();
++        return stream;
++      };
++      const event = createCompactionEvent({
++        preparation: {
++          messagesToSummarize:
++            earlierContext === "history"
++              ? [userMessage(`${oldIntent}\n${unrelatedPending}`, 1)]
++              : [],
++          previousSummary: earlierContext === "previous summary" ? previousSummary : undefined,
++          turnPrefixMessages: [
++            userMessage(correction, 2),
++            toolCallMessage("call_save", "edit", 3),
++            toolResultMessage("call_save", completedEffect, { toolName: "edit", timestamp: 4 }),
++          ],
++          isSplitTurn: true,
++        },
++      });
++
++      const { result } = await runCompactionScenario(sessionManager, { ...event, streamFn });
++
++      const canonicalPrompt = providerPrompts[0];
++      if (canonicalPrompt === undefined) {
++        throw new Error("Expected a canonical summary provider request");
++      }
++      // Inspect the real serialized provider request, not the mocked staged-summarizer input.
++      expect(canonicalPrompt).toContain(oldIntent);
++      expect(canonicalPrompt).toContain(correction);
++      expect(canonicalPrompt).toContain(`[Tool result]: ${completedEffect}`);
++      expect(canonicalPrompt).toContain(unrelatedPending);
++      expect(canonicalPrompt).toContain("## Pending user asks");
++      expect(canonicalPrompt).not.toContain("## Original Request");
++      expect(canonicalPrompt.indexOf(oldIntent)).toBeLessThan(canonicalPrompt.indexOf(correction));
++      expect(providerPrompts).toHaveLength(2);
++      expect(providerPrompts[1]).toContain("## Original Request");
++      expect(providerPrompts[1]).toContain(correction);
++      expect(providerPrompts[1]).not.toContain(oldIntent);
++      const summary = expectCompactionResult(result).summary;
++      expect(summary).toContain(`## Decisions\n${completedEffect}`);
++      expect(summary).toContain(`## Pending user asks\n${unrelatedPending}`);
++      expect(summary).not.toContain(oldIntent);
++      expect(summary).toContain("### Early Progress");
++      expectCanonicalSummaryHeadingsOnce(summary);
++    },
++  );
++
++  it("surfaces a total provider failure and leaves the safeguard transcript unchanged", async () => {
++    testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
++    const model = createAnthropicModelFixture({
++      api: "test-api" as never,
++      baseUrl: "",
++    });
++    const sessionManager = configuredSession({ model, recentTurnsPreserve: 0 });
++
++    const streamFn: StreamFn = () => {
++      const stream = createAssistantMessageEventStream();
++      stream.push({
++        type: "error",
++        reason: "error",
++        error: {
++          role: "assistant",
++          content: [],
++          api: model.api,
++          provider: model.provider,
++          model: model.id,
++          usage: createZeroUsageFixture(),
++          stopReason: "error",
++          errorMessage: "Cannot convert undefined or null to object",
++          timestamp: 1,
++        },
++      });
++      stream.end();
++      return stream;
++    };
++    const event = {
++      ...createCompactionEvent({ messageText: "summarize me", tokensBefore: 1_000 }),
++      streamFn,
++    };
++    const transcriptBefore = structuredClone(event.preparation.messagesToSummarize);
++
++    const { result } = await runCompactionScenario(sessionManager, event);
++
++    expect(result).toEqual({ cancel: true });
++    expect(result).not.toHaveProperty("compaction");
++    expect(event.preparation.messagesToSummarize).toStrictEqual(transcriptBefore);
++    expect(consumeCompactionSafeguardCancellation(sessionManager)?.reason).toContain(
++      "Cannot convert undefined or null to object",
++    );
++  });
++});
 diff --git a/src/agents/agent-hooks/compaction-safeguard.test.ts b/src/agents/agent-hooks/compaction-safeguard.test.ts
-index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726c40ea290 100644
+index b3dcdd8d5491421075b05bb14c1fc08048e021c5..d757f9a3943131c48a64fe8622e29bdb97d3dbcd 100644
 --- a/src/agents/agent-hooks/compaction-safeguard.test.ts
 +++ b/src/agents/agent-hooks/compaction-safeguard.test.ts
-@@ -1,6 +1,3 @@
+@@ -1,9 +1,5 @@
 -import fs from "node:fs";
 -import os from "node:os";
 -import path from "node:path";
- import type { AgentMessage, CompactionPreparation, StreamFn } from "openclaw/plugin-sdk/agent-core";
- import type { ExtensionAPI, ExtensionContext } from "openclaw/plugin-sdk/agent-sessions";
- import { createAssistantMessageEventStream, type Model } from "openclaw/plugin-sdk/llm";
-@@ -18,7 +15,6 @@ import { castAgentMessage } from "../test-helpers/agent-message-fixtures.js";
+-import type { AgentMessage, CompactionPreparation, StreamFn } from "openclaw/plugin-sdk/agent-core";
+-import type { ExtensionAPI, ExtensionContext } from "openclaw/plugin-sdk/agent-sessions";
+-import { createAssistantMessageEventStream, type Model } from "openclaw/plugin-sdk/llm";
++import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
++import type { ExtensionContext } from "openclaw/plugin-sdk/agent-sessions";
+ import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import type { OpenClawConfig } from "../../config/config.js";
+@@ -16,9 +12,7 @@ import * as compactionModule from "../compaction.js";
+ import { buildEmbeddedExtensionFactories } from "../embedded-agent-runner/extensions.js";
+ import { castAgentMessage } from "../test-helpers/agent-message-fixtures.js";
  import { timestampedTextAssistant } from "../test-helpers/sparse-transcript.test-support.js";
- import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
+-import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
  import { jsonResult } from "../tools/common.js";
 -import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../workspace-bootstrap-read.js";
  import * as compactionQualityModule from "./compaction-safeguard-quality.js";
  import {
    consumeCompactionSafeguardCancellation,
-@@ -28,6 +24,7 @@ import {
+@@ -26,8 +20,25 @@ import {
+   setCompactionSafeguardCancellation,
+   setCompactionSafeguardRuntime,
  } from "./compaction-safeguard-runtime.js";
- import compactionSafeguardExtension from "./compaction-safeguard.js";
+-import compactionSafeguardExtension from "./compaction-safeguard.js";
++import {
++  configuredSession,
++  createAnthropicModelFixture,
++  createCompactionContext,
++  createCompactionEvent,
++  createCompactionHandler,
++  createQualityGuardSessionManager,
++  expectCanonicalSummaryHeadingsOnce,
++  expectCompactionResult,
++  modelSession,
++  runCompactionScenario,
++  structuredSummary,
++  stubSessionManager,
++  toolCallMessage,
++  toolResultMessage,
++  userMessage,
++} from "./compaction-safeguard.fixtures.test-support.js";
  import { testing } from "./compaction-safeguard.test-support.js";
 +import { registerWorkspaceCompactionSummaryTests } from "./compaction-safeguard.workspace.test-support.js";
  
  const { compactionLogger } = vi.hoisted(() => {
    const logger = {
-@@ -112,7 +109,6 @@ const {
+@@ -69,28 +80,11 @@ vi.mock("../compaction.js", async () => {
+ });
+ 
+ const mockSummarizeInStages = vi.mocked(compactionModule.summarizeInStages);
+-const actualCompactionModule = await vi.importActual<typeof compactionModule>("../compaction.js");
+ const actualCompactionQualityModule = await vi.importActual<typeof compactionQualityModule>(
+   "./compaction-safeguard-quality.js",
+ );
+ const mockAuditSummaryQuality = vi.mocked(compactionQualityModule.auditSummaryQuality);
+ 
+-function structuredSummary(
+-  values: Partial<Record<"decisions" | "todos" | "rules" | "asks" | "identifiers", string>> = {},
+-): string {
+-  return [
+-    "## Decisions",
+-    values.decisions ?? "Keep current flow.",
+-    "## Open TODOs",
+-    values.todos ?? "None.",
+-    "## Constraints/Rules",
+-    values.rules ?? "Preserve exact context.",
+-    "## Pending user asks",
+-    values.asks ?? "None.",
+-    "## Exact identifiers",
+-    values.identifiers ?? "None.",
+-  ].join("\n");
+-}
+ function headingTemplate(prefix: string): string {
+   return `${prefix}\n${structuredSummary({ decisions: "alpha", todos: "beta", rules: "gamma", asks: "delta", identifiers: "epsilon" })}`;
+ }
+@@ -112,7 +106,6 @@ const {
    formatToolFailuresSection,
    splitPreservedRecentTurns,
    buildPreservedTurnsSection,
@@ -52599,7 +53163,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
    prependPreviousSummaryForRedistill,
    resolveRecentTurnsPreserve,
    resolveQualityGuardMaxRetries,
-@@ -122,7 +118,6 @@ const {
+@@ -122,7 +115,6 @@ const {
    formatFileOperations,
    MAX_FILE_OPS_SECTION_CHARS,
    budgetCompactionSummary,
@@ -52607,7 +53171,235 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
    MAX_COMPACTION_SUMMARY_CHARS,
    SUMMARY_TRUNCATED_MARKER,
    CONTEXT_TRUNCATED_MARKER,
-@@ -876,23 +871,6 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -160,227 +152,6 @@ function installCompactionProviderForTest(
+   });
+ }
+ 
+-function stubSessionManager(): ExtensionContext["sessionManager"] {
+-  return {
+-    getCwd: () => "/stub",
+-    getSessionId: () => "stub-id",
+-    getSessionTarget: () => undefined,
+-    getLeafId: () => null,
+-    getAppendParentId: () => null,
+-    getAppendMode: () => undefined,
+-    getLeafEntry: () => undefined,
+-    getEntry: () => undefined,
+-    getLabel: () => undefined,
+-    getBranch: () => [],
+-    getHeader: () => null,
+-    getEntries: () => [],
+-    getTree: () => [],
+-    getSessionName: () => undefined,
+-  };
+-}
+-
+-function createAnthropicModelFixture(overrides: Partial<Model> = {}): Model {
+-  return {
+-    id: "claude-opus-4-5",
+-    name: "Claude Opus 4.5",
+-    provider: "anthropic",
+-    api: "anthropic" as const,
+-    baseUrl: "https://api.anthropic.com",
+-    contextWindow: 200000,
+-    maxTokens: 4096,
+-    reasoning: false,
+-    input: ["text"] as const,
+-    cost: { input: 15, output: 75, cacheRead: 0, cacheWrite: 0 },
+-    ...overrides,
+-  };
+-}
+-
+-type SafeguardRuntime = NonNullable<Parameters<typeof setCompactionSafeguardRuntime>[1]>;
+-
+-function configuredSession(runtime: SafeguardRuntime) {
+-  const sessionManager = stubSessionManager();
+-  setCompactionSafeguardRuntime(sessionManager, runtime);
+-  return sessionManager;
+-}
+-
+-function modelSession(runtime: SafeguardRuntime = {}) {
+-  return configuredSession({ model: createAnthropicModelFixture(), ...runtime });
+-}
+-
+-function toolResultMessage(
+-  toolCallId: string,
+-  text: string,
+-  overrides: Partial<
+-    Pick<
+-      Extract<AgentMessage, { role: "toolResult" }>,
+-      "toolName" | "timestamp" | "isError" | "details"
+-    >
+-  > = {},
+-): AgentMessage {
+-  return {
+-    role: "toolResult",
+-    toolCallId,
+-    toolName: "read",
+-    content: [{ type: "text", text }],
+-    timestamp: 1,
+-    isError: false,
+-    ...overrides,
+-  };
+-}
+-
+-function userMessage(content: string, timestamp: number): AgentMessage {
+-  return { role: "user", content, timestamp };
+-}
+-
+-function toolCallMessage(id: string, name: string, timestamp: number): AgentMessage {
+-  return castAgentMessage({
+-    role: "assistant",
+-    content: [{ type: "toolCall", id, name, arguments: {} }],
+-    timestamp,
+-  });
+-}
+-
+-function createQualityGuardSessionManager(
+-  overrides: SafeguardRuntime = {},
+-): ExtensionContext["sessionManager"] {
+-  return modelSession({
+-    recentTurnsPreserve: 0,
+-    qualityGuardEnabled: true,
+-    qualityGuardMaxRetries: 1,
+-    ...overrides,
+-  });
+-}
+-
+-type CompactionHandler = (event: unknown, ctx: unknown) => Promise<unknown>;
+-const createCompactionHandler = () => {
+-  let compactionHandler: CompactionHandler | undefined;
+-  const mockApi = {
+-    on: vi.fn((event: string, handler: CompactionHandler) => {
+-      if (event === "session_before_compact") {
+-        compactionHandler = handler;
+-      }
+-    }),
+-  } as unknown as ExtensionAPI;
+-  compactionSafeguardExtension(mockApi);
+-  if (!compactionHandler) {
+-    throw new Error("Expected compaction safeguard to register a handler.");
+-  }
+-  return compactionHandler;
+-};
+-
+-const createCompactionEvent = (
+-  params: {
+-    messageText?: string;
+-    tokensBefore?: number;
+-    preparation?: Partial<Omit<CompactionPreparation, "fileOps" | "settings">> & {
+-      settings?: { reserveTokens: number };
+-    };
+-    customInstructions?: string;
+-    signal?: AbortSignal;
+-  } = {},
+-) => ({
+-  preparation: {
+-    messagesToSummarize: [
+-      { role: "user", content: params.messageText ?? "summarize me", timestamp: Date.now() },
+-    ] as AgentMessage[],
+-    turnPrefixMessages: [] as AgentMessage[],
+-    firstKeptEntryId: "entry-1",
+-    tokensBefore: params.tokensBefore ?? 1_500,
+-    fileOps: {
+-      read: [],
+-      edited: [],
+-      written: [],
+-    },
+-    settings: { reserveTokens: 4_000 },
+-    isSplitTurn: false,
+-    ...params.preparation,
+-  },
+-  customInstructions: params.customInstructions ?? "",
+-  signal: params.signal ?? new AbortController().signal,
+-});
+-
+-const createCompactionContext = (params: {
+-  sessionManager: ExtensionContext["sessionManager"];
+-  getApiKeyAndHeadersMock: ReturnType<typeof vi.fn>;
+-}) => ({
+-  model: undefined,
+-  sessionManager: params.sessionManager,
+-  modelRegistry: { getApiKeyAndHeaders: params.getApiKeyAndHeadersMock },
+-});
+-
+-type CompactionEvent = ReturnType<typeof createCompactionEvent>;
+-
+-function withLatestUnresolvedUserRequest(event: CompactionEvent): CompactionEvent {
+-  const { preparation } = event;
+-  if ("latestUnresolvedUserRequest" in preparation) {
+-    return event;
+-  }
+-  const latestUser = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
+-    .toReversed()
+-    .find((message) => message.role === "user");
+-  const latestUnresolvedUserRequest =
+-    typeof latestUser?.content === "string" ? latestUser.content.trim() : "";
+-  return {
+-    ...event,
+-    preparation: {
+-      ...preparation,
+-      ...(latestUnresolvedUserRequest ? { latestUnresolvedUserRequest } : {}),
+-    },
+-  };
+-}
+-
+-async function runCompactionScenario(
+-  sessionManager: ExtensionContext["sessionManager"],
+-  event: CompactionEvent,
+-  {
+-    apiKey = "test-key",
+-    latestUnresolvedUserRequest = false,
+-  }: { apiKey?: string | null; latestUnresolvedUserRequest?: boolean } = {},
+-) {
+-  const getApiKeyAndHeadersMock = vi
+-    .fn()
+-    .mockResolvedValue(
+-      apiKey !== null ? { ok: true, apiKey } : { ok: false, error: "missing auth" },
+-    );
+-  const result = (await createCompactionHandler()(
+-    latestUnresolvedUserRequest ? withLatestUnresolvedUserRequest(event) : event,
+-    createCompactionContext({ sessionManager, getApiKeyAndHeadersMock }),
+-  )) as {
+-    cancel?: boolean;
+-    compaction?: { summary: string; firstKeptEntryId: string; tokensBefore: number };
+-  };
+-  return { result, getApiKeyAndHeadersMock };
+-}
+-
+-function expectCompactionResult(result: {
+-  cancel?: boolean;
+-  compaction?: {
+-    summary: string;
+-    firstKeptEntryId: string;
+-    tokensBefore: number;
+-  };
+-}) {
+-  expect(result.cancel).not.toBe(true);
+-  if (!result.compaction) {
+-    throw new Error("Expected compaction result");
+-  }
+-  return result.compaction;
+-}
+-
+-const CANONICAL_SUMMARY_HEADINGS = [
+-  "## Decisions",
+-  "## Open TODOs",
+-  "## Constraints/Rules",
+-  "## Pending user asks",
+-  "## Exact identifiers",
+-] as const;
+-
+-function expectCanonicalSummaryHeadingsOnce(summary: string): void {
+-  for (const heading of CANONICAL_SUMMARY_HEADINGS) {
+-    expect(summary.split("\n").filter((line) => line.trim() === heading)).toHaveLength(1);
+-  }
+-}
+-
+ function mockCallArg(
+   mock: { mock: { calls: ReadonlyArray<ReadonlyArray<unknown>> } },
+   callIndex = 0,
+@@ -876,23 +647,6 @@ describe("compaction-safeguard recent-turn preservation", () => {
      ).toContain("latest_user_ask_not_foregrounded");
    });
  
@@ -52631,19 +53423,133 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
    it("cancels without advancing the boundary when dropped history cannot be summarized", async () => {
      mockSummarizeInStages
        .mockRejectedValueOnce(new Error("dropped prefix unavailable"))
-@@ -1124,6 +1102,11 @@ describe("compaction-safeguard recent-turn preservation", () => {
-       expect(providerPrompts[0]).toContain("[User]: summarize me");
-       expect(providerPrompts[0]).toContain("receipt_90210");
-       expect(providerPrompts[0]).toContain("Keep the deployment decision.");
-+      expect(providerPrompts[0]).toContain(
-+        `Keep the final summary body within ${prefix ? MAX_SPLIT_TURN_CONTEXT_CHARS : MAX_COMPACTION_SUMMARY_CHARS} UTF-16 code units.`,
-+      );
-+      expect(providerPrompts[0]).toContain("completed-effect facts, and unresolved asks");
-+      expect(providerPrompts[0]).toContain("follow the configured identifier policy");
-       expect(providerPrompts[0]).toContain("Preserve all opaque identifiers exactly");
-       expect(providerPrompts[0]).not.toContain("## Goal");
-       expect(providerPrompts[0]).not.toContain("## Constraints & Preferences");
-@@ -1490,6 +1473,9 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1063,125 +817,6 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     expect(summaryCall?.headers?.["x-initiator"]).toBe("user");
+   });
+ 
+-  it.each([false, true])(
+-    "sends one authoritative safeguard summary format (prefix=%s)",
+-    async (prefix) => {
+-      testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
+-      const model = createAnthropicModelFixture({
+-        api: "test-api" as never,
+-        baseUrl: "",
+-        reasoning: true,
+-      });
+-      const sessionManager = configuredSession({ model, recentTurnsPreserve: 0 });
+-
+-      const providerPrompts: string[] = [];
+-      const providerBudgets: Array<number | undefined> = [];
+-      const streamFn: StreamFn = (_activeModel, context, options) => {
+-        expect(options?.reasoning).toBe("high");
+-        providerPrompts.push(JSON.stringify(context));
+-        providerBudgets.push(options?.maxTokens);
+-        const stream = createAssistantMessageEventStream();
+-        stream.push({
+-          type: "done",
+-          reason: "stop",
+-          message: {
+-            role: "assistant",
+-            content: [{ type: "text", text: "provider summary" }],
+-            api: model.api,
+-            provider: model.provider,
+-            model: model.id,
+-            usage: createZeroUsageFixture(),
+-            stopReason: "stop",
+-            timestamp: 1,
+-          },
+-        });
+-        stream.end();
+-        return stream;
+-      };
+-      const event = {
+-        ...createCompactionEvent({
+-          messageText: "summarize me: receipt_90210",
+-          tokensBefore: 1_000,
+-        }),
+-        customInstructions: "Keep the deployment decision.",
+-        thinkingLevel: "high" as const,
+-        streamFn,
+-      };
+-      const preparation = {
+-        ...event.preparation,
+-        isSplitTurn: prefix,
+-        messagesToSummarize: prefix ? [] : event.preparation.messagesToSummarize,
+-        turnPrefixMessages: prefix ? event.preparation.messagesToSummarize : [],
+-        previousSummary: prefix ? undefined : "Earlier deployment decision: use canary staging.",
+-      };
+-
+-      const { result } = await runCompactionScenario(sessionManager, { ...event, preparation });
+-
+-      expect(result.cancel).not.toBe(true);
+-      expect(result.compaction?.summary).toContain("provider summary");
+-      expect(result.compaction?.summary).not.toContain("Earlier deployment decision");
+-      expect(providerPrompts).toHaveLength(1);
+-      expect(providerPrompts[0]).toContain("[User]: summarize me");
+-      expect(providerPrompts[0]).toContain("receipt_90210");
+-      expect(providerPrompts[0]).toContain("Keep the deployment decision.");
+-      expect(providerPrompts[0]).toContain("Preserve all opaque identifiers exactly");
+-      expect(providerPrompts[0]).not.toContain("## Goal");
+-      expect(providerPrompts[0]).not.toContain("## Constraints & Preferences");
+-      expect(providerPrompts[0]).toContain(prefix ? "## Original Request" : "## Pending user asks");
+-      expect(providerPrompts[0]).not.toContain(
+-        prefix ? "## Pending user asks" : "## Original Request",
+-      );
+-      expect(providerBudgets).toEqual([prefix ? 2_000 : 3_200]);
+-      if (!prefix) {
+-        expect(providerPrompts[0]).toContain("Earlier deployment decision: use canary staging.");
+-      }
+-    },
+-  );
+-
+-  it("surfaces a total provider failure and leaves the safeguard transcript unchanged", async () => {
+-    testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
+-    const model = createAnthropicModelFixture({
+-      api: "test-api" as never,
+-      baseUrl: "",
+-    });
+-    const sessionManager = configuredSession({ model, recentTurnsPreserve: 0 });
+-
+-    const streamFn: StreamFn = () => {
+-      const stream = createAssistantMessageEventStream();
+-      stream.push({
+-        type: "error",
+-        reason: "error",
+-        error: {
+-          role: "assistant",
+-          content: [],
+-          api: model.api,
+-          provider: model.provider,
+-          model: model.id,
+-          usage: createZeroUsageFixture(),
+-          stopReason: "error",
+-          errorMessage: "Cannot convert undefined or null to object",
+-          timestamp: 1,
+-        },
+-      });
+-      stream.end();
+-      return stream;
+-    };
+-    const event = {
+-      ...createCompactionEvent({ messageText: "summarize me", tokensBefore: 1_000 }),
+-      streamFn,
+-    };
+-    const transcriptBefore = structuredClone(event.preparation.messagesToSummarize);
+-
+-    const { result } = await runCompactionScenario(sessionManager, event);
+-
+-    expect(result).toEqual({ cancel: true });
+-    expect(result).not.toHaveProperty("compaction");
+-    expect(event.preparation.messagesToSummarize).toStrictEqual(transcriptBefore);
+-    expect(consumeCompactionSafeguardCancellation(sessionManager)?.reason).toContain(
+-      "Cannot convert undefined or null to object",
+-    );
+-  });
+-
+   it.each(["How about now?", "１０ and ２０"])(
+     "accepts a preserved keyword-free request without retrying compaction: %s",
+     async (latestAsk) => {
+@@ -1490,6 +1125,9 @@ describe("compaction-safeguard recent-turn preservation", () => {
    it("keeps an owner-provided request pending when its completed turn is preserved", async () => {
      const latestAsk = "combine the bars into one box per provider";
      const completion = "The provider boxes are combined.";
@@ -52653,7 +53559,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      const sessionManager = createQualityGuardSessionManager({ recentTurnsPreserve: 12 });
      const toolChain = Array.from({ length: 12 }, (_, index) => {
        const id = `call_${index}`;
-@@ -1522,9 +1508,42 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1522,9 +1160,42 @@ describe("compaction-safeguard recent-turn preservation", () => {
      expect(finalSummary).toContain(
        `## Pending user asks\nLatest user request context: ${JSON.stringify(latestAsk)}`,
      );
@@ -52697,7 +53603,41 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
    it("keeps an owner-provided request ahead of model-classified older work", async () => {
      const latestAsk = "combine the provider boxes into one completed artifact";
      const summary = structuredSummary({
-@@ -1707,6 +1726,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1608,6 +1279,12 @@ describe("compaction-safeguard recent-turn preservation", () => {
+   it("keeps an owner-provided split-turn request pending across retained context", async () => {
+     const latestAsk = "combine the provider boxes into one completed artifact";
+     const identifier = "/tmp/pr130620/live/marker";
++    const canonicalSummary = structuredSummary({
++      decisions: "The RCA is complete.",
++      todos: "Implementation remains.",
++      asks: "None.",
++      identifiers: identifier,
++    });
+     const prefixSummary = (pendingAsk?: string) =>
+       [
+         "## Original Request",
+@@ -1619,7 +1296,9 @@ describe("compaction-safeguard recent-turn preservation", () => {
+         ...(pendingAsk ? ["## Pending user asks", pendingAsk] : []),
+       ].join("\n");
+     mockSummarizeInStages
++      .mockResolvedValueOnce(canonicalSummary)
+       .mockResolvedValueOnce(prefixSummary(latestAsk))
++      .mockResolvedValueOnce(canonicalSummary)
+       .mockResolvedValueOnce(prefixSummary());
+ 
+     const sessionManager = createQualityGuardSessionManager();
+@@ -1649,8 +1328,8 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     });
+ 
+     const finalSummary = expectCompactionResult(result).summary;
+-    expect(mockSummarizeInStages).toHaveBeenCalledTimes(2);
+-    const retry = requireRecord(mockCallArg(mockSummarizeInStages, 1));
++    expect(mockSummarizeInStages).toHaveBeenCalledTimes(4);
++    const retry = requireRecord(mockCallArg(mockSummarizeInStages, 2));
+     expect(retry.customInstructions).toContain("retained_turn_ask_marked_pending");
+     expect(finalSummary).toContain(
+       `## Pending user asks\nLatest user request context: ${JSON.stringify(latestAsk)}`,
+@@ -1707,6 +1386,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
  
    it("ignores truncated numeric tool-result noise in strict all-preserved audits", async () => {
      const latestAsk = "report metric status";
@@ -52705,7 +53645,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      const sessionManager = createQualityGuardSessionManager({ recentTurnsPreserve: 12 });
      const messagesToSummarize: AgentMessage[] = [
        userMessage(latestAsk, 1),
-@@ -1730,17 +1750,20 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1730,17 +1410,20 @@ describe("compaction-safeguard recent-turn preservation", () => {
      expect(summary).not.toContain("23456789e");
      expect(summary).not.toContain("987654321");
      expect(summary).not.toContain("12345678");
@@ -52728,7 +53668,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      const event = createCompactionEvent({ messageText: sourceText });
  
      const { result } = await runCompactionScenario(sessionManager, event, {
-@@ -1750,7 +1773,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1750,7 +1433,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
      const summary = expectCompactionResult(result).summary;
      expect(summary).toContain(latestAsk);
      expect(summary).toContain(identifier);
@@ -52737,7 +53677,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      expect(mockAuditSummaryQuality).toHaveBeenCalledTimes(1);
      const auditInput = requireRecord(mockCallArg(mockAuditSummaryQuality));
      expect(auditInput.latestAsk).toBe(sourceText);
-@@ -1858,7 +1881,14 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1858,7 +1541,14 @@ describe("compaction-safeguard recent-turn preservation", () => {
      expect(terminalWarnings).not.toContain(correctiveFailureMarker);
    });
  
@@ -52753,7 +53693,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      const sessionManager = modelSession({
        recentTurnsPreserve: 12,
      });
-@@ -1892,10 +1922,13 @@ describe("compaction-safeguard recent-turn preservation", () => {
+@@ -1892,10 +1582,13 @@ describe("compaction-safeguard recent-turn preservation", () => {
      const { result } = await runCompactionScenario(sessionManager, event);
  
      expect(result.cancel).not.toBe(true);
@@ -52769,7 +53709,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
      expect(summary).toContain("## Recent turns preserved verbatim");
      expect(summary).toContain("/tmp/migration.log");
      expect(summary).toContain("/tmp/latest.log");
-@@ -2402,121 +2435,5 @@ describe("compaction-safeguard double-compaction guard", () => {
+@@ -2402,121 +2095,5 @@ describe("compaction-safeguard double-compaction guard", () => {
    });
  });
  
@@ -52893,7 +53833,7 @@ index b3dcdd8d5491421075b05bb14c1fc08048e021c5..1c9032b28441ec53d88f6b0b4044c726
 +registerWorkspaceCompactionSummaryTests();
  /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 diff --git a/src/agents/agent-hooks/compaction-safeguard.ts b/src/agents/agent-hooks/compaction-safeguard.ts
-index 5f09d364b95d338d3cfc170c006eca41ea161211..333b66b0c3c69439e4c75c2f0bb236413b2730d0 100644
+index 5f09d364b95d338d3cfc170c006eca41ea161211..34d071e87ca6815629b7aeb8c0024b1b324a19fa 100644
 --- a/src/agents/agent-hooks/compaction-safeguard.ts
 +++ b/src/agents/agent-hooks/compaction-safeguard.ts
 @@ -31,6 +31,7 @@ import { isRealConversationMessage } from "../compaction-real-conversation.js";
@@ -52960,8 +53900,16 @@ index 5f09d364b95d338d3cfc170c006eca41ea161211..333b66b0c3c69439e4c75c2f0bb23641
        const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
  
        // Use adaptive chunk ratio based on message sizes, reserving headroom for
-@@ -1251,6 +1235,9 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
-                   messages: messagesToSummarize,
+@@ -1245,12 +1229,15 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+         const producerLosses = new Set<CompactionLoss>();
+         try {
+           historySummary =
+-            messagesToSummarize.length > 0
++            allMessages.length > 0
+               ? await summarizeViaLLM({
+                   ...llmSummaryParams,
+-                  messages: messagesToSummarize,
++                  messages: allMessages,
                    maxChunkTokens,
                    summaryPrompt: { kind: "custom", instructions: structuredInstructions },
 +                  finalSummaryInstructions: finalSummaryBudgetInstructions(
