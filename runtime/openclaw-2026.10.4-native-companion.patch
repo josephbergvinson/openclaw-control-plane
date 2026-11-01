@@ -24359,6 +24359,31 @@ index 48d16f0e116bd8c9fd2b38dd7019efa88ca2b298..26f7aec1b65de0080f1720721656679e
        ])
        .groupBy(["session_id", "run_id"]),
    ).rows;
+diff --git a/test/discord-voice-detached-ingress.integration.test.ts b/test/discord-voice-detached-ingress.integration.test.ts
+index b73edd35e5d3b1f9cb7f4f1f02f706a9d9d92964..798c2b88262aaea3c817dd534123bb900c584a09 100644
+--- a/test/discord-voice-detached-ingress.integration.test.ts
++++ b/test/discord-voice-detached-ingress.integration.test.ts
+@@ -77,7 +77,7 @@ describe("Discord late voice consult native admission", () => {
+     const bindRun = vi.fn<RealtimeVoiceSelectionHandle["bindRun"]>(() => bindingRelease);
+     const activeBefore = getActiveGatewayRootWorkCount();
+     const { run } = fixture(true);
+-    let turn: ReturnType<typeof run> | undefined;
++    let turn: Promise<string | null> | undefined;
+     mocks.agentCommandFromIngress.mockImplementationOnce(async (input) =>
+       // The native agent generation captures this tracker before preparing its model.
+       captureAsyncWorkTracker()(async () => {
+@@ -101,10 +101,7 @@ describe("Discord late voice consult native admission", () => {
+       });
+       await trigger.drain();
+       releaseTrigger.resolve();
+-      await expect(turn).resolves.toEqual({
+-        text: "Current call verified.",
+-        completion: "other",
+-      });
++      await expect(turn).resolves.toBe("Current call verified.");
+       expect(mocks.agentCommandFromIngress).toHaveBeenCalledOnce();
+       expect(bindingRelease).toHaveBeenCalledOnce();
+       // The old trigger remains closed: this is not a global scope bypass.
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json
 index 1889394ce067190aaf615e1ee3e7375df64855a5..48b5aab54424759725b7be0fcd874af8646e94dd 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json

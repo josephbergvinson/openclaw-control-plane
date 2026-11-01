@@ -139350,10 +139350,10 @@ index 0000000000000000000000000000000000000000..5a864b2a1afa14342013dd66da3fa789
 +});
 diff --git a/test/discord-voice-detached-ingress.integration.test.ts b/test/discord-voice-detached-ingress.integration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb900c584a09
+index 0000000000000000000000000000000000000000..b73edd35e5d3b1f9cb7f4f1f02f706a9d9d92964
 --- /dev/null
 +++ b/test/discord-voice-detached-ingress.integration.test.ts
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,167 @@
 +import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 +import type { RealtimeVoiceSelectionHandle } from "../src/plugin-sdk/realtime-voice.js";
 +import {
@@ -139433,7 +139433,7 @@ index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb90
 +    const bindRun = vi.fn<RealtimeVoiceSelectionHandle["bindRun"]>(() => bindingRelease);
 +    const activeBefore = getActiveGatewayRootWorkCount();
 +    const { run } = fixture(true);
-+    let turn: Promise<string | null> | undefined;
++    let turn: ReturnType<typeof run> | undefined;
 +    mocks.agentCommandFromIngress.mockImplementationOnce(async (input) =>
 +      // The native agent generation captures this tracker before preparing its model.
 +      captureAsyncWorkTracker()(async () => {
@@ -139457,7 +139457,10 @@ index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb90
 +      });
 +      await trigger.drain();
 +      releaseTrigger.resolve();
-+      await expect(turn).resolves.toBe("Current call verified.");
++      await expect(turn).resolves.toEqual({
++        text: "Current call verified.",
++        completion: "other",
++      });
 +      expect(mocks.agentCommandFromIngress).toHaveBeenCalledOnce();
 +      expect(bindingRelease).toHaveBeenCalledOnce();
 +      // The old trigger remains closed: this is not a global scope bypass.
