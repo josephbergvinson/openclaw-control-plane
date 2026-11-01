@@ -470,6 +470,19 @@ index dcb89cc09f36b7ee4da427379fb6bc561a438742..6af5e3b44c2779beedb9404485fad685
  Session tab cleanup applies only to tabs a session owns: tabs created by the
  OpenClaw browser tool with `action: "open"` and tabs opened from that session's
  Browser panel in the Control UI. OpenClaw does not adopt tabs that were already
+diff --git a/docs/tools/subagents/slash-command.md b/docs/tools/subagents/slash-command.md
+index 20f8ca89052ec2c56c4149d5347c4b4918371be6..1e1acec7731b51a7855ffa49d0235710d61ff28a 100644
+--- a/docs/tools/subagents/slash-command.md
++++ b/docs/tools/subagents/slash-command.md
+@@ -89,7 +89,7 @@ explicitly unsupported even though the ACP spawn and child are observable.
+     - Announced completion is push-based. Once spawned, do **not** poll `/subagents list`, `sessions_list`, or `sessions_history` in a loop just to wait for it to finish; check status on-demand only when debugging.
+     - Child output is a report/evidence for the requester agent to synthesize. It is not user-authored instruction text and cannot override system, developer, or user policy.
+     - A child run ending does not by itself complete the requester's user-facing goal. The requester compares the result with the requested outcome and continues in-scope work, including review findings and failed checks, before replying. Persistent child sessions can be continued with `sessions_send`.
+-    - Ordinary fixable findings are continuation work, not a terminal blocker.
++    - Report the overall goal as blocked only when continuation requires new user authority or an unavailable external decision. Ordinary fixable findings are continuation work, not a terminal blocker.
+     - On completion, OpenClaw best-effort closes tracked browser tabs/processes opened by that sub-agent session before the announce cleanup flow continues.
+ 
+   </Accordion>
 diff --git a/extensions/active-memory/index.test.ts b/extensions/active-memory/index.test.ts
 index 67b1e343978f0664a3ec71efd0b158ce90b7869f..56f735b3be31fd86a9cd11afc3c5403c76401fd4 100644
 --- a/extensions/active-memory/index.test.ts
@@ -6198,6 +6211,21 @@ index 34d071e87ca6815629b7aeb8c0024b1b324a19fa..333b66b0c3c69439e4c75c2f0bb23641
                    maxChunkTokens,
                    summaryPrompt: { kind: "custom", instructions: structuredInstructions },
                    finalSummaryInstructions: finalSummaryBudgetInstructions(
+diff --git a/src/agents/delegation-guidance.ts b/src/agents/delegation-guidance.ts
+index fbc2c3e10fa9175c48b6aa2e49fb4644ea39a6fa..ab6aef8510ba076dd7dd3445c1aa1383caa2618c 100644
+--- a/src/agents/delegation-guidance.ts
++++ b/src/agents/delegation-guidance.ts
+@@ -66,8 +66,8 @@ export function buildDelegationGuidanceSection(params: {
+     `- Announcing spawns notify when the run ends; later turns in a kept OpenClaw session do not report back${params.hasSessionsSend ? "; follow up via `sessions_send`." : "."}`,
+     "- A child run ending does not end the user's delegated goal. Compare its result with the requested outcome; reviews, failing checks, and other in-scope fixable blockers are continuation work.",
+     params.hasSessionsSend
+-      ? "- When a kept OpenClaw session stops before the requested outcome, continue it with `sessions_send`; verify the requested outcome before reporting completion."
+-      : "- Verify the requested outcome before reporting completion.",
++      ? "- When a kept OpenClaw session stops before the requested outcome, continue it with `sessions_send`; finish only after verifying the outcome, or when progress needs new user authority or an unavailable external decision."
++      : "- Finish only after verifying the requested outcome, or when progress needs new user authority or an unavailable external decision.",
+     params.hasSessionsYield
+       ? "- Need announced results before reply: `sessions_yield`; never busy-poll. Collectors require explicit result collection instead."
+       : "- Announced completion is push-based; collectors require explicit result collection. Never busy-poll.",
 diff --git a/src/agents/embedded-agent-helpers/error-text.test.ts b/src/agents/embedded-agent-helpers/error-text.test.ts
 index 20e7263ce28bd29b97ed17dae7639a0241516ce8..90800f8d9f71c0df57373a268c607b5b625a291a 100644
 --- a/src/agents/embedded-agent-helpers/error-text.test.ts
@@ -12604,6 +12632,16 @@ index 7ac3c7fb65c481672fb63f5b4a13a360cc3f5978..0e080514c07f2ef03d275caec10d7ae0
                  sourceReceiptAdmission,
                }),
            ),
+diff --git a/src/agents/subagents/completion/subagent-completion-instructions.ts b/src/agents/subagents/completion/subagent-completion-instructions.ts
+index 569725864aa347f8a55a9273ac6ae4a767e5340e..728a34e399020efe07a62c147dcf73c6705295d7 100644
+--- a/src/agents/subagents/completion/subagent-completion-instructions.ts
++++ b/src/agents/subagents/completion/subagent-completion-instructions.ts
+@@ -1,4 +1,4 @@
+ export const SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION =
+-  "This completion ends one child run, not necessarily the original user request. Compare the result with the requested outcome before deciding the task is done. Reviews, failed checks, and other in-scope fixable blockers require continued work or a follow-up in the kept child session.";
++  "This completion ends one child run, not necessarily the original user request. Compare the result with the requested outcome before deciding the task is done. Reviews, failed checks, and other in-scope fixable blockers require continued work or a follow-up in the kept child session; report a blocker only when progress needs new user authority or an unavailable external decision.";
+ 
+ export const SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION = `Process this result privately. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION} Your final reply stays internal: briefly record the reviewed outcome and any remaining work. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Avoid repeating an update that was already delivered.`;
 diff --git a/src/agents/subagents/registry/subagent-registry-progress-projection.ts b/src/agents/subagents/registry/subagent-registry-progress-projection.ts
 index df7a2a4d4f936bbee323de11e9801ab290e7fee8..b46ad63d894a466c27464f59cf08128099f32c0d 100644
 --- a/src/agents/subagents/registry/subagent-registry-progress-projection.ts
@@ -13763,6 +13801,26 @@ index 48ae1b3210970cb1d4e79ee93c50068e18fbd607..637f5e41d43c78fcc25cf59518a76035
            },
            "restore",
          );
+diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake-receipts.test-support.ts b/src/agents/subagents/registry/subagent-registry.requester-wake-receipts.test-support.ts
+index 00fc94b616ee69c048d0c410e4021371719555b8..6c1d27b8e29be346709b0a597c22371aeed82377 100644
+--- a/src/agents/subagents/registry/subagent-registry.requester-wake-receipts.test-support.ts
++++ b/src/agents/subagents/registry/subagent-registry.requester-wake-receipts.test-support.ts
+@@ -514,11 +514,14 @@ export function registerRequesterWakeReceiptBoundaryTests({
+     if (!rejectRequesterWake) {
+       const wakeMessage = getRequesterWakeCalls()[0]?.params?.message;
+       expect(wakeMessage).toContain(modelRouteChange);
+-      // Yielded batches must retain the same continuation guidance as
++      // Yielded batches must retain the same outcome/blocked boundary as
+       // individual completions, not downgrade failed checks to a final update.
+       expect(wakeMessage).toContain(
+         "Reviews, failed checks, and other in-scope fixable blockers require continued work",
+       );
++      expect(wakeMessage).toContain(
++        "report a blocker only when progress needs new user authority or an unavailable external decision",
++      );
+       expect(wakeMessage).toContain(
+         "Keep this runtime-authored model-route change notice internal on this shared surface.",
+       );
 diff --git a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts b/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
 index e9523fc446e2ecbb441d2089ff0c2f1ef7125b52..27f39809a5c355aed8d2e7079b4c9f3088785301 100644
 --- a/src/agents/subagents/registry/subagent-registry.requester-wake.e2e.test.ts
@@ -23236,6 +23294,230 @@ index 724753ff8cfdd5c2579b11d2e74393e72286522f..94cbe80990833696dd1b24bee501909e
  function redactWorkspacePathString(value: string, redaction: TrajectoryExportRedaction): string {
    const workspaceDir = redaction.workspaceDir;
    if (!workspaceDir) {
+diff --git a/src/trajectory/metadata.test.ts b/src/trajectory/metadata.test.ts
+index 9275abc3aa52683787cc4484e25e2140934af1f3..53ff66c91947ba13fd055d3c0f32a176bc404615 100644
+--- a/src/trajectory/metadata.test.ts
++++ b/src/trajectory/metadata.test.ts
+@@ -1,7 +1,6 @@
+ // Trajectory metadata tests cover metadata capture and normalization.
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import { REDACTED_SENTINEL } from "../config/redact-snapshot.js";
+-import type { SessionSystemPromptReport } from "../config/sessions/session-system-prompt-report.js";
+ import * as gitCommit from "../infra/git-commit.js";
+ import {
+   redactPathForSupport,
+@@ -45,9 +44,6 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", () => ({
+ }));
+ 
+ import { buildTrajectoryArtifacts, buildTrajectoryRunMetadata } from "./metadata.js";
+-import { TRAJECTORY_RUNTIME_EVENT_MAX_BYTES } from "./paths.js";
+-import * as runtimeStoreWriter from "./runtime-store-writer.js";
+-import { createTrajectoryRuntimeRecorder } from "./runtime.js";
+ 
+ afterEach(() => {
+   resetPluginRuntimeStateForTest();
+@@ -55,152 +51,6 @@ afterEach(() => {
+ });
+ 
+ describe("trajectory metadata", () => {
+-  it.each(["config", "plugins", "skills"] as const)(
+-    "records current prompt accounting before a large %s inventory exhausts projection",
+-    (inventory) => {
+-      const writes: string[] = [];
+-      const sink = vi
+-        .spyOn(runtimeStoreWriter, "createSqliteTrajectoryRuntimeSink")
+-        .mockReturnValueOnce({
+-          write: (_event, line) => writes.push(line),
+-          flush: async () => {},
+-          describeFlushState: () => undefined,
+-        });
+-      try {
+-        const registry = createEmptyPluginRegistry();
+-        if (inventory === "plugins") {
+-          registry.plugins.push(
+-            ...Array.from({ length: 64 }, (_, index) =>
+-              createPluginRecord({
+-                id: `plugin-${index}`,
+-                name: `Plugin ${index}`,
+-                source: "bundled",
+-                origin: "bundled",
+-                toolNames: [`tool-${index}`],
+-              }),
+-            ),
+-          );
+-        }
+-        setActivePluginRegistry(registry, "trajectory-metadata-budget-test");
+-        const report: SessionSystemPromptReport = {
+-          source: "run",
+-          generatedAt: 123_456,
+-          sessionId: "current-session",
+-          provider: "openai",
+-          model: "test-model",
+-          systemPrompt: {
+-            chars: 2_000,
+-            hash: "current-prompt-hash",
+-            projectContextChars: 1_000,
+-            nonProjectContextChars: 1_000,
+-          },
+-          currentTurn: { promptChars: 90, runtimeContextChars: 50 },
+-          injectedWorkspaceFiles: [
+-            "AGENTS.md",
+-            "SOUL.md",
+-            "TOOLS.md",
+-            "IDENTITY.md",
+-            "USER.md",
+-          ].map((name) => ({
+-            name,
+-            path: `/tmp/trajectory-metadata-test/${name}`,
+-            missing: false,
+-            rawChars: 200,
+-            injectedChars: 200,
+-            truncated: false,
+-          })),
+-          skills: { promptChars: 30, entries: [] },
+-          tools: {
+-            listChars: 0,
+-            schemaChars: 6_400,
+-            entries: Array.from({ length: 64 }, (_, index) => ({
+-              name: `tool-${index}`,
+-              summaryChars: 20,
+-              schemaChars: 100,
+-            })),
+-          },
+-        };
+-        const metadata = buildTrajectoryRunMetadata({
+-          config:
+-            inventory === "config"
+-              ? {
+-                  agents: {
+-                    entries: Object.fromEntries(
+-                      Array.from({ length: 64 }, (_, index) => [
+-                        `agent-${index}`,
+-                        { model: "openai/test-model" },
+-                      ]),
+-                    ),
+-                  },
+-                }
+-              : undefined,
+-          workspaceDir: "/tmp/trajectory-metadata-test",
+-          timeoutMs: 30_000,
+-          sessionKey: "agent:main:current",
+-          agentId: "main",
+-          provider: "openai",
+-          modelId: "test-model",
+-          systemPromptReport: report,
+-          skillsSnapshot: {
+-            prompt: "Authorization: Bearer synthetic-trajectory-secret",
+-            skills:
+-              inventory === "skills"
+-                ? Array.from({ length: 64 }, (_, index) => ({ name: `skill-${index}` }))
+-                : [],
+-          },
+-          userPromptPrefixText: "x".repeat(32_769),
+-        });
+-        const recorder = createTrajectoryRuntimeRecorder({
+-          env: { OPENCLAW_TRAJECTORY: "1" },
+-          sessionId: "current-session",
+-          runId: "current-run",
+-          provider: "openai",
+-          modelId: "test-model",
+-        });
+-        recorder?.recordEvent("trace.metadata", metadata);
+-
+-        expect(writes).toHaveLength(1);
+-        const line = writes[0]!;
+-        const event = JSON.parse(line);
+-        expect(event).toMatchObject({ type: "trace.metadata", runId: "current-run" });
+-        const recordedReport = event.data.prompting.systemPromptReport;
+-        expect(recordedReport).toMatchObject({
+-          source: report.source,
+-          generatedAt: report.generatedAt,
+-          sessionId: report.sessionId,
+-          provider: report.provider,
+-          model: report.model,
+-          systemPrompt: report.systemPrompt,
+-          currentTurn: report.currentTurn,
+-          skills: report.skills,
+-          tools: { listChars: report.tools.listChars, schemaChars: report.tools.schemaChars },
+-        });
+-        expect(recordedReport.injectedWorkspaceFiles).toEqual(report.injectedWorkspaceFiles);
+-        expect(recordedReport.tools.entries[0]).toEqual(report.tools.entries[0]);
+-        expect(recordedReport.tools.entries).toContain("[Truncated]");
+-        expect(event.data[inventory]).toBe("[Truncated]");
+-        expect(event.data.metadata).toMatchObject({
+-          sessionKey: "agent:main:current",
+-          agentId: "main",
+-        });
+-        expect(event.data.model).toMatchObject({ provider: "openai", name: "test-model" });
+-        expect(event.data.prompting.skillsPrompt).toContain("redacted");
+-        expect(event.data.prompting.userPromptPrefixText).toMatchObject({
+-          truncated: true,
+-          reason: "trajectory-field-size-limit",
+-          originalChars: 32_769,
+-        });
+-        expect(line).toContain("[Truncated]");
+-        expect(line).not.toContain("synthetic-trajectory-secret");
+-        expect(Buffer.byteLength(line, "utf8")).toBeLessThanOrEqual(
+-          TRAJECTORY_RUNTIME_EVENT_MAX_BYTES,
+-        );
+-      } finally {
+-        sink.mockRestore();
+-      }
+-    },
+-  );
+-
+   it("records the loaded artifact commit independently of a different workspace commit", () => {
+     const loadedCommit = vi.spyOn(gitCommit, "resolveLoadedCommitHash").mockReturnValue("1234567");
+     const workspaceCommit = vi.spyOn(gitCommit, "resolveCommitHash");
+diff --git a/src/trajectory/metadata.ts b/src/trajectory/metadata.ts
+index 0517961d35a9c54527bf386ceafacbf37f83c920..cf4c4155406f4b60b13568ed54e57225901a7b79 100644
+--- a/src/trajectory/metadata.ts
++++ b/src/trajectory/metadata.ts
+@@ -264,19 +264,6 @@ export function buildTrajectoryRunMetadata(
+       thinkLevel: params.thinkLevel,
+       reasoningLevel: params.reasoningLevel ?? "off",
+     },
+-    // Diagnostic projection has a shared node budget. Keep run identity and
+-    // current prompt accounting ahead of potentially large inventories.
+-    metadata: {
+-      sessionKey: params.sessionKey,
+-      agentId: params.agentId,
+-      messageProvider: params.messageProvider,
+-      messageChannel: params.messageChannel,
+-    },
+-    prompting: {
+-      skillsPrompt: params.skillsSnapshot?.prompt,
+-      userPromptPrefixText: params.userPromptPrefixText,
+-      systemPromptReport: params.systemPromptReport,
+-    },
+     config: {
+       redacted: params.config ? redactConfigObject(params.config) : undefined,
+       runtime: {
+@@ -289,6 +276,11 @@ export function buildTrajectoryRunMetadata(
+     },
+     plugins,
+     skills: buildSkillsCapture(params.skillsSnapshot, redaction),
++    prompting: {
++      skillsPrompt: params.skillsSnapshot?.prompt,
++      userPromptPrefixText: params.userPromptPrefixText,
++      systemPromptReport: params.systemPromptReport,
++    },
+     redaction: {
+       config: {
+         mode: "redactConfigObject",
+@@ -305,6 +297,12 @@ export function buildTrajectoryRunMetadata(
+         localPathsRedacted: true,
+       },
+     },
++    metadata: {
++      sessionKey: params.sessionKey,
++      agentId: params.agentId,
++      messageProvider: params.messageProvider,
++      messageChannel: params.messageChannel,
++    },
+   };
+ }
+ 
 diff --git a/src/trajectory/runtime-store.sqlite.test.ts b/src/trajectory/runtime-store.sqlite.test.ts
 index 9ad3b419f761bdf80dd7d717bf026823accdcef3..9d5d7299178c658222b6cc2a8597ed48cdd6bad2 100644
 --- a/src/trajectory/runtime-store.sqlite.test.ts
