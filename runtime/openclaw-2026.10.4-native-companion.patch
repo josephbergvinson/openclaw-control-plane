@@ -4324,6 +4324,98 @@ index b003750d7ddd8aaebf5c8c3d259b849d12e5a0d6..b181a0425191ff4e28b5a1429190a72c
 -  errorMessage: "Discord background context not initialized",
 -});
 -export { getOptionalDiscordBackgroundRunner, setDiscordBackgroundRunner };
+diff --git a/extensions/discord/src/voice/ingress.test.ts b/extensions/discord/src/voice/ingress.test.ts
+index 13c3a6c792d6066d4ba3b2378a4bec247f91ce10..21e49b6af8784e4707235cffcd04783768960e59 100644
+--- a/extensions/discord/src/voice/ingress.test.ts
++++ b/extensions/discord/src/voice/ingress.test.ts
+@@ -182,7 +182,7 @@ describe("Discord voice ingress execution correlation", () => {
+       if (fail) {
+         await expect(turn).rejects.toThrow("Agent turn failed");
+       } else {
+-        await expect(turn).resolves.toEqual({ text: "Voice changed.", completion: "other" });
++        await expect(turn).resolves.toBe("Voice changed.");
+       }
+       expect(release).toHaveBeenCalledOnce();
+     },
+diff --git a/extensions/discord/src/voice/ingress.ts b/extensions/discord/src/voice/ingress.ts
+index 29fb1d34db13ba8c6322a10f30b631f99475b038..6fa42a159b8e514ea0909834c60aba470c7007d9 100644
+--- a/extensions/discord/src/voice/ingress.ts
++++ b/extensions/discord/src/voice/ingress.ts
+@@ -21,11 +21,7 @@ import type { DiscordLivePolicyReader } from "../monitor/live-policy.js";
+ import { getDiscordRuntime } from "../runtime.js";
+ import { authorizeDiscordVoiceIngress } from "./access.js";
+ import { resolveDiscordGuildVoiceConfig } from "./config.js";
+-import type {
+-  VoiceAgentTurnResult,
+-  VoiceRequesterFinalBinding,
+-  VoiceSessionEntry,
+-} from "./session.js";
++import type { VoiceRequesterFinalBinding, VoiceSessionEntry } from "./session.js";
+ import type { DiscordVoiceSpeakerContextResolver } from "./speaker-context.js";
+ 
+ const DISCORD_VOICE_MESSAGE_PROVIDER = "discord-voice";
+@@ -141,7 +137,7 @@ export async function runDiscordVoiceAgentTurn(params: {
+   voiceSelection?: RealtimeVoiceSelectionHandle;
+   signal?: AbortSignal;
+   requesterFinal?: VoiceRequesterFinalBinding;
+-}): Promise<VoiceAgentTurnResult | null> {
++}): Promise<string | null> {
+   if (
+     params.entry.captureOnly ||
+     params.entry.sessionLifecycle.status !== "active" ||
+@@ -161,7 +157,7 @@ export async function runDiscordVoiceAgentTurn(params: {
+ 
+ async function runAdmittedDiscordVoiceAgentTurn(
+   params: Parameters<typeof runDiscordVoiceAgentTurn>[0],
+-): Promise<VoiceAgentTurnResult | null> {
++): Promise<string | null> {
+   // Recheck after a reversible suspension wait before using the original call authority.
+   const { context } = params;
+   if (
+@@ -222,38 +218,21 @@ async function runAdmittedDiscordVoiceAgentTurn(
+   const payloads = result.payloads ?? [];
+   if (result.meta?.yielded === true) {
+     const acknowledgment = normalizeOptionalString(result.meta.yieldAcknowledgment);
+-    return {
+-      completion: "pending",
+-      text: acknowledgment
+-        ? truncateUtf16Safe(acknowledgment.replaceAll(/\s+/g, " "), 500)
+-        : "I started that work and will share the result when it is ready.",
+-    };
++    return acknowledgment
++      ? truncateUtf16Safe(acknowledgment.replaceAll(/\s+/g, " "), 500)
++      : "I started that work and will share the result when it is ready.";
+   }
+-  const terminal =
+-    result.meta?.terminalReply?.disposition === "visible" &&
+-    !result.meta.continuationPending &&
+-    !result.meta.aborted &&
+-    !result.meta.error &&
+-    !payloads.some((payload) => payload.isError === true);
+-  // The native snapshot proves disposition but bounds its text to 4096 chars.
+-  // Command payload projection omits reasoning/commentary lane metadata. Use
+-  // the producer's full final text instead of reconstructing it from that list.
+-  const finalText = terminal ? result.meta.finalAssistantVisibleText?.trim() : undefined;
+-  const payloadText = payloads
++  const text = payloads
+     .map((payload) => payload.text)
+     .filter((entry) => typeof entry === "string" && entry.trim())
+     .join("\n")
+     .trim();
+-  const text = finalText || payloadText;
+   if (!text) {
+     logger.info(
+       `discord voice: agent turn produced no speakable payloads guild=${params.entry.guildId} channel=${params.entry.channelId} voiceSession=${params.entry.voiceSessionKey} supervisorSession=${params.entry.route.sessionKey} agent=${params.entry.route.agentId} user=${params.userId} ${summarizeAgentTurnPayloads(payloads)}`,
+     );
+   }
+-  return {
+-    text,
+-    completion: result.meta?.continuationPending ? "pending" : finalText ? "final" : "other",
+-  };
++  return text;
+ }
+ 
+ export async function resolveDiscordVoiceRealtimeAgentContext(params: {
 diff --git a/extensions/discord/src/voice/listeners.ts b/extensions/discord/src/voice/listeners.ts
 index 654d59c788c137893f9822e4d3b458ddffb65468..ee576b3c5f71edfd9fee04ee0f16ef3e847de40d 100644
 --- a/extensions/discord/src/voice/listeners.ts
@@ -4444,6 +4536,499 @@ index aa3322c75fc294f51deeb4dc6e4880fd27d9cdbd..293a24efec2fe920d53c079d785746aa
    });
  
    it("starts auto-join after Discord gateway resumes", async () => {
+diff --git a/extensions/discord/src/voice/realtime-consult-state.ts b/extensions/discord/src/voice/realtime-consult-state.ts
+index 61198ae65293f55202355064dcc24d617353dddf..c431daee8dcf153d3ebddd051ff2c47c519add97 100644
+--- a/extensions/discord/src/voice/realtime-consult-state.ts
++++ b/extensions/discord/src/voice/realtime-consult-state.ts
+@@ -9,11 +9,7 @@ import type {
+ import type { DiscordVoiceIngressContext } from "./ingress.js";
+ import type { DiscordRealtimePlaybackPort } from "./realtime-playback.js";
+ import type { DiscordRealtimeSpeakerContext, DiscordRealtimeTurns } from "./realtime-turns.js";
+-import type {
+-  VoiceAgentTurnResult,
+-  VoiceRealtimeAgentTurnParams,
+-  VoiceSessionEntry,
+-} from "./session.js";
++import type { VoiceRealtimeAgentTurnParams, VoiceSessionEntry } from "./session.js";
+ 
+ export type AgentProxyConsultResult =
+   | { text: string; suppressResponse?: true }
+@@ -54,7 +50,7 @@ export type DiscordRealtimeConsultParams = {
+   isWakeNameRequired: () => boolean;
+   playback: DiscordRealtimePlaybackPort;
+   providerEpoch: () => number;
+-  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<VoiceAgentTurnResult>;
++  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<string>;
+   resolveSpeakerContext: (userId: string) => Promise<DiscordVoiceIngressContext | null>;
+   stopped: () => boolean;
+   turns: DiscordRealtimeTurns;
+diff --git a/extensions/discord/src/voice/realtime-consults.requester-final.test.ts b/extensions/discord/src/voice/realtime-consults.requester-final.test.ts
+index 384af035ebe8e74182124055f3af7ec568a40aab..59c6eed81b032c49567b45510d5e698e351f545d 100644
+--- a/extensions/discord/src/voice/realtime-consults.requester-final.test.ts
++++ b/extensions/discord/src/voice/realtime-consults.requester-final.test.ts
+@@ -33,7 +33,7 @@ function fixture() {
+     runAgentTurn: vi.fn(async (turn: VoiceRealtimeAgentTurnParams) => {
+       binding = turn.requesterFinal;
+       binding?.onRegistration?.({ revoke });
+-      return { text: "I am checking the records.", completion: "pending" };
++      return "I am checking the records.";
+     }),
+     resolveSpeakerContext: vi.fn(async () => ({
+       ...speaker,
+diff --git a/extensions/discord/src/voice/realtime-consults.ts b/extensions/discord/src/voice/realtime-consults.ts
+index 87cd112eb9966012330032024f6d602f64c7c909..ebf002d1de49fdfe2e8250219763a262326f9d3d 100644
+--- a/extensions/discord/src/voice/realtime-consults.ts
++++ b/extensions/discord/src/voice/realtime-consults.ts
+@@ -40,7 +40,7 @@ import type {
+ } from "./realtime-consult-state.js";
+ import type { DiscordRealtimeSpeakerContext } from "./realtime-turns.js";
+ import { isDiscordRealtimeSpeakerContext } from "./realtime-turns.js";
+-import { logVoiceVerbose, type VoiceAgentTurnResult } from "./session.js";
++import { logVoiceVerbose } from "./session.js";
+ 
+ const logger = createSubsystemLogger("discord/voice");
+ const DISCORD_REALTIME_TALKBACK_DEBOUNCE_MS = 350;
+@@ -397,72 +397,9 @@ export class DiscordRealtimeConsults {
+       this.params.consultToolPolicy() !== "none" &&
+       ((!this.params.stopped() && providerEpoch === this.params.providerEpoch()) ||
+         this.detachedProviderEpoch === providerEpoch);
+-    const acceptFinal = (finalText: string): boolean => {
+-      if (
+-        finalAccepted ||
+-        !finalText.trim() ||
+-        !finalCurrent() ||
+-        this.pendingFinalDeliveries >= 32
+-      ) {
+-        return false;
+-      }
+-      finalAccepted = true;
+-      if (params.recent?.context) {
+-        params.recent.context.requesterFinalAccepted = true;
+-      }
+-      this.pendingFinalDeliveries += 1;
+-      void (async () => {
+-        // The admitted native requester owner resolves the task once. Wait
+-        // for its initial acknowledgment before queuing the eventual result.
+-        await initialRun.promise;
+-        const state = params.recent?.context;
+-        await Promise.all(
+-          Array.from(
+-            (state ? this.providerDeliveries.get(state) : undefined) ?? [],
+-            (delivery) => delivery.promise,
+-          ),
+-        );
+-        if (!finalCurrent()) {
+-          return;
+-        }
+-        const fresh = await this.params.resolveSpeakerContext(context.userId);
+-        if (
+-          !finalCurrent() ||
+-          !fresh ||
+-          fresh.isCurrent?.() === false ||
+-          fresh.senderIsOwner !== context.senderIsOwner ||
+-          (fresh.actionHandoff === false &&
+-            (!wasReadOnly || this.params.consultToolPolicy() !== "safe-read-only"))
+-        ) {
+-          logger.info(
+-            "discord voice: requester final rejected after speaker authorization changed",
+-          );
+-          return;
+-        }
+-        if (this.detachedProviderEpoch === providerEpoch) {
+-          this.params.playback.deliverRetainedSpeech(finalText);
+-        } else {
+-          this.params.playback.enqueueExactSpeechMessage(finalText);
+-        }
+-        if (state && params.recent) {
+-          state.result = { text: finalText };
+-          state.delivery = "playback";
+-          this.params.harness.forcedConsults.markDelivered(params.recent);
+-        }
+-      })()
+-        .catch((error: unknown) => {
+-          logger.warn(
+-            `discord voice: requester final delivery failed: ${formatErrorMessage(error)}`,
+-          );
+-        })
+-        .finally(() => {
+-          this.pendingFinalDeliveries -= 1;
+-        });
+-      return true;
+-    };
+-    let result: VoiceAgentTurnResult;
++    let text: string;
+     try {
+-      result = await this.params.runAgentTurn({
++      text = await this.params.runAgentTurn({
+         context,
+         message: params.message,
+         toolsAllow: this.params.consultToolsAllow(),
+@@ -484,21 +421,76 @@ export class DiscordRealtimeConsults {
+               this.requesterFinalBindings.delete(registration);
+             }
+           },
+-          append: (finalText) => !settled && acceptFinal(finalText),
++          append: (finalText) => {
++            if (
++              finalAccepted ||
++              settled ||
++              !finalText.trim() ||
++              !finalCurrent() ||
++              this.pendingFinalDeliveries >= 32
++            ) {
++              return false;
++            }
++            finalAccepted = true;
++            if (params.recent?.context) {
++              params.recent.context.requesterFinalAccepted = true;
++            }
++            this.pendingFinalDeliveries += 1;
++            void (async () => {
++              // The admitted native requester owner resolves the task once. Wait
++              // for its initial acknowledgment before queuing the eventual result.
++              await initialRun.promise;
++              const state = params.recent?.context;
++              await Promise.all(
++                Array.from(
++                  (state ? this.providerDeliveries.get(state) : undefined) ?? [],
++                  (delivery) => delivery.promise,
++                ),
++              );
++              if (!finalCurrent()) {
++                return;
++              }
++              const fresh = await this.params.resolveSpeakerContext(context.userId);
++              if (
++                !finalCurrent() ||
++                !fresh ||
++                fresh.isCurrent?.() === false ||
++                fresh.senderIsOwner !== context.senderIsOwner ||
++                (fresh.actionHandoff === false &&
++                  (!wasReadOnly || this.params.consultToolPolicy() !== "safe-read-only"))
++              ) {
++                logger.info(
++                  "discord voice: requester final rejected after speaker authorization changed",
++                );
++                return;
++              }
++              if (this.detachedProviderEpoch === providerEpoch) {
++                this.params.playback.deliverRetainedSpeech(finalText);
++              } else {
++                this.params.playback.enqueueExactSpeechMessage(finalText);
++              }
++              if (state && params.recent) {
++                state.result = { text: finalText };
++                state.delivery = "playback";
++                this.params.harness.forcedConsults.markDelivered(params.recent);
++              }
++            })()
++              .catch((error: unknown) => {
++                logger.warn(
++                  `discord voice: requester final delivery failed: ${formatErrorMessage(error)}`,
++                );
++              })
++              .finally(() => {
++                this.pendingFinalDeliveries -= 1;
++              });
++            return true;
++          },
+         },
+       });
+     } finally {
+       initialRun.resolve();
+     }
+     params.signal?.throwIfAborted();
+-    // Ordinary native completion has already settled its requester attachment.
+-    // Reuse this consult's final-delivery owner, not the expired callback. The
+-    // existing provider-delivery waits keep exact speech after tool suppression.
+-    if (params.deliveryOwner === "consult" && result.completion === "final") {
+-      if (!acceptFinal(result.text) && !finalAccepted) {
+-        throw new DOMException("Discord voice final delivery is no longer available", "AbortError");
+-      }
+-    }
+     // A native requester final may commit before its promoted run returns the
+     // launch acknowledgment. The final already owns speech; never replay that
+     // stale acknowledgment through provider, forced, or retained delivery.
+@@ -506,9 +498,9 @@ export class DiscordRealtimeConsults {
+       return { text: "", suppressResponse: true };
+     }
+     if (params.deliveryOwner !== "consult" && this.detachedProviderEpoch === providerEpoch) {
+-      this.params.playback.deliverRetainedSpeech(result.text);
++      this.params.playback.deliverRetainedSpeech(text);
+     }
+-    return { text: result.text };
++    return { text };
+   }
+ 
+   private revokeRequesterFinalBindings(): void {
+diff --git a/extensions/discord/src/voice/realtime-consults.yielded.test.ts b/extensions/discord/src/voice/realtime-consults.yielded.test.ts
+index 3543b8b47c14312fd9a14fbb55286b6fb41118af..622b7aec9e5af588084b0e0f1a209a19af4edbbf 100644
+--- a/extensions/discord/src/voice/realtime-consults.yielded.test.ts
++++ b/extensions/discord/src/voice/realtime-consults.yielded.test.ts
+@@ -1,5 +1,4 @@
+ import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
+-import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+ import { defineDiscordVoiceTests } from "./voice-test-harness.test-support.js";
+ 
+ type RequesterFinal = NonNullable<
+@@ -13,7 +12,6 @@ defineDiscordVoiceTests(
+     vi,
+     agentCommandMock,
+     realtimeSessionMock,
+-    resolveVoiceIngressWithParticipantsMock,
+     beginSpeakerTurn,
+     createJoinedAgentProxyFixture,
+     createJoinedBidiFixture,
+@@ -23,168 +21,6 @@ defineDiscordVoiceTests(
+     const acknowledgment = "I am checking the current records.";
+     const finalText = "The original records confirm the requested change is complete.";
+ 
+-    const toolCall = (callId: string) => ({
+-      callId,
+-      itemId: callId,
+-      name: "openclaw_agent_consult",
+-      args: { question: "Check the current records" },
+-    });
+-
+-    it.each([
+-      { name: "continuation", meta: { continuationPending: true } },
+-      { name: "aborted", meta: { aborted: true } },
+-      { name: "error", meta: { error: { kind: "incomplete_turn", message: "Interrupted" } } },
+-      { name: "silent", meta: { terminalReply: { disposition: "silent" } } },
+-      { name: "empty", meta: { terminalReply: { disposition: "empty" } } },
+-      { name: "absent full final", meta: { finalAssistantVisibleText: undefined } },
+-      { name: "empty full final", meta: { finalAssistantVisibleText: "" } },
+-      { name: "absent terminal fact", meta: { terminalReply: undefined } },
+-      { name: "error payload", payload: { isError: true } },
+-    ])("does not classify $name as an exact completed answer", async ({ meta, payload }) => {
+-      agentCommandMock.mockImplementationOnce(async () => ({
+-        payloads: [{ text: "Nonfinal diagnostic", ...payload }],
+-        meta: {
+-          terminalReply: { disposition: "visible", text: "Nonfinal diagnostic" },
+-          finalAssistantVisibleText: "Nonfinal diagnostic",
+-          ...meta,
+-        },
+-      }));
+-      const f = await createJoinedBidiFixture();
+-      beginSpeakerTurn(f.entry).close();
+-      try {
+-        await f.bridgeParams.onToolCall?.(toolCall("nonfinal"), realtimeSessionMock);
+-        expect(sentUserMessages()).toEqual([]);
+-        expect(realtimeSessionMock.submitToolResult.mock.calls[0]?.[2]).toBeUndefined();
+-      } finally {
+-        await f.manager.destroy();
+-      }
+-    });
+-
+-    it("speaks the complete immediate terminal answer exactly once after native requester settlement", async () => {
+-      const spoken = createDeferred<void>();
+-      realtimeSessionMock.sendUserMessage.mockImplementationOnce(() => spoken.resolve());
+-      const completeText = `${"Verified details. ".repeat(260)}Revision: abcdef0123456789abcdef0123456789abcdef0123.`;
+-      agentCommandMock.mockImplementationOnce(async (_input, _runtime, delivery) => {
+-        delivery?.requesterFinal?.onRegistration?.({ revoke: vi.fn() });
+-        delivery?.requesterFinal?.onSettled?.();
+-        return {
+-          payloads: [{ text: "Internal progress" }, { text: completeText }],
+-          meta: {
+-            terminalReply: { disposition: "visible", text: completeText.slice(0, 4096) },
+-            finalAssistantVisibleText: completeText,
+-          },
+-        };
+-      });
+-      const f = await createJoinedBidiFixture();
+-      beginSpeakerTurn(f.entry).close();
+-      try {
+-        await f.bridgeParams.onToolCall?.(toolCall("immediate"), realtimeSessionMock);
+-        expect(realtimeSessionMock.submitToolResult).toHaveBeenCalledWith(
+-          "immediate",
+-          expect.objectContaining({ status: "already_delivered" }),
+-          { suppressResponse: true },
+-        );
+-        await spoken.promise;
+-        expect(sentUserMessages().filter((text) => text.includes(completeText))).toHaveLength(1);
+-        expect(sentUserMessages().some((text) => text.includes("Internal progress"))).toBe(false);
+-        await f.bridgeParams.onToolCall?.(toolCall("duplicate"), realtimeSessionMock);
+-        expect(sentUserMessages().filter((text) => text.includes(completeText))).toHaveLength(1);
+-        expect(agentCommandMock).toHaveBeenCalledOnce();
+-      } finally {
+-        await f.manager.destroy();
+-      }
+-    });
+-
+-    it("waits for every in-flight duplicate tool result before exact final playback", async () => {
+-      const answer = createDeferred<void>();
+-      const firstSubmitted = createDeferred<void>();
+-      const secondSubmitted = createDeferred<void>();
+-      const firstSettled = createDeferred<void>();
+-      const secondSettled = createDeferred<void>();
+-      const started = createDeferred<void>();
+-      const spoken = createDeferred<void>();
+-      realtimeSessionMock.sendUserMessage.mockImplementationOnce(() => spoken.resolve());
+-      agentCommandMock.mockImplementationOnce(async () => {
+-        started.resolve();
+-        await answer.promise;
+-        return {
+-          payloads: [{ text: finalText }],
+-          meta: {
+-            terminalReply: { disposition: "visible", text: finalText },
+-            finalAssistantVisibleText: finalText,
+-          },
+-        };
+-      });
+-      realtimeSessionMock.submitToolResult.mockImplementation(async (id: string) => {
+-        (id === "first" ? firstSubmitted : secondSubmitted).resolve();
+-        await (id === "first" ? firstSettled : secondSettled).promise;
+-      });
+-      const f = await createJoinedBidiFixture();
+-      beginSpeakerTurn(f.entry).close();
+-      try {
+-        const first = f.bridgeParams.onToolCall?.(toolCall("first"), realtimeSessionMock);
+-        await started.promise;
+-        const second = f.bridgeParams.onToolCall?.(toolCall("second"), realtimeSessionMock);
+-        answer.resolve();
+-        await Promise.all([firstSubmitted.promise, secondSubmitted.promise]);
+-        expect(sentUserMessages()).toEqual([]);
+-        firstSettled.resolve();
+-        await first;
+-        expect(sentUserMessages()).toEqual([]);
+-        secondSettled.resolve();
+-        await second;
+-        await spoken.promise;
+-        expect(sentUserMessages().filter((text) => text.includes(finalText))).toHaveLength(1);
+-        expect(agentCommandMock).toHaveBeenCalledOnce();
+-      } finally {
+-        firstSettled.resolve();
+-        secondSettled.resolve();
+-        await f.manager.destroy();
+-      }
+-    });
+-
+-    it.each(["call", "provider", "authorization"] as const)(
+-      "drops an immediate final if %s changes while its tool result is settling",
+-      async (change) => {
+-        const submitted = createDeferred<void>();
+-        const settled = createDeferred<void>();
+-        agentCommandMock.mockImplementationOnce(async () => ({
+-          payloads: [{ text: finalText }],
+-          meta: {
+-            terminalReply: { disposition: "visible", text: finalText },
+-            finalAssistantVisibleText: finalText,
+-          },
+-        }));
+-        realtimeSessionMock.submitToolResult.mockImplementationOnce(async () => {
+-          submitted.resolve();
+-          await settled.promise;
+-        });
+-        const f = await createJoinedBidiFixture();
+-        beginSpeakerTurn(f.entry).close();
+-        const turn = f.bridgeParams.onToolCall?.(toolCall("closing"), realtimeSessionMock);
+-        await submitted.promise;
+-        try {
+-          if (change === "call") {
+-            await f.manager.destroy();
+-          } else if (change === "provider") {
+-            f.bridgeParams.onEvent?.({ direction: "client", type: "session.continuity.reset" });
+-            f.bridgeParams.onReady?.();
+-          } else {
+-            resolveVoiceIngressWithParticipantsMock.mockResolvedValue(null);
+-          }
+-          settled.resolve();
+-          await turn;
+-          await new Promise<void>((resolve) => {
+-            setImmediate(resolve);
+-          });
+-          expect(sentUserMessages().some((text) => text.includes(finalText))).toBe(false);
+-        } finally {
+-          settled.resolve();
+-          await f.manager.destroy();
+-        }
+-      },
+-    );
+-
+     async function yielded(options: { early?: boolean; forced?: boolean } = {}) {
+       let final: RequesterFinal | undefined;
+       const revoke = vi.fn();
+diff --git a/extensions/discord/src/voice/realtime-session-params.ts b/extensions/discord/src/voice/realtime-session-params.ts
+index cb26e9bddc0d3672335721fb38b1e0f030be5429..a7c63d11692c66375b31dc5dfb42c8a9413db2e9 100644
+--- a/extensions/discord/src/voice/realtime-session-params.ts
++++ b/extensions/discord/src/voice/realtime-session-params.ts
+@@ -8,7 +8,6 @@ import type { DiscordRealtimePlayer } from "./realtime-player.js";
+ import type {
+   DiscordVoiceMode,
+   VoiceRealtimeAgentTurnParams,
+-  VoiceAgentTurnResult,
+   VoiceSessionEntry,
+ } from "./session.js";
+ 
+@@ -30,7 +29,7 @@ export type DiscordRealtimeSessionParams = {
+   speakerIdentity?: Readonly<{ userId: string; speakerLabel: string; senderIsOwner: boolean }>;
+   getHumanParticipantCount?: () => number;
+   onTerminalError: (error: Error) => void;
+-  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<VoiceAgentTurnResult>;
++  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<string>;
+   resolveSpeakerContext: (userId: string) => Promise<DiscordVoiceIngressContext | null>;
+ };
+ 
+diff --git a/extensions/discord/src/voice/realtime-voice-selection.test.ts b/extensions/discord/src/voice/realtime-voice-selection.test.ts
+index ff2344f06092d86bdef9b8d0b901635b4fd7c915..1b69c21ce212138edc8fddbdac91495855ea09a9 100644
+--- a/extensions/discord/src/voice/realtime-voice-selection.test.ts
++++ b/extensions/discord/src/voice/realtime-voice-selection.test.ts
+@@ -307,7 +307,7 @@ defineDiscordVoiceTests(
+       ]);
+       const { entry, manager } = await createJoinedAgentProxyFixture();
+       const player = new DiscordRealtimePlayer(entry.audio);
+-      const answer = createDeferred<import("./session.js").VoiceAgentTurnResult>();
++      const answer = createDeferred<string>();
+       const cancellation = new AbortController();
+       const context = { senderIsOwner: true, speakerLabel: "Owner" };
+       const runAgentTurn = vi.fn(() => answer.promise);
+@@ -342,14 +342,14 @@ defineDiscordVoiceTests(
+         await replacement.connect();
+         const replacementBridge = lastRealtimeBridge();
+         original.transferPendingSpeechTo(replacement);
+-        answer.resolve({ text: "The cancelled agenda answer.", completion: "other" });
++        answer.resolve("The cancelled agenda answer.");
+         cancellation.abort(new Error("Consult cancelled"));
+         await rejected;
+         expect(runAgentTurn).toHaveBeenCalledOnce();
+         expect(sentUserMessages(sourceBridge.session)).toHaveLength(0);
+         expect(sentUserMessages(replacementBridge.session)).toHaveLength(0);
+       } finally {
+-        answer.resolve({ text: "", completion: "other" });
++        answer.resolve("");
+         await original.close();
+         await replacement.close();
+         player.close();
+diff --git a/extensions/discord/src/voice/segment.ts b/extensions/discord/src/voice/segment.ts
+index 79524ef65c7cb56b53eb9a8ca1d1dd70ab95a6a7..64797e3bcea1829a5d106d5653d8a617d5bafaeb 100644
+--- a/extensions/discord/src/voice/segment.ts
++++ b/extensions/discord/src/voice/segment.ts
+@@ -82,7 +82,7 @@ export async function respondToDiscordVoiceTranscript(
+       );
+       return;
+     }
+-    replyText = text.text;
++    replyText = text;
+   }
+ 
+   if (!conversationCurrent()) {
+diff --git a/extensions/discord/src/voice/session.ts b/extensions/discord/src/voice/session.ts
+index 4818f5a31b087a21b81d4f7c2d4e7fa6b5313184..84e2f371ac571cb7d958ffbb053b5e1a90f4dca2 100644
+--- a/extensions/discord/src/voice/session.ts
++++ b/extensions/discord/src/voice/session.ts
+@@ -79,12 +79,6 @@ export type VoiceRequesterFinalBinding = {
+   onSettled?: () => void;
+ };
+ 
+-/** Native completion facts survive the private Discord voice adapter. */
+-export type VoiceAgentTurnResult = {
+-  text: string;
+-  completion: "final" | "pending" | "other";
+-};
+-
+ export type VoiceRealtimeAgentTurnParams = {
+   context: VoiceRealtimeSpeakerContext;
+   message: string;
 diff --git a/extensions/discord/src/voice/voice-gateway-capture.test-support.ts b/extensions/discord/src/voice/voice-gateway-capture.test-support.ts
 index 86c9a7cb98581c0d88b4217b1a5a3401c817dc18..681956bdffa1508a33c7654cfe38c3529389d306 100644
 --- a/extensions/discord/src/voice/voice-gateway-capture.test-support.ts
@@ -4576,6 +5161,57 @@ index 86c9a7cb98581c0d88b4217b1a5a3401c817dc18..681956bdffa1508a33c7654cfe38c352
      async recordAfterTurn() {
        firstTransport.streams[0]!.end(Buffer.from([1]));
        await drain();
+diff --git a/extensions/discord/src/voice/voice-receive.ts b/extensions/discord/src/voice/voice-receive.ts
+index 6fd56ea0ac6f4f55a7f1b21be3dbf034720f56ee..efaa4b67b02909480a0b3d490eaeeb05ef4607ab 100644
+--- a/extensions/discord/src/voice/voice-receive.ts
++++ b/extensions/discord/src/voice/voice-receive.ts
+@@ -40,7 +40,6 @@ import {
+   type VoiceJoinOptions,
+   type VoiceSessionEntry,
+   type VoiceRealtimeAgentTurnParams,
+-  type VoiceAgentTurnResult,
+ } from "./session.js";
+ import type { DiscordVoiceSpeakerContextResolver } from "./speaker-context.js";
+ import type { DiscordCaptureReceiptReader } from "./transcripts-source.js";
+@@ -528,7 +527,7 @@ export class DiscordVoiceReceive {
+ 
+   async runDiscordRealtimeAgentTurn(
+     params: VoiceRealtimeAgentTurnParams & { entry: VoiceSessionEntry },
+-  ): Promise<VoiceAgentTurnResult> {
++  ): Promise<string> {
+     const { context, entry, message, toolsAllow, userId } = params;
+     params.signal?.throwIfAborted();
+     const currentContext = await this.resolveDiscordVoiceIngressContext(entry, userId);
+@@ -548,7 +547,7 @@ export class DiscordVoiceReceive {
+     logger.info(
+       `discord voice: agent turn start guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId} user=${userId} speaker=${context.speakerLabel} owner=${context.senderIsOwner} model=${this.params.discordConfig.voice?.model ?? "route-default"} message=${formatVoiceLogPreview(message)}`,
+     );
+-    const result = await runDiscordVoiceAgentTurn({
++    const text = await runDiscordVoiceAgentTurn({
+       entry,
+       accountId: this.params.accountId,
+       userId,
+@@ -561,16 +560,16 @@ export class DiscordVoiceReceive {
+       requesterFinal: params.requesterFinal,
+       ...(params.signal ? { signal: params.signal } : {}),
+     });
+-    if (result === null) {
++    if (text === null) {
+       logVoiceVerbose(
+         `realtime agent unauthorized: guild ${entry.guildId} channel ${entry.channelId} user ${userId}`,
+       );
+-      return { text: "", completion: "other" };
++      return "";
+     }
+     logger.info(
+-      `discord voice: agent turn answer (${result.text.length} chars) guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId}: ${formatVoiceLogPreview(result.text)}`,
++      `discord voice: agent turn answer (${text.length} chars) guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId}: ${formatVoiceLogPreview(text)}`,
+     );
+-    return result;
++    return text;
+   }
+ 
+   private startDecryptRecovery(entry: VoiceSessionEntry, force = false): void {
 diff --git a/extensions/discord/src/voice/voice-runtime.e2e.test.ts b/extensions/discord/src/voice/voice-runtime.e2e.test.ts
 index 8f9be186781216ff4f99ca7ac9460003d752b939..eb8418637ff613616b8db53a479db0f0e3cf4915 100644
 --- a/extensions/discord/src/voice/voice-runtime.e2e.test.ts
@@ -23723,6 +24359,31 @@ index 48d16f0e116bd8c9fd2b38dd7019efa88ca2b298..26f7aec1b65de0080f1720721656679e
        ])
        .groupBy(["session_id", "run_id"]),
    ).rows;
+diff --git a/test/discord-voice-detached-ingress.integration.test.ts b/test/discord-voice-detached-ingress.integration.test.ts
+index b73edd35e5d3b1f9cb7f4f1f02f706a9d9d92964..798c2b88262aaea3c817dd534123bb900c584a09 100644
+--- a/test/discord-voice-detached-ingress.integration.test.ts
++++ b/test/discord-voice-detached-ingress.integration.test.ts
+@@ -77,7 +77,7 @@ describe("Discord late voice consult native admission", () => {
+     const bindRun = vi.fn<RealtimeVoiceSelectionHandle["bindRun"]>(() => bindingRelease);
+     const activeBefore = getActiveGatewayRootWorkCount();
+     const { run } = fixture(true);
+-    let turn: ReturnType<typeof run> | undefined;
++    let turn: Promise<string | null> | undefined;
+     mocks.agentCommandFromIngress.mockImplementationOnce(async (input) =>
+       // The native agent generation captures this tracker before preparing its model.
+       captureAsyncWorkTracker()(async () => {
+@@ -101,10 +101,7 @@ describe("Discord late voice consult native admission", () => {
+       });
+       await trigger.drain();
+       releaseTrigger.resolve();
+-      await expect(turn).resolves.toEqual({
+-        text: "Current call verified.",
+-        completion: "other",
+-      });
++      await expect(turn).resolves.toBe("Current call verified.");
+       expect(mocks.agentCommandFromIngress).toHaveBeenCalledOnce();
+       expect(bindingRelease).toHaveBeenCalledOnce();
+       // The old trigger remains closed: this is not a global scope bypass.
 diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json
 index 1889394ce067190aaf615e1ee3e7375df64855a5..48b5aab54424759725b7be0fcd874af8646e94dd 100644
 --- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.heartbeat-turn.json

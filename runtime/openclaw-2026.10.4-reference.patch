@@ -32285,7 +32285,7 @@ index 0000000000000000000000000000000000000000..6010e97b0d23366a2dd2ef602a8a6961
 +  },
 +);
 diff --git a/extensions/discord/src/voice/ingress.test.ts b/extensions/discord/src/voice/ingress.test.ts
-index 6793e20d161a0ae049b8b4019929c2f8854ad9f1..21e49b6af8784e4707235cffcd04783768960e59 100644
+index 6793e20d161a0ae049b8b4019929c2f8854ad9f1..13c3a6c792d6066d4ba3b2378a4bec247f91ce10 100644
 --- a/extensions/discord/src/voice/ingress.test.ts
 +++ b/extensions/discord/src/voice/ingress.test.ts
 @@ -67,6 +67,35 @@ describe("Discord realtime context host compatibility", () => {
@@ -32335,8 +32335,17 @@ index 6793e20d161a0ae049b8b4019929c2f8854ad9f1..21e49b6af8784e4707235cffcd047837
    function fixture(senderIsOwner = false) {
      const entry = {
        guildId: "guild-1",
+@@ -151,7 +182,7 @@ describe("Discord voice ingress execution correlation", () => {
+       if (fail) {
+         await expect(turn).rejects.toThrow("Agent turn failed");
+       } else {
+-        await expect(turn).resolves.toBe("Voice changed.");
++        await expect(turn).resolves.toEqual({ text: "Voice changed.", completion: "other" });
+       }
+       expect(release).toHaveBeenCalledOnce();
+     },
 diff --git a/extensions/discord/src/voice/ingress.ts b/extensions/discord/src/voice/ingress.ts
-index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba470c7007d9 100644
+index 88ba27f60e6d83a541f3d4d0d47153a53f962905..29fb1d34db13ba8c6322a10f30b631f99475b038 100644
 --- a/extensions/discord/src/voice/ingress.ts
 +++ b/extensions/discord/src/voice/ingress.ts
 @@ -1,10 +1,18 @@
@@ -32360,17 +32369,21 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
  import type { Client } from "../internal/discord.js";
  import { formatMention } from "../mentions.js";
  import { normalizeDiscordSlug } from "../monitor/allow-list.js";
-@@ -12,7 +20,8 @@ import { buildDiscordGroupSystemPrompt } from "../monitor/inbound-context.js";
+@@ -12,7 +20,12 @@ import { buildDiscordGroupSystemPrompt } from "../monitor/inbound-context.js";
  import type { DiscordLivePolicyReader } from "../monitor/live-policy.js";
  import { getDiscordRuntime } from "../runtime.js";
  import { authorizeDiscordVoiceIngress } from "./access.js";
 -import type { VoiceSessionEntry } from "./session.js";
 +import { resolveDiscordGuildVoiceConfig } from "./config.js";
-+import type { VoiceRequesterFinalBinding, VoiceSessionEntry } from "./session.js";
++import type {
++  VoiceAgentTurnResult,
++  VoiceRequesterFinalBinding,
++  VoiceSessionEntry,
++} from "./session.js";
  import type { DiscordVoiceSpeakerContextResolver } from "./speaker-context.js";
  
  const DISCORD_VOICE_MESSAGE_PROVIDER = "discord-voice";
-@@ -29,6 +38,7 @@ export type DiscordVoiceIngressContext = {
+@@ -29,6 +42,7 @@ export type DiscordVoiceIngressContext = {
    isCurrent?: () => boolean;
    senderIsOwner: boolean;
    speakerLabel: string;
@@ -32378,7 +32391,7 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
  };
  
  function summarizeAgentTurnPayloads(payloads: readonly unknown[]): string {
-@@ -111,6 +121,7 @@ export async function resolveDiscordVoiceIngressContext(params: {
+@@ -111,6 +125,7 @@ export async function resolveDiscordVoiceIngressContext(params: {
      isCurrent: access.isCurrent,
      senderIsOwner: speaker.senderIsOwner,
      speakerLabel: speaker.label,
@@ -32386,12 +32399,13 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
    };
  }
  
-@@ -125,7 +136,29 @@ export async function runDiscordVoiceAgentTurn(params: {
+@@ -125,7 +140,29 @@ export async function runDiscordVoiceAgentTurn(params: {
    toolsAllow?: string[];
    voiceSelection?: RealtimeVoiceSelectionHandle;
    signal?: AbortSignal;
+-}): Promise<string | null> {
 +  requesterFinal?: VoiceRequesterFinalBinding;
- }): Promise<string | null> {
++}): Promise<VoiceAgentTurnResult | null> {
 +  if (
 +    params.entry.captureOnly ||
 +    params.entry.sessionLifecycle.status !== "active" ||
@@ -32411,12 +32425,12 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
 +
 +async function runAdmittedDiscordVoiceAgentTurn(
 +  params: Parameters<typeof runDiscordVoiceAgentTurn>[0],
-+): Promise<string | null> {
++): Promise<VoiceAgentTurnResult | null> {
 +  // Recheck after a reversible suspension wait before using the original call authority.
    const { context } = params;
    if (
      params.entry.captureOnly ||
-@@ -135,7 +168,9 @@ export async function runDiscordVoiceAgentTurn(params: {
+@@ -135,7 +172,9 @@ export async function runDiscordVoiceAgentTurn(params: {
      return null;
    }
    params.signal?.throwIfAborted();
@@ -32427,7 +32441,7 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
    const runId = params.voiceSelection ? randomUUID() : undefined;
    const unbind = runId
      ? params.voiceSelection?.bindRun({
-@@ -167,17 +202,26 @@ export async function runDiscordVoiceAgentTurn(params: {
+@@ -167,40 +206,78 @@ export async function runDiscordVoiceAgentTurn(params: {
          senderIsOwner: context.senderIsOwner,
          allowModelOverride: Boolean(voiceModel),
          model: voiceModel,
@@ -32446,16 +32460,45 @@ index 88ba27f60e6d83a541f3d4d0d47153a53f962905..6fa42a159b8e514ea0909834c60aba47
      unbind?.();
    }
    const payloads = result.payloads ?? [];
+-  const text = payloads
 +  if (result.meta?.yielded === true) {
 +    const acknowledgment = normalizeOptionalString(result.meta.yieldAcknowledgment);
-+    return acknowledgment
-+      ? truncateUtf16Safe(acknowledgment.replaceAll(/\s+/g, " "), 500)
-+      : "I started that work and will share the result when it is ready.";
++    return {
++      completion: "pending",
++      text: acknowledgment
++        ? truncateUtf16Safe(acknowledgment.replaceAll(/\s+/g, " "), 500)
++        : "I started that work and will share the result when it is ready.",
++    };
 +  }
-   const text = payloads
++  const terminal =
++    result.meta?.terminalReply?.disposition === "visible" &&
++    !result.meta.continuationPending &&
++    !result.meta.aborted &&
++    !result.meta.error &&
++    !payloads.some((payload) => payload.isError === true);
++  // The native snapshot proves disposition but bounds its text to 4096 chars.
++  // Command payload projection omits reasoning/commentary lane metadata. Use
++  // the producer's full final text instead of reconstructing it from that list.
++  const finalText = terminal ? result.meta.finalAssistantVisibleText?.trim() : undefined;
++  const payloadText = payloads
      .map((payload) => payload.text)
      .filter((entry) => typeof entry === "string" && entry.trim())
-@@ -195,12 +239,24 @@ export async function resolveDiscordVoiceRealtimeAgentContext(params: {
+     .join("\n")
+     .trim();
++  const text = finalText || payloadText;
+   if (!text) {
+     logger.info(
+       `discord voice: agent turn produced no speakable payloads guild=${params.entry.guildId} channel=${params.entry.channelId} voiceSession=${params.entry.voiceSessionKey} supervisorSession=${params.entry.route.sessionKey} agent=${params.entry.route.agentId} user=${params.userId} ${summarizeAgentTurnPayloads(payloads)}`,
+     );
+   }
+-  return text;
++  return {
++    text,
++    completion: result.meta?.continuationPending ? "pending" : finalText ? "final" : "other",
++  };
+ }
+ 
+ export async function resolveDiscordVoiceRealtimeAgentContext(params: {
    entry: { route: Pick<VoiceSessionEntry["route"], "agentId" | "sessionKey"> };
    cfg: OpenClawConfig;
    discordConfig: DiscordAccountConfig;
@@ -33343,10 +33386,10 @@ index 0000000000000000000000000000000000000000..8da375cfa85108b4d637a4ab58f6132e
 +}
 diff --git a/extensions/discord/src/voice/realtime-consult-state.ts b/extensions/discord/src/voice/realtime-consult-state.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..c431daee8dcf153d3ebddd051ff2c47c519add97
+index 0000000000000000000000000000000000000000..61198ae65293f55202355064dcc24d617353dddf
 --- /dev/null
 +++ b/extensions/discord/src/voice/realtime-consult-state.ts
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,63 @@
 +import type { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import type {
 +  buildRealtimeVoiceAgentErrorProviderResult,
@@ -33358,7 +33401,11 @@ index 0000000000000000000000000000000000000000..c431daee8dcf153d3ebddd051ff2c47c
 +import type { DiscordVoiceIngressContext } from "./ingress.js";
 +import type { DiscordRealtimePlaybackPort } from "./realtime-playback.js";
 +import type { DiscordRealtimeSpeakerContext, DiscordRealtimeTurns } from "./realtime-turns.js";
-+import type { VoiceRealtimeAgentTurnParams, VoiceSessionEntry } from "./session.js";
++import type {
++  VoiceAgentTurnResult,
++  VoiceRealtimeAgentTurnParams,
++  VoiceSessionEntry,
++} from "./session.js";
 +
 +export type AgentProxyConsultResult =
 +  | { text: string; suppressResponse?: true }
@@ -33399,7 +33446,7 @@ index 0000000000000000000000000000000000000000..c431daee8dcf153d3ebddd051ff2c47c
 +  isWakeNameRequired: () => boolean;
 +  playback: DiscordRealtimePlaybackPort;
 +  providerEpoch: () => number;
-+  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<string>;
++  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<VoiceAgentTurnResult>;
 +  resolveSpeakerContext: (userId: string) => Promise<DiscordVoiceIngressContext | null>;
 +  stopped: () => boolean;
 +  turns: DiscordRealtimeTurns;
@@ -33408,7 +33455,7 @@ index 0000000000000000000000000000000000000000..c431daee8dcf153d3ebddd051ff2c47c
 +};
 diff --git a/extensions/discord/src/voice/realtime-consults.requester-final.test.ts b/extensions/discord/src/voice/realtime-consults.requester-final.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..59c6eed81b032c49567b45510d5e698e351f545d
+index 0000000000000000000000000000000000000000..384af035ebe8e74182124055f3af7ec568a40aab
 --- /dev/null
 +++ b/extensions/discord/src/voice/realtime-consults.requester-final.test.ts
 @@ -0,0 +1,116 @@
@@ -33447,7 +33494,7 @@ index 0000000000000000000000000000000000000000..59c6eed81b032c49567b45510d5e698e
 +    runAgentTurn: vi.fn(async (turn: VoiceRealtimeAgentTurnParams) => {
 +      binding = turn.requesterFinal;
 +      binding?.onRegistration?.({ revoke });
-+      return "I am checking the records.";
++      return { text: "I am checking the records.", completion: "pending" };
 +    }),
 +    resolveSpeakerContext: vi.fn(async () => ({
 +      ...speaker,
@@ -33635,7 +33682,7 @@ index c734b85c366de75655ced53c3f0a998c4cad20f6..aeb25e8d3db48212fbdf875f5c9b8cae
        await Promise.resolve();
        await Promise.resolve();
 diff --git a/extensions/discord/src/voice/realtime-consults.ts b/extensions/discord/src/voice/realtime-consults.ts
-index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262326f9d3d 100644
+index ab2c28964d6b497c8dd0608a12b85c435434b85c..87cd112eb9966012330032024f6d602f64c7c909 100644
 --- a/extensions/discord/src/voice/realtime-consults.ts
 +++ b/extensions/discord/src/voice/realtime-consults.ts
 @@ -7,68 +7,52 @@ import {
@@ -33683,7 +33730,8 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
 +import type { DiscordRealtimeSpeakerContext } from "./realtime-turns.js";
  import { isDiscordRealtimeSpeakerContext } from "./realtime-turns.js";
 -import type { VoiceRealtimeAgentTurnParams, VoiceSessionEntry } from "./session.js";
- import { logVoiceVerbose } from "./session.js";
+-import { logVoiceVerbose } from "./session.js";
++import { logVoiceVerbose, type VoiceAgentTurnResult } from "./session.js";
  
  const logger = createSubsystemLogger("discord/voice");
  const DISCORD_REALTIME_TALKBACK_DEBOUNCE_MS = 350;
@@ -33896,7 +33944,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
          text: acceptedText,
        });
      } catch (error) {
-@@ -365,61 +358,156 @@ export class DiscordRealtimeConsults {
+@@ -365,61 +358,164 @@ export class DiscordRealtimeConsults {
        fallbackText: DISCORD_REALTIME_FALLBACK_TEXT,
        consult: async ({ question, responseStyle, metadata }) => {
          const context = isDiscordRealtimeSpeakerContext(metadata) ? metadata : undefined;
@@ -33975,9 +34023,72 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
 +      this.params.consultToolPolicy() !== "none" &&
 +      ((!this.params.stopped() && providerEpoch === this.params.providerEpoch()) ||
 +        this.detachedProviderEpoch === providerEpoch);
-+    let text: string;
++    const acceptFinal = (finalText: string): boolean => {
++      if (
++        finalAccepted ||
++        !finalText.trim() ||
++        !finalCurrent() ||
++        this.pendingFinalDeliveries >= 32
++      ) {
++        return false;
++      }
++      finalAccepted = true;
++      if (params.recent?.context) {
++        params.recent.context.requesterFinalAccepted = true;
++      }
++      this.pendingFinalDeliveries += 1;
++      void (async () => {
++        // The admitted native requester owner resolves the task once. Wait
++        // for its initial acknowledgment before queuing the eventual result.
++        await initialRun.promise;
++        const state = params.recent?.context;
++        await Promise.all(
++          Array.from(
++            (state ? this.providerDeliveries.get(state) : undefined) ?? [],
++            (delivery) => delivery.promise,
++          ),
++        );
++        if (!finalCurrent()) {
++          return;
++        }
++        const fresh = await this.params.resolveSpeakerContext(context.userId);
++        if (
++          !finalCurrent() ||
++          !fresh ||
++          fresh.isCurrent?.() === false ||
++          fresh.senderIsOwner !== context.senderIsOwner ||
++          (fresh.actionHandoff === false &&
++            (!wasReadOnly || this.params.consultToolPolicy() !== "safe-read-only"))
++        ) {
++          logger.info(
++            "discord voice: requester final rejected after speaker authorization changed",
++          );
++          return;
++        }
++        if (this.detachedProviderEpoch === providerEpoch) {
++          this.params.playback.deliverRetainedSpeech(finalText);
++        } else {
++          this.params.playback.enqueueExactSpeechMessage(finalText);
++        }
++        if (state && params.recent) {
++          state.result = { text: finalText };
++          state.delivery = "playback";
++          this.params.harness.forcedConsults.markDelivered(params.recent);
++        }
++      })()
++        .catch((error: unknown) => {
++          logger.warn(
++            `discord voice: requester final delivery failed: ${formatErrorMessage(error)}`,
++          );
++        })
++        .finally(() => {
++          this.pendingFinalDeliveries -= 1;
++        });
++      return true;
++    };
++    let result: VoiceAgentTurnResult;
 +    try {
-+      text = await this.params.runAgentTurn({
++      result = await this.params.runAgentTurn({
 +        context,
 +        message: params.message,
 +        toolsAllow: this.params.consultToolsAllow(),
@@ -33999,76 +34110,21 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
 +              this.requesterFinalBindings.delete(registration);
 +            }
 +          },
-+          append: (finalText) => {
-+            if (
-+              finalAccepted ||
-+              settled ||
-+              !finalText.trim() ||
-+              !finalCurrent() ||
-+              this.pendingFinalDeliveries >= 32
-+            ) {
-+              return false;
-+            }
-+            finalAccepted = true;
-+            if (params.recent?.context) {
-+              params.recent.context.requesterFinalAccepted = true;
-+            }
-+            this.pendingFinalDeliveries += 1;
-+            void (async () => {
-+              // The admitted native requester owner resolves the task once. Wait
-+              // for its initial acknowledgment before queuing the eventual result.
-+              await initialRun.promise;
-+              const state = params.recent?.context;
-+              await Promise.all(
-+                Array.from(
-+                  (state ? this.providerDeliveries.get(state) : undefined) ?? [],
-+                  (delivery) => delivery.promise,
-+                ),
-+              );
-+              if (!finalCurrent()) {
-+                return;
-+              }
-+              const fresh = await this.params.resolveSpeakerContext(context.userId);
-+              if (
-+                !finalCurrent() ||
-+                !fresh ||
-+                fresh.isCurrent?.() === false ||
-+                fresh.senderIsOwner !== context.senderIsOwner ||
-+                (fresh.actionHandoff === false &&
-+                  (!wasReadOnly || this.params.consultToolPolicy() !== "safe-read-only"))
-+              ) {
-+                logger.info(
-+                  "discord voice: requester final rejected after speaker authorization changed",
-+                );
-+                return;
-+              }
-+              if (this.detachedProviderEpoch === providerEpoch) {
-+                this.params.playback.deliverRetainedSpeech(finalText);
-+              } else {
-+                this.params.playback.enqueueExactSpeechMessage(finalText);
-+              }
-+              if (state && params.recent) {
-+                state.result = { text: finalText };
-+                state.delivery = "playback";
-+                this.params.harness.forcedConsults.markDelivered(params.recent);
-+              }
-+            })()
-+              .catch((error: unknown) => {
-+                logger.warn(
-+                  `discord voice: requester final delivery failed: ${formatErrorMessage(error)}`,
-+                );
-+              })
-+              .finally(() => {
-+                this.pendingFinalDeliveries -= 1;
-+              });
-+            return true;
-+          },
++          append: (finalText) => !settled && acceptFinal(finalText),
 +        },
 +      });
 +    } finally {
 +      initialRun.resolve();
 +    }
      params.signal?.throwIfAborted();
++    // Ordinary native completion has already settled its requester attachment.
++    // Reuse this consult's final-delivery owner, not the expired callback. The
++    // existing provider-delivery waits keep exact speech after tool suppression.
++    if (params.deliveryOwner === "consult" && result.completion === "final") {
++      if (!acceptFinal(result.text) && !finalAccepted) {
++        throw new DOMException("Discord voice final delivery is no longer available", "AbortError");
++      }
++    }
 +    // A native requester final may commit before its promoted run returns the
 +    // launch acknowledgment. The final already owns speech; never replay that
 +    // stale acknowledgment through provider, forced, or retained delivery.
@@ -34076,21 +34132,22 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
 +      return { text: "", suppressResponse: true };
 +    }
      if (params.deliveryOwner !== "consult" && this.detachedProviderEpoch === providerEpoch) {
-       this.params.playback.deliverRetainedSpeech(text);
-     }
--    return text;
-+    return { text };
+-      this.params.playback.deliverRetainedSpeech(text);
++      this.params.playback.deliverRetainedSpeech(result.text);
++    }
++    return { text: result.text };
 +  }
 +
 +  private revokeRequesterFinalBindings(): void {
 +    for (const binding of this.requesterFinalBindings) {
 +      binding.revoke();
-+    }
+     }
+-    return text;
 +    this.requesterFinalBindings.clear();
    }
  
    private prepareForcedAgentProxyConsult(
-@@ -490,7 +578,7 @@ export class DiscordRealtimeConsults {
+@@ -490,7 +586,7 @@ export class DiscordRealtimeConsults {
      state.delivery = "forced-pending";
      const result = await this.trackAgentProxyConsult(
        pending,
@@ -34099,7 +34156,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
      );
      const deliveries = this.providerDeliveries.get(state);
      await Promise.all(Array.from(deliveries ?? [], (delivery) => delivery.promise));
-@@ -507,7 +595,7 @@ export class DiscordRealtimeConsults {
+@@ -507,7 +603,7 @@ export class DiscordRealtimeConsults {
        );
      }
      const text = "text" in result ? result.text : DISCORD_REALTIME_FALLBACK_TEXT;
@@ -34108,7 +34165,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
        state.delivery = "playback";
        this.params.playback.enqueueExactSpeechMessage(text);
      }
-@@ -515,24 +603,26 @@ export class DiscordRealtimeConsults {
+@@ -515,24 +611,26 @@ export class DiscordRealtimeConsults {
  
    private trackAgentProxyConsult(
      recent: AgentProxyConsultHandle | undefined,
@@ -34139,7 +34196,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
          }
          if (recent && state && state.providerEpoch === this.params.providerEpoch()) {
            // Cancellation must reach the coordinator before delivery closes that transition.
-@@ -550,20 +640,6 @@ export class DiscordRealtimeConsults {
+@@ -550,20 +648,6 @@ export class DiscordRealtimeConsults {
      return tracked;
    }
  
@@ -34160,7 +34217,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
    private async submitRecentAgentProxyConsultResult(
      callId: string,
      recent: AgentProxyConsultHandle,
-@@ -585,7 +661,7 @@ export class DiscordRealtimeConsults {
+@@ -585,7 +669,7 @@ export class DiscordRealtimeConsults {
        (state.delivery === "forced-pending" &&
          !state.result &&
          session.bridge.supportsToolResultSuppression === false)
@@ -34169,7 +34226,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
          : undefined;
      logger.info(
        `discord voice: realtime consult ${state.result ? "reused recent" : "joined in-flight"} agent result call=${callId} speaker=${state.speaker.speakerLabel} owner=${state.speaker.senderIsOwner}`,
-@@ -603,7 +679,7 @@ export class DiscordRealtimeConsults {
+@@ -603,7 +687,7 @@ export class DiscordRealtimeConsults {
        if (providerDelivery) {
          providerDelivery.submissionStarted = true;
        }
@@ -34178,7 +34235,7 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
          callId,
          session,
          result,
-@@ -619,96 +695,9 @@ export class DiscordRealtimeConsults {
+@@ -619,96 +703,9 @@ export class DiscordRealtimeConsults {
        }
      } finally {
        if (providerDelivery) {
@@ -34278,11 +34335,12 @@ index ab2c28964d6b497c8dd0608a12b85c435434b85c..ebf002d1de49fdfe2e8250219763a262
  }
 diff --git a/extensions/discord/src/voice/realtime-consults.yielded.test.ts b/extensions/discord/src/voice/realtime-consults.yielded.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..622b7aec9e5af588084b0e0f1a209a19af4edbbf
+index 0000000000000000000000000000000000000000..3543b8b47c14312fd9a14fbb55286b6fb41118af
 --- /dev/null
 +++ b/extensions/discord/src/voice/realtime-consults.yielded.test.ts
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,282 @@
 +import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
++import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import { defineDiscordVoiceTests } from "./voice-test-harness.test-support.js";
 +
 +type RequesterFinal = NonNullable<
@@ -34296,6 +34354,7 @@ index 0000000000000000000000000000000000000000..622b7aec9e5af588084b0e0f1a209a19
 +    vi,
 +    agentCommandMock,
 +    realtimeSessionMock,
++    resolveVoiceIngressWithParticipantsMock,
 +    beginSpeakerTurn,
 +    createJoinedAgentProxyFixture,
 +    createJoinedBidiFixture,
@@ -34304,6 +34363,168 @@ index 0000000000000000000000000000000000000000..622b7aec9e5af588084b0e0f1a209a19
 +  }) => {
 +    const acknowledgment = "I am checking the current records.";
 +    const finalText = "The original records confirm the requested change is complete.";
++
++    const toolCall = (callId: string) => ({
++      callId,
++      itemId: callId,
++      name: "openclaw_agent_consult",
++      args: { question: "Check the current records" },
++    });
++
++    it.each([
++      { name: "continuation", meta: { continuationPending: true } },
++      { name: "aborted", meta: { aborted: true } },
++      { name: "error", meta: { error: { kind: "incomplete_turn", message: "Interrupted" } } },
++      { name: "silent", meta: { terminalReply: { disposition: "silent" } } },
++      { name: "empty", meta: { terminalReply: { disposition: "empty" } } },
++      { name: "absent full final", meta: { finalAssistantVisibleText: undefined } },
++      { name: "empty full final", meta: { finalAssistantVisibleText: "" } },
++      { name: "absent terminal fact", meta: { terminalReply: undefined } },
++      { name: "error payload", payload: { isError: true } },
++    ])("does not classify $name as an exact completed answer", async ({ meta, payload }) => {
++      agentCommandMock.mockImplementationOnce(async () => ({
++        payloads: [{ text: "Nonfinal diagnostic", ...payload }],
++        meta: {
++          terminalReply: { disposition: "visible", text: "Nonfinal diagnostic" },
++          finalAssistantVisibleText: "Nonfinal diagnostic",
++          ...meta,
++        },
++      }));
++      const f = await createJoinedBidiFixture();
++      beginSpeakerTurn(f.entry).close();
++      try {
++        await f.bridgeParams.onToolCall?.(toolCall("nonfinal"), realtimeSessionMock);
++        expect(sentUserMessages()).toEqual([]);
++        expect(realtimeSessionMock.submitToolResult.mock.calls[0]?.[2]).toBeUndefined();
++      } finally {
++        await f.manager.destroy();
++      }
++    });
++
++    it("speaks the complete immediate terminal answer exactly once after native requester settlement", async () => {
++      const spoken = createDeferred<void>();
++      realtimeSessionMock.sendUserMessage.mockImplementationOnce(() => spoken.resolve());
++      const completeText = `${"Verified details. ".repeat(260)}Revision: abcdef0123456789abcdef0123456789abcdef0123.`;
++      agentCommandMock.mockImplementationOnce(async (_input, _runtime, delivery) => {
++        delivery?.requesterFinal?.onRegistration?.({ revoke: vi.fn() });
++        delivery?.requesterFinal?.onSettled?.();
++        return {
++          payloads: [{ text: "Internal progress" }, { text: completeText }],
++          meta: {
++            terminalReply: { disposition: "visible", text: completeText.slice(0, 4096) },
++            finalAssistantVisibleText: completeText,
++          },
++        };
++      });
++      const f = await createJoinedBidiFixture();
++      beginSpeakerTurn(f.entry).close();
++      try {
++        await f.bridgeParams.onToolCall?.(toolCall("immediate"), realtimeSessionMock);
++        expect(realtimeSessionMock.submitToolResult).toHaveBeenCalledWith(
++          "immediate",
++          expect.objectContaining({ status: "already_delivered" }),
++          { suppressResponse: true },
++        );
++        await spoken.promise;
++        expect(sentUserMessages().filter((text) => text.includes(completeText))).toHaveLength(1);
++        expect(sentUserMessages().some((text) => text.includes("Internal progress"))).toBe(false);
++        await f.bridgeParams.onToolCall?.(toolCall("duplicate"), realtimeSessionMock);
++        expect(sentUserMessages().filter((text) => text.includes(completeText))).toHaveLength(1);
++        expect(agentCommandMock).toHaveBeenCalledOnce();
++      } finally {
++        await f.manager.destroy();
++      }
++    });
++
++    it("waits for every in-flight duplicate tool result before exact final playback", async () => {
++      const answer = createDeferred<void>();
++      const firstSubmitted = createDeferred<void>();
++      const secondSubmitted = createDeferred<void>();
++      const firstSettled = createDeferred<void>();
++      const secondSettled = createDeferred<void>();
++      const started = createDeferred<void>();
++      const spoken = createDeferred<void>();
++      realtimeSessionMock.sendUserMessage.mockImplementationOnce(() => spoken.resolve());
++      agentCommandMock.mockImplementationOnce(async () => {
++        started.resolve();
++        await answer.promise;
++        return {
++          payloads: [{ text: finalText }],
++          meta: {
++            terminalReply: { disposition: "visible", text: finalText },
++            finalAssistantVisibleText: finalText,
++          },
++        };
++      });
++      realtimeSessionMock.submitToolResult.mockImplementation(async (id: string) => {
++        (id === "first" ? firstSubmitted : secondSubmitted).resolve();
++        await (id === "first" ? firstSettled : secondSettled).promise;
++      });
++      const f = await createJoinedBidiFixture();
++      beginSpeakerTurn(f.entry).close();
++      try {
++        const first = f.bridgeParams.onToolCall?.(toolCall("first"), realtimeSessionMock);
++        await started.promise;
++        const second = f.bridgeParams.onToolCall?.(toolCall("second"), realtimeSessionMock);
++        answer.resolve();
++        await Promise.all([firstSubmitted.promise, secondSubmitted.promise]);
++        expect(sentUserMessages()).toEqual([]);
++        firstSettled.resolve();
++        await first;
++        expect(sentUserMessages()).toEqual([]);
++        secondSettled.resolve();
++        await second;
++        await spoken.promise;
++        expect(sentUserMessages().filter((text) => text.includes(finalText))).toHaveLength(1);
++        expect(agentCommandMock).toHaveBeenCalledOnce();
++      } finally {
++        firstSettled.resolve();
++        secondSettled.resolve();
++        await f.manager.destroy();
++      }
++    });
++
++    it.each(["call", "provider", "authorization"] as const)(
++      "drops an immediate final if %s changes while its tool result is settling",
++      async (change) => {
++        const submitted = createDeferred<void>();
++        const settled = createDeferred<void>();
++        agentCommandMock.mockImplementationOnce(async () => ({
++          payloads: [{ text: finalText }],
++          meta: {
++            terminalReply: { disposition: "visible", text: finalText },
++            finalAssistantVisibleText: finalText,
++          },
++        }));
++        realtimeSessionMock.submitToolResult.mockImplementationOnce(async () => {
++          submitted.resolve();
++          await settled.promise;
++        });
++        const f = await createJoinedBidiFixture();
++        beginSpeakerTurn(f.entry).close();
++        const turn = f.bridgeParams.onToolCall?.(toolCall("closing"), realtimeSessionMock);
++        await submitted.promise;
++        try {
++          if (change === "call") {
++            await f.manager.destroy();
++          } else if (change === "provider") {
++            f.bridgeParams.onEvent?.({ direction: "client", type: "session.continuity.reset" });
++            f.bridgeParams.onReady?.();
++          } else {
++            resolveVoiceIngressWithParticipantsMock.mockResolvedValue(null);
++          }
++          settled.resolve();
++          await turn;
++          await new Promise<void>((resolve) => {
++            setImmediate(resolve);
++          });
++          expect(sentUserMessages().some((text) => text.includes(finalText))).toBe(false);
++        } finally {
++          settled.resolve();
++          await f.manager.destroy();
++        }
++      },
++    );
 +
 +    async function yielded(options: { early?: boolean; forced?: boolean } = {}) {
 +      let final: RequesterFinal | undefined;
@@ -34972,10 +35193,10 @@ index 25cbe383e422cfc39794b5fa69c2f1215c5f3cf1..a57aab8ae2998e106c0d3a165fd7d691
 +}
 diff --git a/extensions/discord/src/voice/realtime-session-params.ts b/extensions/discord/src/voice/realtime-session-params.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a7c63d11692c66375b31dc5dfb42c8a9413db2e9
+index 0000000000000000000000000000000000000000..cb26e9bddc0d3672335721fb38b1e0f030be5429
 --- /dev/null
 +++ b/extensions/discord/src/voice/realtime-session-params.ts
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 +import type {
 +  RealtimeVoiceBridgeSession,
@@ -34986,6 +35207,7 @@ index 0000000000000000000000000000000000000000..a7c63d11692c66375b31dc5dfb42c8a9
 +import type {
 +  DiscordVoiceMode,
 +  VoiceRealtimeAgentTurnParams,
++  VoiceAgentTurnResult,
 +  VoiceSessionEntry,
 +} from "./session.js";
 +
@@ -35007,7 +35229,7 @@ index 0000000000000000000000000000000000000000..a7c63d11692c66375b31dc5dfb42c8a9
 +  speakerIdentity?: Readonly<{ userId: string; speakerLabel: string; senderIsOwner: boolean }>;
 +  getHumanParticipantCount?: () => number;
 +  onTerminalError: (error: Error) => void;
-+  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<string>;
++  runAgentTurn: (params: VoiceRealtimeAgentTurnParams) => Promise<VoiceAgentTurnResult>;
 +  resolveSpeakerContext: (userId: string) => Promise<DiscordVoiceIngressContext | null>;
 +};
 +
@@ -35797,7 +36019,7 @@ index 4de50b721b362db86cd1c2a286e49e4b6c1b3064..c486c53a4dc76b7ce178f61b1005df2a
  
          expect(agentCommandMock).toHaveBeenCalledTimes(accepted ? 1 : 0);
 diff --git a/extensions/discord/src/voice/realtime-voice-selection.test.ts b/extensions/discord/src/voice/realtime-voice-selection.test.ts
-index b966370f06b0e96125d969d6d21ac59406bba9af..1b69c21ce212138edc8fddbdac91495855ea09a9 100644
+index b966370f06b0e96125d969d6d21ac59406bba9af..ff2344f06092d86bdef9b8d0b901635b4fd7c915 100644
 --- a/extensions/discord/src/voice/realtime-voice-selection.test.ts
 +++ b/extensions/discord/src/voice/realtime-voice-selection.test.ts
 @@ -10,6 +10,8 @@ defineDiscordVoiceTests(
@@ -35809,6 +36031,32 @@ index b966370f06b0e96125d969d6d21ac59406bba9af..1b69c21ce212138edc8fddbdac914958
      createRealtimeSessionMock,
      createRealtimeVoiceBridgeSessionMock,
      emitFinalRealtimeUserTranscript,
+@@ -305,7 +307,7 @@ defineDiscordVoiceTests(
+       ]);
+       const { entry, manager } = await createJoinedAgentProxyFixture();
+       const player = new DiscordRealtimePlayer(entry.audio);
+-      const answer = createDeferred<string>();
++      const answer = createDeferred<import("./session.js").VoiceAgentTurnResult>();
+       const cancellation = new AbortController();
+       const context = { senderIsOwner: true, speakerLabel: "Owner" };
+       const runAgentTurn = vi.fn(() => answer.promise);
+@@ -340,14 +342,14 @@ defineDiscordVoiceTests(
+         await replacement.connect();
+         const replacementBridge = lastRealtimeBridge();
+         original.transferPendingSpeechTo(replacement);
+-        answer.resolve("The cancelled agenda answer.");
++        answer.resolve({ text: "The cancelled agenda answer.", completion: "other" });
+         cancellation.abort(new Error("Consult cancelled"));
+         await rejected;
+         expect(runAgentTurn).toHaveBeenCalledOnce();
+         expect(sentUserMessages(sourceBridge.session)).toHaveLength(0);
+         expect(sentUserMessages(replacementBridge.session)).toHaveLength(0);
+       } finally {
+-        answer.resolve("");
++        answer.resolve({ text: "", completion: "other" });
+         await original.close();
+         await replacement.close();
+         player.close();
 @@ -558,11 +560,12 @@ defineDiscordVoiceTests(
        vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
        const draining = createDeferred<void>();
@@ -36044,7 +36292,7 @@ index 880f2dfdebb30a2f9d1fdd3728f216370a77d165..60f6c40500699dfe964765ab995a6ead
  };
  
 diff --git a/extensions/discord/src/voice/segment.ts b/extensions/discord/src/voice/segment.ts
-index eb4eec4ad5e5a2c54c538a0ebeba299bb853f60e..64797e3bcea1829a5d106d5653d8a617d5bafaeb 100644
+index eb4eec4ad5e5a2c54c538a0ebeba299bb853f60e..79524ef65c7cb56b53eb9a8ca1d1dd70ab95a6a7 100644
 --- a/extensions/discord/src/voice/segment.ts
 +++ b/extensions/discord/src/voice/segment.ts
 @@ -1,4 +1,5 @@
@@ -36180,6 +36428,15 @@ index eb4eec4ad5e5a2c54c538a0ebeba299bb853f60e..64797e3bcea1829a5d106d5653d8a617
  export async function respondToDiscordVoiceTranscript(
    params: DiscordVoiceResponseParams & {
      ingress: DiscordVoiceIngressContext;
+@@ -186,7 +82,7 @@ export async function respondToDiscordVoiceTranscript(
+       );
+       return;
+     }
+-    replyText = text;
++    replyText = text.text;
+   }
+ 
+   if (!conversationCurrent()) {
 @@ -202,6 +98,7 @@ export async function respondToDiscordVoiceTranscript(
      `reply ok (${replyText.length} chars): guild ${entry.guildId} channel ${entry.channelId}`,
    );
@@ -36234,7 +36491,7 @@ index eb4eec4ad5e5a2c54c538a0ebeba299bb853f60e..64797e3bcea1829a5d106d5653d8a617
      }
    });
 diff --git a/extensions/discord/src/voice/session.ts b/extensions/discord/src/voice/session.ts
-index f80936a24d416db0eb610e7cf163308d91ffbacc..84e2f371ac571cb7d958ffbb053b5e1a90f4dca2 100644
+index f80936a24d416db0eb610e7cf163308d91ffbacc..4818f5a31b087a21b81d4f7c2d4e7fa6b5313184 100644
 --- a/extensions/discord/src/voice/session.ts
 +++ b/extensions/discord/src/voice/session.ts
 @@ -29,10 +29,20 @@ export type VoiceOperationResult = {
@@ -36258,7 +36515,7 @@ index f80936a24d416db0eb610e7cf163308d91ffbacc..84e2f371ac571cb7d958ffbb053b5e1a
  };
  
  export type VoiceSessionGeneration = {
-@@ -60,6 +70,13 @@ export type VoiceRealtimeSpeakerContext = {
+@@ -60,6 +70,19 @@ export type VoiceRealtimeSpeakerContext = {
    extraSystemPrompt?: string;
    senderIsOwner: boolean;
    speakerLabel: string;
@@ -36269,10 +36526,16 @@ index f80936a24d416db0eb610e7cf163308d91ffbacc..84e2f371ac571cb7d958ffbb053b5e1a
 +  append: (text: string) => boolean;
 +  onRegistration?: (handle: { revoke: () => void }) => void;
 +  onSettled?: () => void;
++};
++
++/** Native completion facts survive the private Discord voice adapter. */
++export type VoiceAgentTurnResult = {
++  text: string;
++  completion: "final" | "pending" | "other";
  };
  
  export type VoiceRealtimeAgentTurnParams = {
-@@ -69,6 +86,7 @@ export type VoiceRealtimeAgentTurnParams = {
+@@ -69,6 +92,7 @@ export type VoiceRealtimeAgentTurnParams = {
    userId: string;
    isCurrent: () => boolean;
    signal?: AbortSignal;
@@ -38984,10 +39247,18 @@ index f197066b58f5cc0b3bc5047f598ceeaad11239fc..5520d92052b1f135c6a9f4b7979c358b
            expect(entry.receiveRecovery.decryptFailureCount).toBe(0);
            expect(entry.receiveRecovery.lastDecryptFailureAt).toBe(0);
 diff --git a/extensions/discord/src/voice/voice-receive.ts b/extensions/discord/src/voice/voice-receive.ts
-index 3a1d699e11766c887ff22b5a98857c76d4d9ac6b..efaa4b67b02909480a0b3d490eaeeb05ef4607ab 100644
+index 3a1d699e11766c887ff22b5a98857c76d4d9ac6b..6fd56ea0ac6f4f55a7f1b21be3dbf034720f56ee 100644
 --- a/extensions/discord/src/voice/voice-receive.ts
 +++ b/extensions/discord/src/voice/voice-receive.ts
-@@ -52,6 +52,7 @@ const MAX_PENDING_OPUS_BYTES = 1024 * 1024;
+@@ -40,6 +40,7 @@ import {
+   type VoiceJoinOptions,
+   type VoiceSessionEntry,
+   type VoiceRealtimeAgentTurnParams,
++  type VoiceAgentTurnResult,
+ } from "./session.js";
+ import type { DiscordVoiceSpeakerContextResolver } from "./speaker-context.js";
+ import type { DiscordCaptureReceiptReader } from "./transcripts-source.js";
+@@ -52,6 +53,7 @@ const MAX_PENDING_OPUS_BYTES = 1024 * 1024;
  
  export class DiscordVoiceReceive {
    readonly daveRecoveryAttempts = new Map<string, number>();
@@ -38995,7 +39266,7 @@ index 3a1d699e11766c887ff22b5a98857c76d4d9ac6b..efaa4b67b02909480a0b3d490eaeeb05
  
    constructor(
      private readonly params: {
-@@ -96,7 +97,33 @@ export class DiscordVoiceReceive {
+@@ -96,7 +98,33 @@ export class DiscordVoiceReceive {
      });
    }
  
@@ -39030,14 +39301,48 @@ index 3a1d699e11766c887ff22b5a98857c76d4d9ac6b..efaa4b67b02909480a0b3d490eaeeb05
      entry: VoiceSessionEntry,
      userId: string,
      origin: "native" | "scan" = "native",
-@@ -530,6 +557,7 @@ export class DiscordVoiceReceive {
+@@ -500,7 +528,7 @@ export class DiscordVoiceReceive {
+ 
+   async runDiscordRealtimeAgentTurn(
+     params: VoiceRealtimeAgentTurnParams & { entry: VoiceSessionEntry },
+-  ): Promise<string> {
++  ): Promise<VoiceAgentTurnResult> {
+     const { context, entry, message, toolsAllow, userId } = params;
+     params.signal?.throwIfAborted();
+     const currentContext = await this.resolveDiscordVoiceIngressContext(entry, userId);
+@@ -520,7 +548,7 @@ export class DiscordVoiceReceive {
+     logger.info(
+       `discord voice: agent turn start guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId} user=${userId} speaker=${context.speakerLabel} owner=${context.senderIsOwner} model=${this.params.discordConfig.voice?.model ?? "route-default"} message=${formatVoiceLogPreview(message)}`,
+     );
+-    const text = await runDiscordVoiceAgentTurn({
++    const result = await runDiscordVoiceAgentTurn({
+       entry,
+       accountId: this.params.accountId,
+       userId,
+@@ -530,18 +558,19 @@ export class DiscordVoiceReceive {
        context: currentContext,
        toolsAllow,
        voiceSelection: params.voiceSelection,
 +      requesterFinal: params.requesterFinal,
        ...(params.signal ? { signal: params.signal } : {}),
      });
-     if (text === null) {
+-    if (text === null) {
++    if (result === null) {
+       logVoiceVerbose(
+         `realtime agent unauthorized: guild ${entry.guildId} channel ${entry.channelId} user ${userId}`,
+       );
+-      return "";
++      return { text: "", completion: "other" };
+     }
+     logger.info(
+-      `discord voice: agent turn answer (${text.length} chars) guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId}: ${formatVoiceLogPreview(text)}`,
++      `discord voice: agent turn answer (${result.text.length} chars) guild=${entry.guildId} channel=${entry.channelId} voiceSession=${entry.voiceSessionKey} supervisorSession=${entry.route.sessionKey} agent=${entry.route.agentId}: ${formatVoiceLogPreview(result.text)}`,
+     );
+-    return text;
++    return result;
+   }
+ 
+   private startDecryptRecovery(entry: VoiceSessionEntry, force = false): void {
 diff --git a/extensions/discord/src/voice/voice-recording.ts b/extensions/discord/src/voice/voice-recording.ts
 index 7220446269d499d26bdb942fc79aa6eee9b1b8a6..b7bcea2d68f80ae7c0b50a1b26c856979a0f2445 100644
 --- a/extensions/discord/src/voice/voice-recording.ts
@@ -139045,10 +139350,10 @@ index 0000000000000000000000000000000000000000..5a864b2a1afa14342013dd66da3fa789
 +});
 diff --git a/test/discord-voice-detached-ingress.integration.test.ts b/test/discord-voice-detached-ingress.integration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb900c584a09
+index 0000000000000000000000000000000000000000..b73edd35e5d3b1f9cb7f4f1f02f706a9d9d92964
 --- /dev/null
 +++ b/test/discord-voice-detached-ingress.integration.test.ts
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,167 @@
 +import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 +import type { RealtimeVoiceSelectionHandle } from "../src/plugin-sdk/realtime-voice.js";
 +import {
@@ -139128,7 +139433,7 @@ index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb90
 +    const bindRun = vi.fn<RealtimeVoiceSelectionHandle["bindRun"]>(() => bindingRelease);
 +    const activeBefore = getActiveGatewayRootWorkCount();
 +    const { run } = fixture(true);
-+    let turn: Promise<string | null> | undefined;
++    let turn: ReturnType<typeof run> | undefined;
 +    mocks.agentCommandFromIngress.mockImplementationOnce(async (input) =>
 +      // The native agent generation captures this tracker before preparing its model.
 +      captureAsyncWorkTracker()(async () => {
@@ -139152,7 +139457,10 @@ index 0000000000000000000000000000000000000000..798c2b88262aaea3c817dd534123bb90
 +      });
 +      await trigger.drain();
 +      releaseTrigger.resolve();
-+      await expect(turn).resolves.toBe("Current call verified.");
++      await expect(turn).resolves.toEqual({
++        text: "Current call verified.",
++        completion: "other",
++      });
 +      expect(mocks.agentCommandFromIngress).toHaveBeenCalledOnce();
 +      expect(bindingRelease).toHaveBeenCalledOnce();
 +      // The old trigger remains closed: this is not a global scope bypass.
