@@ -226,6 +226,14 @@ unverified until their actual probes and effect checks pass.
 
 The worker profile sets `agents.defaults.subagents.runTimeoutSeconds: 0`, so an open-ended delegated task has no arbitrary worker deadline. A positive per-run limit is reserved for an explicit operator timebox. Individual I/O timeouts and stalled-work recovery remain separate controls.
 
+## Idle connector cleanup
+
+The example sets `mcp.sessionIdleTtlMs` to `600000` (ten minutes), using the
+native session-runtime idle cleanup. Zero disables idle expiry. Active leases
+remain protected; a later admitted tool call reconnects normally. Session
+archival separately retires its connector runtime after admitted work settles.
+This setting does not remove integrations or add another process supervisor.
+
 ## Permission and host choices
 
 The profile carries the operator's full-access execution choices: `tools.profile`

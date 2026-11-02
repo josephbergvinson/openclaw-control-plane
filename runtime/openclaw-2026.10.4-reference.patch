@@ -9602,6 +9602,20 @@ index a9256ff0b6bb19a77b06ba80ae80f1cdb3494f65..a1a3a563b808008b2de243d6bcceb7e4
  The full named Node plan retains the complete maintainer-tooling family through
  `RELEASE_ONLY_TOOLING_SHARDS` and the matching maintainer leaves in mixed fast
  configs. Product-only PRs omit this family in both precise and broad fallback
+diff --git a/docs/cli/mcp/registry.md b/docs/cli/mcp/registry.md
+index aec704d68bb9f9038cbf5e3230c5a37f7c8d27c2..63e97d81e4a02a9c3e2d5d5cea2be194d9034c94 100644
+--- a/docs/cli/mcp/registry.md
++++ b/docs/cli/mcp/registry.md
+@@ -42,7 +42,8 @@ Those saved definitions are for runtimes that OpenClaw launches or configures la
+     - fetched prompts present their description and role-labeled messages to the agent, including native image blocks for vision-capable models; Code Mode keeps the original prompt JSON shape
+     - dynamic MCP tool-list changes invalidate the cached catalog for that session; the next discovery/use refreshes from the server
+     - repeated MCP tool request/protocol failures pause that server briefly so one broken server does not consume the whole turn
+-    - session-scoped MCP runtimes stay alive between turns until session reset/deletion or compaction ID rollover, explicit Stop, a relevant server config change, or Gateway shutdown; owned stdio children terminate during cleanup
++    - session-scoped MCP runtimes stay alive between turns until session archive/reset/deletion or compaction ID rollover, explicit Stop, a relevant server config change, or Gateway shutdown; owned stdio children terminate during cleanup
++    - archiving preserves existing tool/app leases until their last release; restoring a session reconnects its MCP servers when needed
+     - detached one-shot runs without a surviving runtime session retire their MCP runtimes at run end; a retained transcript does not extend that lifetime
+     - native harness preparation retains the final bundle's server connections and OAuth context until the session closes; unused discovery servers outside that bundle can be retired after preparation when no other lease needs them
+     - canceling compaction closes MCP runtimes created for that compaction, including pending startup and tool discovery
 diff --git a/docs/concepts/active-memory/enabling.md b/docs/concepts/active-memory/enabling.md
 index 9a73d18b063ace5b01c7ff3ef1c7d1df859b9cad..a2ad829708880f3569db1794008e5858167fb507 100644
 --- a/docs/concepts/active-memory/enabling.md
@@ -9728,6 +9742,26 @@ index 52d316bfe5ea6c080141c167c11d098dd9966aba..a0eb3787083e6134167d94db25b95364
  discarded so stale background updates are not prepended to the first prompt in
  the new session.
  
+diff --git a/docs/gateway/config-extensions.md b/docs/gateway/config-extensions.md
+index 497d799b23a5c3e39af64c7af8489f681d0e5f71..0804ba2f6f1ce26294071ad6c16c5c70105efcd4 100644
+--- a/docs/gateway/config-extensions.md
++++ b/docs/gateway/config-extensions.md
+@@ -98,12 +98,13 @@ requires [`uv`/`uvx`](https://docs.astral.sh/uv/getting-started/installation/).
+   keep the server projected for every Codex app-server agent with Codex's
+   default MCP approval behavior.
+ - Session-scoped MCP runtimes stay alive between turns, including quiet periods
+-  and background server work after a tool returns. Session reset/deletion or compaction ID rollover,
++  and background server work after a tool returns. Session archive/reset/deletion or compaction ID rollover,
+   explicit Stop, and Gateway shutdown retire them and terminate owned stdio
+   children. Completing a turn in a surviving session does not retire its runtime.
+   A detached one-shot run without a surviving runtime session owns its MCP
+   lifetime and retires its runtimes at run end; retained transcripts alone do
+-  not keep them alive.
++  not keep them alive. Archiving preserves existing tool/app leases until their
++  last release; restoring a session reconnects its MCP servers when needed.
+ - `mcp.sessionIdleTtlMs`: optional idle eviction in milliseconds. Unset or `0`
+   keeps the session lifetime above. Positive finite values opt into eviction;
+   fractions round down. For example, `mcp: { sessionIdleTtlMs: 3600000 }` evicts
 diff --git a/docs/nodes/computer-use.md b/docs/nodes/computer-use.md
 index 4abd76a2ef4c4e6e58f5eedd7a1da292355144a8..48e92bb294d8867296d01b5b9c59ab386add1f99 100644
 --- a/docs/nodes/computer-use.md
@@ -21522,10 +21556,10 @@ index 18659924b3c97e6b4a037ff849fd097a5729c41a..592ab3b376ad038cdfa851f08d5d0cab
          await stopExactRunning(launched);
 diff --git a/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts b/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4ee5a6e912edff9ed833041803ce1e429d782c1b
+index 0000000000000000000000000000000000000000..97527359cb7ed08cda3bf32dac9b66ae0ff2a0e0
 --- /dev/null
 +++ b/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
-@@ -0,0 +1,251 @@
+@@ -0,0 +1,256 @@
 +import { once } from "node:events";
 +import fs from "node:fs/promises";
 +import { createServer, type ServerResponse } from "node:http";
@@ -21568,9 +21602,13 @@ index 0000000000000000000000000000000000000000..4ee5a6e912edff9ed833041803ce1e42
 +describe.runIf(process.env.OPENCLAW_BROWSER_MANAGED_CLEANUP_E2E === "1")(
 +  "managed Chrome native completion boundary",
 +  () => {
-+    it.each([false, true])(
-+      "owns only its disposable profile (headless=%s)",
-+      async (headless) => {
++    it.each(
++      [false, true].flatMap((headless) =>
++        (["completion", "lifecycle"] as const).map((boundary) => ({ headless, boundary })),
++      ),
++    )(
++      "owns only its disposable profile (headless=$headless, boundary=$boundary)",
++      async ({ headless, boundary }) => {
 +        await withTempDir("openclaw-managed-cleanup-", async (root) => {
 +          expect(getBrowserControlState()).toBeNull();
 +          fixture.root = root;
@@ -21627,7 +21665,7 @@ index 0000000000000000000000000000000000000000..4ee5a6e912edff9ed833041803ce1e42
 +          const cleanup = () =>
 +            closeTrackedBrowserTabsForSessions({
 +              sessionKeys: [sessionKey],
-+              completedBefore: Date.now(),
++              ...(boundary === "completion" ? { completedBefore: Date.now() } : {}),
 +              closeTab: async ({ targetId }) => {
 +                await tabs.closeTab(targetId, { exactTargetId: true });
 +              },
@@ -21741,6 +21779,7 @@ index 0000000000000000000000000000000000000000..4ee5a6e912edff9ed833041803ce1e42
 +              JSON.stringify({
 +                fixture: "managed-completion",
 +                headless,
++                boundary,
 +                launchMs,
 +                observerMs: observerTimes,
 +                startupPages: 0,
@@ -22729,10 +22768,10 @@ index 0000000000000000000000000000000000000000..3ee1b257b2f1bb565d603c6fed4131c1
 +});
 diff --git a/extensions/browser/src/browser/session-tab-registry.idle-retirement.test.ts b/extensions/browser/src/browser/session-tab-registry.idle-retirement.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0114c7cb8f698185d8746a2b2568010fc863680f
+index 0000000000000000000000000000000000000000..0d64f943ac2c64d04ce09a56c2d37042b1374e27
 --- /dev/null
 +++ b/extensions/browser/src/browser/session-tab-registry.idle-retirement.test.ts
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,165 @@
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import {
@@ -22779,21 +22818,28 @@ index 0000000000000000000000000000000000000000..0114c7cb8f698185d8746a2b2568010f
 +    expect(mocks.retire).toHaveBeenCalledOnce();
 +  });
 +
-+  it("keeps explicit untrack reusable until authoritative empty session completion", async () => {
-+    await trackSessionBrowserTab({ sessionKey, targetId: "manually-closed", profile: "openclaw" });
-+    await untrackSessionBrowserTab({
-+      sessionKey,
-+      targetId: "manually-closed",
-+      profile: "openclaw",
-+    });
-+    expect(mocks.retire).not.toHaveBeenCalled();
-+    await closeTrackedBrowserTabsForSessions({
-+      sessionKeys: [sessionKey],
-+      completedBefore: Date.now(),
-+      closeTab: async () => {},
-+    });
-+    expect(mocks.retire).toHaveBeenCalledOnce();
-+  });
++  it.each(["completion", "lifecycle"] as const)(
++    "keeps explicit untrack reusable until authoritative empty session %s",
++    async (boundary) => {
++      await trackSessionBrowserTab({
++        sessionKey,
++        targetId: "manually-closed",
++        profile: "openclaw",
++      });
++      await untrackSessionBrowserTab({
++        sessionKey,
++        targetId: "manually-closed",
++        profile: "openclaw",
++      });
++      expect(mocks.retire).not.toHaveBeenCalled();
++      await closeTrackedBrowserTabsForSessions({
++        sessionKeys: [sessionKey],
++        ...(boundary === "completion" ? { completedBefore: Date.now() } : {}),
++        closeTab: async () => {},
++      });
++      expect(mocks.retire).toHaveBeenCalledOnce();
++    },
++  );
 +
 +  it("snapshots exact managed handles before the awaited completion close batch", async () => {
 +    await trackSessionBrowserTab({ sessionKey, targetId: "last", profile: "openclaw" });
@@ -22820,14 +22866,17 @@ index 0000000000000000000000000000000000000000..0114c7cb8f698185d8746a2b2568010f
 +    expect(later).not.toHaveBeenCalled();
 +  });
 +
-+  it("requires fresh completion preparation even when no tab remains", async () => {
-+    await closeTrackedBrowserTabsForSessions({
-+      sessionKeys: [sessionKey],
-+      completedBefore: Date.now(),
-+      prepareCurrent: async () => false,
-+    });
-+    expect(mocks.retire).not.toHaveBeenCalled();
-+  });
++  it.each(["completion", "lifecycle"] as const)(
++    "requires fresh %s preparation even when no tab remains",
++    async (boundary) => {
++      await closeTrackedBrowserTabsForSessions({
++        sessionKeys: [sessionKey],
++        ...(boundary === "completion" ? { completedBefore: Date.now() } : {}),
++        prepareCurrent: async () => false,
++      });
++      expect(mocks.retire).not.toHaveBeenCalled();
++    },
++  );
 +
 +  it("rejects empty identities and nonfinite cutoffs without capturing profiles", async () => {
 +    await closeTrackedBrowserTabsForSessions({ sessionKeys: [undefined], completedBefore: 1 });
@@ -23025,7 +23074,7 @@ index 1253f52499fe3facb2f86e84d5ef5cf710f48ee9..885e65dba43d5c67b03efa2840832331
      await expect(
        closeTrackedBrowserTabsForSessions({
 diff --git a/extensions/browser/src/browser/session-tab-registry.ts b/extensions/browser/src/browser/session-tab-registry.ts
-index 5832b2c2d5ac2bdbe2a5f38a575dfa061ee40b8b..795b7ce9ad9e5fc145aed9193cc5ef96df60d15a 100644
+index 5832b2c2d5ac2bdbe2a5f38a575dfa061ee40b8b..4fc0b49fbf7e005b31da4095ed5e2126f1ab7721 100644
 --- a/extensions/browser/src/browser/session-tab-registry.ts
 +++ b/extensions/browser/src/browser/session-tab-registry.ts
 @@ -10,6 +10,7 @@ import {
@@ -23206,7 +23255,7 @@ index 5832b2c2d5ac2bdbe2a5f38a575dfa061ee40b8b..795b7ce9ad9e5fc145aed9193cc5ef96
    const volatile = readVolatileTabs(sessionKeys);
    return await withTrackedTabCleanup(params.authority, async () => {
      if (params.isCurrent?.() === false) {
-@@ -257,16 +335,45 @@ export async function closeTrackedBrowserTabsForSessions(
+@@ -257,16 +335,47 @@ export async function closeTrackedBrowserTabsForSessions(
      if (!durable || !isCleanupCurrent(params)) {
        return dashboardClosed;
      }
@@ -23217,21 +23266,6 @@ index 5832b2c2d5ac2bdbe2a5f38a575dfa061ee40b8b..795b7ce9ad9e5fc145aed9193cc5ef96
 +    const cutoff = params.completedBefore;
 +    if (cutoff !== undefined && !Number.isFinite(cutoff)) {
 +      return 0;
-+    }
-+    let completionRetirements: Array<() => Promise<void>> | undefined;
-+    if (cutoff !== undefined) {
-+      if (params.prepareCurrent && !(await params.prepareCurrent())) {
-+        return dashboardClosed;
-+      }
-+      const { captureIdleBrowserProfilesForSessionCleanup } =
-+        await import("../browser-control-state.js");
-+      if (!isCleanupCurrent(params)) {
-+        return dashboardClosed;
-+      }
-+      params.authority?.assertCurrent?.();
-+      completionRetirements = captureIdleBrowserProfilesForSessionCleanup({
-+        onWarn: params.onWarn,
-+      });
 +    }
 +    const tabs = selectTrackedTabsForSessions({ durable, volatile, sessionKeys }).filter((tab) => {
 +      if (cutoff === undefined) {
@@ -23247,6 +23281,23 @@ index 5832b2c2d5ac2bdbe2a5f38a575dfa061ee40b8b..795b7ce9ad9e5fc145aed9193cc5ef96
 +        Math.max(tab.lastUsedAt, nativeAt) <= cutoff
 +      );
      });
++    let completionRetirements: Array<() => Promise<void>> | undefined;
++    // Explicit close untracks a tab while keeping the profile reusable during work.
++    // A cron/child lifecycle end must also inspect idle owned handles when none remain.
++    if (cutoff !== undefined || tabs.length === 0) {
++      if (params.prepareCurrent && !(await params.prepareCurrent())) {
++        return dashboardClosed;
++      }
++      const { captureIdleBrowserProfilesForSessionCleanup } =
++        await import("../browser-control-state.js");
++      if (!isCleanupCurrent(params)) {
++        return dashboardClosed;
++      }
++      params.authority?.assertCurrent?.();
++      completionRetirements = captureIdleBrowserProfilesForSessionCleanup({
++        onWarn: params.onWarn,
++      });
++    }
      return (
        dashboardClosed +
        (await closeTrackedTabs(tabs, {
@@ -60577,8 +60628,66 @@ index e0172b864a76e8841a063bb7882e0a65607abbe3..0a19bd205026d4c6e83ab6b1c9bb5936
      decision = resolveDecision(true);
    }
  
+diff --git a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.test.ts b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.test.ts
+index 119340d7ff04355e63e1077a95647ed1402a002a..bdab871a990e0d2c3d2b10099cec122f781e7554 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.test.ts
+@@ -88,6 +88,53 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
+     } as unknown as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0];
+   }
+ 
++  it.each(["agent", "global", "sandbox"] as const)(
++    "does not start connectors excluded by a configured %s core-only allowlist",
++    async (layer) => {
++      const input = createInput([], [createStubTool("read")]);
++      const allow = ["read", "write", "edit", "exec", "process"];
++      input.attempt.config = {
++        plugins: { enabled: false },
++        mcp: { servers: { company: { command: "unused" } } },
++        ...(layer === "agent"
++          ? { agents: { entries: { main: { tools: { allow } } } } }
++          : layer === "global"
++            ? { tools: { allow } }
++            : {}),
++      };
++      input.preparedToolBase.runtimeCapabilityProfile = resolveConversationCapabilityProfile({
++        config: input.attempt.config,
++        agentId: "main",
++        ...(layer === "sandbox" ? { sandboxToolPolicy: { allow } } : {}),
++      });
++      // There is no per-request toolsAllow: the configured policy must suffice.
++      await prepareEmbeddedAttemptBundleTools(input);
++
++      expect(mocks.acquireSessionMcpRuntime).not.toHaveBeenCalled();
++      expect(mocks.createBundleLspToolRuntime).not.toHaveBeenCalled();
++    },
++  );
++
++  it.each(["group:plugins", "company__*", "*", "custom-plugin"])(
++    "keeps discovery available when configured policy may admit %s",
++    async (grant) => {
++      const input = createInput([], []);
++      input.attempt.config = {
++        plugins: { enabled: false },
++        mcp: { servers: { company: { command: "unused" } } },
++        agents: { entries: { main: { tools: { allow: ["read", grant] } } } },
++      };
++      input.preparedToolBase.runtimeCapabilityProfile = resolveConversationCapabilityProfile({
++        config: input.attempt.config,
++        agentId: "main",
++      });
++
++      await prepareEmbeddedAttemptBundleTools(input);
++
++      expect(mocks.acquireSessionMcpRuntime).toHaveBeenCalledOnce();
++    },
++  );
++
+   it.each(["file", "provider"] as const)(
+     "does not widen a %s memory flush with MCP, LSP, or client functions",
+     async (arm) => {
 diff --git a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
-index 031bb45162de709818390e0b740dbbbdf94e18ba..0e5308300b148eb1306525cf60c59f914e258447 100644
+index 031bb45162de709818390e0b740dbbbdf94e18ba..b41c6cbbb92a5209abf7015a6fa158e7f7937a65 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-bundle-tools.ts
 @@ -1,5 +1,7 @@
@@ -60589,9 +60698,11 @@ index 031bb45162de709818390e0b740dbbbdf94e18ba..0e5308300b148eb1306525cf60c59f91
  import { TOOL_NAME_SEPARATOR } from "../../agent-bundle-mcp-names.js";
  import { loadSessionMcpConfig } from "../../agent-bundle-mcp-runtime-config.js";
  import {
-@@ -9,6 +11,11 @@ import {
+@@ -8,11 +10,18 @@ import {
+ } from "../../agent-bundle-mcp-tools.js";
  import { wrapToolWithAbortSignal } from "../../agent-tools.abort.js";
  import { wrapToolWithBeforeToolCallHook } from "../../agent-tools.before-tool-call.wrapper.js";
++import { resolveConversationToolPolicies } from "../../conversation-tool-policy-pipeline.js";
  import { filterLocalModelLeanTools } from "../../local-model-lean.js";
 +import { createRequesterMcpConnectRefresh } from "../../mcp-requester-connect-refresh.js";
 +import {
@@ -60600,8 +60711,14 @@ index 031bb45162de709818390e0b740dbbbdf94e18ba..0e5308300b148eb1306525cf60c59f91
 +} from "../../mcp-requester-scope.js";
  import { recordAgentCleanupFailure } from "../../run-cleanup-timeout.js";
  import { normalizeAgentRuntimeTools } from "../../runtime-plan/tools.js";
++import { isKnownCoreToolId } from "../../tool-catalog.js";
  import { createRuntimeToolMatcher } from "../../tool-policy-match.js";
-@@ -38,6 +45,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+-import { replaceWithEffectiveToolAllowlist } from "../../tool-policy.js";
++import { expandToolGroups, replaceWithEffectiveToolAllowlist } from "../../tool-policy.js";
+ import { filterRuntimeCompatibleTools } from "../../tool-schema-projection.js";
+ import {
+   withRuntimeToolSchemaQuarantine,
+@@ -38,6 +47,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
    setup: EmbeddedAttemptSetup;
    isRawModelRun: boolean;
    preparedToolBase: PreparedToolBase;
@@ -60609,7 +60726,35 @@ index 031bb45162de709818390e0b740dbbbdf94e18ba..0e5308300b148eb1306525cf60c59f91
  }) {
    const {
      cronCreatorToolAllowlist,
-@@ -125,23 +133,67 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+@@ -83,6 +93,18 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+     !params.attempt.disableTools &&
+     !params.isRawModelRun &&
+     !params.attempt.forceRestartSafeTools;
++  // Configured agent/sandbox policies need not appear in attempt.toolsAllow.
++  // A core-only layer cannot admit bundled tools, so do not start their servers
++  // merely to discard the catalog. Keep discovery for unknown names and globs;
++  // the existing final policy still decides which discovered tools are usable.
++  const bundleDiscoveryEnabled =
++    auxiliaryToolsEnabled &&
++    !Object.values(
++      resolveConversationToolPolicies({ capabilityProfile: runtimeCapabilityProfile }),
++    ).some((policy) => {
++      const allow = expandToolGroups(policy?.allow);
++      return allow.length > 0 && allow.every(isKnownCoreToolId);
++    });
+   let clientTools = auxiliaryToolsEnabled ? params.attempt.clientTools : undefined;
+   // Client functions share the attempt's authority; filter before their names
+   // can reserve bundled tools or enter deferred catalogs and provider requests.
+@@ -104,7 +126,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+     toolDenylist: runtimeCapabilityProfile.policy.explicitToolDenylist,
+   };
+   const bundleMcpEnabled = shouldCreateBundleMcpRuntimeForAttempt({
+-    toolsEnabled: auxiliaryToolsEnabled,
++    toolsEnabled: bundleDiscoveryEnabled,
+     toolsAllow: params.attempt.toolsAllow,
+     resolveConfiguredMcpNamespaces: () => {
+       const configuredNames = Object.keys(params.attempt.config?.mcp?.servers ?? {});
+@@ -125,23 +147,67 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
        });
      },
    });
@@ -60689,6 +60834,15 @@ index 031bb45162de709818390e0b740dbbbdf94e18ba..0e5308300b148eb1306525cf60c59f91
          agentId: params.setup.sessionAgentId,
          reservedToolNames: [
            ...tools.map((tool) => tool.name),
+@@ -152,7 +218,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
+   let bundleLspRuntime: Awaited<ReturnType<typeof createBundleLspToolRuntime>> | undefined;
+   try {
+     const bundleLspEnabled = shouldCreateBundleLspRuntimeForAttempt({
+-      toolsEnabled: auxiliaryToolsEnabled,
++      toolsEnabled: bundleDiscoveryEnabled,
+       toolsAllow: params.attempt.toolsAllow,
+     });
+     bundleLspRuntime = bundleLspEnabled
 diff --git a/src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts b/src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts
 index 3d56e14047ff1539389447305f04a3892f991f62..702d9751fb924f339b2e165430f336e5d7e577cb 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-context-guards.test.ts
@@ -121249,6 +121403,144 @@ index 3955f032be8f36dca6fd0b15ff829135d56e38cd..2eea79f967442814d71f080e66fa7906
            tokenBudget: 50,
            continuationTurns: 0,
          },
+diff --git a/src/gateway/server-methods/sessions-lifecycle-drain.ts b/src/gateway/server-methods/sessions-lifecycle-drain.ts
+index 13b1b725c06f8ca13578bd470d2d824c7127e5b3..007f635feb40e2bcfa16ec8f68da556c97f83cba 100644
+--- a/src/gateway/server-methods/sessions-lifecycle-drain.ts
++++ b/src/gateway/server-methods/sessions-lifecycle-drain.ts
+@@ -5,6 +5,7 @@ import {
+   type ErrorShape,
+   type SessionWorkspaceRecoveryRequiredErrorDetails,
+ } from "../../../packages/gateway-protocol/src/index.js";
++import { retireSessionMcpRuntime } from "../../agents/agent-bundle-mcp-manager-api.js";
+ import {
+   abortEmbeddedAgentRun,
+   isEmbeddedAgentRunInProgress,
+@@ -330,6 +331,20 @@ export async function prepareSessionLifecycleDrain(
+     // Provider settlement keeps its placement custody and deadline. Only after reclaim
+     // finishes does the ordinary admission bound apply, including for local sessions.
+     await withTimeout(admittedWork, timeoutMs, "session work admission lifecycle drain");
++    if (params.action === "archive" && params.sessionId) {
++      params.authorize?.();
++      // Archiving closes the session's transports even when idle eviction is disabled.
++      // Existing tool/app leases retain custody until their last release.
++      const retired = await retireSessionMcpRuntime({
++        sessionId: params.sessionId,
++        reason: "session-archive",
++        preserveActiveLeases: true,
++      });
++      if (!retired) {
++        throw new Error("Session MCP cleanup did not finish during archive");
++      }
++      params.authorize?.();
++    }
+     const placementTarget = { context: params.context, sessionId: params.sessionId };
+     const assertPlacementCurrent =
+       params.action === "archive"
+diff --git a/src/gateway/server-methods/sessions-mutations.archive-attribution.test.ts b/src/gateway/server-methods/sessions-mutations.archive-attribution.test.ts
+index 287cf640724d2c3d912786fd2a03151becdbe621..1ef90d5176bed89cd1bb8c103738f54fa28d5f73 100644
+--- a/src/gateway/server-methods/sessions-mutations.archive-attribution.test.ts
++++ b/src/gateway/server-methods/sessions-mutations.archive-attribution.test.ts
+@@ -1,10 +1,22 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
++import { cleanupTempDirs } from "../../../test/helpers/temp-dir.js";
++import {
++  acquireSessionMcpRuntime,
++  disposeAllSessionMcpRuntimes,
++  setSessionMcpRuntimeScheduler,
++} from "../../agents/agent-bundle-mcp-manager-api.js";
++import { releaseSessionMcpRuntime } from "../../agents/agent-bundle-mcp-manager-cleanup.js";
++import {
++  createMcpProbeFixture,
++  probeMcpServer,
++} from "../../agents/agent-bundle-mcp-probe.test-support.js";
+ import {
+   loadSessionEntry,
+   loadTranscriptEvents,
+   upsertSessionEntryCore,
+ } from "../../config/sessions/session-accessor.js";
+ import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
++import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
+ import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+ import { withReadySessionRows } from "../session-row-prepared-read.js";
+ import { createSessionRowProjection } from "../session-row-projection.js";
+@@ -79,6 +91,77 @@ async function invokePatchSession(
+ }
+ 
+ describe("sessions.patch archive attribution", () => {
++  it.each([false, true])(
++    "retires archived MCP processes without interrupting leased tools or other sessions (leased=%s)",
++    async (retainLease) => {
++      await withOpenClawTestState({ scenario: "minimal" }, async () => {
++        const tempDirs: string[] = [];
++        const scheduler = createTestGatewayScheduler();
++        await disposeAllSessionMcpRuntimes();
++        await setSessionMcpRuntimeScheduler(scheduler);
++        const { params, config } = await createMcpProbeFixture(tempDirs);
++        const cfg = config();
++        const key = "agent:main:archive-mcp";
++        const sessionId = "archive-mcp";
++        const input = { ...params, cfg, sessionId, sessionKey: key };
++        const target = await acquireSessionMcpRuntime(input);
++        const other = await acquireSessionMcpRuntime({
++          ...input,
++          sessionId: "other-mcp",
++          sessionKey: "agent:main:other-mcp",
++        });
++        try {
++          await upsertSessionEntryCore(
++            { agentId: "main", sessionKey: key },
++            { sessionId, updatedAt: 1 },
++          );
++          const targetProcess = await probeMcpServer(target.runtime, "healthy");
++          const otherProcess = await probeMcpServer(other.runtime, "healthy");
++          const stale = await invokePatchSession(
++            { key, archived: true, expectedSessionId: "replaced-session" },
++            client(),
++          );
++          expect(stale[0]?.[0]).toBe(false);
++          expect(await probeMcpServer(target.runtime, "healthy")).toEqual(targetProcess);
++          if (!retainLease) {
++            await releaseSessionMcpRuntime(target);
++          }
++
++          await patchSession({ key, archived: true, expectedSessionId: sessionId }, client());
++          expect(loadSessionEntry({ agentId: "main", sessionKey: key })?.archivedAt).toEqual(
++            expect.any(Number),
++          );
++          if (retainLease) {
++            expect(await probeMcpServer(target.runtime, "healthy")).toEqual(targetProcess);
++            await releaseSessionMcpRuntime(target);
++          }
++          expect(() => process.kill(targetProcess.pid, 0)).toThrow();
++          expect(await probeMcpServer(other.runtime, "healthy")).toEqual(otherProcess);
++
++          await patchSession({ key, archived: false, expectedSessionId: sessionId }, client());
++          const restored = await acquireSessionMcpRuntime(input);
++          try {
++            const restoredProcess = await probeMcpServer(restored.runtime, "healthy");
++            expect(restoredProcess.pid).not.toBe(targetProcess.pid);
++            await releaseSessionMcpRuntime(restored);
++            // Restoring the session must not leave a permanent retirement marker.
++            expect(await probeMcpServer(restored.runtime, "healthy")).toEqual(restoredProcess);
++            await patchSession({ key, archived: true, expectedSessionId: sessionId }, client());
++            expect(() => process.kill(restoredProcess.pid, 0)).toThrow();
++          } finally {
++            restored.releaseLease();
++          }
++        } finally {
++          target.releaseLease();
++          other.releaseLease();
++          await disposeAllSessionMcpRuntimes();
++          await scheduler.stop();
++          cleanupTempDirs(tempDirs);
++        }
++      });
++    },
++  );
++
+   it("stamps the transition actor without adding transcript events and preserves the first archiver", async () => {
+     await withOpenClawTestState({ scenario: "minimal" }, async () => {
+       const sessionKey = "agent:main:archive-attribution";
 diff --git a/src/gateway/server-methods/sessions-patch-engine.ts b/src/gateway/server-methods/sessions-patch-engine.ts
 index d413423ea1d106c4817334be44f0608e34025459..ce1fae8980efa49882a842bb3bb1e07dd094ca37 100644
 --- a/src/gateway/server-methods/sessions-patch-engine.ts

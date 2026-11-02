@@ -23,6 +23,10 @@ ordinary-use acceptance on another host.
 Read canonical source and native distribution identities from the manifest. The
 current source includes these targeted reliability repairs:
 
+- Core-only sessions avoid starting MCP and language-server connectors they cannot
+  use. Session archival retires the existing MCP runtime after admitted work
+  settles, preserving active leases and normal reconnect on restoration. Native
+  idle expiry handles unused sessions without a second process-cleanup service.
 - Current valid MCP OAuth bearers use a fresh canonical state read without taking
   the exclusive renewal or consent lease. Expired or rejected bearers and pending
   consent retain that leased path.
@@ -107,7 +111,9 @@ current source includes these targeted reliability repairs:
   Completion cleanup covers ordinary and already-delivered replies. It waits
   for the final-delivery record to finish updating and retains its own tracked
   lifetime, so foreground request teardown does not cancel it. Current task,
-  unfinished-delivery and cancellation checks remain binding.
+  unfinished-delivery and cancellation checks remain binding. Existing lifecycle
+  cleanup also retires an idle managed browser when the task already closed its
+  last tracked tab; the same foreign-tab, download and ownership checks apply.
 
 - Nested tool results use compact JSON formatting without changing their
   decoded contents. This reduces formatting overhead in retained tool history;

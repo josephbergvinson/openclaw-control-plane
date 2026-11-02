@@ -32,6 +32,7 @@ operations. No one layer substitutes for the others.
 | Tool access | `src/agents` and gateway tool resolution carry the admitted permission mode and tool policy into execution. Authenticated-owner defaults do not become permissions for unrelated senders. |
 | Visible workers | Native session/subagent tools and the retained run registry represent delegated work and bind registered projects to their authorized source root/worktree. The caller supplies the task scope; workers retain its constraints. |
 | Verified file writes | The native file-write tool reports its existing saved-content verification in the result. The agent can use that confirmation without another read solely to check that the same write succeeded; existing conflict, cancellation and verification handling remains unchanged. |
+| Session connector lifecycle | Core-only tool policies skip MCP and language-server discovery before connector startup. Policies that may admit plugin or custom tools retain discovery. Archiving a session retires its MCP runtime through the existing lifecycle drain after admitted work settles; active leases remain protected and restoring the session reconnects normally. The native idle timeout handles abandoned idle runtimes separately. |
 | Agent deletion | The existing database owner drains its own readers for the exact agent being deleted before checking outstanding leases. Readers belonging to another process still prevent deletion, and data shared with a surviving agent is preserved. |
 | Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. |
 | Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. A successful explicit yield with accepted completion children retains its requester handoff through internal prompt cleanup. The existing dispatcher can transfer an already confirmed current progress card without a new payload; recovered prepared cohorts retain its progress reference. Cancellation, failure and completed-output checks still apply. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
@@ -143,7 +144,15 @@ owned task tabs. It may then stop that exact idle instance after downloads settl
 with complete observation and no other pages, unrecognized background targets
 or concurrent work. Recognized extension background-only targets may remain.
 Profile data and sign-in state remain; externally attached browsers retain
-their own lifecycle. Unknown observation leaves the browser running.
+their own lifecycle. Unknown observation leaves the browser running. Lifecycle
+cleanup also considers an existing idle managed instance when its last tracked
+tab was already explicitly closed, using the same ownership and activity checks.
+
+Account selection uses the registered route and the account shown on the page.
+An ordinary Chrome profile and an OpenClaw managed-profile name are separate
+identities; a convenient label or the last-used company profile does not select
+the requested account. Personal tasks use the operator's registered personal
+profile unless the task calls for another account.
 
 The bundled browser guidance starts with the selected profile's existing tabs;
 setup diagnostics are for suspected setup failures. It also explains that configured
