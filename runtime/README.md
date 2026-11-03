@@ -18,15 +18,31 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The reconstructed source includes a test-only browser cleanup mock correction
-beyond the installed R83 reference. This correction changes no production code,
-installed gateway, native archive or retained Mac companion.
+The reference installation now runs R84 with Mac companion build 505. Its private
+source publication and loaded runtime have been checked against the manifest's
+source identities. The native Codex archive is unchanged. Benchmark comparisons
+are still in progress; this release does not establish an overall performance
+advantage over another harness.
 
 ## Source identities
 
 Read canonical source and native distribution identities from the manifest. The
 current source includes these targeted reliability repairs:
 
+- Follow-up work sent to a child keeps the original requester and completion
+  obligation. Acknowledgment, progress and the final answer retain separate roles;
+  a late completion cannot reopen already finished work or consume a newer task's
+  pending reply. Existing recovery and retry records remain authoritative.
+- Shell execution no longer rejects valid compound commands using a speculative
+  Python syntax check. Direct Python-file checks remain scoped to the file that
+  will execute; authorization and sandbox boundaries are unchanged.
+- Optional file reads distinguish a missing parent directory from a permission or
+  I/O failure, including BusyBox shell behavior. A failed read is not silently
+  converted into an empty file.
+- The Mac replacement watcher accepts the installed app's valid signing
+  requirement, including an Apple Development signature. This removes repeated
+  whole-bundle validation caused by applying a Developer ID-only requirement to
+  that installation. The watcher and signature validation remain enabled.
 - Core-only sessions avoid starting MCP and language-server connectors they cannot
   use. Session archival retires the existing MCP runtime after admitted work
   settles, preserving active leases and normal reconnect on restoration. Native
