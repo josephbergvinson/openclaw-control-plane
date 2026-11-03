@@ -24,7 +24,18 @@ Policy describes the intended behavior. Runtime source binds the requester,
 execution, continuation and delivery. Workspace helpers own their checked
 operations. No one layer substitutes for the others.
 
+The current source also carries child follow-up completion back to its original
+requester. Completion is matched to that request and session generation, so a
+late child result neither reopens a finished answer nor settles unrelated newer
+work. See `src/agents/tools/sessions-send*` and the existing subagent registry and
+announcement code. Progress remains separate from the final result.
+
 ## Requests, tools and durable work
+
+Execution preflight checks a directly invoked Python file without treating an
+entire compound shell command as Python. The existing sandbox file reader also
+distinguishes an absent parent directory from permission and I/O errors across
+supported shells. These changes preserve tool authorization and failure reporting.
 
 | Mechanism | Implementation area and behavior |
 | --- | --- |
@@ -117,6 +128,13 @@ not reconstructed by this packet; see the
 [source boundaries](../runtime/README.md#source-identities). Every supported
 reconstruction requires a full target-tree check. Source reconstruction does not
 install or launch the app.
+
+`apps/macos/Sources/OpenClaw/ApplicationRelocator.swift` checks the installed
+application's signed requirement when watching for replacement. Apple Development
+and Developer ID builds retain their respective valid identities. A mismatched
+Developer ID-only assumption previously caused repeated whole-bundle validation
+for the development-signed installation; the repair keeps the watcher and
+signature checks enabled.
 
 Local application authentication resolves the configured gateway SecretRef through
 the matching native helper, using bounded private pipes and current configuration.

@@ -406,6 +406,79 @@ index db4eb26bca2f168e9c80c0d7e056e50b93e49304..2d0c4011c5ef0e52a1cc2b3cf88e5d52
      }
  
      static func configFingerprint(_ root: [String: Any]) -> Data? {
+diff --git a/apps/macos/Sources/OpenClaw/ApplicationRelocator.swift b/apps/macos/Sources/OpenClaw/ApplicationRelocator.swift
+index 9cb2c939c696bee37398c9c9917171d805f3a5bb..ea4f46f4be2b3af1316a0475e60847c7f37dcea8 100644
+--- a/apps/macos/Sources/OpenClaw/ApplicationRelocator.swift
++++ b/apps/macos/Sources/OpenClaw/ApplicationRelocator.swift
+@@ -817,22 +817,57 @@ extension ApplicationRelocator {
+         bundleIdentifier: String) -> (codeDirectoryHash: Data, requirementData: Data)?
+     {
+         guard let codeDirectoryHash = kernelCodeDirectoryHash(),
+-              let teamIdentifier = kernelTeamIdentifier(),
+-              let requirementString = developerIDRequirementString(
++              let teamIdentifier = kernelTeamIdentifier()
++        else { return nil }
++        var runningCode: SecCode?
++        var staticCode: SecStaticCode?
++        var information: CFDictionary?
++        var designatedRequirement: SecRequirement?
++        var requirementData: CFData?
++        guard SecCodeCopySelf(SecCSFlags(), &runningCode) == errSecSuccess,
++              let runningCode,
++              SecCodeCopyStaticCode(runningCode, SecCSFlags(), &staticCode) == errSecSuccess,
++              let staticCode,
++              SecCodeCopySigningInformation(
++                  staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
++              let information,
++              (information as NSDictionary)[kSecCodeInfoUnique] as? Data == codeDirectoryHash,
++              (information as NSDictionary)[kSecCodeInfoIdentifier] as? String == bundleIdentifier,
++              (information as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String == teamIdentifier,
++              SecCodeCopyDesignatedRequirement(staticCode, SecCSFlags(), &designatedRequirement) == errSecSuccess,
++              let designatedRequirement,
++              let requirement = replacementRequirement(
++                  designatedRequirement: designatedRequirement,
+                   bundleIdentifier: bundleIdentifier,
+-                  teamIdentifier: teamIdentifier)
++                  teamIdentifier: teamIdentifier),
++              // A dynamic code reference can resolve to a replaced path on disk.
++              // Bind the captured requirement to the kernel-loaded code, not that path.
++              SecCodeCheckValidity(runningCode, SecCSFlags(), requirement) == errSecSuccess,
++              SecRequirementCopyData(requirement, SecCSFlags(), &requirementData) == errSecSuccess,
++              let requirementData
+         else { return nil }
++        return (codeDirectoryHash, requirementData as Data)
++    }
++
++    nonisolated static func replacementRequirement(
++        designatedRequirement: SecRequirement,
++        bundleIdentifier: String,
++        teamIdentifier: String) -> SecRequirement?
++    {
++        guard self.isRequirementToken(bundleIdentifier), self.isRequirementToken(teamIdentifier) else { return nil }
++        var designatedText: CFString?
++        guard SecRequirementCopyString(designatedRequirement, SecCSFlags(), &designatedText) == errSecSuccess,
++              let designatedText
++        else { return nil }
++        // Preserve the running app's signing class and certificate policy. The
++        // additional identity constraints also fence a custom designated requirement.
++        let requirementText = "(\(designatedText)) and identifier \"\(bundleIdentifier)\" and " +
++            "anchor apple generic and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
+         var requirement: SecRequirement?
+-        var requirementData: CFData?
+         guard SecRequirementCreateWithString(
+-            requirementString as CFString,
+-            SecCSFlags(),
+-            &requirement) == errSecSuccess,
+-            let requirement,
+-            SecRequirementCopyData(requirement, SecCSFlags(), &requirementData) == errSecSuccess,
+-            let requirementData
++            requirementText as CFString, SecCSFlags(), &requirement) == errSecSuccess
+         else { return nil }
+-        return (codeDirectoryHash, requirementData as Data)
++        return requirement
+     }
+ 
+     nonisolated static func developerIDRequirementString(
 diff --git a/apps/macos/Sources/OpenClaw/BoundedProcess.swift b/apps/macos/Sources/OpenClaw/BoundedProcess.swift
 index b6cb5ac99aedea44d7e07f00731c53e6f8449fb9..21cf07ee257f6473d312b9270daf165e13b8a873 100644
 --- a/apps/macos/Sources/OpenClaw/BoundedProcess.swift
@@ -4116,6 +4189,84 @@ index dace3f66d05a00b0bed20e34f53d9b89c4b15b4c..3b811a98b3cf11e7b5efe3bff454a1d5
      @Test
      func `route edit during config read fails the source snapshot closed`() async {
          let configPath = TestIsolation.tempConfigPath()
+diff --git a/apps/macos/Tests/OpenClawIPCTests/ApplicationRelocatorTests.swift b/apps/macos/Tests/OpenClawIPCTests/ApplicationRelocatorTests.swift
+index 40bc645281cc7e96dd9602fdffb2ade3775b2491..7801c0f69f13686905de36b13f09f5456435702b 100644
+--- a/apps/macos/Tests/OpenClawIPCTests/ApplicationRelocatorTests.swift
++++ b/apps/macos/Tests/OpenClawIPCTests/ApplicationRelocatorTests.swift
+@@ -1,5 +1,6 @@
+ import Foundation
+ @testable import OpenClaw
++import Security
+ import Testing
+ 
+ @Suite("Application Relocator Tests")
+@@ -346,6 +347,66 @@ struct ApplicationRelocatorTests {
+         ) == nil)
+     }
+ 
++    @Test(arguments: [
++        "certificate leaf[subject.CN] = \"Apple Development: Example (EXAMPLE1234)\" and " +
++            "certificate 1[field.1.2.840.113635.100.6.2.1] exists",
++        "certificate 1[field.1.2.840.113635.100.6.2.6] exists and " +
++            "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
++    ])
++    func `replacement keeps the loaded signing policy and team`(_ signingPolicy: String) throws {
++        var designated: SecRequirement?
++        #expect(SecRequirementCreateWithString(
++            signingPolicy as CFString, SecCSFlags(), &designated) == errSecSuccess)
++        let original = try #require(designated)
++        let requirement = try #require(ApplicationRelocator.replacementRequirement(
++            designatedRequirement: original,
++            bundleIdentifier: "ai.openclaw.mac",
++            teamIdentifier: "EXAMPLETEAM"
++        ))
++        var text: CFString?
++        #expect(SecRequirementCopyString(requirement, SecCSFlags(), &text) == errSecSuccess)
++        let compiled = try #require(text) as String
++        #expect(compiled.contains("identifier \"ai.openclaw.mac\""))
++        #expect(compiled.contains("anchor apple generic"))
++        #expect(compiled.contains("subject.OU] = EXAMPLETEAM"))
++        if signingPolicy.contains("Apple Development") {
++            #expect(compiled.contains("Apple Development: Example (EXAMPLE1234)"))
++            #expect(compiled.contains("1.2.840.113635.100.6.2.1"))
++            #expect(!compiled.contains("1.2.840.113635.100.6.1.13"))
++        } else {
++            #expect(compiled.contains("1.2.840.113635.100.6.2.6"))
++            #expect(compiled.contains("1.2.840.113635.100.6.1.13"))
++        }
++    }
++
++    @Test
++    func `custom designated requirement cannot remove replacement identity constraints`() throws {
++        var designated: SecRequirement?
++        #expect(SecRequirementCreateWithString("always" as CFString, SecCSFlags(), &designated) == errSecSuccess)
++        let original = try #require(designated)
++        let requirement = try #require(ApplicationRelocator.replacementRequirement(
++            designatedRequirement: original,
++            bundleIdentifier: "ai.openclaw.mac",
++            teamIdentifier: "EXAMPLETEAM"
++        ))
++        var text: CFString?
++        #expect(SecRequirementCopyString(requirement, SecCSFlags(), &text) == errSecSuccess)
++        let compiled = try #require(text) as String
++        #expect(compiled.contains("identifier \"ai.openclaw.mac\""))
++        #expect(compiled.contains("anchor apple generic"))
++        #expect(compiled.contains("subject.OU] = EXAMPLETEAM"))
++        #expect(ApplicationRelocator.replacementRequirement(
++            designatedRequirement: original,
++            bundleIdentifier: "ai.openclaw.mac\" or always",
++            teamIdentifier: "EXAMPLETEAM"
++        ) == nil)
++        #expect(ApplicationRelocator.replacementRequirement(
++            designatedRequirement: original,
++            bundleIdentifier: "ai.openclaw.mac",
++            teamIdentifier: "EXAMPLETEAM\" or always"
++        ) == nil)
++    }
++
+     @Test
+     func `bundle file reference stays bound after canonical path replacement`() throws {
+         let root = FileManager.default.temporaryDirectory
 diff --git a/apps/macos/Tests/OpenClawIPCTests/BundledRuntimeTests.swift b/apps/macos/Tests/OpenClawIPCTests/BundledRuntimeTests.swift
 index 5054ccead3157e60f595435a544261a10ef76124..96a75f322e76477eea8fc066d79250e832ac9059 100644
 --- a/apps/macos/Tests/OpenClawIPCTests/BundledRuntimeTests.swift
@@ -10317,6 +10468,19 @@ index 6af5e3b44c2779beedb9404485fad685a9221574..dcb89cc09f36b7ee4da427379fb6bc56
  Session tab cleanup applies only to tabs a session owns: tabs created by the
  OpenClaw browser tool with `action: "open"` and tabs opened from that session's
  Browser panel in the Control UI. OpenClaw does not adopt tabs that were already
+diff --git a/docs/tools/exec.md b/docs/tools/exec.md
+index 6d51e0fbff9e677bb9d4ce33921c345a9c8e4f1e..b2b2a73926f72c70381e940ef3cb5537760cccaa 100644
+--- a/docs/tools/exec.md
++++ b/docs/tools/exec.md
+@@ -90,7 +90,7 @@ Notes:
+ - For channel-origin runs, OpenClaw also exposes a narrow sender/chat identity JSON payload in `OPENCLAW_CHANNEL_CONTEXT` when the channel provided those ids.
+ - `exec` cannot run `openclaw channels login` or `/approve` shell commands: `openclaw channels login` is an interactive channel-auth flow, and `/approve` needs to go through the approval command handler, not a shell. Run channel login in a terminal on the gateway host, or use a channel-specific login agent tool when one exists (for example `whatsapp_login`).
+ - Important: sandboxing is **off by default**. If sandboxing is off, implicit `host=auto` resolves to `gateway`. Explicit `host=sandbox` still fails closed instead of silently running on the gateway host. Enable sandboxing or use `host=gateway` with approvals.
+-- Python script preflight checks for common shell-syntax mistakes only inspect files inside the effective `workdir` boundary. If a script path resolves outside `workdir`, the file check is skipped. JavaScript source is left to Node, which returns its normal diagnostics and exit code; statements before a runtime error may already have executed. Separate restrictions on ambiguous Python/Node interpreter commands still apply. Preflight skips entirely when `host=gateway` and the effective policy is `security=full` with `ask=off`.
++- Python script preflight checks for common shell-syntax mistakes only inspect files inside the effective `workdir` boundary. If a script path resolves outside `workdir`, the file check is skipped. JavaScript source is left to Node, which returns its normal diagnostics and exit code; statements before a runtime error may already have executed. When no direct script target can be identified (for example, a pipeline or shell wrapper), this best-effort check is skipped and normal shell/interpreter diagnostics apply. Supported direct targets still receive the check, including within command forms the parser can resolve. This syntax check is not an execution authorization boundary; host approval policy, sandboxing, and dispatch-time revalidation still apply. Preflight skips entirely when `host=gateway` and the effective policy is `security=full` with `ask=off`.
+ - For long-running work that starts now, start it once and rely on automatic completion wake when it is enabled and the command emits output or fails. Use `process` for logs, status, input, or intervention. Do not emulate scheduling with sleep loops, timeout loops, or repeated polling.
+ - When `tools.exec.notifyOnExit=false`, a running result explicitly says that automatic completion wake is disabled, in both its text and structured `followUp`. Later `process poll`, `log`, and `list` results preserve that guidance while the command is running, using the policy captured when it started. If the task needs the result, collect it with `process poll` and a timeout before ending the turn, unless another continuation is already arranged. A running process or active session goal does not arrange that continuation.
+ - When an approved async command completes, its continuation uses the normal agent run timeout from `agents.defaults.timeoutSeconds`. The follow-up observer can finish waiting while the accepted agent run continues.
 diff --git a/docs/tools/subagents/slash-command.md b/docs/tools/subagents/slash-command.md
 index 1e1acec7731b51a7855ffa49d0235710d61ff28a..20f8ca89052ec2c56c4149d5347c4b4918371be6 100644
 --- a/docs/tools/subagents/slash-command.md
@@ -55081,6 +55245,21 @@ index c863b8e1730442bce91b83f71302a862560f8adf..490c25d187710c3b4dfaaed25e126aee
    it("keeps a no-deadline exec recoverable and honors explicit cancellation", async () => {
      const child = createAdapter();
      const spawned = createDeferred();
+diff --git a/src/agents/bash-tools.exec-run.ts b/src/agents/bash-tools.exec-run.ts
+index 8bace5eadf3f44437fd847f96e04ebfedafa99e0..dfcfbdf762c68b2e41d49f9036005f9fc35f7aaa 100644
+--- a/src/agents/bash-tools.exec-run.ts
++++ b/src/agents/bash-tools.exec-run.ts
+@@ -576,8 +576,8 @@ export function createExecTool(
+         effectiveTimeout = params.timeoutSeconds ?? defaultTimeoutSec;
+         const usePty = params.pty === true && !sandbox;
+ 
+-        // Preflight: check Python shell-syntax mistakes and ambiguous interpreter commands
+-        // before execution. JavaScript source diagnostics belong to Node.
++        // Best-effort Python typo diagnostics after execution authorization. Commands
++        // without a direct script target use their normal shell/interpreter diagnostics.
+         if (scriptPreflightCwd && !shouldSkipExecScriptPreflight({ host, security, ask })) {
+           await validateScriptFileForShellBleed({
+             command: params.command,
 diff --git a/src/agents/bash-tools.exec-runtime.ts b/src/agents/bash-tools.exec-runtime.ts
 index 8028dd8332c04a47634f231c68c4311c3679b7f6..d2ee3f33b27da6caa6cd9897b20da5430b026571 100644
 --- a/src/agents/bash-tools.exec-runtime.ts
@@ -55155,6 +55334,614 @@ index 8028dd8332c04a47634f231c68c4311c3679b7f6..d2ee3f33b27da6caa6cd9897b20da543
          outcome = buildExecExitOutcome({
            exit,
            aggregated: session.aggregated.trim(),
+diff --git a/src/agents/bash-tools.exec-script-ambiguity.ts b/src/agents/bash-tools.exec-script-ambiguity.ts
+deleted file mode 100644
+index 03e73714be3217a0dce3499216c661ff0574b803..0000000000000000000000000000000000000000
+--- a/src/agents/bash-tools.exec-script-ambiguity.ts
++++ /dev/null
+@@ -1,419 +0,0 @@
+-/** Detects ambiguous interpreter invocations that cannot be safely preflighted. */
+-import {
+-  normalizeLowercaseStringOrEmpty,
+-  normalizeOptionalLowercaseString,
+-} from "@openclaw/normalization-core/string-coerce";
+-import { splitShellArgs } from "../utils/shell-argv.js";
+-import {
+-  extractInterpreterScriptPathsFromSegment,
+-  parsePreflightShellSegment,
+-  stripPreflightAssignments,
+-  stripPreflightEnvPrefix,
+-} from "./bash-tools.exec-script-target.js";
+-
+-function extractUnquotedShellText(raw: string): string | null {
+-  let out = "";
+-  let quote: "'" | '"' | undefined;
+-  let escaped = false;
+-
+-  for (const ch of raw) {
+-    if (escaped) {
+-      if (!quote) {
+-        // Preserve escapes outside quotes so downstream heuristics can distinguish
+-        // escaped literals (e.g. `\|`) from executable shell operators.
+-        out += `\\${ch}`;
+-      }
+-      escaped = false;
+-      continue;
+-    }
+-    if (quote !== "'" && ch === "\\") {
+-      escaped = true;
+-      continue;
+-    }
+-    if (quote) {
+-      if (ch === quote) {
+-        quote = undefined;
+-      }
+-      continue;
+-    }
+-    if (ch === "'" || ch === '"') {
+-      quote = ch;
+-      continue;
+-    }
+-    out += ch;
+-  }
+-
+-  if (escaped || quote) {
+-    return null;
+-  }
+-  return out;
+-}
+-
+-function splitShellSegmentsOutsideQuotes(
+-  rawText: string,
+-  params: { splitPipes: boolean },
+-): string[] {
+-  const segments: string[] = [];
+-  let buf = "";
+-  let quote: "'" | '"' | undefined;
+-  let escaped = false;
+-
+-  const pushSegment = () => {
+-    if (buf.trim().length > 0) {
+-      segments.push(buf);
+-    }
+-    buf = "";
+-  };
+-
+-  for (let i = 0; i < rawText.length; i += 1) {
+-    const ch = rawText[i];
+-    const next = rawText[i + 1];
+-
+-    if (escaped) {
+-      buf += ch;
+-      escaped = false;
+-      continue;
+-    }
+-
+-    if (quote !== "'" && ch === "\\") {
+-      buf += ch;
+-      escaped = true;
+-      continue;
+-    }
+-
+-    if (quote) {
+-      buf += ch;
+-      if (ch === quote) {
+-        quote = undefined;
+-      }
+-      continue;
+-    }
+-
+-    if (ch === "'" || ch === '"') {
+-      quote = ch;
+-      buf += ch;
+-      continue;
+-    }
+-
+-    if (ch === "\n" || ch === "\r" || ch === ";") {
+-      pushSegment();
+-      continue;
+-    }
+-    if ((ch === "&" || ch === "|") && next === ch) {
+-      pushSegment();
+-      i += 1;
+-      continue;
+-    }
+-    if (params.splitPipes && ch === "|") {
+-      pushSegment();
+-      continue;
+-    }
+-
+-    buf += ch;
+-  }
+-  pushSegment();
+-  return segments;
+-}
+-
+-function isInterpreterExecutable(executable: string | undefined): boolean {
+-  if (!executable) {
+-    return false;
+-  }
+-  return /^python(?:3(?:\.\d+)?)?$/i.test(executable) || executable === "node";
+-}
+-
+-function hasUnescapedSequence(raw: string, sequence: string): boolean {
+-  let escaped = false;
+-  for (let i = 0; i < raw.length; i += 1) {
+-    const ch = raw[i];
+-    if (escaped) {
+-      escaped = false;
+-      continue;
+-    }
+-    if (ch === "\\") {
+-      escaped = true;
+-      continue;
+-    }
+-    if (raw.startsWith(sequence, i)) {
+-      return true;
+-    }
+-  }
+-  return false;
+-}
+-
+-function hasUnquotedScriptHint(raw: string): boolean {
+-  let quote: "'" | '"' | undefined;
+-  let escaped = false;
+-  let token = "";
+-
+-  const flushToken = (): boolean => {
+-    const normalizedToken = normalizeLowercaseStringOrEmpty(token);
+-    if (normalizedToken.endsWith(".py") || normalizedToken.endsWith(".js")) {
+-      return true;
+-    }
+-    token = "";
+-    return false;
+-  };
+-
+-  for (const ch of raw) {
+-    if (escaped) {
+-      if (!quote) {
+-        token += ch;
+-      }
+-      escaped = false;
+-      continue;
+-    }
+-    if (quote !== "'" && ch === "\\") {
+-      escaped = true;
+-      continue;
+-    }
+-    if (quote) {
+-      if (ch === quote) {
+-        quote = undefined;
+-      }
+-      continue;
+-    }
+-    if (ch === "'" || ch === '"') {
+-      if (flushToken()) {
+-        return true;
+-      }
+-      quote = ch;
+-      continue;
+-    }
+-    if (/\s/u.test(ch) || "|&;()<>".includes(ch)) {
+-      if (flushToken()) {
+-        return true;
+-      }
+-      continue;
+-    }
+-    token += ch;
+-  }
+-  return flushToken();
+-}
+-
+-function resolveLeadingShellSegmentExecutable(rawSegment: string): string | undefined {
+-  return normalizeOptionalLowercaseString(
+-    parsePreflightShellSegment(extractUnquotedShellText(rawSegment) ?? rawSegment)[0],
+-  );
+-}
+-
+-function analyzeInterpreterHeuristicsFromUnquoted(raw: string): {
+-  hasPython: boolean;
+-  hasNode: boolean;
+-  hasComplexSyntax: boolean;
+-  hasProcessSubstitution: boolean;
+-  hasScriptHint: boolean;
+-} {
+-  const executables = splitShellSegmentsOutsideQuotes(raw, { splitPipes: true }).map(
+-    resolveLeadingShellSegmentExecutable,
+-  );
+-  const hasPython = executables.some((executable) =>
+-    /^python(?:3(?:\.\d+)?)?$/i.test(executable ?? ""),
+-  );
+-  const hasNode = executables.includes("node");
+-  const hasProcessSubstitution = hasUnescapedSequence(raw, "<(") || hasUnescapedSequence(raw, ">(");
+-  const hasComplexSyntax =
+-    hasUnescapedSequence(raw, "|") ||
+-    hasUnescapedSequence(raw, "&&") ||
+-    hasUnescapedSequence(raw, "||") ||
+-    hasUnescapedSequence(raw, ";") ||
+-    raw.includes("\n") ||
+-    raw.includes("\r") ||
+-    hasUnescapedSequence(raw, "$(") ||
+-    hasUnescapedSequence(raw, "`") ||
+-    hasProcessSubstitution;
+-  const hasScriptHint = hasUnquotedScriptHint(raw);
+-
+-  return { hasPython, hasNode, hasComplexSyntax, hasProcessSubstitution, hasScriptHint };
+-}
+-
+-function extractShellWrappedCommandPayload(
+-  executable: string | undefined,
+-  args: string[],
+-): string | null {
+-  if (!executable) {
+-    return null;
+-  }
+-  const executableBase = normalizeOptionalLowercaseString(executable.split(/[\\/]/u).at(-1)) ?? "";
+-  const normalizedExecutable = executableBase.endsWith(".exe")
+-    ? executableBase.slice(0, -4)
+-    : executableBase;
+-  if (!/^(?:bash|dash|fish|ksh|sh|zsh)$/i.test(normalizedExecutable)) {
+-    return null;
+-  }
+-  const shortOptionsWithSeparateValue = new Set(["-O", "-o"]);
+-  for (let i = 0; i < args.length; i += 1) {
+-    const arg = args.at(i);
+-    if (arg === undefined) {
+-      break;
+-    }
+-    if (arg === "--") {
+-      return null;
+-    }
+-    if (arg === "-c") {
+-      return args.at(i + 1) ?? null;
+-    }
+-    if (/^-[A-Za-z]+$/u.test(arg)) {
+-      if (arg.includes("c")) {
+-        return args.at(i + 1) ?? null;
+-      }
+-      if (shortOptionsWithSeparateValue.has(arg)) {
+-        i += 1;
+-      }
+-      continue;
+-    }
+-    if (/^--[A-Za-z0-9][A-Za-z0-9-]*(?:=.*)?$/u.test(arg)) {
+-      if (!arg.includes("=")) {
+-        const next = args.at(i + 1);
+-        if (next && next !== "--" && !next.startsWith("-")) {
+-          i += 1;
+-        }
+-      }
+-      continue;
+-    }
+-    return null;
+-  }
+-  return null;
+-}
+-
+-export function shouldFailClosedInterpreterPreflight(command: string): {
+-  hasInterpreterInvocation: boolean;
+-  hasComplexSyntax: boolean;
+-  hasProcessSubstitution: boolean;
+-  hasInterpreterSegmentScriptHint: boolean;
+-  hasInterpreterPipelineScriptHint: boolean;
+-  isDirectInterpreterCommand: boolean;
+-} {
+-  const raw = command.trim();
+-  const rawArgv = splitShellArgs(raw);
+-  const [directCommandToken, ...args] = rawArgv
+-    ? stripPreflightAssignments(stripPreflightEnvPrefix(rawArgv))
+-    : [];
+-  const directExecutable = normalizeOptionalLowercaseString(directCommandToken);
+-  const isDirectInterpreterCommand = isInterpreterExecutable(directExecutable);
+-
+-  const unquotedRaw = extractUnquotedShellText(raw) ?? raw;
+-  const topLevel = analyzeInterpreterHeuristicsFromUnquoted(unquotedRaw);
+-
+-  const shellWrappedPayload = extractShellWrappedCommandPayload(directExecutable, args);
+-  const nestedUnquoted = shellWrappedPayload
+-    ? (extractUnquotedShellText(shellWrappedPayload) ?? shellWrappedPayload)
+-    : "";
+-  const nested = shellWrappedPayload
+-    ? analyzeInterpreterHeuristicsFromUnquoted(nestedUnquoted)
+-    : {
+-        hasPython: false,
+-        hasNode: false,
+-        hasComplexSyntax: false,
+-        hasProcessSubstitution: false,
+-        hasScriptHint: false,
+-      };
+-  const hasInterpreterInvocationInSegment = (rawSegment: string): boolean =>
+-    isInterpreterExecutable(resolveLeadingShellSegmentExecutable(rawSegment));
+-  const isScriptExecutingInterpreterCommand = (rawCommand: string): boolean => {
+-    const [commandToken, ...argsLocal] = parsePreflightShellSegment(rawCommand);
+-    const executable = normalizeOptionalLowercaseString(commandToken);
+-    if (!executable) {
+-      return false;
+-    }
+-
+-    if (/^python(?:3(?:\.\d+)?)?$/i.test(executable)) {
+-      const pythonInfoOnlyFlags = new Set(["-V", "--version", "-h", "--help"]);
+-      if (argsLocal.some((arg) => pythonInfoOnlyFlags.has(arg))) {
+-        return false;
+-      }
+-      if (
+-        argsLocal.some(
+-          (arg) =>
+-            arg === "-c" ||
+-            arg === "-m" ||
+-            arg.startsWith("-c") ||
+-            arg.startsWith("-m") ||
+-            arg === "--check-hash-based-pycs",
+-        )
+-      ) {
+-        return false;
+-      }
+-      return true;
+-    }
+-
+-    if (executable === "node") {
+-      const nodeInfoOnlyFlags = new Set(["-v", "--version", "-h", "--help", "-c", "--check"]);
+-      if (argsLocal.some((arg) => nodeInfoOnlyFlags.has(arg))) {
+-        return false;
+-      }
+-      if (
+-        argsLocal.some(
+-          (arg) =>
+-            arg === "-e" ||
+-            arg === "-p" ||
+-            arg === "--eval" ||
+-            arg === "--print" ||
+-            arg.startsWith("--eval=") ||
+-            arg.startsWith("--print=") ||
+-            ((arg.startsWith("-e") || arg.startsWith("-p")) && arg.length > 2),
+-        )
+-      ) {
+-        return false;
+-      }
+-      return true;
+-    }
+-
+-    return false;
+-  };
+-  const hasScriptHintInSegment = (segment: string): boolean =>
+-    extractInterpreterScriptPathsFromSegment(segment).length > 0 || hasUnquotedScriptHint(segment);
+-  const hasInterpreterAndScriptHintInSameSegment = (rawText: string): boolean => {
+-    const segments = splitShellSegmentsOutsideQuotes(rawText, { splitPipes: true });
+-    return segments.some((segment) => {
+-      if (!isScriptExecutingInterpreterCommand(segment)) {
+-        return false;
+-      }
+-      return hasScriptHintInSegment(segment);
+-    });
+-  };
+-  const hasInterpreterPipelineScriptHintInSameSegment = (rawText: string): boolean => {
+-    const commandSegments = splitShellSegmentsOutsideQuotes(rawText, { splitPipes: false });
+-    return commandSegments.some((segment) => {
+-      const pipelineCommands = splitShellSegmentsOutsideQuotes(segment, { splitPipes: true });
+-      const hasScriptExecutingPipedInterpreter = pipelineCommands
+-        .slice(1)
+-        .some((pipelineCommand) => isScriptExecutingInterpreterCommand(pipelineCommand));
+-      if (!hasScriptExecutingPipedInterpreter) {
+-        return false;
+-      }
+-      return hasScriptHintInSegment(segment);
+-    });
+-  };
+-  const hasInterpreterSegmentScriptHint =
+-    hasInterpreterAndScriptHintInSameSegment(raw) ||
+-    (shellWrappedPayload !== null && hasInterpreterAndScriptHintInSameSegment(shellWrappedPayload));
+-  const hasInterpreterPipelineScriptHint =
+-    hasInterpreterPipelineScriptHintInSameSegment(raw) ||
+-    (shellWrappedPayload !== null &&
+-      hasInterpreterPipelineScriptHintInSameSegment(shellWrappedPayload));
+-  const hasShellWrappedInterpreterSegmentScriptHint =
+-    shellWrappedPayload !== null && hasInterpreterAndScriptHintInSameSegment(shellWrappedPayload);
+-  const hasShellWrappedInterpreterInvocation =
+-    (nested.hasPython || nested.hasNode) &&
+-    (hasShellWrappedInterpreterSegmentScriptHint ||
+-      nested.hasScriptHint ||
+-      nested.hasComplexSyntax ||
+-      nested.hasProcessSubstitution);
+-  const hasTopLevelInterpreterInvocation = splitShellSegmentsOutsideQuotes(raw, {
+-    splitPipes: true,
+-  }).some((segment) => hasInterpreterInvocationInSegment(segment));
+-  const hasInterpreterInvocation =
+-    isDirectInterpreterCommand ||
+-    hasShellWrappedInterpreterInvocation ||
+-    hasTopLevelInterpreterInvocation;
+-
+-  return {
+-    hasInterpreterInvocation,
+-    hasComplexSyntax: topLevel.hasComplexSyntax || hasShellWrappedInterpreterInvocation,
+-    hasProcessSubstitution: topLevel.hasProcessSubstitution || nested.hasProcessSubstitution,
+-    hasInterpreterSegmentScriptHint,
+-    hasInterpreterPipelineScriptHint,
+-    isDirectInterpreterCommand,
+-  };
+-}
+diff --git a/src/agents/bash-tools.exec-script-preflight.ts b/src/agents/bash-tools.exec-script-preflight.ts
+index 22a067af7aefd7997b30ae110462635924aa4008..8145c0b18410059232c389bcee7681e52bc9a18a 100644
+--- a/src/agents/bash-tools.exec-script-preflight.ts
++++ b/src/agents/bash-tools.exec-script-preflight.ts
+@@ -4,7 +4,6 @@ import path from "node:path";
+ /** Safely reads script files and rejects common shell-to-script bleed. */
+ import type { ExecAsk, ExecHost, ExecSecurity } from "../infra/exec-approvals.js";
+ import { createLazyImportLoader } from "../shared/lazy-promise.js";
+-import { shouldFailClosedInterpreterPreflight } from "./bash-tools.exec-script-ambiguity.js";
+ import { extractScriptTargetFromCommand } from "./bash-tools.exec-script-target.js";
+ 
+ const SKIPPABLE_SCRIPT_PREFLIGHT_FS_ERROR_CODES = new Set([
+@@ -199,35 +198,11 @@ export async function validateScriptFileForShellBleed(params: {
+   workdir: string;
+ }): Promise<void> {
+   const target = extractScriptTargetFromCommand(params.command);
+-  if (!target) {
+-    const {
+-      hasInterpreterInvocation,
+-      hasComplexSyntax,
+-      hasProcessSubstitution,
+-      hasInterpreterSegmentScriptHint,
+-      hasInterpreterPipelineScriptHint,
+-      isDirectInterpreterCommand,
+-    } = shouldFailClosedInterpreterPreflight(params.command);
+-    if (
+-      hasInterpreterInvocation &&
+-      hasComplexSyntax &&
+-      (hasInterpreterSegmentScriptHint ||
+-        hasInterpreterPipelineScriptHint ||
+-        (hasProcessSubstitution && isDirectInterpreterCommand))
+-    ) {
+-      // Fail closed when interpreter-driven script execution is ambiguous; otherwise
+-      // attackers can route script content through forms our fast parser cannot validate.
+-      throw new Error(
+-        "exec preflight: complex interpreter invocation detected; refusing to run without script preflight validation. " +
+-          "Use a direct `python <file>.py` or `node <file>.js` command.",
+-      );
+-    }
+-    return;
+-  }
+-
+-  // Dollar-prefixed identifiers and NODE labels are valid JavaScript. Leave source
+-  // diagnostics to Node while preserving the complex-command policy above.
+-  if (target.kind === "node") {
++  // This is a best-effort Python typo check, not execution authorization. Compound
++  // commands stay with the admitted shell instead of requiring a second shell parser.
++  // Host policy, sandboxing, and approval revalidation remain the execution boundary.
++  // JavaScript diagnostics belong to Node, including valid dollar-prefixed identifiers.
++  if (!target || target.kind === "node") {
+     return;
+   }
+ 
+diff --git a/src/agents/bash-tools.exec-script-target.ts b/src/agents/bash-tools.exec-script-target.ts
+index 4e1f78f5eb9b00292c2a86b7cbe0c0f441ec2c97..f5ed36a6b556c3bee0d5e76f2e75799c3ce358e8 100644
+--- a/src/agents/bash-tools.exec-script-target.ts
++++ b/src/agents/bash-tools.exec-script-target.ts
+@@ -22,7 +22,7 @@ function isShellEnvAssignmentToken(token: string): boolean {
+   return /^[A-Za-z_][A-Za-z0-9_]*=.*$/u.test(token);
+ }
+ 
+-export function stripPreflightAssignments(argv: string[]): string[] {
++function stripPreflightAssignments(argv: string[]): string[] {
+   let index = 0;
+   while (isShellEnvAssignmentToken(argv[index] ?? "")) {
+     index += 1;
+@@ -30,14 +30,6 @@ export function stripPreflightAssignments(argv: string[]): string[] {
+   return argv.slice(index);
+ }
+ 
+-export function parsePreflightShellSegment(rawSegment: string): string[] {
+-  const argv = splitShellArgs(rawSegment.trim()) ?? [];
+-  const command = /^(?:if|then|do|elif|else|while|until|time)$/i.test(argv[0] ?? "")
+-    ? argv.slice(1)
+-    : argv;
+-  return stripPreflightAssignments(stripPreflightEnvPrefix(command));
+-}
+-
+ function isEnvExecutableToken(token: string | undefined): boolean {
+   if (!token) {
+     return false;
+@@ -47,7 +39,7 @@ function isEnvExecutableToken(token: string | undefined): boolean {
+   return normalizedBase === "env";
+ }
+ 
+-export function stripPreflightEnvPrefix(argv: string[]): string[] {
++function stripPreflightEnvPrefix(argv: string[]): string[] {
+   if (argv.length === 0) {
+     return argv;
+   }
+@@ -217,11 +209,6 @@ function extractInterpreterScriptTargetFromArgv(
+   return null;
+ }
+ 
+-export function extractInterpreterScriptPathsFromSegment(rawSegment: string): string[] {
+-  const target = extractInterpreterScriptTargetFromArgv(parsePreflightShellSegment(rawSegment));
+-  return target?.relOrAbsPaths ?? [];
+-}
+-
+ export function extractScriptTargetFromCommand(
+   command: string,
+ ): { kind: "python"; relOrAbsPaths: string[] } | { kind: "node"; relOrAbsPaths: string[] } | null {
+diff --git a/src/agents/bash-tools.exec.script-preflight.test.ts b/src/agents/bash-tools.exec.script-preflight.test.ts
+index 01ebd742185cc14b0d73e6d33c16295fcd2e311f..3efcc31c31842cf2e6f158a76b0041024f72b60b 100644
+--- a/src/agents/bash-tools.exec.script-preflight.test.ts
++++ b/src/agents/bash-tools.exec.script-preflight.test.ts
+@@ -296,16 +296,66 @@ describeNonWin("exec script preflight", () => {
+   });
+ 
+   it.each([
+-    "cat bad.py | python",
+-    "cat bad.js | node",
+-    'bash -c "node bad.js"',
+-    "node <(cat bad.js)",
+-    'if true; then\npython "bad.py"\nfi',
+-    `env /bin/bash --rcfile shell.rc --noprofile --norc -O extglob -ceu "python 'bad.py'"`,
+-    'bash -c "if true; then python bad.py; fi"',
+-  ])("fails closed for %s", async (command) => {
+-    await expect(runExecPreflight(command)).rejects.toThrow(
+-      /exec preflight: complex interpreter invocation detected/,
++    "cat probe.py | python3",
++    "cat probe.js | node",
++    'bash -c "node probe.js"',
++    'bash -c "python3 <(cat probe.py)"',
++    'if true; then\npython3 "probe.py"\nfi',
++    'env /bin/bash --noprofile --norc -ceu "python3 probe.py"',
++    'bash -c "if true; then python3 probe.py; fi"',
++    "find . -name probe.py -print | sort >/dev/null\npython3 probe.py",
++    'PYTHONDONTWRITEBYTECODE=1 python3 probe.py; result=$?; test "$result" -eq 0',
++    "python3 probe.py && node --check probe.js",
++  ])("executes authorized compound scripts: %s", async (command) => {
++    const result = await execScripts(command, {
++      "probe.py": 'print("script-ok")',
++      "probe.js": 'process.stdout.write("script-ok\\n");',
++    });
++    expect(result.details).toMatchObject({
++      status: "completed",
++      exitCode: 0,
++      aggregated: "script-ok",
++    });
++  });
++
++  it.each([
++    ["python3", "probe.py", "raise RuntimeError('native-failure')", "RuntimeError"],
++    ["node", "probe.js", "throw new Error('native-failure');", "Error: native-failure"],
++  ])(
++    "preserves native %s failure output and the compound exit status",
++    async (interpreter, file, source, diagnostic) => {
++      const result = await execScripts(`printf 'before-script\\n'; ${interpreter} ${file}`, {
++        [file]: source,
++      });
++      expect(result.details).toMatchObject({ status: "completed", exitCode: 1 });
++      const text = result.content.find((content) => content.type === "text")?.text ?? "";
++      expect(text).toMatch(/^before-script\r?\n/);
++      expect(text).toContain(diagnostic);
++      expect(text).not.toContain("exec preflight:");
++    },
++  );
++
++  it("still denies compound commands before script execution when exec policy denies", async () => {
++    await withScripts(
++      { "probe.py": 'open("effect.txt", "w").write("unexpected")' },
++      async (workdir) => {
++        const tool = createExecTool({
++          host: "gateway",
++          security: "deny",
++          ask: "off",
++          allowBackground: false,
++        });
++        await expect(
++          tool.execute("denied-compound", {
++            command: "printf 'before-script\\n'; python3 probe.py",
++            workdir,
++          }),
++        ).rejects.toThrow("exec denied: host=gateway security=deny");
++        await expect(fs.stat(path.join(workdir, "effect.txt"))).rejects.toMatchObject({
++          code: "ENOENT",
++        });
++        expect(processGatewayAllowlistMock).not.toHaveBeenCalled();
++      },
+     );
+   });
+ 
 diff --git a/src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts b/src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts
 index cec0e61f86c1531385403c831c1384134b55f792..6b854ae3e03b27c9e0e9c92134557cf07db3550a 100644
 --- a/src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts
@@ -72767,6 +73554,214 @@ index 4ff6adb522f30b7e43d7009d3d2280cb7fce948a..994dca774bbe6785403199b01323e4fc
 +  type InternalSteeringDeliveryBoundary,
    type InternalToolExecutionPreparer,
  } from "../../../packages/agent-core/src/internal-hooks.js";
+diff --git a/src/agents/sandbox/fs-bridge-shell-command-plans.ts b/src/agents/sandbox/fs-bridge-shell-command-plans.ts
+index 5ced3e5c11676ca17409e0d54e85ed425fd666f5..920c56b25c56b3552b1043307963c5471ac3f0d3 100644
+--- a/src/agents/sandbox/fs-bridge-shell-command-plans.ts
++++ b/src/agents/sandbox/fs-bridge-shell-command-plans.ts
+@@ -22,7 +22,16 @@ export function buildStatPlan(
+ ): SandboxFsCommandPlan {
+   return {
+     checks: [{ target, options: { action: "stat files" } }],
+-    script: 'set -eu\ncd -- "$1"\nLC_ALL=C stat -c "%F|%s|%y" -- "$2"',
++    // BusyBox's failed cd does not distinguish missing parents from permissions.
++    // Ask stat for that diagnostic, but never accept metadata after anchoring failed.
++    script: `set -eu
++cd -- "$1" || {
++  cd_status=$?
++  LC_ALL=C stat -c "%F|%s|%y" -- "$1/" >/dev/null || exit "$?"
++  printf '%s\n' 'Sandbox stat parent could not be entered.' >&2
++  exit "$cd_status"
++}
++LC_ALL=C stat -c "%F|%s|%y" -- "$2"`,
+     args: [anchoredTarget.canonicalParentPath, anchoredTarget.basename],
+     allowFailure: true,
+   };
+diff --git a/src/agents/sandbox/fs-bridge.optional-read.test.ts b/src/agents/sandbox/fs-bridge.optional-read.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cc81d39fa364e9255e30893e21f8da44fa801d9
+--- /dev/null
++++ b/src/agents/sandbox/fs-bridge.optional-read.test.ts
+@@ -0,0 +1,164 @@
++import { spawnSync } from "node:child_process";
++import fs from "node:fs/promises";
++import path from "node:path";
++import { afterEach, describe, expect, it } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import "../../test-utils/prepare-compiled-subprocesses.js";
++import { createSandboxedReadTool } from "../agent-tools.read.js";
++import {
++  createSandbox,
++  createSandboxFsBridge,
++  dockerExecResult,
++  getDockerArg,
++  getDockerScript,
++  installFsBridgeTestHarness,
++  mockedExecDockerRaw,
++} from "./fs-bridge.test-helpers.js";
++
++// Run the real command plan with the observed BusyBox cd diagnostic. The fixture
++// supplies stat outcomes, so this covers shell control flow without a Docker VM.
++const STAT_SHELL_FIXTURE = `
++cd() {
++  if [ "$CD_EXIT" != 0 ]; then
++    printf "openclaw-sandbox-fs: 2: cd: can't cd to %s\n" "$2" >&2
++    return "$CD_EXIT"
++  fi
++}
++stat() {
++  [ "$LC_ALL" = C ] || return 99
++  [ "$4" = "$EXPECTED_STAT_TARGET" ] || return 98
++  printf '%s\n' "$STAT_STDERR" >&2
++  printf '%s' "$STAT_STDOUT"
++  return "$STAT_EXIT"
++}
++`;
++
++describe.skipIf(process.platform === "win32")("sandbox optional reads", () => {
++  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++  installFsBridgeTestHarness();
++
++  async function createReadFixture(params: {
++    cdExit: number;
++    statError: string;
++    statExit?: number;
++    statOutput?: string;
++  }) {
++    const workspaceDir = tempDirs.make("openclaw-optional-read-");
++    await fs.mkdir(path.join(workspaceDir, "existing"));
++    mockedExecDockerRaw.mockImplementation(async (args) => {
++      const script = getDockerScript(args);
++      if (script.includes('readlink -n -f -- "$cursor"')) {
++        return dockerExecResult(`${getDockerArg(args, 1)}\n`);
++      }
++      const result = spawnSync(
++        "/bin/sh",
++        [
++          "-c",
++          STAT_SHELL_FIXTURE + script,
++          "openclaw-sandbox-fs",
++          getDockerArg(args, 1),
++          getDockerArg(args, 2),
++        ],
++        {
++          env: {
++            CD_EXIT: String(params.cdExit),
++            STAT_STDERR: params.statError,
++            STAT_EXIT: String(params.statExit ?? 1),
++            STAT_STDOUT: params.statOutput ?? "",
++            EXPECTED_STAT_TARGET:
++              params.cdExit === 0 ? getDockerArg(args, 2) : `${getDockerArg(args, 1)}/`,
++          },
++        },
++      );
++      if (result.error) {
++        throw result.error;
++      }
++      return { stdout: result.stdout, stderr: result.stderr, code: result.status ?? 1 };
++    });
++    const bridge = createSandboxFsBridge({
++      sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
++    });
++    return createSandboxedReadTool({ root: "/workspace", bridge });
++  }
++
++  it.each([
++    {
++      name: "missing parent",
++      filePath: "absent/note.txt",
++      cdExit: 2,
++      reason: "No such file or directory",
++    },
++    {
++      name: "missing leaf",
++      filePath: "existing/note.txt",
++      cdExit: 0,
++      reason: "No such file or directory",
++    },
++    {
++      name: "non-directory parent",
++      filePath: "not-directory/note.txt",
++      cdExit: 2,
++      reason: "Not a directory",
++    },
++  ])(
++    "returns not_found for an optional $name but rejects a required read",
++    async ({ filePath, cdExit, reason }) => {
++      const read = await createReadFixture({
++        cdExit,
++        statError: `stat: can't stat path: ${reason}`,
++      });
++      await expect(
++        read.execute("optional-read", { path: filePath, optional: true }),
++      ).resolves.toMatchObject({
++        details: { kind: "not_found", status: "not_found", optional: true },
++      });
++      await expect(read.execute("required-read", { path: filePath })).rejects.toMatchObject({
++        code: "ENOENT",
++      });
++    },
++  );
++
++  it.each(["Permission denied", "Input/output error"])(
++    "preserves %s on optional reads after cd fails",
++    async (reason) => {
++      const read = await createReadFixture({
++        cdExit: 2,
++        statError: `stat: can't stat path: ${reason}`,
++      });
++      await expect(
++        read.execute("optional-read", { path: "absent/note.txt", optional: true }),
++      ).rejects.toThrow(reason);
++    },
++  );
++
++  it("does not accept fallback metadata when the parent becomes available after cd failed", async () => {
++    const read = await createReadFixture({
++      cdExit: 2,
++      statError: "",
++      statExit: 0,
++      statOutput: "directory|4096|2",
++    });
++    await expect(
++      read.execute("optional-read", { path: "absent/note.txt", optional: true }),
++    ).rejects.toThrow("cd: can't cd to /workspace/absent");
++  });
++
++  it.each(
++    ["No such file or directory", "Not a directory"].flatMap((phrase) =>
++      ["Permission denied", "Input/output error", ""].map((reason) => ({ phrase, reason })),
++    ),
++  )(
++    "does not infer missing from parent '$phrase' when stat reports '$reason'",
++    async ({ phrase, reason }) => {
++      const read = await createReadFixture({
++        cdExit: 2,
++        statError: reason ? `stat: can't stat path: ${reason}` : "",
++        statExit: reason ? 1 : 0,
++        statOutput: reason ? "" : "directory|4096|2",
++      });
++      await expect(
++        read.execute("optional-read", { path: `parent: ${phrase}/note.txt`, optional: true }),
++      ).rejects.toThrow(reason || "cd: can't cd");
++    },
++  );
++});
+diff --git a/src/agents/sandbox/fs-bridge.ts b/src/agents/sandbox/fs-bridge.ts
+index 1211ef3cd72148ca63f9f2badd5a8c2e1c48df05..d6d87529c3eb330987b040725068db7a931f2d02 100644
+--- a/src/agents/sandbox/fs-bridge.ts
++++ b/src/agents/sandbox/fs-bridge.ts
+@@ -344,8 +344,9 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
+       signal: params.signal,
+     });
+     if (result.code !== 0) {
+-      const stderr = result.stderr.toString("utf8");
+-      if (stderr.includes("No such file or directory")) {
++      const stderr = result.stderr.toString("utf8").trimEnd();
++      // Only the terminal C-locale reason is authoritative; filenames can contain these words.
++      if (stderr.endsWith(": No such file or directory") || stderr.endsWith(": Not a directory")) {
+         return null;
+       }
+       const message = stderr.trim() || `stat failed with code ${result.code}`;
 diff --git a/src/agents/session-goal-usage.test.ts b/src/agents/session-goal-usage.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..f7ea0bb2a1290f34fe3637afd11907b27faa17cc
@@ -74674,6 +75669,85 @@ index 179f76391bbad288c26ea1d409dd55c108e212d8..8e6104dcb910653ba59c7e5934fc6397
      steeringMode: "all",
      ...(queueSettings.debounceMs !== undefined ? { debounceMs: queueSettings.debounceMs } : {}),
      waitForTranscriptCommit: true,
+diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.test.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.test.ts
+index e5b27ee9cfebe0ac3c15c7f7a50fa85cd0b5022b..eec57089929644b3a2ea027ce471d5d3fbcdbb04 100644
+--- a/src/agents/subagents/announce/subagent-announce-completion-delivery.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-completion-delivery.test.ts
+@@ -1,7 +1,10 @@
+ // Completion predicates read recorded facts, not rendered placeholder wording.
+ import { describe, expect, it, vi } from "vitest";
+ import { hasFailedSubagentNoOutputCompletion } from "../../internal-event-contract.js";
+-import { runAnnounceAgentCall } from "./subagent-announce-completion-delivery.js";
++import {
++  resolvePrivateCompletionDeliveryResult,
++  runAnnounceAgentCall,
++} from "./subagent-announce-completion-delivery.js";
+ import { setSubagentAnnounceDeliveryDepsForTest } from "./subagent-announce-overrides.test-support.js";
+ 
+ const failedChild = { type: "task_completion", source: "subagent", status: "error" } as const;
+@@ -87,3 +90,49 @@ describe("hasFailedSubagentNoOutputCompletion", () => {
+     expect(hasFailedSubagentNoOutputCompletion([])).toBe(false);
+   });
+ });
++
++describe("private followup canonical final evidence", () => {
++  it.each([
++    "success",
++    "error",
++    "aborted",
++    "yielded",
++    "continuationPending",
++    "wrong target",
++    "progress",
++    "dry run",
++  ])("credits only a completed source final: %s", (kind) => {
++    const result = resolvePrivateCompletionDeliveryResult(
++      {
++        status: "ok",
++        inputProcessingCompleted: true,
++        result: {
++          payloads: [],
++          meta: {
++            ...(kind === "error" ? { error: { kind: "incomplete_turn" } } : {}),
++            ...(kind === "aborted" ? { aborted: true } : {}),
++            ...(kind === "yielded" ? { yielded: true } : {}),
++            ...(kind === "continuationPending" ? { continuationPending: true } : {}),
++          },
++          messagingToolSentTexts: kind === "dry run" ? [] : ["Completed result"],
++          messagingToolSentTargets:
++            kind === "dry run"
++              ? []
++              : [
++                  {
++                    tool: "message",
++                    provider: "telegram",
++                    to: kind === "wrong target" ? "456" : "123",
++                    accountId: "test",
++                    sourceReplyFinal: kind !== "progress",
++                    text: "Completed result",
++                  },
++                ],
++        },
++      },
++      { channel: "telegram", to: "123", accountId: "test" },
++    );
++    expect(result.delivered).toBe(true);
++    expect(result.requesterVisibleFinalDelivered === true).toBe(kind === "success");
++  });
++});
+diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+index 02dbd121410e01847231cf43f97062cd85358454..8bb97d9dc9ce3aa2905c6530df09d3f05a413ca2 100644
+--- a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+@@ -245,6 +245,8 @@ export function resolvePrivateCompletionDeliveryResult(
+     origin?.channel &&
+     origin.to &&
+     result &&
++    !result.meta?.error &&
++    !result.meta?.aborted &&
+     result.meta?.yielded !== true &&
+     result.meta?.continuationPending !== true &&
+     hasMessagingToolDeliveryToSource(result, origin, { requireFinalReply: true })
 diff --git a/src/agents/subagents/announce/subagent-announce-delivery.runtime.test.ts b/src/agents/subagents/announce/subagent-announce-delivery.runtime.test.ts
 index fb3e3c33bb57201d90195b861256dfc4fff6708b..e6669ade92d0bd87eb5d7b63f85ef67c0062fa83 100644
 --- a/src/agents/subagents/announce/subagent-announce-delivery.runtime.test.ts
@@ -74754,6 +75828,75 @@ index fb3e3c33bb57201d90195b861256dfc4fff6708b..e6669ade92d0bd87eb5d7b63f85ef67c
    it("keeps the remaining wake budget after compaction and delivery-mode mismatch", async () => {
      vi.useFakeTimers();
      vi.setSystemTime(0);
+diff --git a/src/agents/subagents/announce/subagent-announce-delivery.test.ts b/src/agents/subagents/announce/subagent-announce-delivery.test.ts
+index 2c86a1b5c1846432ffac0c6d6894cf138aedec08..7955f9df286c736cd0eb1c91473dde6891b0acfd 100644
+--- a/src/agents/subagents/announce/subagent-announce-delivery.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-delivery.test.ts
+@@ -287,6 +287,7 @@ function createGatewayMock(response: Record<string, unknown> = {}, onCall?: () =
+ 
+ function createPayloadGatewayMock(...payloads: Record<string, unknown>[]) {
+   return createGatewayMock({
++    status: "ok",
+     result: { payloads, ...(payloads.length > 0 ? { deliveryStatus: sentDeliveryStatus } : {}) },
+   });
+ }
+@@ -1439,6 +1440,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+   it("delivers dormant child completion under restrictive gateway roles with Gateway-owned timeout policy", async () => {
+     const callGateway = createGatewayMock();
+     const { cfg, dispatchGatewayMethodInProcess } = createRoleRestrictedInProcessGatewayMock({
++      status: "ok",
+       result: {
+         deliveryStatus: sentDeliveryStatus,
+         payloads: [{ text: "requester voice completion" }],
+@@ -2784,18 +2786,30 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+   const localOnly = { routes: [localRequesterSettleRoute] };
+   const visibleFinal = { recordsVisibleFinal: true, expected: deliveredRequesterFinal };
+   const requesterSettleCases = [
+-    ...[
++    settleCase(
++      "preserves automatic final delivery after continuation completes",
++      { payloads: [], requesterContinuationSettled: true, deliveryStatus: sentDeliveryStatus },
++      visibleFinal,
++    ),
++    settleCase(
++      "does not promote a yielded turn's automatic delivery to a visible final",
+       {
+-        name: "automatic delivery",
+-        evidence: { deliveryStatus: { status: "sent", succeeded: true, resultCount: 1 } },
++        payloads: [],
++        meta: { yielded: true },
++        requesterContinuationSettled: true,
++        deliveryStatus: sentDeliveryStatus,
+       },
+-      { name: "final message tool", evidence: { messagingToolSentTargets: [sourceFinal] } },
+-    ].map(({ name, evidence }) =>
+-      settleCase(
+-        `preserves ${name} final evidence alongside settled continuation`,
+-        { payloads: [], meta: { yielded: true }, requesterContinuationSettled: true, ...evidence },
+-        visibleFinal,
+-      ),
++      { expected: deliveredRequesterFinal },
++    ),
++    settleCase(
++      "preserves an explicit message-tool final alongside settled continuation",
++      {
++        payloads: [],
++        meta: { yielded: true },
++        requesterContinuationSettled: true,
++        messagingToolSentTargets: [sourceFinal],
++      },
++      visibleFinal,
+     ),
+     settleCase(
+       "acknowledges a core-settled next wave without recording a visible final",
+@@ -3081,6 +3095,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+         gatewayMock.mockRejectedValueOnce(error);
+       }
+       gatewayMock.mockResolvedValue({
++        status: "ok",
+         result: {
+           payloads: [{ text: "recovered child completion" }],
+           deliveryStatus: sentDeliveryStatus,
 diff --git a/src/agents/subagents/announce/subagent-announce-delivery.ts b/src/agents/subagents/announce/subagent-announce-delivery.ts
 index 8ca273135894bc448ae83df26755d1c6422bc14c..c05eef6de2e3612d3ca732ae29175a656b09dd08 100644
 --- a/src/agents/subagents/announce/subagent-announce-delivery.ts
@@ -74780,6 +75923,69 @@ index 8ca273135894bc448ae83df26755d1c6422bc14c..c05eef6de2e3612d3ca732ae29175a65
          requesterSessionKey: params.requesterSessionKey,
          requesterAgentId: params.requesterAgentId,
          steerMessage: runtimeContextFragments.length
+diff --git a/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts b/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
+index f1ab5037af402b2a640e08fe83ddef0476cc4b0b..ab1b76dbebf0b465b6c80c9fb55cfaa97ba1fe9d 100644
+--- a/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
+@@ -50,6 +50,24 @@ describe("yielded private settle outcomes", () => {
+       response: { status: "error" },
+       expected: { delivered: false, reason: "visible_reply_missing" },
+     },
++    ...[
++      { status: "error", meta: {} },
++      { status: "ok", meta: { error: { kind: "incomplete_turn" } } },
++      { status: "ok", meta: { aborted: true } },
++    ].map(({ status, meta }) => ({
++      name: `sent runtime failure is not the owed final: ${status}/${Object.keys(meta)[0]}`,
++      response: {
++        status,
++        result: {
++          payloads: [
++            { text: "Agent couldn't generate a response. Please try again.", isError: true },
++          ],
++          meta,
++          deliveryStatus: sentDeliveryStatus,
++        },
++      },
++      expected: { delivered: false, reason: "visible_reply_missing" },
++    })),
+     {
+       name: "empty successful turn",
+       response: { status: "ok", result: { payloads: [] } },
+diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.test.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.test.ts
+index 60cabfd5ad5c8c78eb94dd62a59bad270258af64..bd9d5ce5dcff582271d27c3899b4770c99e9fdae 100644
+--- a/src/agents/subagents/announce/subagent-announce-direct-delivery.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.test.ts
+@@ -147,6 +147,29 @@ describe("late exact requester recovery", () => {
+     };
+   }
+ 
++  it("retires an accepted settle quietly when its original final commits before execution", async () => {
++    const fixture = setup();
++    const delivery = fixture.startDelivery();
++    await fixture.dispatchEntered.promise;
++    fixture.state.allowed = false;
++    let stopped: unknown;
++    try {
++      fixture.startExecution();
++    } catch (error) {
++      stopped = error;
++    }
++    expect(stopped).toBeInstanceOf(Error);
++    fixture.dispatchDone.reject(stopped);
++    await expect(delivery).resolves.toMatchObject({
++      delivered: false,
++      reason: "source_owner_changed",
++      disposition: "intentional_non_delivery",
++    });
++    expect(fixture.send).not.toHaveBeenCalled();
++    expect(fixture.read).not.toHaveBeenCalled();
++    expect(fixture.dispatch).toHaveBeenCalledOnce();
++  });
++
+   it.each([
+     "completed",
+     "cancelled",
 diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
 index 965f31fd9470e57e4de39b139cce88949b2b0004..508d44970f95f44ef1726e9a3e7a8191b997eb4d 100644
 --- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
@@ -75015,7 +76221,7 @@ index 965f31fd9470e57e4de39b139cce88949b2b0004..508d44970f95f44ef1726e9a3e7a8191
      const delivery = classified instanceof Promise ? await classified : classified;
      const originalOutcome = buildAgentRunTerminalOutcomeFromWaitResult(
 diff --git a/src/agents/subagents/announce/subagent-announce-direct-response.ts b/src/agents/subagents/announce/subagent-announce-direct-response.ts
-index 84465b6c268477d61678716d66d1ed6641683c18..42bc62f3de70ad85f5e31e4448aac75d212a15b0 100644
+index 84465b6c268477d61678716d66d1ed6641683c18..45e1af61c681ba737cfe57c65fa064529026e3e3 100644
 --- a/src/agents/subagents/announce/subagent-announce-direct-response.ts
 +++ b/src/agents/subagents/announce/subagent-announce-direct-response.ts
 @@ -48,6 +48,7 @@ type DirectAnnounceResponseContext = {
@@ -75067,6 +76273,21 @@ index 84465b6c268477d61678716d66d1ed6641683c18..42bc62f3de70ad85f5e31e4448aac75d
      const requiresSettleReply =
        requesterSessionBound &&
        params.sourceTool === "subagent_settle" &&
+@@ -168,8 +196,13 @@ export function createDirectAnnounceResponseClassifier(context: DirectAnnounceRe
+     const terminalDelivery = normalizeAgentRunTerminalDeliverySnapshot(
+       directAnnounceResult?.deliveryStatus,
+     );
++    // Sending a runtime failure notice does not fulfil the original reply obligation.
+     const automaticFinalDelivered =
+-      terminalDelivery?.status === "sent" && terminalDelivery.resultCount > 0;
++      requesterCompletedSuccessfully &&
++      directAnnounceResult?.meta?.yielded !== true &&
++      directAnnounceResult?.meta?.continuationPending !== true &&
++      terminalDelivery?.status === "sent" &&
++      terminalDelivery.resultCount > 0;
+     if (
+       requiresAutomaticFinalReceipt &&
+       !hasFinalMessagingToolDelivery &&
 diff --git a/src/agents/subagents/announce/subagent-announce-dispatch.ts b/src/agents/subagents/announce/subagent-announce-dispatch.ts
 index f583dc746e54a111ec0474bab454149f6d5a56fa..0cd701f745c989a6985852004ccaa52e2b42d18d 100644
 --- a/src/agents/subagents/announce/subagent-announce-dispatch.ts
@@ -78136,7 +79357,7 @@ index a7c4fe2a7e64a52aa6eb5a5795ed58370083ef6c..cf31c8abc6973fb4f54ebcae29dd7168
 -  });
  });
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-state.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-state.ts
-index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba29921ca5 100644
+index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..494db66c71955ed69548b8e4e36ecf82bf49d219 100644
 --- a/src/agents/subagents/announce/subagent-announce.requester-settle-state.ts
 +++ b/src/agents/subagents/announce/subagent-announce.requester-settle-state.ts
 @@ -1,3 +1,5 @@
@@ -78145,8 +79366,15 @@ index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba
  import type {
    RequesterSettleWakeState,
    SubagentRunRecord,
-@@ -8,6 +10,11 @@ import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatc
- export type RequesterSettleWakeBatchState = Omit<RequesterSettleWakeState, "retireAfterSettle">;
+@@ -5,9 +7,17 @@ import type {
+ import { isSameSubagentRun, isSameSubagentRunOwner } from "../registry/subagent-run-generation.js";
+ import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
+ 
+-export type RequesterSettleWakeBatchState = Omit<RequesterSettleWakeState, "retireAfterSettle">;
++export type RequesterSettleWakeBatchState = Omit<
++  RequesterSettleWakeState,
++  "retireAfterSettle" | "requesterTurnRunId"
++>;
  
  export type RequesterSettleWakeBatchCallbacks = {
 +  /** Presentation remains derived from the existing registry's exact completion cohort. */
@@ -78157,7 +79385,7 @@ index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba
    transitionBatch: (
      batch: readonly SubagentRunRecord[],
      state: RequesterSettleWakeBatchState,
-@@ -21,6 +28,14 @@ export type RequesterSettleWakeBatchCallbacks = {
+@@ -21,6 +31,14 @@ export type RequesterSettleWakeBatchCallbacks = {
    ) => void | Promise<void>;
  };
  
@@ -78172,7 +79400,7 @@ index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba
  const activeRequesterSettleWakeBatches = new Map<string, () => boolean>();
  
  /** Reads stay independent; the first prepared decision owns mutation and delivery. */
-@@ -68,6 +83,8 @@ export function retainedYieldIdentity(state: RequesterSettleWakeBatchState) {
+@@ -68,6 +86,8 @@ export function retainedYieldIdentity(state: RequesterSettleWakeBatchState) {
      ...(state.afterRequesterYield === true ? { afterRequesterYield: true as const } : {}),
      ...(state.yieldedFinalDeliverable === true ? { yieldedFinalDeliverable: true as const } : {}),
      ...(state.rearmGeneration !== undefined ? { rearmGeneration: state.rearmGeneration } : {}),
@@ -78181,7 +79409,7 @@ index 17c82f9e89d9bc1f4eeddb3677fef902737eacc6..7a8e0c7d5e299f50fb31e117157dfdba
    };
  }
  
-@@ -109,6 +126,10 @@ export function readSharedBatchState(
+@@ -109,6 +129,10 @@ export function readSharedBatchState(
        : {}),
      ...(source?.yieldedFinalDeliverable === true ? { yieldedFinalDeliverable: true } : {}),
      ...(source?.rearmGeneration !== undefined ? { rearmGeneration: source.rearmGeneration } : {}),
@@ -79214,10 +80442,16 @@ index 7660a628455118767cf8de43a76fef6929974965..f0138ae31116ef4656b5ce7fcdecd936
      this.request.custody.release();
    }
 diff --git a/src/agents/subagents/completion/session-followup-completion.types.ts b/src/agents/subagents/completion/session-followup-completion.types.ts
-index 0078f4db1ba2ad3cd8a4df620c156b01c5c9184f..8f050c94cb74055fcb13bd49c6a6e77dc01ce7ea 100644
+index 0078f4db1ba2ad3cd8a4df620c156b01c5c9184f..8f60282d90075b4bb36f6c74807da54992173980 100644
 --- a/src/agents/subagents/completion/session-followup-completion.types.ts
 +++ b/src/agents/subagents/completion/session-followup-completion.types.ts
-@@ -13,6 +13,8 @@ export type FollowupRequesterAuthority = {
+@@ -1,4 +1,5 @@
+ import type { AgentWaitResult } from "../../run-wait.types.js";
++import type { SubagentAnnounceDeliveryResult } from "../announce/subagent-announce-dispatch.js";
+ import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+ 
+ export type FollowupReply = AgentWaitResult & { replyText?: string };
+@@ -13,6 +14,8 @@ export type FollowupRequesterAuthority = {
    run<T>(runId: string, run: () => Promise<T>): Promise<T>;
  };
  export type FollowupRequest = {
@@ -79226,7 +80460,16 @@ index 0078f4db1ba2ad3cd8a4df620c156b01c5c9184f..8f050c94cb74055fcb13bd49c6a6e77d
    runId: string;
    requesterSessionKey: string;
    requesterSessionId: string;
-@@ -32,6 +34,15 @@ export type FollowupSuccessor = {
+@@ -21,6 +24,8 @@ export type FollowupRequest = {
+   targetAgentId: string;
+   custody: FollowupCustody;
+   requesterAuthority?: FollowupRequesterAuthority | undefined;
++  /** Exact original requester cohort, separate from this followup's own child work. */
++  completeRequesterFinal?: (delivery: SubagentAnnounceDeliveryResult) => Promise<void>;
+   completion?: FollowupCompletionOwner;
+ };
+ export type FollowupCohort = { entries: readonly SubagentRunRecord[]; generation: number };
+@@ -32,6 +37,15 @@ export type FollowupSuccessor = {
  };
  
  export type FollowupSettlement = { kind: "yielded" } | { kind: "terminal"; reply: FollowupReply };
@@ -79242,12 +80485,243 @@ index 0078f4db1ba2ad3cd8a4df620c156b01c5c9184f..8f050c94cb74055fcb13bd49c6a6e77d
  /** Logical result custody outlives each physical execution and its projections. */
  export interface FollowupCompletionOwner {
    readonly request: FollowupRequest;
-@@ -58,4 +69,5 @@ export interface FollowupCompletionOwner {
+@@ -58,4 +72,5 @@ export interface FollowupCompletionOwner {
    take(timeoutMs?: number): Promise<FollowupReply | undefined>;
    replaceCohortEntry(previous: SubagentRunRecord, next: SubagentRunRecord): void;
    close(error?: unknown): void;
 +  offerInPlace?(offer: FollowupInPlaceOffer): FollowupInPlaceReceipt;
  }
+diff --git a/src/agents/subagents/completion/subagent-completion-admission.requester-final.test.ts b/src/agents/subagents/completion/subagent-completion-admission.requester-final.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5d9fff501bb4a5ea8697e5ef7e135cbcd6d841c7
+--- /dev/null
++++ b/src/agents/subagents/completion/subagent-completion-admission.requester-final.test.ts
+@@ -0,0 +1,225 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../../../test/helpers/temp-dir.js";
++import { resolvePreferredOpenClawTmpDir } from "../../../infra/tmp-openclaw-dir.js";
++import { createDeferredCore } from "../../../shared/deferred.js";
++import {
++  closeOpenClawStateDatabaseAsync,
++  closeOpenClawStateDatabaseForTest,
++  openOpenClawStateDatabase,
++  type OpenClawStateDatabase,
++} from "../../../state/openclaw-state-db.js";
++import { subagentRuns } from "../registry/subagent-registry-memory.js";
++import {
++  getPendingWakeCommit,
++  retryPendingWakeCommit,
++} from "../registry/subagent-registry-requester-wake-commit.js";
++import { loadSubagentRegistryFromSqlite } from "../registry/subagent-registry.store.sqlite.js";
++import {
++  records,
++  requesterWakeDriver,
++  admitCompletionFixtureDatabase,
++  seedSubagentCompletionDelivery,
++  seedSubagentCompletionOwner,
++} from "./subagent-completion-admission.test-helpers.js";
++
++const tempDirs = useAutoCleanupTempDirTracker(afterEach);
++vi.mock("../registry/subagent-registry.js", () => ({ resumeSubagentRun: vi.fn() }));
++
++describe("persisted requester final custody", () => {
++  let database: OpenClawStateDatabase;
++  beforeEach(async () => {
++    const tempDir = tempDirs.make("openclaw-requester-final-", resolvePreferredOpenClawTmpDir());
++    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
++    database = openOpenClawStateDatabase();
++    await admitCompletionFixtureDatabase();
++  });
++  afterEach(async () => {
++    await closeOpenClawStateDatabaseAsync();
++    subagentRuns.clear();
++    closeOpenClawStateDatabaseForTest();
++    vi.unstubAllEnvs();
++  });
++  const persistOwner = (input: ReturnType<typeof records>) =>
++    seedSubagentCompletionOwner({ subagent: input.subagent, databaseOptions: { database } });
++
++  it.each(["pending", "in_progress"] as const)(
++    "persists a canonical pre-yield final over %s private deliveries without a later wake",
++    async (status) => {
++      const inputs = [records(), records()];
++      inputs[1]!.subagent.runId = "second-child";
++      inputs[1]!.subagent.childSessionKey = "agent:main:subagent:second-child";
++      for (const input of inputs) {
++        Object.assign(input.subagent, {
++          taskRunId: input.subagent.runId,
++          requesterTurnRunId: "original-turn",
++          requesterTurnYielded: true,
++          completionTarget: "parent",
++          completionRequesterSessionId: "original-session",
++          completionRequesterLifecycleRevision: "original-incarnation",
++          cleanupCompletedAt: Date.now(),
++          delivery: { status },
++        });
++        persistOwner(input);
++      }
++      const driver = requesterWakeDriver(inputs);
++      const complete = driver.controller.captureRequesterVisibleFinalDelivery({
++        requesterTurnRunId: "original-turn",
++        requesterAgentId: "main",
++        requesterSessionKey: inputs[0]!.subagent.requesterSessionKey,
++        sourceSessionKey: inputs[0]!.subagent.childSessionKey,
++        assertCurrent() {},
++      })!;
++      try {
++        await complete({ delivered: true, path: "direct", requesterVisibleFinalDelivered: true });
++        const committed = loadSubagentRegistryFromSqlite();
++        expect(committed.get(inputs[0]!.subagent.runId)?.delivery?.requesterVisibleFinal).toEqual({
++          requesterTurnRunId: "original-turn",
++          batchRunIds: inputs.map(({ subagent }) => subagent.runId).toSorted(),
++        });
++        expect(
++          inputs.every(
++            ({ subagent }) => committed.get(subagent.runId)?.delivery?.status === "delivered",
++          ),
++        ).toBe(true);
++        await driver.controller.settleRequesterTurnAfterSessionSpawns({
++          requesterTurnRunId: "original-turn",
++          requesterAgentId: "main",
++          requesterSessionKey: inputs[0]!.subagent.requesterSessionKey,
++          requesterYielded: true,
++          acceptedSessionSpawns: inputs.map(({ subagent }) => ({
++            runId: subagent.runId,
++            childSessionKey: subagent.childSessionKey,
++            expectsCompletionMessage: true,
++            completionTarget: "parent" as const,
++          })),
++        });
++        const yielded = loadSubagentRegistryFromSqlite();
++        for (const { subagent } of inputs) {
++          const current = yielded.get(subagent.runId)!;
++          expect(current.requesterTurnRunId).toBeUndefined();
++          expect(current.requesterSettleWake).toBeUndefined();
++          expect(
++            getPendingWakeCommit(driver.controller, subagentRuns.get(subagent.runId)!),
++          ).toBeUndefined();
++        }
++        expect(driver.wake).not.toHaveBeenCalled();
++      } finally {
++        driver.controller.clearScheduledResumeTimers();
++      }
++    },
++  );
++
++  it.each([
++    { binding: "current", status: "pending" },
++    { binding: "current", status: "in_progress" },
++    { binding: "current", status: "suspended" },
++    { binding: "another original turn", status: "pending" },
++  ] as const)(
++    "retains a followup final through native publication failure ($binding, $status)",
++    async ({ binding, status }) => {
++      vi.useFakeTimers({ toFake: ["Date"] });
++      const inputs = [records(), records()];
++      inputs[1]!.subagent.runId = "second-child";
++      inputs[1]!.subagent.childSessionKey = "agent:main:subagent:second-child";
++      for (const input of inputs) {
++        Object.assign(input.subagent, {
++          taskRunId: input.subagent.runId,
++          requesterTurnRunId: "original-turn",
++          requesterTurnYielded: true,
++          completionTarget: "parent",
++          completionRequesterSessionId: "original-session",
++          completionRequesterLifecycleRevision: "original-incarnation",
++          cleanupCompletedAt: Date.now(),
++          delivery: { status, ...(status === "suspended" ? { suspendedReason: "expiry" } : {}) },
++        });
++        persistOwner(input);
++      }
++      const driver = requesterWakeDriver(inputs);
++      const queued = createDeferredCore<Parameters<NonNullable<typeof driver.wake>>[0]>();
++      const resume = createDeferredCore();
++      const clearPendingLifecycleError = vi.spyOn(
++        driver.controller.options,
++        "clearPendingLifecycleError",
++      );
++      driver.wake.mockImplementation(async (params) => {
++        queued.resolve(params);
++        await resume.promise;
++        return false;
++      });
++      const assertCurrent = vi.fn();
++      const complete = driver.controller.captureRequesterVisibleFinalDelivery({
++        requesterTurnRunId: "original-turn",
++        requesterAgentId: "main",
++        requesterSessionKey: inputs[0]!.subagent.requesterSessionKey,
++        sourceSessionKey: inputs[0]!.subagent.childSessionKey,
++        assertCurrent,
++      })!;
++      try {
++        await driver.controller.settleRequesterTurnAfterSessionSpawns({
++          requesterTurnRunId: "original-turn",
++          requesterAgentId: "main",
++          requesterSessionKey: inputs[0]!.subagent.requesterSessionKey,
++          requesterYielded: true,
++          acceptedSessionSpawns: inputs.map(({ subagent }) => ({
++            runId: subagent.runId,
++            childSessionKey: subagent.childSessionKey,
++            expectsCompletionMessage: true,
++            completionTarget: "parent" as const,
++          })),
++        });
++        const wake = await queued.promise;
++        database.db.exec(
++          "CREATE TRIGGER reject_final BEFORE UPDATE ON subagent_runs WHEN json_extract(NEW.payload_json, '$.parentCompletion.requesterSettleWake') IS NULL BEGIN SELECT RAISE(ABORT, 'final persistence unavailable'); END",
++        );
++        await complete({ delivered: true, path: "direct", requesterVisibleFinalDelivered: true });
++        expect(wake.isSourceCurrent()).toBe(false);
++        const current = subagentRuns.get(inputs[0]!.subagent.runId)!;
++        const pending = getPendingWakeCommit(driver.controller, current)!;
++        expect(pending).toBeDefined();
++        expect(
++          loadSubagentRegistryFromSqlite().get(current.runId)?.requesterSettleWake,
++        ).toBeDefined();
++        assertCurrent.mockImplementation(() => {
++          throw new Error("followup custody released");
++        });
++        database.db.exec("DROP TRIGGER reject_final");
++        if (binding !== "current") {
++          const changed = loadSubagentRegistryFromSqlite().get(current.runId)!;
++          changed.requesterSettleWake!.requesterTurnRunId = "replacement-turn";
++          seedSubagentCompletionDelivery({ subagent: changed, databaseOptions: { database } });
++        }
++        vi.setSystemTime(pending.nextAttemptAt + 1);
++        const retry = retryPendingWakeCommit(driver.controller, pending);
++        if (binding === "current") {
++          await retry;
++        } else {
++          await expect(retry).rejects.toThrow("Requester wake lost its current commit episode");
++        }
++        const stored = loadSubagentRegistryFromSqlite();
++        if (binding === "current") {
++          expect(
++            inputs.every(({ subagent }) => !stored.get(subagent.runId)?.requesterSettleWake),
++          ).toBe(true);
++          expect(clearPendingLifecycleError).toHaveBeenCalledWith(current.runId);
++          expect(
++            inputs.every(
++              ({ subagent }) => stored.get(subagent.runId)?.delivery?.status === "delivered",
++            ),
++          ).toBe(true);
++          expect(getPendingWakeCommit(driver.controller, current)).toBeUndefined();
++          expect(driver.wake).toHaveBeenCalledOnce();
++        } else {
++          expect(stored.get(current.runId)?.requesterSettleWake?.requesterTurnRunId).toBe(
++            "replacement-turn",
++          );
++          expect(stored.get(inputs[1]!.subagent.runId)?.requesterSettleWake).toBeDefined();
++        }
++      } finally {
++        resume.resolve();
++        driver.controller.clearScheduledResumeTimers();
++        clearPendingLifecycleError.mockRestore();
++        vi.useRealTimers();
++      }
++    },
++  );
++});
 diff --git a/src/agents/subagents/completion/subagent-completion-instructions.ts b/src/agents/subagents/completion/subagent-completion-instructions.ts
 index 728a34e399020efe07a62c147dcf73c6705295d7..569725864aa347f8a55a9273ac6ae4a767e5340e 100644
 --- a/src/agents/subagents/completion/subagent-completion-instructions.ts
@@ -79258,8 +80732,53 @@ index 728a34e399020efe07a62c147dcf73c6705295d7..569725864aa347f8a55a9273ac6ae4a7
 +  "This completion ends one child run, not necessarily the original user request. Compare the result with the requested outcome before deciding the task is done. Reviews, failed checks, and other in-scope fixable blockers require continued work or a follow-up in the kept child session.";
  
  export const SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION = `Process this result privately. ${SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION} Your final reply stays internal: briefly record the reviewed outcome and any remaining work. If the original request requires a user-facing update, send it through an available, permitted messaging tool; do not rely on your final reply for delivery. Avoid repeating an update that was already delivered.`;
+diff --git a/src/agents/subagents/completion/subagent-completion-mutation.kernel.ts b/src/agents/subagents/completion/subagent-completion-mutation.kernel.ts
+index 326f1fa6fb786b90af969fb85f0576d572ae9dfb..7b4dedb045ce1d015c109724d8faa06180e85724 100644
+--- a/src/agents/subagents/completion/subagent-completion-mutation.kernel.ts
++++ b/src/agents/subagents/completion/subagent-completion-mutation.kernel.ts
+@@ -13,12 +13,12 @@ import { resolveEventSessionKey } from "../../../routing/session-key.js";
+ import type { OpenClawStateDatabase } from "../../../state/openclaw-state-db-contract.js";
+ import {
+   consumeSubagentPauseNotice,
++  acknowledgeSubagentFinalDelivery,
+   completeRequesterSettleWakeState,
+   transitionRequesterSettleWakeState,
+   ensureCompletionState,
+   ensureDeliveryState,
+   isCompletedRequesterDeliveryBlocked,
+-  clearSubagentPendingDelivery,
+   loadPendingFinalDeliveryPayload,
+   markRequesterSettleWakePending,
+ } from "../registry/subagent-delivery-state.js";
+@@ -277,6 +277,8 @@ function readRequesterBatch(
+       !subagent.requesterSettleWake ||
+       subagent.requesterSessionKey !== first?.requesterSessionKey ||
+       subagent.requesterAgentId !== first?.requesterAgentId ||
++      subagent.requesterSettleWake.requesterTurnRunId !==
++        first?.requesterSettleWake?.requesterTurnRunId ||
+       subagent.requesterSettleWake.rearmGeneration !==
+         first?.requesterSettleWake?.rearmGeneration ||
+       subagent.requesterSettleWake.batchRunIds?.toSorted().join("\0") !== cohort
+@@ -343,16 +345,7 @@ function settleRequesterBatch(
+           acknowledgeExpiredDelivery)
+       ) {
+         if (params.outcome.delivered) {
+-          const delivery = ensureDeliveryState(subagent);
+-          const deliveredAt = params.outcome.deliveredAt ?? now;
+-          Object.assign(delivery, {
+-            status: "delivered",
+-            disposition: "delivered",
+-            deliveredAt,
+-            announcedAt: deliveredAt,
+-            lastDropReason: undefined,
+-          });
+-          clearSubagentPendingDelivery(subagent);
++          acknowledgeSubagentFinalDelivery(subagent, params.outcome.deliveredAt ?? now);
+         } else {
+           const blocked = prepareBlockedSubagentCompletion(
+             database,
 diff --git a/src/agents/subagents/registry/subagent-delivery-state.test.ts b/src/agents/subagents/registry/subagent-delivery-state.test.ts
-index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbca2f0d594 100644
+index 3540096636d1ae57e365041a3409caaa10dbf3b3..baf47904db9be8e272624521cfb4fc96fa494a4b 100644
 --- a/src/agents/subagents/registry/subagent-delivery-state.test.ts
 +++ b/src/agents/subagents/registry/subagent-delivery-state.test.ts
 @@ -1,6 +1,15 @@
@@ -79279,7 +80798,7 @@ index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbc
  import type { SubagentRunRecord } from "./subagent-registry.types.js";
  
  function baseRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
-@@ -23,6 +32,52 @@ function baseRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord
+@@ -23,6 +32,55 @@ function baseRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord
  }
  
  describe("normalizeSubagentRunState", () => {
@@ -79293,6 +80812,7 @@ index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbc
 +    };
 +    const entry = baseRun({
 +      requesterSettleWake: {
++        requesterTurnRunId: "original-requester-turn",
 +        status: "pending",
 +        attemptCount: 2,
 +        replayCount: 1,
@@ -79311,6 +80831,7 @@ index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbc
 +    expect(attempt.progressMessage).toEqual(progressMessage);
 +    transitionRequesterSettleWakeState(entry, attempt);
 +    expect(entry.requesterSettleWake).toMatchObject({
++      requesterTurnRunId: "original-requester-turn",
 +      status: "dispatching",
 +      attemptCount: 1,
 +      progressOperationId: "requester-turn",
@@ -79322,6 +80843,7 @@ index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbc
 +      progressMessage: { ...progressMessage, messageId: "unconfirmed-stale-card" },
 +    });
 +    expect(entry.requesterSettleWake?.progressMessage).toEqual(progressMessage);
++    expect(entry.requesterSettleWake?.requesterTurnRunId).toBe("original-requester-turn");
 +    const unconfirmed = baseRun();
 +    transitionRequesterSettleWakeState(unconfirmed, attempt);
 +    expect(unconfirmed.requesterSettleWake?.progressMessage).toBeUndefined();
@@ -79333,10 +80855,52 @@ index 3540096636d1ae57e365041a3409caaa10dbf3b3..31a0712d5a0ebe5adf0ffd7476496bbc
      const entry = normalizeSubagentRunState(
        baseRun({ taskRunId: "  run-task-owner  ", generation: 2 }),
 diff --git a/src/agents/subagents/registry/subagent-delivery-state.ts b/src/agents/subagents/registry/subagent-delivery-state.ts
-index 136a29e2e7b84400fe5d6b4e36ed4b5f80dda58a..5e0df950487175e48b9a68d2c1955214c1743d40 100644
+index 136a29e2e7b84400fe5d6b4e36ed4b5f80dda58a..967fc3738cf3bac8cac92dcf55b1d59088c4f714 100644
 --- a/src/agents/subagents/registry/subagent-delivery-state.ts
 +++ b/src/agents/subagents/registry/subagent-delivery-state.ts
-@@ -330,10 +330,18 @@ export function transitionRequesterSettleWakeState(
+@@ -300,6 +300,41 @@ export const clearSubagentPendingDelivery = (entry: SubagentRunRecord) => {
+   }
+ };
+ 
++/** Eligibility for the existing native requester-final acknowledgement transition. */
++export function canAcknowledgeSubagentFinalDelivery(
++  entry: Pick<SubagentRunRecord, "delivery">,
++): boolean {
++  const status = entry.delivery?.status ?? "pending";
++  return (
++    status === "delivered" ||
++    status === "pending" ||
++    status === "in_progress" ||
++    (status === "suspended" && entry.delivery?.suspendedReason === "expiry")
++  );
++}
++
++/** Caller supplies a canonical final receipt and owns the exact terminal requester cohort. */
++export function acknowledgeSubagentFinalDelivery(
++  entry: SubagentRunRecord,
++  deliveredAt: number,
++): void {
++  if (!canAcknowledgeSubagentFinalDelivery(entry)) {
++    throw new Error("Subagent final cannot acknowledge this delivery state");
++  }
++  const delivery = ensureDeliveryState(entry);
++  if (delivery.status === "delivered") {
++    return;
++  }
++  Object.assign(delivery, {
++    status: "delivered",
++    disposition: "delivered",
++    deliveredAt,
++    announcedAt: deliveredAt,
++    lastDropReason: undefined,
++  });
++  clearSubagentPendingDelivery(entry);
++}
++
+ export const loadPendingFinalDeliveryPayload = (
+   entry: SubagentRunRecord,
+ ): PendingFinalDeliveryPayload => {
+@@ -330,10 +365,21 @@ export function transitionRequesterSettleWakeState(
    entry: SubagentRunRecord,
    state: RequesterSettleWakeBatchState,
  ): void {
@@ -79346,6 +80910,9 @@ index 136a29e2e7b84400fe5d6b4e36ed4b5f80dda58a..5e0df950487175e48b9a68d2c1955214
    entry.requesterSettleWake = {
 -    ...state,
 +    ...batchState,
++    ...(entry.requesterSettleWake?.requesterTurnRunId
++      ? { requesterTurnRunId: entry.requesterSettleWake.requesterTurnRunId }
++      : {}),
      ...(entry.requesterSettleWake?.progressOperationId
 -      ? { progressOperationId: entry.requesterSettleWake.progressOperationId }
 +      ? {
@@ -79641,6 +81208,199 @@ index 0000000000000000000000000000000000000000..883e51c72175ab54546add2acc8e4dac
 +    return this.completeItem(itemId);
 +  }
 +}
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-context.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-context.ts
+index 0b9a96921f728461434cd64bf07500da731b676f..9aabda04a1ca0b2276e7f7213f2255d4c2cd41f5 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-context.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-context.ts
+@@ -94,6 +94,12 @@ export type PendingRequesterSettleWakeCommit = {
+     pending: PendingRequesterSettleWakeCommit,
+   ): boolean | Promise<boolean>;
+   generation: number | undefined;
++  /** An already delivered source final may persist while its requester still owns the turn. */
++  acceptedFinal?: boolean;
++  acceptedFinalSettlement?: Promise<void>;
++  finishAcceptedFinal?: () => void;
++  /** A later exact final waits for this owner's already admitted write, including retries. */
++  retainedFinal?: () => Promise<void>;
+   committedWake?: RequesterWakeCommittedWrite;
+   /** One current retry caller must resume the published transition. */
+   needsWakeContinuation?: boolean;
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-controller.test-support.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-controller.test-support.ts
+index d6fb9a0b1309e7431ac75e37d4bb0e10e64db0bf..27ac01c03696ca8c979b4bb46efac29166962d6c 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-controller.test-support.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-controller.test-support.ts
+@@ -290,6 +290,11 @@ export function createLifecycleControllerFixture(
+     controller.settleRequesterTurnAfterSessionSpawns,
+   );
+   controller.cancelRequesterSettleWake = runOwned(controller.cancelRequesterSettleWake);
++  const captureRequesterFinal = controller.captureRequesterVisibleFinalDelivery;
++  controller.captureRequesterVisibleFinalDelivery = (request) => {
++    const complete = runOwned(captureRequesterFinal)(request);
++    return complete && runOwned(complete);
++  };
+   controller.resumeAncestorCleanup = runOwned(controller.resumeAncestorCleanup);
+   controller.resumeRequesterSettleWake = runOwned(controller.resumeRequesterSettleWake);
+   controller.runRequesterSettleWake = runOwned(controller.runRequesterSettleWake);
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-delivery.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-delivery.ts
+index 4f55bd2a63c17c51374d4c6d6303384ef793db4a..a39cacd99fcfbd5003b5d17235ebf0a3d8c3d7a4 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-delivery.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-delivery.ts
+@@ -38,6 +38,35 @@ import { hasSubagentRunEnded } from "./subagent-run-liveness.js";
+ 
+ const DELIVERY_MIRROR_HISTORY_MAX_CHARS = 128 * 1024;
+ 
++/** One successful source final can fulfil only its complete original requester cohort. */
++export function recordRequesterVisibleFinal(
++  entry: SubagentRunRecord,
++  requesterTurnRunId: string,
++  runs: ReadonlyMap<string, SubagentRunRecord>,
++): void {
++  const siblings = [...runs.values()].filter(
++    (sibling) =>
++      sibling.requesterSessionKey === entry.requesterSessionKey &&
++      sibling.requesterAgentId === entry.requesterAgentId &&
++      sibling.requesterTurnRunId === requesterTurnRunId &&
++      sibling.expectsCompletionMessage === true,
++  );
++  if (
++    siblings.some((sibling) => isSameSubagentRunOwner(sibling, entry)) &&
++    siblings.every(
++      (sibling) =>
++        sibling.execution.status === "terminal" &&
++        hasSubagentRunEnded(sibling) &&
++        (isSameSubagentRunOwner(sibling, entry) || sibling.delivery?.status === "delivered"),
++    )
++  ) {
++    ensureDeliveryState(entry).requesterVisibleFinal = {
++      requesterTurnRunId,
++      batchRunIds: siblings.map((sibling) => sibling.runId).toSorted(),
++    };
++  }
++}
++
+ export const formatAnnounceDeliveryError = (delivery: SubagentAnnounceDeliveryResult): string => {
+   const errors = [
+     delivery.error,
+@@ -85,27 +114,7 @@ export const recordAnnounceDeliveryResult = (
+       delivery.requesterVisibleFinalDelivered &&
+       requesterTurnRunId
+     ) {
+-      const siblings = [...(runs?.values() ?? [])].filter(
+-        (sibling) =>
+-          sibling.requesterSessionKey === entry.requesterSessionKey &&
+-          sibling.requesterTurnRunId === requesterTurnRunId &&
+-          sibling.expectsCompletionMessage === true,
+-      );
+-      if (
+-        siblings.some((sibling) => isSameSubagentRunOwner(sibling, entry)) &&
+-        siblings.every(
+-          (sibling) =>
+-            sibling.execution.status === "terminal" &&
+-            hasSubagentRunEnded(sibling) &&
+-            (isSameSubagentRunOwner(sibling, entry) || sibling.delivery?.status === "delivered"),
+-        )
+-      ) {
+-        // Bind final evidence before yielding; direct delivery is fenced once a yield is frozen.
+-        deliveryState.requesterVisibleFinal = {
+-          requesterTurnRunId,
+-          batchRunIds: siblings.map((sibling) => sibling.runId).toSorted(),
+-        };
+-      }
++      recordRequesterVisibleFinal(entry, requesterTurnRunId, runs ?? new Map());
+     }
+   }
+   deliveryState.disposition =
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
+index 84c3ec905d12075cf8bcaa1980f2c7b8b791ed4a..0670b53d64cb78a9c667f42b1c4b0485bf90c962 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
+@@ -30,12 +30,12 @@ import {
+   getPendingWakeCommit,
+   hasRequesterWakeOwner,
+   retryPendingWakeCommit,
+-  shouldReportRequesterSettleWakeFailure,
+ } from "./subagent-registry-requester-wake-commit.js";
+ import {
+   commitRequesterSettleWakeMutation,
+   isCurrentRequesterSettleWakeBatch,
+ } from "./subagent-registry-requester-wake-mutation.js";
++import { shouldReportRequesterWakeFailure } from "./subagent-registry-requester-wake-reporting.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ import { captureRequesterSettleRunIdentity } from "./subagent-requester-settle-identity.js";
+ import {
+@@ -45,7 +45,7 @@ import {
+ } from "./subagent-run-generation.js";
+ import { hasSubagentRunEnded } from "./subagent-run-liveness.js";
+ 
+-const completeRequesterSettleWakeBatch = async (
++export const completeRequesterSettleWakeBatch = async (
+   context: SubagentLifecycleWakeContext,
+   entries: readonly SubagentRunRecord[],
+   stateContext: OpenClawStateWorkerContext,
+@@ -256,7 +256,7 @@ function retainScheduledRequesterSettleWakeTimer(
+   return false;
+ }
+ 
+-function scheduleRequesterSettleWakeRetry(
++export function scheduleRequesterSettleWakeRetry(
+   context: SubagentLifecycleWakeContext,
+   runId: string,
+   entry: SubagentRunRecord,
+@@ -326,6 +326,7 @@ export function scheduleRequesterSettleWake(
+       (entry.execution.status === "running" || !hasSubagentRunEnded(entry))) ||
+     !requesterSessionKey ||
+     (!pendingAtAdmission?.initialTransfer &&
++      !pendingAtAdmission?.acceptedFinal &&
+       entry.requesterTurnRunId &&
+       entry.expectsCompletionMessage === true) ||
+     context.scheduledRequesterSettleWakeRuns.has(getSubagentRunRuntimeKey(entry))
+@@ -345,10 +346,15 @@ export function scheduleRequesterSettleWake(
+     try {
+       assertSubagentRegistryWriteSourceCurrent(stateContext);
+       entry = currentSubagentRunOrObserved(params.runs, entry);
++      const pending = getPendingWakeCommit(context, entry);
+       return (
++        (!(pending?.acceptedFinal || pending?.retainedFinal) || pending === pendingAtAdmission) &&
+         !context.cancelledRequesterSettleWakeRuns.has(getSubagentRunRuntimeKey(entry)) &&
+         isDeepStrictEqual(captureRequesterSettleRunIdentity(entry), admittedIdentity) &&
+-        hasRequesterWakeOwner(context, entry)
++        hasRetainedWake(context, entry) &&
++        (pendingAtAdmission !== undefined ||
++          (entry.requesterSettleWake?.rearmGeneration === admittedWake?.rearmGeneration &&
++            entry.requesterSettleWake?.requesterTurnRunId === admittedWake?.requesterTurnRunId))
+       );
+     } catch {
+       return false;
+@@ -501,7 +507,7 @@ export function scheduleRequesterSettleWake(
+               return;
+             }
+             const safeError = buildSafeLifecycleErrorMeta(error);
+-            if (shouldReportRequesterSettleWakeFailure(context, entry, safeError)) {
++            if (shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), safeError)) {
+               params.warn("requester settle wake failed", {
+                 error: safeError,
+                 runId: maskLifecycleIdentifier(runId, "run"),
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.ts
+index 3fc10884f4f5b6522ae6378d697cfee59b52b63d..3f1f619dd969c55dc505cde9d11b23b6c075ecb4 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle.ts
+@@ -48,6 +48,7 @@ import {
+   SubagentRegistryMutationRejectedError,
+ } from "./subagent-registry-persistence.js";
+ import { subscribeSubagentRunChanges } from "./subagent-registry-publication.js";
++import { captureRequesterVisibleFinalDelivery } from "./subagent-registry-requester-final.js";
+ import { commitRequesterInitialTransfer } from "./subagent-registry-requester-wake-commit.js";
+ import {
+   adoptSubagentRunForRequesterTurnInRuns,
+@@ -680,4 +681,8 @@ export class SubagentLifecycleController {
+ 
+   startSubagentAnnounceCleanupFlow = (runId: string, entry: SubagentRunRecord): boolean =>
+     startSubagentAnnounceCleanupFlow(this, runId, entry);
++
++  captureRequesterVisibleFinalDelivery = (
++    params: Parameters<typeof captureRequesterVisibleFinalDelivery>[1],
++  ) => captureRequesterVisibleFinalDelivery(this, params);
+ }
 diff --git a/src/agents/subagents/registry/subagent-registry-progress-projection.ts b/src/agents/subagents/registry/subagent-registry-progress-projection.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..df7a2a4d4f936bbee323de11e9801ab290e7fee8
@@ -83393,8 +85153,1141 @@ index 12e5baf4e6a76e4f2cd91d871cb71b6411cf2942..21aa457eed1c4fe3db78872b19716d83
              assertCurrent: custody.assertCurrent,
            }),
          ),
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-final.test.ts b/src/agents/subagents/registry/subagent-registry-requester-final.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1af6b3a927fa74f48f5e0a27257badf2af26e3e1
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-requester-final.test.ts
+@@ -0,0 +1,318 @@
++import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
++import { createDeferredCore } from "../../../shared/deferred.js";
++import { mockBlockedCompletionDeliveryOwner } from "./subagent-registry-lifecycle-completion.test-support.js";
++import {
++  createRunEntry,
++  mutateLifecycleRun,
++  type LifecycleFixtureWrite,
++  createLifecycleControllerFixture,
++} from "./subagent-registry-lifecycle-controller.test-support.js";
++import type { SubagentLifecycleOptions } from "./subagent-registry-lifecycle.js";
++type RequesterSettleWakeParams = Parameters<
++  SubagentLifecycleOptions["maybeWakeRequesterAfterAllChildrenSettled"]
++>[0];
++
++const completionDeliveryMocks = vi.hoisted(() => ({
++  blockSubagentCompletionDelivery: vi.fn(),
++  settleRequesterCompletionBatch: vi.fn(),
++  mutateRequesterSettleWakeBatch: vi.fn(),
++  ownersByEntry: new Map<object, Pick<SubagentLifecycleOptions, "runs">>(),
++}));
++
++vi.mock("../completion/subagent-completion-admission.store.js", async (importOriginal) => ({
++  ...(await importOriginal<
++    typeof import("../completion/subagent-completion-admission.store.js")
++  >()),
++  blockSubagentCompletionDelivery: completionDeliveryMocks.blockSubagentCompletionDelivery,
++  settleRequesterCompletionBatch: completionDeliveryMocks.settleRequesterCompletionBatch,
++  mutateRequesterSettleWakeBatch: completionDeliveryMocks.mutateRequesterSettleWakeBatch,
++}));
++
++function createLifecycleController(params: Parameters<typeof createLifecycleControllerFixture>[0]) {
++  return createLifecycleControllerFixture(params, {
++    callGateway: async () => {
++      throw new Error("Requester final policy must not call the Gateway");
++    },
++    cleanupBrowserSessionsForLifecycleEnd: async () => {},
++    ownersByEntry: completionDeliveryMocks.ownersByEntry,
++  });
++}
++
++describe("followup final retires only its original requester cohort", () => {
++  beforeEach(() => {
++    mockBlockedCompletionDeliveryOwner(completionDeliveryMocks);
++  });
++
++  function setup(
++    beforeWrite?: (write: LifecycleFixtureWrite) => void | Promise<void>,
++    status: "delivered" | "pending" | "in_progress" = "delivered",
++  ) {
++    const entries = ["first", "second"].map((name) =>
++      createRunEntry({
++        runId: `run-${name}`,
++        childSessionKey: `agent:main:subagent:${name}`,
++        requesterAgentId: "main",
++        requesterTurnRunId: "original-turn",
++        requesterTurnYielded: true,
++        expectsCompletionMessage: true,
++        completionTarget: "parent",
++        completionRequesterSessionId: "original-session",
++        completionRequesterLifecycleRevision: "original-incarnation",
++        endedAt: 4_000,
++        outcome: { status: "ok" },
++        cleanupCompletedAt: 4_100,
++        delivery: { status, ...(status === "delivered" ? { deliveredAt: 4_100 } : {}) },
++      }),
++    );
++    const runs = new Map(entries.map((entry) => [entry.runId, entry]));
++    const queued = createDeferredCore<RequesterSettleWakeParams>();
++    const resume = createDeferredCore();
++    const wake = vi.fn(async (params: RequesterSettleWakeParams) => {
++      queued.resolve(params);
++      await resume.promise;
++      return false;
++    });
++    const clearPendingLifecycleError = vi.fn();
++    const controller = createLifecycleController({
++      clearPendingLifecycleError,
++      beforeWrite,
++      entry: entries[0]!,
++      runs,
++      maybeWakeRequesterAfterAllChildrenSettled: wake,
++    });
++    onTestFinished(() => resume.resolve());
++    const assertCurrent = vi.fn();
++    const complete = controller.captureRequesterVisibleFinalDelivery({
++      requesterTurnRunId: "original-turn",
++      requesterSessionKey: entries[0]!.requesterSessionKey,
++      requesterAgentId: "main",
++      sourceSessionKey: entries[0]!.childSessionKey,
++      assertCurrent,
++    });
++    expect(complete).toBeTypeOf("function");
++    const yieldRequester = () =>
++      controller.settleRequesterTurnAfterSessionSpawns({
++        requesterTurnRunId: "original-turn",
++        requesterSessionKey: entries[0]!.requesterSessionKey,
++        requesterAgentId: "main",
++        requesterYielded: true,
++        acceptedSessionSpawns: entries.map((entry) => ({
++          runId: entry.runId,
++          childSessionKey: entry.childSessionKey,
++          expectsCompletionMessage: true,
++          completionTarget: "parent" as const,
++        })),
++      });
++    return {
++      entries,
++      runs,
++      controller,
++      queued,
++      resume,
++      wake,
++      assertCurrent,
++      clearPendingLifecycleError,
++      complete: complete!,
++      yieldRequester,
++    };
++  }
++
++  const final = {
++    delivered: true,
++    path: "direct",
++    requesterVisibleFinalDelivered: true,
++  } as const;
++
++  it.each(["delivered", "pending", "in_progress"] as const)(
++    "credits a %s final before yield without dispatching a second requester turn",
++    async (status) => {
++      const state = setup(undefined, status);
++      await state.complete(final);
++      expect(state.runs.get("run-first")?.delivery?.requesterVisibleFinal).toEqual({
++        requesterTurnRunId: "original-turn",
++        batchRunIds: ["run-first", "run-second"],
++      });
++      await state.yieldRequester();
++      expect(state.wake).not.toHaveBeenCalled();
++      expect([...state.runs.values()].every((entry) => !entry.requesterSettleWake)).toBe(true);
++    },
++  );
++
++  it.each(["before final callback", "during final publication"])(
++    "does not credit a later child registered %s",
++    async (registration) => {
++      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
++      onTestFinished(() => {
++        vi.useRealTimers();
++      });
++      const writing = createDeferredCore();
++      const resumeWrite = createDeferredCore();
++      const state = setup(async ({ postimages }) => {
++        if (
++          registration === "during final publication" &&
++          [...postimages.values()].some((entry) => entry?.delivery?.requesterVisibleFinal)
++        ) {
++          writing.resolve();
++          await resumeWrite.promise;
++        }
++      });
++      const later = createRunEntry({
++        runId: "run-later",
++        childSessionKey: "agent:main:subagent:later",
++        requesterAgentId: "main",
++        requesterTurnRunId: "original-turn",
++        requesterTurnYielded: true,
++        expectsCompletionMessage: true,
++        completionTarget: "parent",
++        endedAt: 4_000,
++        cleanupCompletedAt: 4_100,
++        delivery: { status: "delivered", deliveredAt: 4_100 },
++      });
++      if (registration === "before final callback") {
++        state.runs.set(later.runId, later);
++      }
++      const completing = state.complete(final);
++      if (registration === "during final publication") {
++        await writing.promise;
++        state.runs.set(later.runId, later);
++        resumeWrite.resolve();
++      }
++      await completing;
++      await vi.advanceTimersByTimeAsync(31_000);
++      expect(state.runs.get("run-first")?.delivery?.requesterVisibleFinal).toBeUndefined();
++      expect(state.runs.get(later.runId)?.requesterTurnRunId).toBe("original-turn");
++    },
++  );
++
++  it("retires an already queued settle after the final without replaying its answer", async () => {
++    const state = setup();
++    await state.yieldRequester();
++    const queued = await state.queued.promise;
++    expect(queued.isSourceCurrent()).toBe(true);
++    state.clearPendingLifecycleError.mockClear();
++    expect(state.runs.get("run-first")?.requesterSettleWake?.requesterTurnRunId).toBe(
++      "original-turn",
++    );
++    await state.complete(final);
++    expect(queued.isSourceCurrent()).toBe(false);
++    expect([...state.runs.values()].every((entry) => !entry.requesterSettleWake)).toBe(true);
++    expect([...state.runs.values()].every((entry) => entry.delivery?.status === "delivered")).toBe(
++      true,
++    );
++    expect(state.clearPendingLifecycleError).toHaveBeenCalledWith("run-first");
++    expect(state.clearPendingLifecycleError).toHaveBeenCalledWith("run-second");
++    state.resume.resolve();
++  });
++
++  it("retains a pre-yield final across a failed write and waits for it before yielding", async () => {
++    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
++    onTestFinished(() => {
++      vi.useRealTimers();
++    });
++    let rejectMarker = true;
++    const state = setup(({ postimages }) => {
++      if (
++        rejectMarker &&
++        [...postimages.values()].some((entry) => entry?.delivery?.requesterVisibleFinal)
++      ) {
++        throw new Error("storage briefly unavailable");
++      }
++    }, "pending");
++    await state.complete(final);
++    expect(state.runs.get("run-first")?.delivery?.requesterVisibleFinal).toBeUndefined();
++    state.assertCurrent.mockImplementation(() => {
++      throw new Error("followup custody released");
++    });
++    const yielding = state.yieldRequester();
++    let yielded = false;
++    void yielding.then(() => {
++      yielded = true;
++    });
++    await Promise.resolve();
++    expect(yielded).toBe(false);
++    rejectMarker = false;
++    await vi.advanceTimersByTimeAsync(31_000);
++    await yielding;
++    expect(state.wake).not.toHaveBeenCalled();
++    expect([...state.runs.values()].every((entry) => !entry.requesterSettleWake)).toBe(true);
++  });
++
++  it.each(["pending", "in_progress"] as const)(
++    "settles the released cohort's %s private delivery after its canonical final",
++    async (status) => {
++      const state = setup();
++      await state.yieldRequester();
++      const queued = await state.queued.promise;
++      for (const entry of state.entries) {
++        await mutateLifecycleRun(entry, (draft) => {
++          draft.delivery = { status };
++        });
++      }
++      await state.complete(final);
++      expect(queued.isSourceCurrent()).toBe(false);
++      expect([...state.runs.values()].every((entry) => !entry.requesterSettleWake)).toBe(true);
++      expect(
++        [...state.runs.values()].every((entry) => entry.delivery?.status === "delivered"),
++      ).toBe(true);
++      state.resume.resolve();
++    },
++  );
++
++  it.each(["error", "timeout", "unknown"] as const)(
++    "accepts a canonical final that reports a terminal child %s",
++    async (status) => {
++      const state = setup();
++      await state.yieldRequester();
++      const queued = await state.queued.promise;
++      await mutateLifecycleRun(state.entries[1]!, (draft) => {
++        draft.execution.outcome = { status };
++      });
++      await state.complete(final);
++      expect(queued.isSourceCurrent()).toBe(false);
++      expect([...state.runs.values()].every((entry) => !entry.requesterSettleWake)).toBe(true);
++      state.resume.resolve();
++    },
++  );
++
++  it.each([
++    "pending final",
++    "pending child",
++    "permanent delivery failure",
++    "new cohort",
++    "new turn",
++    "new session",
++    "new owner",
++  ])("preserves the owed reply for %s", async (change) => {
++    const state = setup();
++    await state.yieldRequester();
++    await state.queued.promise;
++    if (change !== "pending final") {
++      await mutateLifecycleRun(state.entries[1]!, (draft) => {
++        if (change === "pending child") {
++          draft.execution.status = "running";
++          draft.execution.endedAt = undefined;
++        }
++        if (change === "permanent delivery failure") {
++          draft.delivery = { status: "suspended", suspendedReason: "permanent_failure" };
++        }
++        if (change === "new cohort") {
++          draft.requesterSettleWake!.batchRunIds!.push("another-child");
++        }
++        if (change === "new turn") {
++          draft.requesterSettleWake!.requesterTurnRunId = "another-turn";
++        }
++        if (change === "new session") {
++          draft.completionRequesterSessionId = "replacement-session";
++        }
++        if (change === "new owner") {
++          draft.generation = (draft.generation ?? 0) + 1;
++        }
++      });
++    }
++    await state.complete(change === "pending final" ? { delivered: false, path: "direct" } : final);
++    expect([...state.runs.values()].every((entry) => entry.requesterSettleWake !== undefined)).toBe(
++      true,
++    );
++    state.resume.resolve();
++  });
++});
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-final.ts b/src/agents/subagents/registry/subagent-registry-requester-final.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8fb11577213793197dbc16060273e51d4b03da87
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-requester-final.ts
+@@ -0,0 +1,196 @@
++import { isDeepStrictEqual } from "node:util";
++import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
++import type { SubagentAnnounceDeliveryResult } from "../announce/subagent-announce-dispatch.js";
++import {
++  acknowledgeSubagentFinalDelivery,
++  canAcknowledgeSubagentFinalDelivery,
++} from "./subagent-delivery-state.js";
++import type { SubagentLifecycleWakeContext } from "./subagent-registry-lifecycle-context.js";
++import { recordRequesterVisibleFinal } from "./subagent-registry-lifecycle-delivery.js";
++import { buildSafeLifecycleErrorMeta } from "./subagent-registry-lifecycle-log.js";
++import {
++  completeRequesterSettleWakeBatch,
++  scheduleRequesterSettleWakeRetry,
++} from "./subagent-registry-lifecycle-wake.js";
++import {
++  assertSubagentRegistryWriteSourceCurrent,
++  mutateSubagentRuns,
++  SubagentRegistryMutationRejectedError,
++} from "./subagent-registry-persistence.js";
++import {
++  commitRequesterWake,
++  getPendingWakeCommit,
++} from "./subagent-registry-requester-wake-commit.js";
++import type { SubagentRunRecord } from "./subagent-registry.types.js";
++import { copySubagentRunRuntimeOwner, isSameSubagentRunOwner } from "./subagent-run-generation.js";
++import { hasSubagentRunEnded } from "./subagent-run-liveness.js";
++
++/** Retain an admitted followup's original cohort; a later final cannot settle another turn. */
++export function captureRequesterVisibleFinalDelivery(
++  context: SubagentLifecycleWakeContext,
++  params: {
++    requesterTurnRunId: string;
++    requesterSessionKey: string;
++    requesterAgentId: string;
++    sourceSessionKey: string;
++    assertCurrent(): void;
++  },
++): ((delivery: SubagentAnnounceDeliveryResult) => Promise<void>) | undefined {
++  params.assertCurrent();
++  const isOriginalRequesterChild = (entry: SubagentRunRecord) =>
++    entry.requesterTurnRunId === params.requesterTurnRunId &&
++    entry.requesterSessionKey === params.requesterSessionKey &&
++    entry.requesterAgentId === params.requesterAgentId &&
++    entry.expectsCompletionMessage === true;
++  const captured = [...context.options.runs.values()]
++    .filter(isOriginalRequesterChild)
++    .map((entry) => copySubagentRunRuntimeOwner(entry, structuredClone(entry)));
++  if (!captured.some((entry) => entry.childSessionKey === params.sourceSessionKey)) {
++    return undefined;
++  }
++  const ids = captured.map((entry) => entry.runId).toSorted();
++  const currentBatch = (
++    claimed = false,
++    runs: ReadonlyMap<string, SubagentRunRecord> = context.options.runs,
++  ): SubagentRunRecord[] | undefined => {
++    if (
++      claimed &&
++      !isDeepStrictEqual(
++        [...runs.values()]
++          .filter(isOriginalRequesterChild)
++          .map((entry) => entry.runId)
++          .toSorted(),
++        ids,
++      )
++    ) {
++      return undefined;
++    }
++    const batch: SubagentRunRecord[] = [];
++    for (const expected of captured) {
++      const current = runs.get(expected.runId);
++      const wake = current?.requesterSettleWake;
++      if (
++        !current ||
++        !isSameSubagentRunOwner(current, expected) ||
++        context.newerGenerationOwnsSession(current) ||
++        current.requesterSessionKey !== params.requesterSessionKey ||
++        current.requesterAgentId !== params.requesterAgentId ||
++        current.requesterStorePath !== expected.requesterStorePath ||
++        current.completionRequesterSessionId !== expected.completionRequesterSessionId ||
++        current.completionRequesterLifecycleRevision !==
++          expected.completionRequesterLifecycleRevision ||
++        (claimed
++          ? current.requesterTurnRunId !== params.requesterTurnRunId
++          : current.requesterTurnRunId !== undefined ||
++            wake?.requesterTurnRunId !== params.requesterTurnRunId ||
++            !isDeepStrictEqual(wake.batchRunIds?.toSorted(), ids) ||
++            (batch.length > 0 &&
++              wake.rearmGeneration !== batch[0]?.requesterSettleWake?.rearmGeneration)) ||
++        current.execution.status !== "terminal" ||
++        !hasSubagentRunEnded(current) ||
++        current.pauseReason !== undefined ||
++        !canAcknowledgeSubagentFinalDelivery(current) ||
++        current.cleanupCompletedAt === undefined ||
++        current.suppressCompletionDelivery === true ||
++        current.killIntent ||
++        current.killReconciliation
++      ) {
++        return undefined;
++      }
++      batch.push(current);
++    }
++    return batch;
++  };
++  return async (delivery) => {
++    if (!delivery.delivered || delivery.requesterVisibleFinalDelivered !== true) {
++      return;
++    }
++    params.assertCurrent();
++    const outcome = { ...delivery, deliveredAt: delivery.deliveredAt ?? Date.now() };
++    const stateContext = captureOpenClawStateWorkerContext();
++    const batch = currentBatch(true) ?? currentBatch();
++    if (!batch) {
++      return;
++    }
++    const generation = batch[0]?.requesterSettleWake?.rearmGeneration;
++    try {
++      await commitRequesterWake(
++        context,
++        batch,
++        generation,
++        async (members, pending) => {
++          if (!pending.committedWake) {
++            // The successful external effect was accepted above. Publication and
++            // retries now belong to these lifecycle rows, not borrowed tool custody.
++            const claimed = currentBatch(true);
++            if (claimed) {
++              await mutateSubagentRuns(
++                ids,
++                (rows) => {
++                  const claimedMembers = currentBatch(true, rows);
++                  if (!claimedMembers) {
++                    return { value: false };
++                  }
++                  const postimages = new Map(
++                    claimedMembers.map((entry) => {
++                      const next = copySubagentRunRuntimeOwner(entry, structuredClone(entry));
++                      acknowledgeSubagentFinalDelivery(next, outcome.deliveredAt);
++                      return [next.runId, next] as const;
++                    }),
++                  );
++                  const source = [...postimages.values()].find(
++                    (entry) => entry.childSessionKey === params.sourceSessionKey,
++                  )!;
++                  recordRequesterVisibleFinal(source, params.requesterTurnRunId, postimages);
++                  return { value: true, postimages };
++                },
++                {
++                  runs: context.options.runs,
++                  context: stateContext,
++                  assertCurrent: () => {
++                    assertSubagentRegistryWriteSourceCurrent(stateContext);
++                    if (!currentBatch(true)) {
++                      throw new SubagentRegistryMutationRejectedError(
++                        "Requester final cohort changed",
++                      );
++                    }
++                  },
++                },
++              );
++              pending.adoptPublished(members);
++              return true;
++            }
++            if (!currentBatch()) {
++              return true;
++            }
++          }
++          return completeRequesterSettleWakeBatch(
++            context,
++            members,
++            stateContext,
++            pending,
++            pending.generation,
++            outcome,
++          );
++        },
++        true,
++        false,
++        stateContext,
++        true,
++      );
++    } catch (error) {
++      if (!batch.some((entry) => getPendingWakeCommit(context, entry))) {
++        throw error;
++      }
++      context.options.warn("requester final persistence deferred to lifecycle retry", {
++        error: buildSafeLifecycleErrorMeta(error),
++      });
++    } finally {
++      for (const entry of batch) {
++        if (getPendingWakeCommit(context, entry)) {
++          scheduleRequesterSettleWakeRetry(context, entry.runId, entry, stateContext);
++        }
++      }
++    }
++  };
++}
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-wake-commit.test.ts b/src/agents/subagents/registry/subagent-registry-requester-wake-commit.test.ts
+index a009c9344b2b9bd1e0b24ad73fb2907f04bf7439..116bc879b385207cfc2e0f0dc21cca07c5f8d053 100644
+--- a/src/agents/subagents/registry/subagent-registry-requester-wake-commit.test.ts
++++ b/src/agents/subagents/registry/subagent-registry-requester-wake-commit.test.ts
+@@ -8,8 +8,8 @@ import {
+   commitRequesterWake,
+   getPendingWakeCommit,
+   retryPendingWakeCommit,
+-  shouldReportRequesterSettleWakeFailure,
+ } from "./subagent-registry-requester-wake-commit.js";
++import { shouldReportRequesterWakeFailure } from "./subagent-registry-requester-wake-reporting.js";
+ import { createRequesterWakeContextFixture } from "./subagent-registry-requester-yield.test-support.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ import { copySubagentRunRuntimeOwner } from "./subagent-run-generation.js";
+@@ -143,6 +143,65 @@ describe("requester settle wake commit retry", () => {
+     },
+   );
+ 
++  it.each([1, 2])("retains one final through %i failed predecessor commits", async (count) => {
++    const entries = Array.from({ length: count }, (_, index) =>
++      makeRetainedChild(`child-${index}`),
++    );
++    const { context } = makeContext(entries);
++    const commits = entries.map(() => vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true));
++    for (const [index, entry] of entries.entries()) {
++      await commitRequesterWake(context, [entry], undefined, commits[index]!, true);
++    }
++    const final = vi.fn(() => true);
++    await commitRequesterWake(context, entries, undefined, final, true, false, undefined, true);
++    expect(final).not.toHaveBeenCalled();
++    for (const [index, entry] of entries.entries()) {
++      const pending = getPendingWakeCommit(context, entry)!;
++      vi.setSystemTime(pending.nextAttemptAt + 1);
++      await retryPendingWakeCommit(context, pending);
++      expect(final).toHaveBeenCalledTimes(index === entries.length - 1 ? 1 : 0);
++    }
++    expect(entries.every((entry) => !getPendingWakeCommit(context, entry))).toBe(true);
++  });
++
++  it("retains a final when the predecessor it awaits throws before publication", async () => {
++    const entry = makeRetainedChild();
++    const { context } = makeContext([entry]);
++    const entered = createDeferredCore();
++    const failedWrite = createDeferredCore<boolean>();
++    const predecessor = vi
++      .fn()
++      .mockImplementationOnce(() => {
++        entered.resolve();
++        return failedWrite.promise;
++      })
++      .mockResolvedValue(true);
++    const first = commitRequesterWake(context, [entry], undefined, predecessor, true);
++    const rejected = expect(first).rejects.toThrow("native write failed");
++    await entered.promise;
++    const final = vi.fn(() => true);
++    const accepted = commitRequesterWake(
++      context,
++      [entry],
++      undefined,
++      final,
++      true,
++      false,
++      undefined,
++      true,
++    );
++    failedWrite.reject(new Error("native write failed"));
++    await rejected;
++    await accepted;
++    expect(final).not.toHaveBeenCalled();
++    const pending = getPendingWakeCommit(context, entry)!;
++    expect(pending.retainedFinal).toBeTypeOf("function");
++    vi.setSystemTime(pending.nextAttemptAt + 1);
++    await retryPendingWakeCommit(context, pending);
++    expect(final).toHaveBeenCalledOnce();
++    expect(getPendingWakeCommit(context, entry)).toBeUndefined();
++  });
++
+   it("keeps a recovered Gateway wake separate from the retired callback", async () => {
+     const entry = makeRetainedChild();
+     const { context } = makeContext([entry]);
+@@ -238,7 +297,7 @@ describe("requester settle wake commit retry", () => {
+     // Regression for recovery latency: widening this ceiling to cut log volume
+     // also postpones the write that would have succeeded, so the requester waits
+     // out the whole gap after storage comes back. Reported volume is bounded by
+-    // shouldReportRequesterSettleWakeFailure instead.
++    // shouldReportRequesterWakeFailure instead.
+     // https://github.com/openclaw/openclaw/issues/154252
+     const entry = makeRetainedChild();
+     const { context } = makeContext([entry]);
+@@ -449,7 +508,9 @@ describe("requester settle wake failure reporting", () => {
+ 
+     // Nothing is pending, so this failure has nothing to repeat.
+     expect(getPendingWakeCommit(context, entry)).toBeUndefined();
+-    expect(shouldReportRequesterSettleWakeFailure(context, entry, READONLY_FAULT)).toBe(true);
++    expect(
++      shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), READONLY_FAULT),
++    ).toBe(true);
+   });
+ 
+   it("spends a fixed budget on an identical repeat, then withholds it", async () => {
+@@ -461,7 +522,9 @@ describe("requester settle wake failure reporting", () => {
+ 
+     const decisions: boolean[] = [];
+     for (let attempt = 0; attempt < 40; attempt += 1) {
+-      decisions.push(shouldReportRequesterSettleWakeFailure(context, entry, READONLY_FAULT));
++      decisions.push(
++        shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), READONLY_FAULT),
++      );
+     }
+ 
+     expect(decisions.filter(Boolean)).toHaveLength(5);
+@@ -472,12 +535,16 @@ describe("requester settle wake failure reporting", () => {
+   it("always reports a fault other than the one already reported", async () => {
+     const { context, entry } = await openEpisode();
+     for (let attempt = 0; attempt < 20; attempt += 1) {
+-      shouldReportRequesterSettleWakeFailure(context, entry, READONLY_FAULT);
++      shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), READONLY_FAULT);
+     }
+ 
+     // A new failure mode must never sit hidden behind an older one.
+-    expect(shouldReportRequesterSettleWakeFailure(context, entry, MALFORMED_FAULT)).toBe(true);
+-    expect(shouldReportRequesterSettleWakeFailure(context, entry, MALFORMED_FAULT)).toBe(true);
++    expect(
++      shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), MALFORMED_FAULT),
++    ).toBe(true);
++    expect(
++      shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), MALFORMED_FAULT),
++    ).toBe(true);
+   });
+ 
+   it("accounts for the reports it withheld once the episode recovers", async () => {
+@@ -485,7 +552,7 @@ describe("requester settle wake failure reporting", () => {
+     let writable = false;
+     const { context, entry, warn } = await openEpisode(() => writable);
+     for (let attempt = 0; attempt < 30; attempt += 1) {
+-      shouldReportRequesterSettleWakeFailure(context, entry, READONLY_FAULT);
++      shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), READONLY_FAULT);
+     }
+ 
+     writable = true;
+@@ -502,7 +569,7 @@ describe("requester settle wake failure reporting", () => {
+   it("stays silent about recovery when it withheld nothing", async () => {
+     let writable = false;
+     const { context, entry, warn } = await openEpisode(() => writable);
+-    shouldReportRequesterSettleWakeFailure(context, entry, READONLY_FAULT);
++    shouldReportRequesterWakeFailure(getPendingWakeCommit(context, entry), READONLY_FAULT);
+ 
+     writable = true;
+     await sweep(context, entry, 5);
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-wake-commit.ts b/src/agents/subagents/registry/subagent-registry-requester-wake-commit.ts
+index 41c0ce6b7144a726611f255589556da6f41e451c..4b7af55863a48b77b305f1c8ffa59265b7fa11ae 100644
+--- a/src/agents/subagents/registry/subagent-registry-requester-wake-commit.ts
++++ b/src/agents/subagents/registry/subagent-registry-requester-wake-commit.ts
+@@ -5,7 +5,6 @@ import type {
+   PendingRequesterSettleWakeCommit,
+   SubagentLifecycleWakeContext,
+ } from "./subagent-registry-lifecycle-context.js";
+-import { maskLifecycleIdentifier } from "./subagent-registry-lifecycle-log.js";
+ import {
+   assertSubagentRegistryWriteSourceCurrent,
+   mutateSubagentRuns,
+@@ -13,6 +12,10 @@ import {
+   SubagentRegistryCommitReceiptError,
+   SubagentRegistryWriteError,
+ } from "./subagent-registry-persistence.js";
++import {
++  deferRequesterWakeCommit,
++  reportRequesterWakeCommitRecovery,
++} from "./subagent-registry-requester-wake-reporting.js";
+ import type { RequesterInitialTransfer } from "./subagent-registry-requester-yield.js";
+ import { rowToSubagentRunRecord } from "./subagent-registry.store.codec.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+@@ -28,14 +31,6 @@ import {
+   isSameSubagentRunOwner,
+ } from "./subagent-run-generation.js";
+ 
+-// Reporting thresholds never change the durable obligation or retry cadence.
+-const REQUESTER_SETTLE_WAKE_COMMIT_SUSTAINED_FAILURES = 5;
+-
+-const REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS = 120_000;
+-
+-// Count emitted reports separately: not every reported rejection advances commit failures.
+-const REQUESTER_SETTLE_WAKE_FAILURE_REPORT_BUDGET = 5;
+-
+ type WakeCommitFailureRetention =
+   | boolean
+   | ((error: unknown, pending: PendingRequesterSettleWakeCommit) => boolean);
+@@ -62,42 +57,8 @@ function clearPendingWakeCommit(
+     return;
+   }
+   releasePendingWakeKeys(context, pending);
+-  const suppressed = pending.suppressedFailureLogs ?? 0;
+-  if (suppressed > 0) {
+-    // Closing the episode accounts for what it withheld, so a log that went
+-    // quiet is never read as an outage that stopped happening.
+-    context.options.warn("requester settle wake commit recovered", {
+-      failures: pending.failures,
+-      suppressedFailureLogs: suppressed,
+-      runIds: pending.entries.map((entry) => maskLifecycleIdentifier(entry.runId, "run")),
+-    });
+-  }
+-}
+-
+-/** Bound identical reports per episode; a different failure always gets a fresh budget. */
+-export function shouldReportRequesterSettleWakeFailure(
+-  context: SubagentLifecycleWakeContext,
+-  entry: SubagentRunRecord,
+-  error: Record<string, string>,
+-): boolean {
+-  const pending = getPendingWakeCommit(context, entry);
+-  if (!pending) {
+-    // No retry episode owns this failure, so nothing is going to repeat it.
+-    return true;
+-  }
+-  const signature = `${error.name ?? ""}\u0000${error.message ?? ""}`;
+-  if (pending.reportedFailureSignature !== signature) {
+-    pending.reportedFailureSignature = signature;
+-    pending.reportedFailureLogs = 1;
+-    return true;
+-  }
+-  const reported = pending.reportedFailureLogs ?? 0;
+-  if (reported < REQUESTER_SETTLE_WAKE_FAILURE_REPORT_BUDGET) {
+-    pending.reportedFailureLogs = reported + 1;
+-    return true;
+-  }
+-  pending.suppressedFailureLogs = (pending.suppressedFailureLogs ?? 0) + 1;
+-  return false;
++  pending.finishAcceptedFinal?.();
++  reportRequesterWakeCommitRecovery(context, pending);
+ }
+ 
+ export function getPendingWakeCommit(
+@@ -116,6 +77,15 @@ export function getPendingWakeCommit(
+     // A changed row relinquishes only its own obligation. Surviving siblings
+     // must keep the known outcome or replay budget ahead of transport.
+     context.pendingRequesterSettleWakeCommits.delete(getSubagentRunRuntimeKey(entry));
++    if (
++      pending.entries.every(
++        (member) =>
++          context.pendingRequesterSettleWakeCommits.get(getSubagentRunRuntimeKey(member)) !==
++          pending,
++      )
++    ) {
++      pending.finishAcceptedFinal?.();
++    }
+     return undefined;
+   }
+   return pending;
+@@ -150,6 +120,11 @@ export function commitRequesterInitialTransfer(
+   const existing = params.entries.map((entry) => getPendingWakeCommit(context, entry));
+   const existingEpisode = existing.find((pending) => pending !== undefined);
+   if (existingEpisode) {
++    if (existingEpisode.acceptedFinalSettlement) {
++      return existingEpisode.acceptedFinalSettlement.then(() =>
++        commitRequesterInitialTransfer(context, params),
++      );
++    }
+     if (
+       existingEpisode.initialTransfer?.kind === params.kind &&
+       existingEpisode.entries.length === params.entries.length &&
+@@ -447,32 +422,6 @@ export function commitRequesterInitialTransfer(
+   return completion.promise;
+ }
+ 
+-function deferWakeCommit(
+-  context: SubagentLifecycleWakeContext,
+-  pending: PendingRequesterSettleWakeCommit,
+-): void {
+-  pending.failures += 1;
+-  if (
+-    pending.failures >= REQUESTER_SETTLE_WAKE_COMMIT_SUSTAINED_FAILURES &&
+-    !pending.sustainedFailureReported
+-  ) {
+-    // Explain why per-attempt reporting will go quiet while retries continue.
+-    pending.sustainedFailureReported = true;
+-    context.options.warn("requester settle wake commit still failing; retries continue", {
+-      failures: pending.failures,
+-      retryIntervalMs: REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS,
+-      suppressingIdenticalFailures: true,
+-      runIds: pending.entries.map((entry) => maskLifecycleIdentifier(entry.runId, "run")),
+-    });
+-  }
+-  // Always a future deadline. The lifecycle owner arms its retry timer from
+-  // this value and skips any deadline that is not ahead of now, so a deadline
+-  // in the past would strand the pending wake until restart.
+-  pending.nextAttemptAt =
+-    Date.now() +
+-    Math.min(REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS, 30_000 * 2 ** (pending.failures - 1));
+-}
+-
+ // Persistence failure cannot erase a transport result or its replay budget. Keep
+ // that exact operation in the lifecycle owner, ahead of every later transport.
+ export function commitRequesterWake(
+@@ -483,6 +432,7 @@ export function commitRequesterWake(
+   retainOnFailure: WakeCommitFailureRetention,
+   retryWholeBatch = false,
+   stateContext?: OpenClawStateWorkerContext,
++  acceptedFinal = false,
+ ): Promise<void> {
+   const predecessors = new Set(
+     observedEntries.flatMap((entry) => {
+@@ -492,32 +442,87 @@ export function commitRequesterWake(
+   );
+   if (predecessors.size > 0) {
+     return Promise.all(
+-      [...predecessors].map(
+-        (pending) => pending.initialTransfer?.completion ?? pending.inFlight ?? Promise.resolve(),
+-      ),
+-    ).then(async () => {
+-      // A failed episode retains its observed delivery and replay budget ahead of new work.
+-      if (observedEntries.some((entry) => getPendingWakeCommit(context, entry))) {
+-        return;
+-      }
+-      await commitRequesterWake(
+-        context,
+-        observedEntries,
+-        generation,
+-        commit,
+-        retainOnFailure,
+-        retryWholeBatch,
+-        stateContext,
+-      );
+-    });
++      [...predecessors].map(async (pending) => {
++        await pending.initialTransfer?.completion;
++        await pending.inFlight;
++      }),
++    )
++      .catch((error: unknown) => {
++        if (
++          !acceptedFinal ||
++          !observedEntries.some((entry) => getPendingWakeCommit(context, entry))
++        ) {
++          throw error;
++        }
++        // A rejected predecessor still owns its retry. Retain the accepted final
++        // below exactly as for a nonterminal write result.
++      })
++      .then(async () => {
++        // A failed episode retains its observed delivery and replay budget ahead of new work.
++        const remaining = new Set(
++          observedEntries.flatMap((entry) => {
++            const pending = getPendingWakeCommit(context, entry);
++            return pending ? [pending] : [];
++          }),
++        );
++        if (remaining.size > 0) {
++          if (acceptedFinal) {
++            // Keep the receipt in the predecessor's existing lifecycle owner; its
++            // publication retry must run before this final can retire the cohort.
++            let resumed = false;
++            const resumeFinal = async () => {
++              if (
++                resumed ||
++                observedEntries.some((entry) => getPendingWakeCommit(context, entry))
++              ) {
++                return;
++              }
++              resumed = true;
++              await commitRequesterWake(
++                context,
++                observedEntries,
++                generation,
++                commit,
++                retainOnFailure,
++                retryWholeBatch,
++                stateContext,
++                true,
++              );
++            };
++            for (const pending of remaining) {
++              pending.retainedFinal ??= resumeFinal;
++            }
++          }
++          return;
++        }
++        await commitRequesterWake(
++          context,
++          observedEntries,
++          generation,
++          commit,
++          retainOnFailure,
++          retryWholeBatch,
++          stateContext,
++          acceptedFinal,
++        );
++      });
++  }
++  const entries = acceptedFinal
++    ? observedEntries.map((entry) => currentSubagentRunOrObserved(context.options.runs, entry))
++    : observedEntries;
++  if (entries.some((entry, index) => !isSameSubagentRunOwner(entry, observedEntries[index]))) {
++    return Promise.resolve();
+   }
+-  const entries = observedEntries;
++  const currentGeneration = acceptedFinal
++    ? entries[0]?.requesterSettleWake?.rearmGeneration
++    : generation;
++  const finalSettlement = acceptedFinal ? createDeferredCore() : undefined;
+   const owners = new Map(
+     entries.map((entry) => [
+       getSubagentRunRuntimeKey(entry),
+       {
+         identity: captureRequesterSettleRunIdentity(entry),
+-        generation,
++        generation: currentGeneration,
+         progress: captureRequesterSettleWakeProgress(entry),
+         killIntent: entry.killIntent,
+         killReconciliation: entry.killReconciliation,
+@@ -532,7 +537,10 @@ export function commitRequesterWake(
+   >();
+   const pending: PendingRequesterSettleWakeCommit = {
+     entries: [...entries],
+-    generation,
++    generation: currentGeneration,
++    acceptedFinal,
++    acceptedFinalSettlement: finalSettlement?.promise,
++    finishAcceptedFinal: finalSettlement?.resolve,
+     stateContext,
+     commit,
+     retryWholeBatch,
+@@ -616,7 +624,7 @@ export function commitRequesterWake(
+         }
+       }
+       const wake = live.requesterSettleWake;
+-      if (owner.published && !owner.progress) {
++      if ((owner.published || acceptedFinal) && !owner.progress) {
+         return wake === undefined;
+       }
+       return Boolean(
+@@ -665,47 +673,56 @@ function runPendingWakeCommit(
+     const shouldRetain =
+       typeof retainOnFailure === "function" ? retainOnFailure(error, pending) : retainOnFailure;
+     if (shouldRetain) {
+-      deferWakeCommit(context, pending);
++      deferRequesterWakeCommit(context, pending);
+     } else {
+       clearPendingWakeCommit(context, pending);
+     }
+   };
+-  const operation = Promise.resolve()
+-    .then(async () => {
+-      try {
+-        const members = pending.entries.filter(
+-          (member) => getPendingWakeCommit(context, member) === pending,
+-        );
+-        // A no-wake decision belongs to its complete original batch. Storage may
+-        // retry it unchanged; changed membership needs a fresh sweeper decision.
+-        if (
+-          pending.retryWholeBatch &&
+-          !pending.committedWake &&
+-          members.length !== pending.entries.length
+-        ) {
+-          clearPendingWakeCommit(context, pending);
+-          return;
+-        }
+-        // First admission requires every captured owner, including child-generation
+-        // authority. Only retries can retain a known outcome for surviving members.
+-        if (attempt === "initial" && members.length !== pending.entries.length) {
+-          retain();
+-          return;
+-        }
+-        if (members.length === 0 || (await pending.commit(members, pending))) {
+-          clearPendingWakeCommit(context, pending);
+-        } else {
+-          // A temporarily closed Gateway cannot erase already observed delivery.
+-          retain();
+-        }
+-      } catch (error) {
+-        retain(error);
+-        throw error;
++  const operation = Promise.resolve().then(async () => {
++    try {
++      const members = pending.entries.filter(
++        (member) => getPendingWakeCommit(context, member) === pending,
++      );
++      // A no-wake decision belongs to its complete original batch. Storage may
++      // retry it unchanged; changed membership needs a fresh sweeper decision.
++      if (
++        pending.retryWholeBatch &&
++        !pending.committedWake &&
++        members.length !== pending.entries.length
++      ) {
++        clearPendingWakeCommit(context, pending);
++        return;
++      }
++      // First admission requires every captured owner, including child-generation
++      // authority. Only retries can retain a known outcome for surviving members.
++      if (attempt === "initial" && members.length !== pending.entries.length) {
++        retain();
++        return;
++      }
++      if (members.length === 0 || (await pending.commit(members, pending))) {
++        clearPendingWakeCommit(context, pending);
++      } else {
++        // A temporarily closed Gateway cannot erase already observed delivery.
++        retain();
+       }
+-    })
+-    .finally(() => {
++    } catch (error) {
++      retain(error);
++      throw error;
++    } finally {
+       pending.inFlight = undefined;
+-    });
++      if (
++        pending.entries.every(
++          (entry) =>
++            context.pendingRequesterSettleWakeCommits.get(getSubagentRunRuntimeKey(entry)) !==
++            pending,
++        )
++      ) {
++        const retainedFinal = pending.retainedFinal;
++        pending.retainedFinal = undefined;
++        await retainedFinal?.();
++      }
++    }
++  });
+   pending.inFlight = operation;
+   return operation;
+ }
+diff --git a/src/agents/subagents/registry/subagent-registry-requester-wake-reporting.ts b/src/agents/subagents/registry/subagent-registry-requester-wake-reporting.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4330e139ad1ac4c09b1b302f255fb8b998d0e77c
+--- /dev/null
++++ b/src/agents/subagents/registry/subagent-registry-requester-wake-reporting.ts
+@@ -0,0 +1,79 @@
++import type {
++  PendingRequesterSettleWakeCommit,
++  SubagentLifecycleWakeContext,
++} from "./subagent-registry-lifecycle-context.js";
++import { maskLifecycleIdentifier } from "./subagent-registry-lifecycle-log.js";
++
++// Reporting thresholds never change the durable obligation or retry cadence.
++const REQUESTER_SETTLE_WAKE_COMMIT_SUSTAINED_FAILURES = 5;
++
++const REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS = 120_000;
++
++// Count emitted reports separately: not every reported rejection advances commit failures.
++const REQUESTER_SETTLE_WAKE_FAILURE_REPORT_BUDGET = 5;
++
++/** Bound identical reports per episode; a different failure always gets a fresh budget. */
++export function shouldReportRequesterWakeFailure(
++  pending: PendingRequesterSettleWakeCommit | undefined,
++  error: Record<string, string>,
++): boolean {
++  if (!pending) {
++    // No retry episode owns this failure, so nothing is going to repeat it.
++    return true;
++  }
++  const signature = `${error.name ?? ""}\u0000${error.message ?? ""}`;
++  if (pending.reportedFailureSignature !== signature) {
++    pending.reportedFailureSignature = signature;
++    pending.reportedFailureLogs = 1;
++    return true;
++  }
++  const reported = pending.reportedFailureLogs ?? 0;
++  if (reported < REQUESTER_SETTLE_WAKE_FAILURE_REPORT_BUDGET) {
++    pending.reportedFailureLogs = reported + 1;
++    return true;
++  }
++  pending.suppressedFailureLogs = (pending.suppressedFailureLogs ?? 0) + 1;
++  return false;
++}
++
++export function deferRequesterWakeCommit(
++  context: SubagentLifecycleWakeContext,
++  pending: PendingRequesterSettleWakeCommit,
++): void {
++  pending.failures += 1;
++  if (
++    pending.failures >= REQUESTER_SETTLE_WAKE_COMMIT_SUSTAINED_FAILURES &&
++    !pending.sustainedFailureReported
++  ) {
++    // Explain why per-attempt reporting will go quiet while retries continue.
++    pending.sustainedFailureReported = true;
++    context.options.warn("requester settle wake commit still failing; retries continue", {
++      failures: pending.failures,
++      retryIntervalMs: REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS,
++      suppressingIdenticalFailures: true,
++      runIds: pending.entries.map((entry) => maskLifecycleIdentifier(entry.runId, "run")),
++    });
++  }
++  // Always a future deadline. The lifecycle owner arms its retry timer from
++  // this value and skips any deadline that is not ahead of now, so a deadline
++  // in the past would strand the pending wake until restart.
++  pending.nextAttemptAt =
++    Date.now() +
++    Math.min(REQUESTER_SETTLE_WAKE_COMMIT_MAX_BACKOFF_MS, 30_000 * 2 ** (pending.failures - 1));
++}
++
++export function reportRequesterWakeCommitRecovery(
++  context: SubagentLifecycleWakeContext,
++  pending: PendingRequesterSettleWakeCommit,
++): void {
++  const suppressed = pending.suppressedFailureLogs ?? 0;
++  if (suppressed > 0) {
++    // Closing the episode accounts for what it withheld, so a log that went
++    // quiet is never read as an outage that stopped happening.
++    context.options.warn("requester settle wake commit recovered", {
++      failures: pending.failures,
++      suppressedFailureLogs: suppressed,
++      runIds: pending.entries.map((entry) => maskLifecycleIdentifier(entry.runId, "run")),
++    });
++  }
++}
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
-index 6ffb2af703d328b5ef14885306cee0cb3bdcba10..9d9bb2a84ac61fd92aa9a72c1a97f3fffb317363 100644
+index 6ffb2af703d328b5ef14885306cee0cb3bdcba10..fcf261f8adfdfe2a50f3c84651218df49e7b9401 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.test.ts
 @@ -1,4 +1,5 @@
@@ -83563,8 +86456,16 @@ index 6ffb2af703d328b5ef14885306cee0cb3bdcba10..9d9bb2a84ac61fd92aa9a72c1a97f3ff
    it.each([false, true])(
      "publishes a nested requester's pause with its wake batch (plan rejection: %s)",
      async (rejectPlan) => {
+@@ -622,6 +748,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
+       const batchRunIds = entries.map((entry) => entry.runId).toSorted();
+       for (const entry of entries) {
+         expect(runs.get(entry.runId)!.requesterSettleWake).toEqual({
++          requesterTurnRunId: REQUESTER_TURN,
+           status: "pending",
+           attemptCount: 0,
+           batchRunIds,
 diff --git a/src/agents/subagents/registry/subagent-registry-requester-yield.ts b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
-index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..3e4630882cbba9ad020e341fe0c536ed19c0ba77 100644
+index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..3dc9b1d7ef3c4cbd9ad3eb315601413c879572dc 100644
 --- a/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 +++ b/src/agents/subagents/registry/subagent-registry-requester-yield.ts
 @@ -1,4 +1,7 @@
@@ -83822,7 +86723,15 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..3e4630882cbba9ad020e341fe0c536ed
          for (const entry of entries) {
            const existing = entry.requesterSettleWake;
            const completionEnded = typeof entry.execution.endedAt === "number";
-@@ -529,6 +503,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+@@ -518,6 +492,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+             };
+           }
+           entry.requesterSettleWake = {
++            requesterTurnRunId,
+             ...(existing?.pauseNotice ? { pauseNotice: existing.pauseNotice } : {}),
+             status: "pending",
+             attemptCount: 0,
+@@ -529,6 +504,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
              ...(completionEnded ? { afterRequesterYield: true } : {}),
              rearmGeneration,
              progressOperationId,
@@ -83830,6 +86739,14 @@ index 09f4ad55a6407d9bb1170bbaef9ec4d8733f3932..3e4630882cbba9ad020e341fe0c536ed
              ...(existing?.retireAfterSettle === true || entry.retireAfterRequesterTurn === true
                ? { retireAfterSettle: true }
                : {}),
+@@ -546,6 +522,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
+           if (completionGeneration !== undefined) {
+             const existing = entry.requesterSettleWake;
+             entry.requesterSettleWake = {
++              requesterTurnRunId,
+               ...(existing?.pauseNotice ? { pauseNotice: existing.pauseNotice } : {}),
+               ...(existing?.retireAfterSettle ? { retireAfterSettle: true } : {}),
+               status: "pending",
 diff --git a/src/agents/subagents/registry/subagent-registry-restore.ts b/src/agents/subagents/registry/subagent-registry-restore.ts
 index c177749987d33b2abb4fcff1b4ec4c751555ddf2..48ae1b3210970cb1d4e79ee93c50068e18fbd607 100644
 --- a/src/agents/subagents/registry/subagent-registry-restore.ts
@@ -84383,7 +87300,7 @@ index a2aa3a8c7dc6a4ff8be994d76e700153370f9051..3544091e673eb615bad9df0d4ae4a618
  
      lifecycleHandler?.({
 diff --git a/src/agents/subagents/registry/subagent-registry.ts b/src/agents/subagents/registry/subagent-registry.ts
-index a83262aaac6b868491b8ca69e9614505f0fa79e9..62d4f4aceeee5f7f9ed3d1ad7831604324fbc225 100644
+index a83262aaac6b868491b8ca69e9614505f0fa79e9..74d14131c7df9965516fe2357ed96b756ce3df09 100644
 --- a/src/agents/subagents/registry/subagent-registry.ts
 +++ b/src/agents/subagents/registry/subagent-registry.ts
 @@ -10,7 +10,6 @@ import {
@@ -84513,7 +87430,16 @@ index a83262aaac6b868491b8ca69e9614505f0fa79e9..62d4f4aceeee5f7f9ed3d1ad78316043
  }
  
  const testing = {
-@@ -707,6 +716,7 @@ export const recordSwarmStructuredOutput = publicApi.recordSwarmStructuredOutput
+@@ -686,6 +695,8 @@ export const finalizeInterruptedSubagentRun = completionRuntime.finalizeInterrup
+ export const markSubagentRunTerminated = subagentRunManager.markSubagentRunTerminated;
+ export const cancelSubagentRequesterSettleWake =
+   subagentLifecycleController.cancelRequesterSettleWake;
++export const captureRequesterVisibleFinalDelivery =
++  subagentLifecycleController.captureRequesterVisibleFinalDelivery;
+ 
+ export { prependAgentSteeringPrompt };
+ 
+@@ -707,6 +718,7 @@ export const recordSwarmStructuredOutput = publicApi.recordSwarmStructuredOutput
  export const listSwarmRunsForGroup = publicApi.listSwarmRunsForGroup;
  export const getSwarmRunByLaunchReplayKey = publicApi.getSwarmRunByLaunchReplayKey;
  export const countActiveRunsForSession = publicApi.countActiveRunsForSession;
@@ -84522,7 +87448,7 @@ index a83262aaac6b868491b8ca69e9614505f0fa79e9..62d4f4aceeee5f7f9ed3d1ad78316043
    return subagentRestorer.restoreOnce();
  }
 diff --git a/src/agents/subagents/registry/subagent-registry.types.ts b/src/agents/subagents/registry/subagent-registry.types.ts
-index 58a5864518a784d912c43fc204dae2b23d3afe47..b056aee8de59d715ed84adbc6ee736bec3692bd7 100644
+index 58a5864518a784d912c43fc204dae2b23d3afe47..51352b586b195eedc68e3166dccbc54d80138ef1 100644
 --- a/src/agents/subagents/registry/subagent-registry.types.ts
 +++ b/src/agents/subagents/registry/subagent-registry.types.ts
 @@ -1,3 +1,4 @@
@@ -84530,7 +87456,16 @@ index 58a5864518a784d912c43fc204dae2b23d3afe47..b056aee8de59d715ed84adbc6ee736be
  import type {
    SessionEntryCurrentCheck,
    SessionEntryCurrentFacts,
-@@ -145,6 +146,8 @@ export type RequesterSettleWakeState = {
+@@ -120,6 +121,8 @@ type SwarmQueuedLaunch = {
+ 
+ /** Durable outbox state for the top-level requester settle wake. */
+ export type RequesterSettleWakeState = {
++  /** Original requester turn whose frozen cohort still owes its final. */
++  requesterTurnRunId?: string;
+   /** Pending message-wait notice; consuming it leaves the completion cohort armed. */
+   pauseNotice?: { acknowledgment: string };
+   status: "pending" | "dispatching";
+@@ -145,6 +148,8 @@ export type RequesterSettleWakeState = {
    rearmGeneration?: number;
    /** Reference to the conversation receipt for this presentation, not completion credit. */
    progressOperationId?: string;
@@ -84539,7 +87474,7 @@ index 58a5864518a784d912c43fc204dae2b23d3afe47..b056aee8de59d715ed84adbc6ee736be
    /** Number of times this batch has been deferred due to unsettled descendants. */
    deferralCount?: number;
    lastError?: string | null;
-@@ -206,6 +209,8 @@ export type SubagentRunRecord = Omit<SubagentRunReadRecord, "execution" | "colle
+@@ -206,6 +211,8 @@ export type SubagentRunRecord = Omit<SubagentRunReadRecord, "execution" | "colle
    expectsCompletionMessage?: boolean;
    completionTarget?: "parent";
    completionRequesterSessionId?: string;
@@ -84634,6 +87569,18 @@ index 0000000000000000000000000000000000000000..4633a47c726acb1656f627cf4c04b878
 +  assertCurrent();
 +  return { mcpRequesterScope: scope, mcpRequesterScopeAssertCurrent: assertCurrent };
 +}
+diff --git a/src/agents/subagents/registry/subagent-requester-settle-identity.ts b/src/agents/subagents/registry/subagent-requester-settle-identity.ts
+index 2e0de2430625bee56067a8d68a57b1299743932f..0faaf2169c5b3031f630ec23c7b907520b2e9eb7 100644
+--- a/src/agents/subagents/registry/subagent-requester-settle-identity.ts
++++ b/src/agents/subagents/registry/subagent-requester-settle-identity.ts
+@@ -116,6 +116,7 @@ export function captureRequesterSettleWakeProgress(entry: SubagentRunRecord) {
+   const wake = entry.requesterSettleWake;
+   return (
+     wake && {
++      requesterTurnRunId: wake.requesterTurnRunId,
+       status: wake.status,
+       attemptCount: wake.attemptCount,
+       replayCount: wake.replayCount ?? 0,
 diff --git a/src/agents/subagents/registry/subagent-session-reconciliation.test.ts b/src/agents/subagents/registry/subagent-session-reconciliation.test.ts
 index 63b0010bf16d6b650e260129113e063e0d754083..b6b6dfea0090c1926cf4984a9d1c6ba35cb6155f 100644
 --- a/src/agents/subagents/registry/subagent-session-reconciliation.test.ts
@@ -91816,6 +94763,36 @@ index 0000000000000000000000000000000000000000..e3b23ca54ad805468f6c7e9ca8b91d57
 +    }
 +  }
 +}
+diff --git a/src/agents/tools/sessions-send-followup-custody.ts b/src/agents/tools/sessions-send-followup-custody.ts
+index 7bc7921c6648456f0c9cf26998a4d33500f001aa..85e4f4ec27ed2a7e40cc7486cb503b86128547f0 100644
+--- a/src/agents/tools/sessions-send-followup-custody.ts
++++ b/src/agents/tools/sessions-send-followup-custody.ts
+@@ -164,6 +164,17 @@ export async function prepareSessionsSendFollowup(params: {
+       }
+     });
+     const requesterSessionId = facts[0]!.readCurrent(getRuntimeConfig()).target.entry.sessionId;
++    const completeRequesterFinal = params.requesterTurnRunId
++      ? (
++          await import("../subagents/registry/subagent-registry.js")
++        ).captureRequesterVisibleFinalDelivery({
++          requesterTurnRunId: params.requesterTurnRunId,
++          requesterAgentId: params.requesterAgentId,
++          requesterSessionKey: params.requesterSessionKey,
++          sourceSessionKey: params.targetSessionKey,
++          assertCurrent,
++        })
++      : undefined;
+     if (params.requesterTurnRunId && params.withRequesterAuthority) {
+       const requesterTurnRunId = params.requesterTurnRunId;
+       requesterAuthority = params.withRequesterAuthority(() =>
+@@ -196,6 +207,7 @@ export async function prepareSessionsSendFollowup(params: {
+       requesterSessionKey: params.requesterSessionKey,
+       requesterSessionId,
+       requesterAuthority,
++      completeRequesterFinal,
+       requesterAgentId: params.requesterAgentId,
+       targetSessionKey: params.targetSessionKey,
+       targetAgentId: params.targetAgentId,
 diff --git a/src/agents/tools/sessions-send-followup.ts b/src/agents/tools/sessions-send-followup.ts
 index 6a47bf04fa3e039b677b275c40054e66bdfa6a1f..981b2adb3a4f6d33842e2d36d9ee6dc7db0b4ea4 100644
 --- a/src/agents/tools/sessions-send-followup.ts
@@ -91909,8 +94886,122 @@ index 6a47bf04fa3e039b677b275c40054e66bdfa6a1f..981b2adb3a4f6d33842e2d36d9ee6dc7
          }
          return accepted;
        };
+diff --git a/src/agents/tools/sessions-send-owner-continuation.test.ts b/src/agents/tools/sessions-send-owner-continuation.test.ts
+index e01ae692e0be1248f89f860906daeb3b1eae0ad6..be4bcc4d527db419e96222810b32161c5f148b32 100644
+--- a/src/agents/tools/sessions-send-owner-continuation.test.ts
++++ b/src/agents/tools/sessions-send-owner-continuation.test.ts
+@@ -32,8 +32,12 @@ const fixture = vi.hoisted(() => ({
+   log: vi.fn(),
+   dispatch: vi.fn(),
+   wait: vi.fn(),
++  captureRequesterFinal: vi.fn<() => FollowupRequest["completeRequesterFinal"]>(() => undefined),
+   gatewayContext: {},
+ }));
++vi.mock("../subagents/registry/subagent-registry.js", () => ({
++  captureRequesterVisibleFinalDelivery: fixture.captureRequesterFinal,
++}));
+ vi.mock("../../config/config.js", () => ({ getRuntimeConfig: () => ({}) }));
+ vi.mock("../../gateway/server-plugin-in-process-dispatch.js", () => ({
+   getInProcessGatewayRequestContext: () => fixture.gatewayContext,
+@@ -135,6 +139,7 @@ afterEach(() => {
+   revokeRequesterCronAuthority(SESSION);
+   fixture.dispatch.mockReset();
+   fixture.wait.mockReset();
++  fixture.captureRequesterFinal.mockReset();
+   vi.useRealTimers();
+   vi.clearAllMocks();
+ });
+@@ -241,6 +246,7 @@ describe("child followup requester continuation", () => {
+     "observer closed",
+     "receipt replay",
+     "requester failed while pending",
++    "source final settles original cohort",
+   ])("returns the original owner's plugin authority after %s", async (outcome) => {
+     let ownerCurrent = true;
+     const owner = {
+@@ -257,6 +263,15 @@ describe("child followup requester continuation", () => {
+       undefined,
+       owner,
+     )!;
++    const completeRequesterFinal = vi.fn(async (delivery) => {
++      if (delivery.requesterVisibleFinalDelivered) {
++        // The exact cohort's lifecycle owner releases its retained requester authority.
++        revokeRequesterCronAuthority(SESSION);
++      }
++    });
++    if (outcome === "source final settles original cohort") {
++      fixture.captureRequesterFinal.mockReturnValue(completeRequesterFinal);
++    }
+     const request: FollowupRequest | undefined = await inRun("original", () =>
+       runWithCronCreatorAuthorityCapability(capability, async () => {
+         const withRequesterAuthority = bindRequesterYieldCronAuthority("original");
+@@ -339,7 +354,29 @@ describe("child followup requester continuation", () => {
+       );
+       return outcome === "receipt replay" || outcome === "requester failed while pending"
+         ? { runId: admission!.runId, status: "in_flight" }
+-        : { runId: admission!.runId, status: "ok", inputProcessingCompleted: true };
++        : {
++            runId: admission!.runId,
++            status: "ok",
++            inputProcessingCompleted: true,
++            ...(outcome === "source final settles original cohort"
++              ? {
++                  result: {
++                    payloads: [],
++                    didSendViaMessagingTool: true,
++                    messagingToolSentTargets: [
++                      {
++                        tool: "message",
++                        provider: "telegram",
++                        accountId: "test",
++                        to: "123",
++                        sourceReplyFinal: true,
++                        text: "The complete answer.",
++                      },
++                    ],
++                  },
++                }
++              : {}),
++          };
+     });
+     fixture.dispatch.mockImplementation(async (method, params, options) =>
+       callGateway({
+@@ -363,6 +400,7 @@ describe("child followup requester continuation", () => {
+       displayKey: CHILD,
+       requesterSessionKey: SESSION,
+       requesterAgentId: "main",
++      requesterOrigin: { channel: "telegram", to: "123", accountId: "test" },
+       replyTimeoutMs: 1000,
+       replyMode: "one-way",
+     });
+@@ -371,7 +409,8 @@ describe("child followup requester continuation", () => {
+       outcome === "success" ||
+       outcome === "child error" ||
+       outcome === "observer closed" ||
+-      outcome === "receipt replay"
++      outcome === "receipt replay" ||
++      outcome === "source final settles original cohort"
+     ) {
+       expect(invoked).toHaveBeenCalledTimes(1);
+       expect(fixture.log).not.toHaveBeenCalled();
+@@ -392,6 +431,15 @@ describe("child followup requester continuation", () => {
+         expect.objectContaining({ runId: callGateway.mock.calls[0]?.[0].params.idempotencyKey }),
+       );
+     }
++    if (outcome === "source final settles original cohort") {
++      expect(completeRequesterFinal).toHaveBeenCalledExactlyOnceWith({
++        delivered: true,
++        path: "direct",
++        requesterVisibleFinalDelivered: true,
++      });
++      expect(fixture.release).toHaveBeenCalledOnce();
++      expect(fixture.log).not.toHaveBeenCalled();
++    }
+     fixture.assertCustody.mockReset();
+   });
+ });
 diff --git a/src/agents/tools/sessions-send-reply-flow.ts b/src/agents/tools/sessions-send-reply-flow.ts
-index 10d4a8b4ec3e94bafb951f9a6da915497c4770ee..fa4a9d6879d88debf21ef7a331e6f02fe0f42ac8 100644
+index 10d4a8b4ec3e94bafb951f9a6da915497c4770ee..a9ce2eac8b213c4acf165280ba48877a2f9eec98 100644
 --- a/src/agents/tools/sessions-send-reply-flow.ts
 +++ b/src/agents/tools/sessions-send-reply-flow.ts
 @@ -11,14 +11,18 @@ import { recordSessionParticipantBestEffort } from "../../sessions/session-parti
@@ -91934,7 +95025,23 @@ index 10d4a8b4ec3e94bafb951f9a6da915497c4770ee..fa4a9d6879d88debf21ef7a331e6f02f
  const log = createSubsystemLogger("agents/sessions-send");
  
  /** Await custody transfer before returning the tool; result observation stays detached. */
-@@ -194,3 +198,83 @@ export function startSessionsSendReplyFlow(
+@@ -144,10 +148,14 @@ export function startSessionsSendReplyFlow(
+               // input. Failed or timed-out processing must never execute again here.
+               response = await dispatch();
+             }
+-            const delivery = resolvePrivateCompletionDeliveryResult(readReceipt());
++            const delivery = resolvePrivateCompletionDeliveryResult(
++              readReceipt(),
++              params.requesterOrigin,
++            );
+             if (!delivery.delivered) {
+               throw new Error(delivery.error ?? "Private requester input was not processed.");
+             }
++            await request.completeRequesterFinal?.(delivery);
+           };
+           const promptedAt = Date.now();
+           await (request.requesterAuthority
+@@ -194,3 +202,83 @@ export function startSessionsSendReplyFlow(
      });
    return admitted.promise;
  }
