@@ -75828,6 +75828,75 @@ index fb3e3c33bb57201d90195b861256dfc4fff6708b..e6669ade92d0bd87eb5d7b63f85ef67c
    it("keeps the remaining wake budget after compaction and delivery-mode mismatch", async () => {
      vi.useFakeTimers();
      vi.setSystemTime(0);
+diff --git a/src/agents/subagents/announce/subagent-announce-delivery.test.ts b/src/agents/subagents/announce/subagent-announce-delivery.test.ts
+index 2c86a1b5c1846432ffac0c6d6894cf138aedec08..7955f9df286c736cd0eb1c91473dde6891b0acfd 100644
+--- a/src/agents/subagents/announce/subagent-announce-delivery.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-delivery.test.ts
+@@ -287,6 +287,7 @@ function createGatewayMock(response: Record<string, unknown> = {}, onCall?: () =
+ 
+ function createPayloadGatewayMock(...payloads: Record<string, unknown>[]) {
+   return createGatewayMock({
++    status: "ok",
+     result: { payloads, ...(payloads.length > 0 ? { deliveryStatus: sentDeliveryStatus } : {}) },
+   });
+ }
+@@ -1439,6 +1440,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+   it("delivers dormant child completion under restrictive gateway roles with Gateway-owned timeout policy", async () => {
+     const callGateway = createGatewayMock();
+     const { cfg, dispatchGatewayMethodInProcess } = createRoleRestrictedInProcessGatewayMock({
++      status: "ok",
+       result: {
+         deliveryStatus: sentDeliveryStatus,
+         payloads: [{ text: "requester voice completion" }],
+@@ -2784,18 +2786,30 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+   const localOnly = { routes: [localRequesterSettleRoute] };
+   const visibleFinal = { recordsVisibleFinal: true, expected: deliveredRequesterFinal };
+   const requesterSettleCases = [
+-    ...[
++    settleCase(
++      "preserves automatic final delivery after continuation completes",
++      { payloads: [], requesterContinuationSettled: true, deliveryStatus: sentDeliveryStatus },
++      visibleFinal,
++    ),
++    settleCase(
++      "does not promote a yielded turn's automatic delivery to a visible final",
+       {
+-        name: "automatic delivery",
+-        evidence: { deliveryStatus: { status: "sent", succeeded: true, resultCount: 1 } },
++        payloads: [],
++        meta: { yielded: true },
++        requesterContinuationSettled: true,
++        deliveryStatus: sentDeliveryStatus,
+       },
+-      { name: "final message tool", evidence: { messagingToolSentTargets: [sourceFinal] } },
+-    ].map(({ name, evidence }) =>
+-      settleCase(
+-        `preserves ${name} final evidence alongside settled continuation`,
+-        { payloads: [], meta: { yielded: true }, requesterContinuationSettled: true, ...evidence },
+-        visibleFinal,
+-      ),
++      { expected: deliveredRequesterFinal },
++    ),
++    settleCase(
++      "preserves an explicit message-tool final alongside settled continuation",
++      {
++        payloads: [],
++        meta: { yielded: true },
++        requesterContinuationSettled: true,
++        messagingToolSentTargets: [sourceFinal],
++      },
++      visibleFinal,
+     ),
+     settleCase(
+       "acknowledges a core-settled next wave without recording a visible final",
+@@ -3081,6 +3095,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
+         gatewayMock.mockRejectedValueOnce(error);
+       }
+       gatewayMock.mockResolvedValue({
++        status: "ok",
+         result: {
+           payloads: [{ text: "recovered child completion" }],
+           deliveryStatus: sentDeliveryStatus,
 diff --git a/src/agents/subagents/announce/subagent-announce-delivery.ts b/src/agents/subagents/announce/subagent-announce-delivery.ts
 index 8ca273135894bc448ae83df26755d1c6422bc14c..c05eef6de2e3612d3ca732ae29175a656b09dd08 100644
 --- a/src/agents/subagents/announce/subagent-announce-delivery.ts

@@ -18,9 +18,11 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The reference installation now runs R84 with Mac companion build 505. Its private
-source publication and loaded runtime have been checked against the manifest's
-source identities. The native Codex archive is unchanged. Benchmark comparisons
+The reference installation runs R84 with Mac companion build 505. The published
+source adds one test-only commit to that installed runtime: completion fixtures
+now include the Gateway's terminal status and distinguish a yielded update from
+a final answer. All production files, the installed runtime, the native Codex
+archive and the companion are unchanged by that correction. Benchmark comparisons
 are still in progress; this release does not establish an overall performance
 advantage over another harness.
 
