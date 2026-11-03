@@ -18,13 +18,13 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The reference installation runs R84 with Mac companion build 505. The published
-source adds one test-only commit to that installed runtime: completion fixtures
-now include the Gateway's terminal status and distinguish a yielded update from
-a final answer. All production files, the installed runtime, the native Codex
-archive and the companion are unchanged by that correction. Benchmark comparisons
-are still in progress; this release does not establish an overall performance
-advantage over another harness.
+The reference installation runs R85 with Mac companion build 505. The published
+source matches that gateway release. Discord's native `/goal` command now treats
+an objective supplied without an explicit action as literal text, including an
+objective that begins with “Complete” or “Pause.” Explicit actions and text
+commands retain their existing behavior. The native Codex archive and companion
+remain unchanged. Benchmark comparisons are still in progress; this release does
+not establish an overall performance advantage over another harness.
 
 ## Source identities
 

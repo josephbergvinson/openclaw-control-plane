@@ -10481,6 +10481,25 @@ index 6d51e0fbff9e677bb9d4ce33921c345a9c8e4f1e..b2b2a73926f72c70381e940ef3cb5537
  - For long-running work that starts now, start it once and rely on automatic completion wake when it is enabled and the command emits output or fails. Use `process` for logs, status, input, or intervention. Do not emulate scheduling with sleep loops, timeout loops, or repeated polling.
  - When `tools.exec.notifyOnExit=false`, a running result explicitly says that automatic completion wake is disabled, in both its text and structured `followUp`. Later `process poll`, `log`, and `list` results preserve that guidance while the command is running, using the policy captured when it started. If the task needs the result, collect it with `process poll` and a timeout before ending the turn, unless another continuation is already arranged. A running process or active session goal does not arrange that continuation.
  - When an approved async command completes, its continuation uses the normal agent run timeout from `agents.defaults.timeoutSeconds`. The follow-up observer can finish waiting while the accepted agent run continues.
+diff --git a/docs/tools/goal.md b/docs/tools/goal.md
+index 1a0b1335fdb18748791cb66f3367565488516369..8196ca574db51723adff4271bfe51861a34505b3 100644
+--- a/docs/tools/goal.md
++++ b/docs/tools/goal.md
+@@ -38,7 +38,13 @@ a separate sandbox policy session.
+ 
+ `start` is optional: `/goal get CI green for PR 87469` also creates a goal,
+ OpenClaw treats any text after `/goal` that is not a known action word as a
+-new objective.
++new objective. In text commands, use `/goal start <objective>` when the objective
++begins with an action word, such as `Complete the QA checklist`.
++
++In Discord's native `/goal` command, supplying `text` without selecting `action`
++always starts a goal with that literal objective, even when it begins with an
++action word. Select `action` explicitly to pause, resume, complete, or otherwise
++manage a goal. Leaving both fields empty shows status without creating a goal.
+ 
+ Explicit actions such as `start` and `edit` preserve line breaks, indentation,
+ and repeated spaces inside the objective. Leading and trailing whitespace is
 diff --git a/docs/tools/subagents/slash-command.md b/docs/tools/subagents/slash-command.md
 index 1e1acec7731b51a7855ffa49d0235710d61ff28a..20f8ca89052ec2c56c4149d5347c4b4918371be6 100644
 --- a/docs/tools/subagents/slash-command.md
@@ -96295,6 +96314,89 @@ index 7fc94bb4058c91eec469e9751d28307dbd153eb0..0d990b107e4b135a49778cb4c3600a4a
  }
  
  /** Synchronous CLI capture; deferred effects retain its original person-access grant. */
+diff --git a/src/auto-reply/commands-args.ts b/src/auto-reply/commands-args.ts
+index 31bbd30090f386b3ad8ac333ef421687a79b9869..766deb892191f35db1c5b79f294adf6f122147b2 100644
+--- a/src/auto-reply/commands-args.ts
++++ b/src/auto-reply/commands-args.ts
+@@ -56,9 +56,17 @@ function formatNamedArgs(
+   return parts.length > 0 ? parts.join(" ") : undefined;
+ }
+ 
++function formatGoalArgs(values: CommandArgValues): string | undefined {
++  const action = normalizeOptionalLowercaseString(normalizeArgValue(values.action));
++  const text = normalizeArgValue(values.text);
++  // Native objective text is literal, even when it begins with a lifecycle action.
++  return text ? `${action ?? "start"} ${text}` : action;
++}
++
+ /** Command-specific serializers used when rebuilding slash-command text from parsed args. */
+ export const COMMAND_ARG_FORMATTERS: Record<string, CommandArgsFormatter> = {
+   config: formatActionArgs,
++  goal: formatGoalArgs,
+   mcp: formatActionArgs,
+   plugins: (values) => formatActionArgs(values, ["show", "get", "enable", "disable"]),
+   debug: (values) => formatActionArgs(values, []),
+diff --git a/src/auto-reply/commands-registry.shared.ts b/src/auto-reply/commands-registry.shared.ts
+index fae42af27e52b2e473c80b1354aa52ff8985c736..9874b2efd6f18b636da2acccf129c8263964a56f 100644
+--- a/src/auto-reply/commands-registry.shared.ts
++++ b/src/auto-reply/commands-registry.shared.ts
+@@ -170,6 +170,7 @@ export function buildBuiltinChatCommands(
+       modelIndependent: "always",
+     }),
+     defineBuiltinCommand("goal", "Show or control the current goal.", "status", "standard", {
++      formatArgs: COMMAND_ARG_FORMATTERS.goal,
+       modelIndependent: (args) => {
+         const parsed = parseSlashCommandOrNull(`/goal ${args}`, "/goal", "status");
+         return (
+diff --git a/src/auto-reply/commands-registry.test.ts b/src/auto-reply/commands-registry.test.ts
+index bc5435b13f5dc6c5618b41f990f2e3c085cf68be..de23f5a285977dc01d088618a803da69ad384826 100644
+--- a/src/auto-reply/commands-registry.test.ts
++++ b/src/auto-reply/commands-registry.test.ts
+@@ -760,6 +760,44 @@ describe("commands registry args", () => {
+     },
+   );
+ 
++  it.each([
++    "Complete the QA checklist",
++    "Pause the rollout",
++    "Resume the migration",
++    "Clear the backlog",
++    "Block invalid requests",
++    "Edit the documentation",
++    "Start the review",
++    "Status report for the release",
++    "Review the QA checklist",
++    "Complete the checklist\n\n  Preserve this  label.",
++  ])("preserves native goal objective text without an action: %s", (text) => {
++    expect(buildCommandTextFromArgs(requireChatCommand("goal"), { values: { text } })).toBe(
++      `/goal start ${text}`,
++    );
++  });
++
++  it.each(["status", "start", "edit", "pause", "resume", "complete", "block", "clear"])(
++    "keeps an explicit native goal %s action",
++    (action) => {
++      const command = requireChatCommand("goal");
++      expect(buildCommandTextFromArgs(command, { values: { action } })).toBe(`/goal ${action}`);
++      expect(
++        buildCommandTextFromArgs(command, { values: { action, text: "Complete the checklist" } }),
++      ).toBe(`/goal ${action} Complete the checklist`);
++    },
++  );
++
++  it("keeps empty native goal arguments and raw text commands unchanged", () => {
++    const command = requireChatCommand("goal");
++    expect(buildCommandTextFromArgs(command)).toBe("/goal");
++    expect(buildCommandTextFromArgs(command, { values: {} })).toBe("/goal");
++    expect(buildCommandTextFromArgs(command, { values: { text: "  " } })).toBe("/goal");
++    expect(buildCommandTextFromArgs(command, { raw: "complete finished" })).toBe(
++      "/goal complete finished",
++    );
++  });
++
+   it("resolves auto arg menus when missing a choice arg", () => {
+     const command = createUsageModeCommand();
+ 
 diff --git a/src/auto-reply/get-reply-options.types.ts b/src/auto-reply/get-reply-options.types.ts
 index 899fe65a2e56e4822acb5dccfda8bc28789adf22..3099e312a0db6a575bc0dc23b96de9b590c33014 100644
 --- a/src/auto-reply/get-reply-options.types.ts
@@ -101529,10 +101631,10 @@ index 2444e96779c7ce54e4056f3bb510ebb2c98b7cf0..b47a929a8642dcaa0c7a1ecc0e90e304
      { label: "no children", acceptedSessionSpawns: [] },
      {
 diff --git a/src/auto-reply/reply/commands-goal.test.ts b/src/auto-reply/reply/commands-goal.test.ts
-index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..5bc0894d8df41f2d9d395f97a5154ae160db684e 100644
+index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..88d86b6dbc0e89e7c15d300118b1454e445e3c4e 100644
 --- a/src/auto-reply/reply/commands-goal.test.ts
 +++ b/src/auto-reply/reply/commands-goal.test.ts
-@@ -273,39 +273,49 @@ describe("goal commands", () => {
+@@ -273,39 +273,67 @@ describe("goal commands", () => {
      expect(missing?.reply?.text).toBe("Goal error: goal not found");
    });
  
@@ -101553,6 +101655,24 @@ index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..5bc0894d8df41f2d9d395f97a5154ae1
 -          objective: "finish the migration",
 -          status: "active",
 -          createdAt: 1,
++  it.each(["/goal", "/goal status"])(
++    "reports an absent goal without creating one for %s",
++    async (command) => {
++      const storePath = await createStorePath();
++      const entry = { sessionId: "sess-main", updatedAt: 1 };
++      await upsertSessionEntry({ storePath, sessionKey, entry });
++      const before = getSessionEntry({ storePath, sessionKey });
++      const params = buildGoalParams(command, storePath);
++
++      const result = await handleGoalCommand(params, true);
++
++      expect(result?.shouldContinue).toBe(false);
++      expect(result?.reply?.text).toContain("No goal");
++      expect(getSessionEntry({ storePath, sessionKey })).toEqual(before);
++      expect(takeCommandSessionMetadataChanges(params.ctx)).toBeUndefined();
++    },
++  );
++
 +  it.each([
 +    { tokensUsed: 0, expectedStatus: "active" },
 +    { tokensUsed: 25, expectedStatus: "budget_limited" },
