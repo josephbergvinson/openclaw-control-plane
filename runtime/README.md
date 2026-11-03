@@ -18,6 +18,10 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
+The reconstructed source includes a test-only browser cleanup mock correction
+beyond the installed R83 reference. This correction changes no production code,
+installed gateway, native archive or retained Mac companion.
+
 ## Source identities
 
 Read canonical source and native distribution identities from the manifest. The
