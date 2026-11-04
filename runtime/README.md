@@ -18,13 +18,21 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The reference installation runs R85 with Mac companion build 505. The published
-source matches that gateway release. Discord's native `/goal` command now treats
-an objective supplied without an explicit action as literal text, including an
-objective that begins with “Complete” or “Pause.” Explicit actions and text
-commands retain their existing behavior. The native Codex archive and companion
-remain unchanged. Benchmark comparisons are still in progress; this release does
-not establish an overall performance advantage over another harness.
+The selected and loaded reference is R86, verified on 4 November 2026, with
+the retained Mac companion build 505. Fresh native Discord command acceptance
+remains pending; backend health and source tests do not establish it. Discord's
+native `/goal` start and
+resume commands acknowledge a saved goal before model work begins. Progress and
+results then use the originating conversation's normal delivery path, so a long
+task does not depend on the slash command's expiring interaction token. A private
+command acknowledgment stays private and states where work updates will appear.
+Status and other control replies keep their existing behavior.
+
+The earlier objective-parsing repair remains included: an objective supplied
+without an explicit action is literal text, including one that begins with
+“Complete” or “Pause.” The native Codex archive and companion are unchanged.
+Benchmark comparisons remain in progress; this source update does not establish
+an overall performance advantage over another harness.
 
 ## Source identities
 
