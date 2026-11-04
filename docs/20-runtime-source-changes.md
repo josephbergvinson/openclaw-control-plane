@@ -129,6 +129,17 @@ not reconstructed by this packet; see the
 reconstruction requires a full target-tree check. Source reconstruction does not
 install or launch the app.
 
+Local dashboard authentication uses `GatewayEndpointStore` and
+`GatewayLocalAuthResolver` to resolve configured credential references through
+the existing endpoint owner. `DashboardManager+Construction` and
+`DashboardManager+Routes` apply the same resolution to primary and auxiliary
+local dashboards. `GatewayConnection` calls the endpoint's invalidation callback
+on disconnect or explicit shutdown, clearing the owning local credential cache;
+unrelated remote connections do not invalidate it. Credentials are resolved again
+on later connection use. Configuration changes and connection ownership remain
+part of credential selection. This is companion source behavior; the runtime guide
+records package and installed-interface acceptance separately.
+
 `apps/macos/Sources/OpenClaw/ApplicationRelocator.swift` checks the installed
 application's signed requirement when watching for replacement. Apple Development
 and Developer ID builds retain their respective valid identities. A mismatched

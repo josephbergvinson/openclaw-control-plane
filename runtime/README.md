@@ -18,11 +18,11 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded reference is R86, verified on 4 November 2026, with
-the retained Mac companion build 505. Fresh native Discord command acceptance
-remains pending; backend health and source tests do not establish it. Discord's
-native `/goal` start and
-resume commands acknowledge a saved goal before model work begins. Progress and
+The selected and loaded external gateway reference is R86, verified on 4 November
+2026. A fresh owner-origin native Discord goal
+verified its command acknowledgment, one progress message, a separate final reply
+and completed delegated work. Native `/goal` start and resume commands acknowledge
+a saved goal before model work begins. Progress and
 results then use the originating conversation's normal delivery path, so a long
 task does not depend on the slash command's expiring interaction token. A private
 command acknowledgment stays private and states where work updates will appear.
@@ -30,7 +30,16 @@ Status and other control replies keep their existing behavior.
 
 The earlier objective-parsing repair remains included: an objective supplied
 without an explicit action is literal text, including one that begins with
-“Complete” or “Pause.” The native Codex archive and companion are unchanged.
+“Complete” or “Pause.” The native Codex archive is unchanged.
+
+The Mac companion build 506 source resolves local dashboard credential
+references through the existing endpoint owner. Primary and auxiliary dashboard
+connections refresh those credentials when their own connection retires; unrelated
+remote connections do not invalidate them. The previous native credential-entry
+behavior is retained. The companion source packet is separate from the installed
+gateway reference: reconstruction does not install the app or establish live
+dashboard acceptance.
+
 Benchmark comparisons remain in progress; this source update does not establish
 an overall performance advantage over another harness.
 
@@ -167,11 +176,11 @@ interval or response-time guarantee.
 
 The managed Codex 0.160.0 archive and the selected external gateway retain their
 separate manifest bindings. The optional Mac companion target reproduces its
-separately retained complete source tree. Its finite patch includes native
-credential-form and Computer-tool changes, along with every inverse gateway-only
-change needed to reach that component. These inverse changes do not roll back the
-selected external gateway. New finite declarations list their exact paths; legacy packets
-retain their original eight-path contract. The existing native owner still
+separately declared complete source tree. Its finite patch includes dashboard
+credential resolution, retained native credential-entry behavior and the exact
+dependency declarations of that component. The selected external gateway remains
+unchanged. New finite declarations list their exact paths; legacy packets retain
+their original eight-path contract. The existing native owner still
 verifies the Apple process, current host and local principal, exact form, focused
 secure field and single-use entry scope. Its source commit, full tree and build
 label are recorded in `nativeCompanion`.
@@ -347,14 +356,18 @@ companion cases:
 - **Finite source delta:** bind the distribution tree and an exact nonempty patch
   in `nativeCompanion.delta`. The patch must change exactly the allowed paths
   enforced by the helper. The [source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
-  covers the declared shared/macOS changes and all inverse gateway changes.
+  covers the declared shared/macOS changes, inverse gateway changes and the two
+  exact pnpm files when needed to restore the companion's dependency declarations.
   Its bytes and SHA-256, base tree and complete final companion tree are checked.
 
 The source commit and `sourceTree` retain the authentic component identity.
 When fixture labels are normalized, a separate `normalizedTree` and exact
 `normalization.paths` describe the public replay; those paths must match the
 source normalization declaration. The helper verifies the complete replay tree
-before retrieving the same declared native archive.
+before retrieving the same declared native archive. The archive's verified
+presence does not establish that the companion lockfile selects it; dependency
+installation follows the reconstructed lockfile. Dependency files cannot be
+fixture-normalization targets.
 A descriptive companion identity that differs without a valid delta is
 not reconstructable in this mode. Ordinary source and native-distribution modes
 keep their existing targets; do not apply another mode on an already modified

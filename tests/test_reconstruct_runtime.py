@@ -84,15 +84,20 @@ class RuntimeReconstructionTests(unittest.TestCase):
         )
         return replace(self.package, native=native), contents
 
-    def companion_package(self, extra_paths=()):
+    def companion_package(self, extra_paths=(), *, restore_native_dependencies=False):
         package, contents = self.native_package()
         with patch.object(RUNTIME, "provision_native_artifact", return_value={"verified": True}):
             RUNTIME.reconstruct(self.checkout, package, apply=True)
         paths = frozenset(RUNTIME.NATIVE_COMPANION_DELTA_PATHS | set(extra_paths))
+        if restore_native_dependencies:
+            paths |= RUNTIME.NATIVE_DELTA_PATHS
         for name in sorted(paths):
             path = self.checkout / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("// companion fixture\n", encoding="utf-8")
+            if restore_native_dependencies and name in RUNTIME.NATIVE_DELTA_PATHS:
+                path.write_bytes(self.run_git_bytes("show", package.normalized_tree + ":" + name))
+            else:
+                path.write_text("// companion fixture\n", encoding="utf-8")
             self.run_git("add", "--", name)
         tree = self.run_git("write-tree")
         raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index", package.native.normalized_tree)
@@ -150,6 +155,8 @@ class RuntimeReconstructionTests(unittest.TestCase):
         invalid = [replace(package.companion, normalization_paths=frozenset()),
                    replace(package.companion, normalized_tree=None),
                    replace(package.companion, normalization_paths=frozenset({"src/../outside"})),
+                   replace(package.companion, normalization_paths=frozenset({"pnpm-lock.yaml"})),
+                   replace(package.companion, normalization_paths=frozenset({"pnpm-workspace.yaml"})),
                    replace(package.companion, normalized_tree=package.companion.source_tree)]
         with patch.object(RUNTIME, "build_opener") as opener:
             for companion in invalid:
@@ -196,6 +203,63 @@ class RuntimeReconstructionTests(unittest.TestCase):
                     self.assertEqual("", self.run_git("status", "--porcelain"))
                     self.assertEqual(package.base_tree, self.run_git("write-tree"))
             opener.assert_not_called()
+
+    def test_companion_dependency_delta_loads_and_restores_its_complete_source_tree(self) -> None:
+        package, contents = self.companion_package(restore_native_dependencies=True)
+        directory = Path(self.temporary.name) / "companion-package"
+        directory.mkdir()
+        (directory / "companion.patch").write_bytes(package.companion.patch)
+        manifest = {"nativeCompanion": {
+            "platform": "darwin-arm64", "sourceCommit": package.companion.source_commit,
+            "sourceTree": package.companion.source_tree,
+            "delta": {"distributionTree": package.native.normalized_tree,
+                      "paths": sorted(package.companion.delta_paths),
+                      "patch": {"file": "companion.patch", "bytes": len(package.companion.patch),
+                                "sha256": package.companion.patch_sha256}},
+        }}
+        companion = RUNTIME.load_native_companion(directory, manifest, package.native)
+        self.assertEqual(package.companion, companion)
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(contents)
+        with patch.object(RUNTIME, "build_opener", return_value=opener):
+            result = RUNTIME.reconstruct(self.checkout, replace(package, companion=companion), apply=True)
+        self.assertTrue(result["nativeCompanion"]["normalizedTreeVerified"])
+        self.assertEqual(companion.source_tree, self.run_git("write-tree"))
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        for name in RUNTIME.NATIVE_DELTA_PATHS:
+            actual = (self.checkout / name).read_bytes()
+            self.assertEqual(self.run_git_bytes("show", package.normalized_tree + ":" + name), actual)
+            self.assertNotEqual(self.run_git_bytes("show", package.native.normalized_tree + ":" + name), actual)
+        opener.open.assert_called_once()
+
+    def test_companion_dependency_delta_refuses_inexact_paths_before_any_source_change(self) -> None:
+        package, _ = self.companion_package(restore_native_dependencies=True)
+        invalid = [package.companion.delta_paths - {name} for name in RUNTIME.NATIVE_DELTA_PATHS]
+        invalid += [package.companion.delta_paths | {name} for name in (
+            "src/unchanged.ts", "package.json", ".npmrc", "pnpm-lock.yaml.bak",
+            "pnpm-workspace.yaml.extra", "./pnpm-lock.yaml", "src/../pnpm-lock.yaml",
+            "pnpm-lock.yaml/../package.json", "pnpm-workspace.yaml/child",
+        )]
+        with patch.object(RUNTIME, "build_opener") as opener:
+            for paths in invalid:
+                with self.subTest(paths=paths):
+                    broken = replace(package, companion=replace(package.companion, delta_paths=paths))
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.reconstruct(self.checkout, broken, apply=True)
+                    self.assertEqual("", self.run_git("status", "--porcelain"))
+                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
+            opener.assert_not_called()
+
+    def test_wrong_dependency_companion_tree_retains_evidence_without_fetching_archive(self) -> None:
+        package, _ = self.companion_package(restore_native_dependencies=True)
+        broken = replace(package, companion=replace(package.companion, source_tree="0" * 40))
+        with patch.object(RUNTIME, "build_opener") as opener:
+            with self.assertRaisesRegex(RUNTIME.ReconstructionError, "Companion applied tree differs"):
+                RUNTIME.reconstruct(self.checkout, broken, apply=True)
+            opener.assert_not_called()
+        self.assertEqual(package.companion.source_tree, self.run_git("write-tree"))
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        self.assertFalse((self.checkout / "native-package-artifacts").exists())
 
     def identity_companion_package(self):
         package, contents = self.native_package()
@@ -358,6 +422,13 @@ class RuntimeReconstructionTests(unittest.TestCase):
             broken["nativeCompanion"]["normalization"]["paths"] = declared
             path.write_text(json.dumps(broken))
             with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
+        for name in RUNTIME.NATIVE_DELTA_PATHS:
+            broken = json.loads(json.dumps(normalized))
+            broken["source"]["normalization"]["paths"] = [name]
+            broken["nativeCompanion"]["normalization"]["paths"] = [name]
+            path.write_text(json.dumps(broken))
+            with self.assertRaisesRegex(RUNTIME.ReconstructionError, "unsupported source path"):
                 RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
         invalid = []
         for value in (None, [], ["src/a", "src/a"], ["src/b", "src/a"], [True],
