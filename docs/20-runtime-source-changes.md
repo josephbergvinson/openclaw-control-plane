@@ -45,7 +45,7 @@ supported shells. These changes preserve tool authorization and failure reportin
 | Verified file writes | The native file-write tool reports its existing saved-content verification in the result. The agent can use that confirmation without another read solely to check that the same write succeeded; existing conflict, cancellation and verification handling remains unchanged. |
 | Session connector lifecycle | Core-only tool policies skip MCP and language-server discovery before connector startup. Policies that may admit plugin or custom tools retain discovery. Archiving a session retires its MCP runtime through the existing lifecycle drain after admitted work settles; active leases remain protected and restoring the session reconnects normally. The native idle timeout handles abandoned idle runtimes separately. |
 | Agent deletion | The existing database owner drains its own readers for the exact agent being deleted before checking outstanding leases. Readers belonging to another process still prevent deletion, and data shared with a surviving agent is preserved. |
-| Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. Discord's native command keeps objective text separate from an explicitly selected lifecycle action: omitted action plus text starts a literal objective, while empty arguments show status. Text commands retain their documented parsing. |
+| Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. Discord's native command keeps objective text separate from an explicitly selected lifecycle action: omitted action plus text starts a literal objective, while empty arguments show status. A saved start or resume receives its command confirmation before model work, then uses ordinary conversation progress and final delivery instead of an expiring interaction token. Confirmation visibility is preserved; child handoffs and partial delivery do not falsely settle the final answer. Text commands retain their documented parsing. |
 | Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. A successful explicit yield with accepted completion children retains its requester handoff through internal prompt cleanup. The existing dispatcher can transfer an already confirmed current progress card without a new payload; recovered prepared cohorts retain its progress reference. Cancellation, failure and completed-output checks still apply. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
 | Original task context | Session creation, continuation and scheduled recovery retain the original request and source bindings. Later steering can correct ongoing work without silently replacing its objective. |
 | Follow-up admission | Queue and steering owners distinguish live corrections, queued follow-ups and independent requests. The shared native target owner can wait for the exact admitted continuation's publication through child settlement or compaction. Queue admission stays gated until that owner and terminal persistence settle, including across an existing drain or stale-drain retirement. Cancellation removes its foreground observer without consuming a still-valid queued input; replacement cannot redirect that input into a successor. Native tool authority and source checks still apply. |
@@ -128,6 +128,17 @@ not reconstructed by this packet; see the
 [source boundaries](../runtime/README.md#source-identities). Every supported
 reconstruction requires a full target-tree check. Source reconstruction does not
 install or launch the app.
+
+Local dashboard authentication uses `GatewayEndpointStore` and
+`GatewayLocalAuthResolver` to resolve configured credential references through
+the existing endpoint owner. `DashboardManager+Construction` and
+`DashboardManager+Routes` apply the same resolution to primary and auxiliary
+local dashboards. `GatewayConnection` calls the endpoint's invalidation callback
+on disconnect or explicit shutdown, clearing the owning local credential cache;
+unrelated remote connections do not invalidate it. Credentials are resolved again
+on later connection use. Configuration changes and connection ownership remain
+part of credential selection. This is companion source behavior; the runtime guide
+records package and installed-interface acceptance separately.
 
 `apps/macos/Sources/OpenClaw/ApplicationRelocator.swift` checks the installed
 application's signed requirement when watching for replacement. Apple Development

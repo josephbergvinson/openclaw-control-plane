@@ -9932,6 +9932,29 @@ index 4abd76a2ef4c4e6e58f5eedd7a1da292355144a8..48e92bb294d8867296d01b5b9c59ab38
  The CUA provider also exposes the v2 browser family: `get_browser_state`, `browser_prepare`, `browser_navigate`, `browser_click`, `browser_type`, `browser_dialog`, `browser_set_input_files`, `browser_download`, and `browser_pointer`. Use `list_windows` to discover a native browser's `windowRef`, then pass it to `get_browser_state` to obtain an opaque `browserRef` and page references. Subsequent `get_browser_state` page snapshots and browser actions require both `browserRef` and `pageRef`; snapshots return the observation and element references needed for input. `browser_prepare` also requires the discovered `windowRef`, even for an isolated profile. These references belong to one Computer Use execution and driver generation; navigation invalidates page-element observations, and a driver restart invalidates the complete browser reference set.
  
  CUA additionally exposes `get_recording_state`, `start_recording`, `stop_recording`, and `replay_trajectory`. Recording and browser file operations use opaque `openclaw:computer-resource` handles. The selected computer host creates and validates the underlying files and directories; agent actions never accept native paths, output roots, or helper executable paths. Handles belong to one Computer Use execution and cannot be reused by another execution.
+diff --git a/docs/plugins/sdk-channel-plugins/message-adapter.md b/docs/plugins/sdk-channel-plugins/message-adapter.md
+index ba8f4390c92a5e5d65ba7b2a3be1a0ce1a08fc96..3518cdf24dc66b2c6ef28fd2dab44a9027d50069 100644
+--- a/docs/plugins/sdk-channel-plugins/message-adapter.md
++++ b/docs/plugins/sdk-channel-plugins/message-adapter.md
+@@ -72,6 +72,18 @@ fallback/retention, cleanup, and receipt behavior cannot drift silently.
+ 
+ ### Progress visibility acceptance
+ 
++For native commands that start or resume a session goal, `GetReplyOptions` exposes
++`onGoalContinuation(confirmation)`. Core invokes it after saving the goal and
++before starting its continuation. Use it to settle the command receipt and switch
++continued work to the originating conversation. A failed receipt does not undo
++goal admission. Keep command receipt accounting separate from final delivery;
++status, denied commands and unsuccessful starts do not invoke this callback.
++
++Core-managed `delivery.durable` applies to final replies only. When an adapter
++switches away from an expiring interaction, its nonfinal and fallback delivery
++must also use the conversation transport. Reuse the normal message adapter and
++progress presenter; do not start another goal runner or replay the command.
++
+ Progress callbacks report what the operator can see, not merely what a plugin queued. Return
+ `true` after accepting visible progress and `false` while delivery is pending or when no visible
+ update occurred. Existing synchronous and asynchronous callbacks that return `void` remain
 diff --git a/docs/plugins/sdk-runtime.md b/docs/plugins/sdk-runtime.md
 index b2a9f809b196aba5d270916b936ac2399c967a65..6e66a4c1ae591e0c2d8cead4a756866fb6932397 100644
 --- a/docs/plugins/sdk-runtime.md
@@ -10482,10 +10505,10 @@ index 6d51e0fbff9e677bb9d4ce33921c345a9c8e4f1e..b2b2a73926f72c70381e940ef3cb5537
  - When `tools.exec.notifyOnExit=false`, a running result explicitly says that automatic completion wake is disabled, in both its text and structured `followUp`. Later `process poll`, `log`, and `list` results preserve that guidance while the command is running, using the policy captured when it started. If the task needs the result, collect it with `process poll` and a timeout before ending the turn, unless another continuation is already arranged. A running process or active session goal does not arrange that continuation.
  - When an approved async command completes, its continuation uses the normal agent run timeout from `agents.defaults.timeoutSeconds`. The follow-up observer can finish waiting while the accepted agent run continues.
 diff --git a/docs/tools/goal.md b/docs/tools/goal.md
-index 1a0b1335fdb18748791cb66f3367565488516369..8196ca574db51723adff4271bfe51861a34505b3 100644
+index 1a0b1335fdb18748791cb66f3367565488516369..830ab22f961d7bb534cf8b8b12c1efea8d72a843 100644
 --- a/docs/tools/goal.md
 +++ b/docs/tools/goal.md
-@@ -38,7 +38,13 @@ a separate sandbox policy session.
+@@ -38,7 +38,20 @@ a separate sandbox policy session.
  
  `start` is optional: `/goal get CI green for PR 87469` also creates a goal,
  OpenClaw treats any text after `/goal` that is not a known action word as a
@@ -10497,6 +10520,13 @@ index 1a0b1335fdb18748791cb66f3367565488516369..8196ca574db51723adff4271bfe51861
 +always starts a goal with that literal objective, even when it begins with an
 +action word. Select `action` explicitly to pause, resume, complete, or otherwise
 +manage a goal. Leaving both fields empty shows status without creating a goal.
++
++After a native Discord start or resume is saved, the command immediately confirms
++admission. Its confirmation follows the configured private/public command setting.
++Progress and results use the originating conversation's normal delivery path,
++including its configured progress card and a separate final reply. They do not
++depend on the slash interaction remaining valid for the duration of the goal.
++An expired confirmation does not create a second goal or cancel the saved one.
  
  Explicit actions such as `start` and `edit` preserve line breaks, indentation,
  and repeated spaces inside the objective. Leading and trailing whitespace is
@@ -30186,10 +30216,60 @@ index e8ee3ce55368af8d276f35dfff3fae4e3b53cf01..f465fafca3d8606cfe92db64d576e02b
        if (!draftStream || !text) {
          return;
 diff --git a/extensions/discord/src/monitor/message-handler.process-progress.ts b/extensions/discord/src/monitor/message-handler.process-progress.ts
-index f4738f88ddf86af265c835936e25daaad090d31b..1413c45d65bf171a15f59cda02c685c3d1e1bedb 100644
+index f4738f88ddf86af265c835936e25daaad090d31b..9e77371c8144e3a4e55acbb345545e9cc2d5c988 100644
 --- a/extensions/discord/src/monitor/message-handler.process-progress.ts
 +++ b/extensions/discord/src/monitor/message-handler.process-progress.ts
-@@ -158,17 +158,22 @@ export function createDiscordMessageProgressRuntime(params: {
+@@ -11,11 +11,13 @@ type CallbackPayload<K extends keyof ReplyOptions> =
+ type DraftPreview = ReturnType<typeof createDiscordDraftPreviewController>;
+ 
+ export function createDiscordMessageProgressRuntime(params: {
+-  ctx: DiscordMessagePreflightContext;
++  ctx: Pick<DiscordMessagePreflightContext, "cfg" | "abortSignal"> & {
++    route: Pick<DiscordMessagePreflightContext["route"], "agentId">;
++  };
+   sessionKey?: string;
+   sourceRepliesAreToolOnly: boolean;
+   draftPreview: DraftPreview;
+-  reactions: {
++  reactions?: {
+     statusReactionsExplicitlyEnabled: boolean;
+     statusReactionsEnabled: boolean;
+     readonly controller: StatusReactionController;
+@@ -83,11 +85,11 @@ export function createDiscordMessageProgressRuntime(params: {
+     // Queued turns can finish after dispatch closeout has already cleaned up.
+     onQueuedFollowupSettled: draftPreview.draftStream ? () => draftPreview.cleanup() : undefined,
+     suppressDefaultToolProgressMessages:
+-      (params.sourceRepliesAreToolOnly && params.reactions.statusReactionsExplicitlyEnabled) ||
++      (params.sourceRepliesAreToolOnly && params.reactions?.statusReactionsExplicitlyEnabled) ||
+       draftPreview.suppressDefaultToolProgressMessages
+         ? true
+         : undefined,
+-    allowToolLifecycleWhenProgressHidden: params.reactions.statusReactionsEnabled
++    allowToolLifecycleWhenProgressHidden: params.reactions?.statusReactionsEnabled
+       ? true
+       : undefined,
+     commentaryProgressEnabled: draftPreview.isProgressMode
+@@ -125,7 +127,7 @@ export function createDiscordMessageProgressRuntime(params: {
+       if (payload?.requiresReasoningProgressOptIn === true && !reasoningWindowEnabled) {
+         return false;
+       }
+-      await params.reactions.controller.setThinking();
++      await params.reactions?.controller.setThinking();
+       return await draftPreview.pushReasoningProgress(payload?.text, {
+         snapshot: payload?.isReasoningSnapshot === true,
+       });
+@@ -135,8 +137,8 @@ export function createDiscordMessageProgressRuntime(params: {
+       if (abortSignal?.aborted) {
+         return false;
+       }
+-      await params.reactions.maybeBindToToolReaction(payload);
+-      await params.reactions.controller.setTool(payload.name);
++      await params.reactions?.maybeBindToToolReaction(payload);
++      await params.reactions?.controller.setTool(payload.name);
+       return await draftPreview.pushToolEvent(payload);
+     },
+     onItemEvent: async (payload) => {
+@@ -158,17 +160,22 @@ export function createDiscordMessageProgressRuntime(params: {
        return await draftPreview.pushApprovalEvent(payload);
      },
      onCompactionStart: async () => {
@@ -30198,7 +30278,8 @@ index f4738f88ddf86af265c835936e25daaad090d31b..1413c45d65bf171a15f59cda02c685c3
 +          ? await draftPreview.pushMaintenanceStatus("Compacting conversation context…")
 +          : false;
        if (!abortSignal?.aborted) {
-         await params.reactions.controller.setCompacting();
+-        await params.reactions.controller.setCompacting();
++        await params.reactions?.controller.setCompacting();
        }
 -      return false;
 +      return visible;
@@ -30206,8 +30287,10 @@ index f4738f88ddf86af265c835936e25daaad090d31b..1413c45d65bf171a15f59cda02c685c3
      onCompactionEnd: async () => {
 +      const visible = await draftPreview.pushMaintenanceStatus();
        if (!abortSignal?.aborted) {
-         params.reactions.controller.cancelPending();
-         await params.reactions.controller.setThinking();
+-        params.reactions.controller.cancelPending();
+-        await params.reactions.controller.setThinking();
++        params.reactions?.controller.cancelPending();
++        await params.reactions?.controller.setThinking();
        }
 -      return false;
 +      return visible;
@@ -30443,6 +30526,865 @@ index dec374dff01481d893c7208bbb46a42331645d57..ed681694f899c692dbcf76a15284fc8c
          onObservedReplyDelivery: observeFinalDelivery,
          onModelSelected,
        },
+diff --git a/extensions/discord/src/monitor/native-command-agent-reply.ts b/extensions/discord/src/monitor/native-command-agent-reply.ts
+index a22aceffb1d17d3b1c5165e052b296102a36d681..c442d0686a00474f921a6a02c5f1dfcee4acff37 100644
+--- a/extensions/discord/src/monitor/native-command-agent-reply.ts
++++ b/extensions/discord/src/monitor/native-command-agent-reply.ts
+@@ -20,6 +20,7 @@ import type {
+ } from "../internal/discord.js";
+ import type { DiscordChannelConfigResolved } from "./allow-list.js";
+ import type { buildDiscordNativeCommandContext } from "./native-command-context.js";
++import { createDiscordNativeGoalContinuation } from "./native-command-goal-continuation.js";
+ import {
+   DISCORD_EMPTY_VISIBLE_REPLY_WARNING,
+   deliverDiscordInteractionReply,
+@@ -53,6 +54,7 @@ export async function dispatchDiscordNativeAgentReply(params: {
+   preferFollowUp: boolean;
+   responseEphemeral?: boolean;
+   suppressReplies?: boolean;
++  goalCommand?: boolean;
+   dispatchReplyFromConfig?: DiscordDispatchReplyFromConfig;
+   log: ReturnType<typeof createSubsystemLogger>;
+   pluginCommandDispatch: PluginCommandCatalogDecision;
+@@ -62,91 +64,130 @@ export async function dispatchDiscordNativeAgentReply(params: {
+   let didReply = false;
+   let finalReplyOutcome: "accepted" | "failed" | "suppressed" | undefined;
+   let hiddenFinalReply: ReplyPayload | undefined;
+-  const turnResult = await nativeCommandRuntime.dispatchChannelInboundTurn({
+-    cfg: params.cfg,
+-    channel: "discord",
+-    accountId: params.effectiveRoute.accountId,
+-    route: {
+-      agentId: params.effectiveRoute.agentId,
+-      sessionKey: params.ctxPayload.SessionKey ?? params.effectiveRoute.sessionKey,
+-    },
+-    ctxPayload: params.ctxPayload,
+-    dispatchReplyFromConfig: params.dispatchReplyFromConfig,
+-    delivery: {
+-      deliver: async (payload) => {
+-        if (params.suppressReplies) {
+-          return {
+-            visibleReplySent: false,
+-            suppression: { reason: "channel_transform" as const },
+-          };
+-        }
+-        const payloadDelivered = await deliverDiscordInteractionReply({
+-          interaction: params.interaction,
+-          payload,
+-          componentRoute: {
+-            accountId: params.effectiveRoute.accountId,
+-            agentId: params.effectiveRoute.agentId,
+-            sessionKey:
+-              params.ctxPayload.CommandTargetSessionKey ?? params.effectiveRoute.sessionKey,
++  const goalContinuation =
++    params.goalCommand && !params.suppressReplies && params.ctxPayload.OriginatingTo
++      ? createDiscordNativeGoalContinuation({
++          ...params,
++          agentId: params.effectiveRoute.agentId,
++          sessionKey: params.ctxPayload.CommandTargetSessionKey ?? params.effectiveRoute.sessionKey,
++          target: params.ctxPayload.OriginatingTo,
++          log: logVerbose,
++        })
++      : undefined;
++  let dispatchFailed = false;
++  const turnResult = await (async () => {
++    try {
++      return await nativeCommandRuntime.dispatchChannelInboundTurn({
++        cfg: params.cfg,
++        channel: "discord",
++        accountId: params.effectiveRoute.accountId,
++        route: {
++          agentId: params.effectiveRoute.agentId,
++          sessionKey: params.ctxPayload.SessionKey ?? params.effectiveRoute.sessionKey,
++        },
++        ctxPayload: params.ctxPayload,
++        dispatchReplyFromConfig: params.dispatchReplyFromConfig,
++        delivery: {
++          preparePayload: goalContinuation?.preparePayload,
++          durable: goalContinuation?.durable,
++          deliver: async (payload, info) => {
++            if (params.suppressReplies) {
++              return {
++                visibleReplySent: false,
++                suppression: { reason: "channel_transform" as const },
++              };
++            }
++            if (goalContinuation?.active) {
++              return await goalContinuation.deliver(payload, info);
++            }
++            const payloadDelivered = await deliverDiscordInteractionReply({
++              interaction: params.interaction,
++              payload,
++              componentRoute: {
++                accountId: params.effectiveRoute.accountId,
++                agentId: params.effectiveRoute.agentId,
++                sessionKey:
++                  params.ctxPayload.CommandTargetSessionKey ?? params.effectiveRoute.sessionKey,
++              },
++              mediaLocalRoots: params.mediaLocalRoots,
++              ...resolveDiscordInteractionReplyOptions(params),
++              preferFollowUp: params.preferFollowUp || didReply,
++              responseEphemeral: params.responseEphemeral,
++            });
++            didReply ||= payloadDelivered;
++            return payloadDelivered
++              ? { visibleReplySent: true }
++              : {
++                  visibleReplySent: false,
++                  suppression: { reason: "no_visible_result" as const },
++                };
+           },
+-          mediaLocalRoots: params.mediaLocalRoots,
+-          ...resolveDiscordInteractionReplyOptions(params),
+-          preferFollowUp: params.preferFollowUp || didReply,
+-          responseEphemeral: params.responseEphemeral,
+-        });
+-        didReply ||= payloadDelivered;
+-        return payloadDelivered
+-          ? { visibleReplySent: true }
+-          : {
+-              visibleReplySent: false,
+-              suppression: { reason: "no_visible_result" as const },
+-            };
+-      },
+-      onDelivered: (payload, info, result) => {
+-        // Hidden picker dispatch reuses only a real core final suppressed by this adapter.
+-        if (
+-          params.suppressReplies &&
+-          info.kind === "final" &&
+-          result?.suppression?.reason === "channel_transform" &&
+-          payload.text?.trim()
+-        ) {
+-          hiddenFinalReply = payload;
+-        }
+-        // A failed final outweighs later suppression until Discord accepts a final.
+-        if (
+-          info.kind === "final" &&
+-          result?.visibleReplySent !== undefined &&
+-          (result.visibleReplySent || finalReplyOutcome !== "failed")
+-        ) {
+-          finalReplyOutcome = result.visibleReplySent ? "accepted" : "suppressed";
+-        }
+-      },
+-      onError: (err, info) => {
+-        const partialDelivery = isChannelPartialDeliveryError(err);
+-        if (partialDelivery) {
+-          // Preserve failed delivery accounting while preventing an empty fallback from
+-          // obscuring the prefix that Discord already accepted for this payload.
+-          didReply = true;
+-          logVerbose("discord: interaction reply partially delivered before expiry");
+-        }
+-        if (info.kind === "final") {
+-          finalReplyOutcome = partialDelivery ? "accepted" : "failed";
+-        }
+-        const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+-        params.log.error(`discord slash ${info.kind} reply failed: ${message}`);
+-      },
+-    },
+-    replyPipeline: {},
+-    dispatcherOptions: {
+-      humanDelay: resolveHumanDelayConfig(params.cfg, params.effectiveRoute.agentId),
+-    },
+-    replyOptions: {
+-      skillFilter: params.channelConfig?.skills,
+-      [PLUGIN_COMMAND_DISPATCH]: params.pluginCommandDispatch,
+-      disableBlockStreaming:
+-        typeof blockStreamingEnabled === "boolean" ? !blockStreamingEnabled : undefined,
+-    },
+-  });
++          onDelivered: async (payload, info, result) => {
++            if (goalContinuation?.active && result?.visibleReplySent) {
++              didReply = true;
++              if (
++                info.kind === "final" &&
++                !info.continuationStatus &&
++                !info.adoptProgressContinuation
++              ) {
++                await goalContinuation.onFinalDelivered();
++              }
++            }
++            // Hidden picker dispatch reuses only a real core final suppressed by this adapter.
++            if (
++              params.suppressReplies &&
++              info.kind === "final" &&
++              result?.suppression?.reason === "channel_transform" &&
++              payload.text?.trim()
++            ) {
++              hiddenFinalReply = payload;
++            }
++            // A failed final outweighs later suppression until Discord accepts a final.
++            if (
++              info.kind === "final" &&
++              !info.continuationStatus &&
++              !info.adoptProgressContinuation &&
++              result?.visibleReplySent !== undefined &&
++              (result.visibleReplySent || finalReplyOutcome !== "failed")
++            ) {
++              finalReplyOutcome = result.visibleReplySent ? "accepted" : "suppressed";
++            }
++          },
++          onError: (err, info) => {
++            const partialDelivery = isChannelPartialDeliveryError(err);
++            if (partialDelivery) {
++              // Preserve failed delivery accounting while preventing an empty fallback from
++              // obscuring the prefix that Discord already accepted for this payload.
++              didReply = true;
++              logVerbose("discord: slash reply partially delivered");
++            }
++            if (info.kind === "final") {
++              finalReplyOutcome = "failed";
++            }
++            const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
++            params.log.error(`discord slash ${info.kind} reply failed: ${message}`);
++          },
++        },
++        replyPipeline: {},
++        dispatcherOptions: {
++          adoptProgressContinuation: goalContinuation?.adoptProgressContinuation,
++          humanDelay: resolveHumanDelayConfig(params.cfg, params.effectiveRoute.agentId),
++        },
++        replyOptions: {
++          skillFilter: params.channelConfig?.skills,
++          [PLUGIN_COMMAND_DISPATCH]: params.pluginCommandDispatch,
++          disableBlockStreaming:
++            typeof blockStreamingEnabled === "boolean" ? !blockStreamingEnabled : undefined,
++          ...goalContinuation?.replyOptions,
++        },
++      });
++    } catch (error) {
++      dispatchFailed = true;
++      throw error;
++    } finally {
++      await goalContinuation?.cleanup(dispatchFailed || finalReplyOutcome === "failed");
++    }
++  })();
+   const shouldSettleWithoutVisibleReply =
+     params.suppressReplies ||
+     finalReplyOutcome === "suppressed" ||
+@@ -158,6 +199,12 @@ export async function dispatchDiscordNativeAgentReply(params: {
+     ...(hiddenFinalReply ? { hiddenFinalReply } : {}),
+   };
+ 
++  // Admission already settled the slash receipt. Never delete it or resurrect
++  // an expired webhook because the independent goal is queued/silent/failed.
++  if (goalContinuation?.active) {
++    return dispatchResult;
++  }
++
+   if (!didReply && shouldSettleWithoutVisibleReply) {
+     await settleDiscordInteractionWithoutVisibleReply(params.interaction);
+     return dispatchResult;
+diff --git a/extensions/discord/src/monitor/native-command-goal-continuation.test.ts b/extensions/discord/src/monitor/native-command-goal-continuation.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..92802ecb84b4a73735a980d3569404fe8b72b771
+--- /dev/null
++++ b/extensions/discord/src/monitor/native-command-goal-continuation.test.ts
+@@ -0,0 +1,277 @@
++import { InteractionType } from "discord-api-types/v10";
++import { createChannelPartialDeliveryError } from "openclaw/plugin-sdk/channel-inbound";
++import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
++import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";
++import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
++import * as sessionStore from "openclaw/plugin-sdk/session-store-runtime";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { CommandInteraction } from "../internal/discord.js";
++import {
++  attachRestMock,
++  createInternalInteractionPayload,
++  createInternalTestClient,
++} from "../internal/test-builders.test-support.js";
++import { discordOutbound } from "../outbound-adapter.js";
++import { dispatchDiscordNativeAgentReply } from "./native-command-agent-reply.js";
++import * as goalModule from "./native-command-goal-continuation.js";
++import { createDiscordNativeGoalContinuation } from "./native-command-goal-continuation.js";
++import { nativeCommandRuntime } from "./native-command.runtime.js";
++
++const CHANNEL = "100000000000000002";
++
++async function harness(options: { target?: string; progress?: boolean } = {}) {
++  vi.spyOn(sessionStore, "getSessionEntry").mockReturnValue(undefined);
++  const client = createInternalTestClient();
++  let expired = false;
++  const patch = vi.fn(async (url: string) => {
++    if (expired && url.startsWith("/webhooks/")) {
++      throw Object.assign(new Error("Unknown interaction"), { discordCode: 10062 });
++    }
++    return { id: "100000000000000010", channel_id: CHANNEL };
++  });
++  const post = vi.fn(async (url: string) => {
++    if (expired && (url.startsWith("/webhooks/") || url.startsWith("/interactions/"))) {
++      throw Object.assign(new Error("Unknown interaction"), { discordCode: 10062 });
++    }
++    return { id: "100000000000000010", channel_id: CHANNEL };
++  });
++  const remove = vi.fn(async () => undefined);
++  attachRestMock(client, { post, patch, delete: remove });
++  const raw = createInternalInteractionPayload({
++    id: "interaction1",
++    token: "test-token",
++    channel_id: CHANNEL,
++  });
++  if (raw.type !== InteractionType.ApplicationCommand) {
++    throw new Error("Expected command interaction");
++  }
++  const interaction = new CommandInteraction(client, raw);
++  await interaction.defer({ ephemeral: true });
++  const cfg: OpenClawConfig = {
++    channels: {
++      discord: {
++        streaming: options.progress
++          ? {
++              mode: "progress",
++              progress: { label: false, commentary: true, narration: false, toolProgress: false },
++            }
++          : { mode: "off" },
++      },
++    },
++  };
++  const send = vi.spyOn(discordOutbound, "sendPayload").mockResolvedValue({
++    channel: "discord",
++    messageId: "100000000000000011",
++    receipt: {
++      platformMessageIds: ["100000000000000011"],
++      sentAt: Date.now(),
++      parts: [{ platformMessageId: "100000000000000011", index: 0, kind: "text" }],
++    },
++  });
++  const goal = createDiscordNativeGoalContinuation({
++    cfg,
++    discordConfig: cfg.channels?.discord,
++    accountId: "default",
++    agentId: "main",
++    sessionKey: `agent:main:discord:channel:${CHANNEL}`,
++    target: options.target ?? `channel:${CHANNEL}`,
++    interaction,
++    responseEphemeral: true,
++    mediaLocalRoots: [],
++    log: () => undefined,
++  });
++  return {
++    goal,
++    cfg,
++    interaction,
++    post,
++    patch,
++    remove,
++    send,
++    expire: () => {
++      expired = true;
++    },
++  };
++}
++
++describe("native goal conversation delivery", () => {
++  afterEach(() => vi.restoreAllMocks());
++
++  it("does not expose maintenance progress or enable conversation delivery before persistence", async () => {
++    const { goal, post, patch } = await harness({ progress: true });
++    await goal.replyOptions.onItemEvent?.({
++      itemId: "pre",
++      kind: "preamble",
++      progressText: "Private status lookup",
++    });
++    expect(goal.active).toBe(false);
++    expect(
++      typeof goal.durable === "function" &&
++        (await goal.durable({ text: "No goal" }, { kind: "final" })),
++    ).toBe(false);
++    expect(post).toHaveBeenCalledTimes(1); // initial private defer only
++    expect(patch).not.toHaveBeenCalled();
++    await goal.cleanup(false);
++  });
++
++  it.each([`channel:${CHANNEL}`, "user:100000000000000004"])(
++    "keeps long-running replies off the expired interaction for %s",
++    async (target) => {
++      const { goal, patch, post, send, expire } = await harness({ target });
++      await goal.replyOptions.onGoalContinuation?.("Goal started: inspect fixture");
++      expect(patch.mock.calls[0]?.[0]).toContain("/@original".replace("@", "%40"));
++      expire(); // subsequent interaction HTTP calls represent a token older than fifteen minutes
++      const options =
++        typeof goal.durable === "function" &&
++        (await goal.durable({ text: "Done" }, { kind: "final" }));
++      expect(options).toMatchObject({ to: target, replyToId: null, replyToMode: "off" });
++      expect(
++        typeof goal.durable === "function" &&
++          (await goal.durable({ text: "Working" }, { kind: "block" })),
++      ).toBe(false);
++      await goal.deliver({ text: "A recoverable error", isError: true }, { kind: "block" });
++      await goal.deliver({ mediaUrl: "https://example.com/result.png" }, { kind: "tool" });
++      // The core can fall back to direct delivery for an unsupported durable payload.
++      await goal.deliver({ text: "Done" }, { kind: "final" });
++      expect(send).toHaveBeenCalledTimes(3);
++      for (const [args] of send.mock.calls) {
++        expect(args).toMatchObject({ to: target, replyToId: null, replyToMode: "off" });
++      }
++      expect(post).toHaveBeenCalledTimes(1);
++      expect(patch).toHaveBeenCalledTimes(1);
++      await goal.cleanup(false);
++    },
++  );
++
++  it("continues the admitted goal even when its private confirmation has already expired", async () => {
++    const { goal, expire, send } = await harness();
++    expire();
++    await expect(
++      goal.replyOptions.onGoalContinuation?.("Goal resumed: inspect fixture"),
++    ).rejects.toThrow("expired");
++    expect(goal.active).toBe(true);
++    await goal.deliver({ text: "Completed" }, { kind: "final" });
++    expect(send).toHaveBeenCalledTimes(1);
++    await goal.cleanup(false);
++  });
++
++  it("hands a waiting child the existing progress card without posting a false final", async () => {
++    const { goal, post, send, remove } = await harness({ progress: true });
++    await goal.replyOptions.onGoalContinuation?.("Goal started: inspect fixture");
++    await goal.replyOptions.requesterProgress?.()?.publish("Checking the fixture.");
++    const adopt = vi.fn(async () => true);
++    const info = {
++      kind: "final" as const,
++      continuationStatus: { authored: true },
++      adoptProgressContinuation: adopt,
++    };
++    expect(
++      typeof goal.durable === "function" &&
++        (await goal.durable({ text: "Waiting for the check." }, info)),
++    ).toBe(false);
++    await goal.deliver({ text: "Waiting for the check." }, info);
++    await goal.cleanup(false);
++    expect(adopt).toHaveBeenCalledExactlyOnceWith(
++      expect.objectContaining({
++        messageId: "100000000000000010",
++        to: `channel:${CHANNEL}`,
++        text: "Waiting for the check.",
++      }),
++    );
++    expect(post.mock.calls.filter(([url]) => url === `/channels/${CHANNEL}/messages`)).toHaveLength(
++      1,
++    );
++    expect(send).not.toHaveBeenCalled();
++    expect(remove).not.toHaveBeenCalled();
++  });
++
++  it.each(["waiting", "partial failure", "final"] as const)(
++    "settles native %s using its actual delivery outcome",
++    async (outcome) => {
++      const { goal, cfg, interaction } = await harness({ progress: true });
++      vi.spyOn(goalModule, "createDiscordNativeGoalContinuation").mockReturnValue(goal);
++      const final = vi.spyOn(goal, "onFinalDelivered");
++      const cleanup = vi.spyOn(goal, "cleanup");
++      vi.spyOn(nativeCommandRuntime, "dispatchChannelInboundTurn").mockImplementation(
++        async (plan) => {
++          await plan.replyOptions?.onGoalContinuation?.("Goal started: inspect fixture");
++          if (outcome === "partial failure") {
++            plan.delivery.onError?.(
++              createChannelPartialDeliveryError(new Error("last part failed"), {
++                visibleReplySent: true,
++                messageIds: ["100000000000000011"],
++              }),
++              { kind: "final" },
++            );
++          } else {
++            await plan.delivery.onDelivered?.(
++              { text: "result" },
++              {
++                kind: "final",
++                ...(outcome === "waiting" ? { continuationStatus: { authored: true } } : {}),
++              },
++              { visibleReplySent: true },
++            );
++          }
++          return { dispatched: false, admission: { kind: "dispatch" } };
++        },
++      );
++      const sessionKey = `agent:main:discord:channel:${CHANNEL}`;
++      await dispatchDiscordNativeAgentReply({
++        cfg,
++        discordConfig: cfg.channels?.discord ?? {},
++        accountId: "default",
++        interaction,
++        ctxPayload: finalizeInboundContext({
++          Body: "/goal start inspect fixture",
++          BodyForAgent: "/goal start inspect fixture",
++          BodyForCommands: "/goal start inspect fixture",
++          CommandBody: "/goal start inspect fixture",
++          RawBody: "/goal start inspect fixture",
++          ChatType: "channel" as const,
++          InboundEventKind: "user_request" as const,
++          CommandAuthorized: true,
++          From: `discord:channel:${CHANNEL}`,
++          To: "slash:100000000000000003",
++          SessionKey: sessionKey,
++          CommandTargetSessionKey: sessionKey,
++          OriginatingTo: `channel:${CHANNEL}`,
++        }),
++        effectiveRoute: { agentId: "main", accountId: "default", sessionKey },
++        channelConfig: null,
++        mediaLocalRoots: [],
++        preferFollowUp: false,
++        responseEphemeral: true,
++        goalCommand: true,
++        pluginCommandDispatch: { kind: "non-plugin" },
++        log: createSubsystemLogger("discord-goal-test"),
++      });
++      expect(final).toHaveBeenCalledTimes(outcome === "final" ? 1 : 0);
++      expect(cleanup).toHaveBeenCalledExactlyOnceWith(outcome === "partial failure");
++    },
++  );
++
++  it("edits one progress card and keeps the final separate after interaction expiry", async () => {
++    const { goal, post, patch, send, expire, remove } = await harness({ progress: true });
++    await goal.replyOptions.onGoalContinuation?.("Goal started: inspect fixture");
++    const publication = goal.replyOptions.requesterProgress?.();
++    expect(publication).toBeDefined();
++    await publication?.publish("Inspecting the fixture.");
++    expire();
++    await publication?.publish("The fixture passed; preparing the result.");
++    expect(post.mock.calls.filter(([url]) => url === `/channels/${CHANNEL}/messages`)).toHaveLength(
++      1,
++    );
++    expect(patch.mock.calls, JSON.stringify(patch.mock.calls)).toEqual(
++      expect.arrayContaining([
++        expect.arrayContaining([`/channels/${CHANNEL}/messages/100000000000000010`]),
++      ]),
++    );
++    await goal.deliver({ text: "Fixture verified." }, { kind: "final" });
++    await goal.onFinalDelivered();
++    await goal.cleanup(false);
++    expect(send).toHaveBeenCalledTimes(1);
++    expect(remove).not.toHaveBeenCalled();
++    expect(patch.mock.calls.filter(([url]) => url.startsWith("/webhooks/"))).toHaveLength(1);
++  });
++});
+diff --git a/extensions/discord/src/monitor/native-command-goal-continuation.ts b/extensions/discord/src/monitor/native-command-goal-continuation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6bdd92862fb62f4d4d7c5aa4c155d7300b0c913
+--- /dev/null
++++ b/extensions/discord/src/monitor/native-command-goal-continuation.ts
+@@ -0,0 +1,203 @@
++import {
++  createChannelPartialDeliveryError,
++  type ChannelInboundTurnPlan,
++} from "openclaw/plugin-sdk/channel-inbound";
++import { listMessageReceiptPlatformIds } from "openclaw/plugin-sdk/channel-outbound";
++import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
++import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
++import type { GetReplyOptions } from "openclaw/plugin-sdk/reply-runtime";
++import type {
++  CommandInteraction,
++  ButtonInteraction,
++  StringSelectMenuInteraction,
++} from "../internal/discord.js";
++import { discordOutbound } from "../outbound-adapter.js";
++import { createDiscordDraftPreviewController } from "./message-handler.draft-preview.js";
++import { createDiscordMessageProgressRuntime } from "./message-handler.process-progress.js";
++import {
++  deliverDiscordInteractionReply,
++  resolveDiscordInteractionReplyOptions,
++} from "./native-command-reply.js";
++import { sanitizeDiscordFrontChannelReplyPayloads } from "./reply-safety.js";
++
++type Delivery = NonNullable<ChannelInboundTurnPlan["delivery"]>;
++type Deliver = NonNullable<Delivery["deliver"]>;
++
++/** A slash receipt ends at admission; the saved goal belongs to its conversation. */
++export function createDiscordNativeGoalContinuation(params: {
++  cfg: OpenClawConfig;
++  discordConfig: NonNullable<OpenClawConfig["channels"]>["discord"];
++  accountId: string;
++  agentId: string;
++  sessionKey: string;
++  target: string;
++  interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction;
++  responseEphemeral?: boolean;
++  mediaLocalRoots: readonly string[];
++  log: (message: string) => void;
++}) {
++  let active = false;
++  const formatting = resolveDiscordInteractionReplyOptions(params);
++  const draft = createDiscordDraftPreviewController({
++    ...params,
++    sourceRepliesAreToolOnly: false,
++    textLimit: formatting.textLimit,
++    deliveryRest: params.interaction.client.rest,
++    deliverChannelId: params.interaction.rawData.channel_id ?? "",
++    replyReference: { peek: () => undefined },
++  });
++  const { replyOptions: progressOptions } = createDiscordMessageProgressRuntime({
++    ctx: { cfg: params.cfg, route: { agentId: params.agentId } },
++    sessionKey: params.sessionKey,
++    sourceRepliesAreToolOnly: false,
++    draftPreview: draft,
++    onTurnReset: () => undefined,
++  });
++  // Core may emit maintenance events before command admission. Never publish
++  // those from a private status/error command or a goal that was not admitted.
++  const guardedCallbacks = Object.fromEntries(
++    Object.entries(progressOptions).map(([key, value]) => [
++      key,
++      typeof value === "function"
++        ? (...args: unknown[]) => (active ? Reflect.apply(value, undefined, args) : undefined)
++        : value,
++    ]),
++  );
++  // SAFETY: Mapping preserves all keys and callback signatures; only pre-admission calls become no-ops.
++  const guardedProgress = guardedCallbacks as typeof progressOptions;
++  const deliveryOptions = {
++    to: params.target,
++    replyToId: null,
++    replyToMode: "off" as const,
++    formatting,
++    mediaAccess: { localRoots: params.mediaLocalRoots },
++  };
++  const replyOptions: Partial<GetReplyOptions> = {
++    ...guardedProgress,
++    disableBlockStreaming: draft.disableBlockStreamingForDraft,
++    onPartialReply:
++      draft.draftStream && !draft.isProgressMode
++        ? (payload) => {
++            if (active) {
++              draft.updateFromPartial(payload.text);
++            }
++          }
++        : undefined,
++    requesterProgress: () =>
++      active ? draft.createRequesterProgressPublication({ to: params.target }) : undefined,
++    onGoalContinuation: async (confirmation) => {
++      // Switch before attempting the receipt: an expired receipt cannot cancel
++      // the persisted goal or send its eventual result to the expired webhook.
++      active = true;
++      await deliverDiscordInteractionReply({
++        interaction: params.interaction,
++        payload: {
++          text: `${confirmation}\n\nProgress and results will appear in this conversation.`,
++        },
++        ...formatting,
++        preferFollowUp: false,
++        responseEphemeral: params.responseEphemeral,
++      });
++    },
++  };
++  const preparePayload: NonNullable<Delivery["preparePayload"]> = async (payload, info) => {
++    if (!active) {
++      return payload;
++    }
++    const [safe] = sanitizeDiscordFrontChannelReplyPayloads([payload], { kind: info.kind });
++    if (!safe) {
++      return null;
++    }
++    if (info.kind === "final" && !info.continuationStatus) {
++      draft.freezeProgress();
++    }
++    if (
++      draft.draftStream &&
++      draft.isProgressMode &&
++      info.kind === "block" &&
++      !safe.isCommentary &&
++      !safe.isError &&
++      !safe.interactive &&
++      !safe.presentation &&
++      !safe.channelData &&
++      !resolveSendableOutboundReplyParts(safe).hasMedia
++    ) {
++      return null;
++    }
++    return safe;
++  };
++  const durable: Delivery["durable"] = (_payload, info) =>
++    active && info.kind === "final" && !info.continuationStatus && !info.adoptProgressContinuation
++      ? deliveryOptions
++      : false;
++  const deliver: Deliver = async (payload, info) => {
++    const status = await draft.deliverContinuationStatus(payload, info, { to: params.target });
++    if (status) {
++      return status;
++    }
++    if (await draft.adoptProgressContinuation(payload, info, { to: params.target })) {
++      return { visibleReplySent: true };
++    }
++    // Core-managed message hooks have already run here. Use the existing raw
++    // Discord adapter, not a second durable batch (which would run hooks twice).
++    // This also handles nonfinal media/errors and unsupported durable payloads.
++    const accepted: string[] = [];
++    try {
++      const result = await discordOutbound.sendPayload!({
++        cfg: params.cfg,
++        accountId: params.accountId,
++        ...deliveryOptions,
++        text: payload.text ?? "",
++        payload,
++        onDeliveryResult: async (delivered) => {
++          if (delivered.messageId) {
++            accepted.push(delivered.messageId);
++          }
++        },
++      });
++      const messageIds = result.receipt ? listMessageReceiptPlatformIds(result.receipt) : accepted;
++      if (!messageIds.length) {
++        throw new Error("Discord goal reply returned no message receipt");
++      }
++      return { visibleReplySent: true, messageIds, receipt: result.receipt };
++    } catch (error) {
++      if (accepted.length) {
++        throw createChannelPartialDeliveryError(error, {
++          visibleReplySent: true,
++          messageIds: accepted,
++        });
++      }
++      throw error;
++    }
++  };
++  return {
++    get active() {
++      return active;
++    },
++    replyOptions,
++    preparePayload,
++    durable,
++    deliver,
++    adoptProgressContinuation: async (
++      continuation: Parameters<
++        NonNullable<ChannelInboundTurnPlan["dispatcherOptions"]>["adoptProgressContinuation"] & {}
++      >[0],
++    ) =>
++      active &&
++      (await draft.adoptExistingProgressContinuation(
++        continuation.adopt,
++        { to: params.target },
++        () => {
++          if (!active) {
++            throw new Error("Discord goal continuation is not admitted");
++          }
++        },
++      )),
++    async onFinalDelivered() {
++      draft.freezeProgress();
++      await draft.finalizeProgressDraft();
++      await draft.lifecycle.observeDelivery({ visibleReplySent: true });
++    },
++    cleanup: (failed: boolean) => draft.cleanup({ failed }),
++  };
++}
+diff --git a/extensions/discord/src/monitor/native-command.interaction-boundary.test.ts b/extensions/discord/src/monitor/native-command.interaction-boundary.test.ts
+index 0b57db9202a79fccb8e4d16ec8aa3bef3efe3bfc..3c4a433317622e6a13e419fbbd718295fe4c1e58 100644
+--- a/extensions/discord/src/monitor/native-command.interaction-boundary.test.ts
++++ b/extensions/discord/src/monitor/native-command.interaction-boundary.test.ts
+@@ -71,6 +71,11 @@ function createHarness() {
+       ephemeralDefault: true,
+       command: { name: "status", description: "Status", acceptsArgs: false },
+     }),
++    createDiscordNativeCommand({
++      ...commandContext,
++      ephemeralDefault: true,
++      command: { name: "goal", description: "Goal", acceptsArgs: true },
++    }),
+     createDiscordNativeCommand({
+       ...commandContext,
+       ephemeralDefault: true,
+@@ -91,7 +96,7 @@ function createHarness() {
+     }),
+   ]);
+   client.componentHandler.register(createDiscordModelPickerFallbackButton(commandContext));
+-  const post = vi.fn(async () => undefined);
++  const post = vi.fn(async (_path: string, _options?: unknown, _files?: unknown) => undefined);
+   const get = vi.fn(async (path: string) => {
+     if (path === `/channels/${THREAD}`) {
+       return { id: THREAD, type: ChannelType.PublicThread, parent_id: CHANNEL, name: "topic" };
+@@ -239,6 +244,81 @@ describe("Client.handleInteraction native command channel identity", () => {
+     expectFollowUp(harness, "You are not authorized to use this command.");
+   });
+ 
++  it.each(["start", "resume"])(
++    "settles native goal %s before its long-running turn finishes",
++    async (action) => {
++      const harness = createHarness();
++      const admitted = createDeferred<void>();
++      const finish = createDeferred<void>();
++      harness.dispatch.mockImplementation(async (plan) => {
++        expect(harness.post.mock.calls[0]?.[0]).toBe(
++          "/interactions/interaction1/test-token/callback",
++        );
++        expect(plan.ctxPayload.CommandTargetSessionKey).toBe(
++          `agent:main:discord:channel:${THREAD}`,
++        );
++        expect(plan.replyOptions?.onGoalContinuation).toBeTypeOf("function");
++        await plan.replyOptions?.onGoalContinuation?.(
++          `Goal ${action === "start" ? "started" : "resumed"}: inspect fixture`,
++        );
++        admitted.resolve();
++        await finish.promise;
++        return { dispatched: false, admission: { kind: "dispatch" } };
++      });
++      const raw = payload(THREAD);
++      raw.data = {
++        id: "goal1",
++        name: "goal",
++        type: 1,
++        options: [
++          { name: "action", type: ApplicationCommandOptionType.String, value: action },
++          ...(action === "start"
++            ? [
++                {
++                  name: "text",
++                  type: ApplicationCommandOptionType.String as const,
++                  value: "inspect fixture",
++                },
++              ]
++            : []),
++        ],
++      };
++      const pending = harness.client.handleInteraction(raw);
++      await admitted.promise;
++      expect(harness.patch).toHaveBeenCalledWith("/webhooks/app1/test-token/messages/%40original", {
++        body: {
++          content: expect.stringContaining(
++            "Progress and results will appear in this conversation.",
++          ),
++          flags: 64,
++        },
++      });
++      expect(harness.post.mock.calls.filter(([url]) => url.startsWith("/webhooks/"))).toHaveLength(
++        0,
++      );
++      finish.resolve();
++      await pending;
++      expect(harness.dispatch).toHaveBeenCalledTimes(1);
++    },
++  );
++
++  it("does not dispatch or publish a goal for an unauthorized native command", async () => {
++    const harness = createHarness();
++    const raw = payload(CHANNEL, false, "100000000000000099");
++    raw.data = {
++      id: "goal1",
++      name: "goal",
++      type: 1,
++      options: [
++        { name: "text", type: ApplicationCommandOptionType.String, value: "inspect fixture" },
++      ],
++    };
++    await harness.client.handleInteraction(raw);
++    expect(harness.dispatch).not.toHaveBeenCalled();
++    expectFollowUp(harness, "You are not authorized to use this command.");
++    expect(harness.post.mock.calls.some(([url]) => url.startsWith("/channels/"))).toBe(false);
++  });
++
+   it("rejects a thread whose parent is outside the allowlist", async () => {
+     const harness = createHarness();
+     denyThreadParent(harness);
+diff --git a/extensions/discord/src/monitor/native-command.ts b/extensions/discord/src/monitor/native-command.ts
+index 62c8dfdbc907e4e80545eff83a65693be6d7c97f..31151c7ab1795b332dc9e737b4099b18c93d61ba 100644
+--- a/extensions/discord/src/monitor/native-command.ts
++++ b/extensions/discord/src/monitor/native-command.ts
+@@ -665,6 +665,7 @@ async function dispatchDiscordCommandInteraction(
+     preferFollowUp,
+     responseEphemeral,
+     suppressReplies,
++    goalCommand: command.key === "goal",
+     dispatchReplyFromConfig,
+     log,
+     pluginCommandDispatch: params.pluginCommandDispatch,
 diff --git a/extensions/discord/src/monitor/provider.startup.test.ts b/extensions/discord/src/monitor/provider.startup.test.ts
 index 4c2b3122fad3eac5734dafb46b21c4982ec060ad..8f1f51bf6405b141dc6de77abf637e1f852305bc 100644
 --- a/extensions/discord/src/monitor/provider.startup.test.ts
@@ -96398,10 +97340,10 @@ index bc5435b13f5dc6c5618b41f990f2e3c085cf68be..de23f5a285977dc01d088618a803da69
      const command = createUsageModeCommand();
  
 diff --git a/src/auto-reply/get-reply-options.types.ts b/src/auto-reply/get-reply-options.types.ts
-index 899fe65a2e56e4822acb5dccfda8bc28789adf22..3099e312a0db6a575bc0dc23b96de9b590c33014 100644
+index 899fe65a2e56e4822acb5dccfda8bc28789adf22..818ac304b8699afbb9d205f9da930443f5859445 100644
 --- a/src/auto-reply/get-reply-options.types.ts
 +++ b/src/auto-reply/get-reply-options.types.ts
-@@ -140,286 +140,291 @@ type ReasoningProgressPayload = {
+@@ -140,286 +140,293 @@ type ReasoningProgressPayload = {
  type ProgressCallbackResult = boolean | void;
  
  /** Reply generation options shared by auto-reply, webchat, channels, and tests. */
@@ -96739,6 +97681,8 @@ index 899fe65a2e56e4822acb5dccfda8bc28789adf22..3099e312a0db6a575bc0dc23b96de9b5
 +    /** Current user turn is already durable; replay it without appending another copy. */
 +    suppressNextUserMessagePersistence?: boolean;
 +    onReplyStart?: () => Promise<void> | void;
++    /** A goal was saved and will continue in this conversation, independently of a command receipt. */
++    onGoalContinuation?: (confirmation: string) => Promise<void> | void;
 +    /** Called when the typing controller cleans up (e.g., run ended with NO_REPLY). */
 +    onTypingCleanup?: () => void;
 +    onTypingController?: (typing: TypingController) => void;
@@ -101631,10 +102575,75 @@ index 2444e96779c7ce54e4056f3bb510ebb2c98b7cf0..b47a929a8642dcaa0c7a1ecc0e90e304
      { label: "no children", acceptedSessionSpawns: [] },
      {
 diff --git a/src/auto-reply/reply/commands-goal.test.ts b/src/auto-reply/reply/commands-goal.test.ts
-index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..88d86b6dbc0e89e7c15d300118b1454e445e3c4e 100644
+index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..4e5b78764ac41cfedf38a2f0f0d4545fdea0ceec 100644
 --- a/src/auto-reply/reply/commands-goal.test.ts
 +++ b/src/auto-reply/reply/commands-goal.test.ts
-@@ -273,39 +273,67 @@ describe("goal commands", () => {
+@@ -1,6 +1,6 @@
+ // Tests goal command persistence, status transitions, and reply text.
+ import path from "node:path";
+-import { afterAll, describe, expect, it } from "vitest";
++import { afterAll, describe, expect, it, vi } from "vitest";
+ import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+@@ -102,6 +102,56 @@ function buildGoalParams(commandBodyNormalized: string, storePath: string): Hand
+ }
+ 
+ describe("goal commands", () => {
++  it.each(["start", "resume"])("acknowledges persisted %s before continuing", async (action) => {
++    const storePath = await createStorePath();
++    if (action === "resume") {
++      await upsertSessionEntry(buildGoalSessionFixture(storePath, sessionKey, "paused"));
++    } else {
++      await upsertSessionEntry({
++        storePath,
++        sessionKey,
++        entry: { sessionId: "sess-main", updatedAt: 1 },
++      });
++    }
++    const params = buildGoalParams(
++      `/goal ${action} ${action === "start" ? "finish the migration" : ""}`,
++      storePath,
++    );
++    const confirmation = vi.fn(async (text: string) => {
++      expect(getSessionEntry({ storePath, sessionKey })?.goal?.status).toBe("active");
++      expect(text).toBe(`Goal ${action === "start" ? "started" : "resumed"}: finish the migration`);
++    });
++    params.opts = { onGoalContinuation: confirmation };
++    const result = await handleGoalCommand(params, true);
++    expect(confirmation).toHaveBeenCalledTimes(1);
++    expect(result?.shouldContinue).toBe(true);
++  });
++
++  it("does not abandon or recreate a saved goal when its confirmation cannot be delivered", async () => {
++    const storePath = await createStorePath();
++    await upsertSessionEntry({
++      storePath,
++      sessionKey,
++      entry: { sessionId: "sess-main", updatedAt: 1 },
++    });
++    const params = buildGoalParams("/goal start finish the migration", storePath);
++    const confirmation = vi.fn(async () => {
++      throw new Error("interaction expired");
++    });
++    params.opts = { onGoalContinuation: confirmation };
++    const result = await handleGoalCommand(params, true);
++    expect(confirmation).toHaveBeenCalledTimes(1);
++    expect(result).toEqual({ shouldContinue: true });
++    expect(getSessionEntry({ storePath, sessionKey })?.goal?.status).toBe("active");
++    const repeated = await handleGoalCommand(
++      buildGoalParams("/goal start finish the migration", storePath),
++      true,
++    );
++    expect(repeated?.shouldContinue).toBe(false);
++    expect(repeated?.reply?.text).toContain("already exists");
++    expect(confirmation).toHaveBeenCalledTimes(1);
++  });
++
+   it("parses bare goal text as a start objective", () => {
+     expect(parseGoalCommand("/goal build a 3d game")).toEqual({
+       action: "start",
+@@ -273,39 +323,67 @@ describe("goal commands", () => {
      expect(missing?.reply?.text).toBe("Goal error: goal not found");
    });
  
@@ -101733,6 +102742,32 @@ index a1ab6f705de53356f014b48c01e8a33fdbdb9f80..88d86b6dbc0e89e7c15d300118b1454e
 +    },
 +  );
  });
+diff --git a/src/auto-reply/reply/commands-goal.ts b/src/auto-reply/reply/commands-goal.ts
+index de174321a45448ec65ea58db614f3491502d980b..3808e89c242d023212e2f7e5bdf27806a0e82bbe 100644
+--- a/src/auto-reply/reply/commands-goal.ts
++++ b/src/auto-reply/reply/commands-goal.ts
+@@ -13,6 +13,7 @@ import {
+ } from "../../config/sessions.js";
+ import { loadSessionEntry as getSessionEntry } from "../../config/sessions/session-accessor.js";
+ import type { SessionEntry } from "../../config/sessions/types.js";
++import { logWarn } from "../../logger.js";
+ import { applyCommandTextToParams } from "./command-context-rewrite.js";
+ import { commandReply as goalReply, defineAuthorizedTextCommand } from "./command-gates.js";
+ import { markCommandSessionMetadataChanged } from "./command-session-metadata.js";
+@@ -227,6 +228,13 @@ export const handleGoalCommand: CommandHandler = defineAuthorizedTextCommand(
+       }
+       if (result.continuationPrompt) {
+         applyCommandTextToParams(params, result.continuationPrompt);
++        // Persistence owns admission. A failed command receipt must not turn an
++        // already-saved goal into an error or stop its one admitted continuation.
++        try {
++          await params.opts?.onGoalContinuation?.(result.text);
++        } catch {
++          logWarn("Goal saved; its continuation confirmation could not be delivered.");
++        }
+         return { shouldContinue: true };
+       }
+       return goalReply(result.text);
 diff --git a/src/auto-reply/reply/directive-handling.mixed-inline.test.ts b/src/auto-reply/reply/directive-handling.mixed-inline.test.ts
 index 4648d1e0cc577cb4161b2cb4e9a06971fe7b46fd..3ef2a513be48f9ee4278287adf5b2f5e8aef04f3 100644
 --- a/src/auto-reply/reply/directive-handling.mixed-inline.test.ts
@@ -105464,6 +106499,79 @@ index 80fafbaaf9f5e4deeaa46ab289898b022017068f..a36e06014df26c3ec19bec66553bc29b
 -    leaseActive = false;
 -  }
  }
+diff --git a/src/auto-reply/reply/get-reply.fast-path.runtime.test.ts b/src/auto-reply/reply/get-reply.fast-path.runtime.test.ts
+index bb573b1a54cc28189febe9e451cf2b5f75094898..78ddcc4a7a63b1004c790af970b9e9a73ba8ed7c 100644
+--- a/src/auto-reply/reply/get-reply.fast-path.runtime.test.ts
++++ b/src/auto-reply/reply/get-reply.fast-path.runtime.test.ts
+@@ -1,6 +1,8 @@
+ // Tests runtime-loaded fast-path command behavior for get-reply.
+ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++import { createDeferred } from "../../../test/helpers/promise.js";
+ import type { OpenClawConfig } from "../../config/config.js";
++import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+ import { setActivePluginRegistry } from "../../plugins/runtime.js";
+ import {
+   createChannelTestPluginBase,
+@@ -151,6 +153,59 @@ describe("getReplyFromConfig fast-path runtime", () => {
+     });
+   });
+ 
++  it("settles native goal admission before a held model run and persists it only once", async () => {
++    await withTempHome(async (home) => {
++      const cfg = makeReplyConfig(home) as OpenClawConfig;
++      const sessionKey = "agent:main:telegram:direct:goal-fixture";
++      const entered = createDeferred();
++      const finish = createDeferred();
++      const acknowledgments: string[] = [];
++      agentMocks.runEmbeddedAgent.mockImplementation(async () => {
++        expect(acknowledgments).toEqual(["Goal started: inspect fixture"]);
++        entered.resolve();
++        await finish.promise;
++        return makeEmbeddedTextResult("Fixture complete");
++      });
++      const pending = getReplyFromConfig(
++        {
++          Body: "/goal start inspect fixture",
++          BodyForAgent: "/goal start inspect fixture",
++          RawBody: "/goal start inspect fixture",
++          CommandBody: "/goal start inspect fixture",
++          CommandTurn: { kind: "native", source: "native", authorized: true },
++          CommandTargetSessionKey: sessionKey,
++          SessionKey: "telegram:slash:source",
++          Provider: "telegram",
++          Surface: "telegram",
++          ChatType: "direct",
++        },
++        {
++          onGoalContinuation: (text) => {
++            expect(
++              loadSessionEntry({ sessionKey, storePath: cfg.session?.store })?.goal?.status,
++            ).toBe("active");
++            acknowledgments.push(text);
++          },
++        },
++        cfg,
++      );
++      let goalId: string | undefined;
++      try {
++        await Promise.race([entered.promise, pending]);
++        expect(agentMocks.runEmbeddedAgent).toHaveBeenCalledTimes(1);
++        goalId = loadSessionEntry({ sessionKey, storePath: cfg.session?.store })?.goal?.id;
++        expect(goalId).toBeTruthy();
++      } finally {
++        finish.resolve();
++        await pending;
++      }
++      expect(loadSessionEntry({ sessionKey, storePath: cfg.session?.store })?.goal?.id).toBe(
++        goalId,
++      );
++      expect(acknowledgments).toHaveLength(1);
++    });
++  });
++
+   it("ignores stale native legacy source for structured normal turns before routing", async () => {
+     await withTempHome(async (home) => {
+       agentMocks.runEmbeddedAgent.mockResolvedValue(makeEmbeddedTextResult("ok"));
 diff --git a/src/auto-reply/reply/get-reply.types.ts b/src/auto-reply/reply/get-reply.types.ts
 index 8640de17a6f37cd66dc4cbd1c01bdc72b780e5e1..7383a92f7e26b316d3efb3f6852ea85ac39cc6f0 100644
 --- a/src/auto-reply/reply/get-reply.types.ts
@@ -110316,6 +111424,68 @@ index c5b82ec02088fc7e48285691e0701d46c45221dd..fc0910efe74315823835bbf53890d638
        );
      },
    );
+diff --git a/src/channels/turn/direct-delivery-custody.ts b/src/channels/turn/direct-delivery-custody.ts
+index c7c711c9e1ba3ec7e175818861b1723cde434a4e..8395b8b08e3381a944f77b552d77c6ce217a587a 100644
+--- a/src/channels/turn/direct-delivery-custody.ts
++++ b/src/channels/turn/direct-delivery-custody.ts
+@@ -71,6 +71,10 @@ export function createDirectPendingFinalCustody(
+ export function toCoreManagedDeliveryInfo(info: ChannelDeliveryInfo) {
+   return {
+     kind: info.kind,
++    ...(info.continuationStatus ? { continuationStatus: info.continuationStatus } : {}),
++    ...(info.adoptProgressContinuation
++      ? { adoptProgressContinuation: info.adoptProgressContinuation }
++      : {}),
+     ...(info.participant ? { participant: info.participant } : {}),
+     ...(info.assistantMessageIndex === undefined
+       ? {}
+diff --git a/src/channels/turn/run-channel-turn.delivery.test.ts b/src/channels/turn/run-channel-turn.delivery.test.ts
+index dee4dd50ae568d66c08263cc6205bd804a41f033..90fd2b3622e318b918377e395c1d7e5f078cd412 100644
+--- a/src/channels/turn/run-channel-turn.delivery.test.ts
++++ b/src/channels/turn/run-channel-turn.delivery.test.ts
+@@ -122,6 +122,42 @@ describe("channel turn delivery", () => {
+     resetLogger();
+   });
+ 
++  it("retains continuation presentation semantics through core-managed delivery and one hook pass", async () => {
++    const adopt = vi.fn(async () => true);
++    const status = { authored: true };
++    dispatchReplyWithRoutedChannelDispatcherCore.mockImplementationOnce(async (params) => {
++      await params.dispatcherOptions.deliver(
++        { text: "Waiting for child" },
++        {
++          kind: "final",
++          continuationStatus: status,
++          adoptProgressContinuation: adopt,
++        },
++      );
++      return { queuedFinal: true, counts: { tool: 0, block: 0, final: 1 } };
++    });
++    const hook = vi.fn(async () => undefined);
++    getGlobalHookRunner.mockReturnValue({
++      hasHooks: (name: string) => name === "message_sending",
++      runMessageSending: hook,
++    });
++    const deliver = vi.fn(async (_payload: ReplyPayload, info: ChannelDeliveryInfo) => {
++      expect(info.continuationStatus).toBe(status);
++      expect(info.adoptProgressContinuation).toBe(adopt);
++      expect(info.onPlatformSendDispatch).toBeUndefined();
++      expect(info.assertPlatformSendAuthorized).toBeUndefined();
++      expect(info.bindPendingFinalDelivery).toBeUndefined();
++      return { visibleReplySent: true };
++    });
++    await runRouted({
++      deliver,
++      durable: (_payload, info) => (info.continuationStatus ? false : { to: "chat-1" }),
++    });
++    expect(deliver).toHaveBeenCalledTimes(1);
++    expect(hook).toHaveBeenCalledTimes(1);
++    expect(sendDurableMessageBatch).not.toHaveBeenCalled();
++  });
++
+   it("preserves prepared payload custody and literals through preparation and message hooks", async () => {
+     const order: string[] = [];
+     const completion = {
 diff --git a/src/cli/command-catalog.ts b/src/cli/command-catalog.ts
 index 08cdd710e4781be1484cc9d09fb76e2bcf08f788..efb0c9bc89cf544bab8e3f73390a97d3e9f429e9 100644
 --- a/src/cli/command-catalog.ts

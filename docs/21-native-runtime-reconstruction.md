@@ -60,10 +60,14 @@ companion source. The helper accepts either of these finite cases:
 | Separate retained-companion delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` binds one nonempty regular patch by `file`, `bytes` and `sha256`. Its ordinary text changes must match the complete finite path set exactly. |
 
 A new finite declaration supplies `delta.paths`: a nonempty, sorted, unique list
-of exact relative source paths under `apps/`, `src/`, `extensions/`, `test/` or
-`docs/`. Traversal, control characters, Git metadata and dependency-store paths
-are refused. Extra or omitted patch paths fail before source application or
-archive retrieval. A target-tree mismatch still fails after application and leaves
+of exact relative source paths under `apps/`, `src/`, `extensions/`, `test/`,
+`docs/`, `scripts/` or `packages/`. A companion delta may also declare the root
+files `pnpm-lock.yaml` and `pnpm-workspace.yaml`, allowing the
+companion to restore its own dependency declarations after the distribution
+overlay. Other root files are refused. Traversal, control characters, Git metadata
+and dependency-store paths are refused. Extra or omitted patch paths fail before
+source application or archive retrieval. A target-tree mismatch still fails after
+application and leaves
 the isolated staged checkout available for inspection. The path list is reviewed
 source metadata, not permission to omit differences or weaken full-tree equality.
 
@@ -87,14 +91,18 @@ including modes, must equal the declared companion replay tree.
 For deliberate fixture normalization, `sourceCommit` and `sourceTree` retain the
 authentic component identity. The optional `normalizedTree` binds the public
 replay separately; `normalization.paths` must be a sorted, unique list matching
-the source normalization declaration. Both normalization fields and a bound
-delta are required together. Without normalization, the replay target remains
+the source normalization declaration. The two root dependency files are permitted
+only in source deltas, never as normalization targets. Both normalization fields
+and a bound delta are required together. Without normalization, the replay target remains
 `sourceTree`. This preserves the distinction between anonymized test labels and
 the original source without changing production code.
 
 Both cases first verify the distribution, then the complete companion source tree,
-including modes, and provision the same bound archive. A historical descriptive
-companion identity does not grant reconstruction when these conditions fail.
+including modes, and provision the same bound archive. Provisioning verifies
+archive bytes; it does not assert that the companion's dependency declarations
+select that archive. Dependency installation follows the reconstructed companion
+lockfile. A historical descriptive companion identity does not grant reconstruction
+when these conditions fail.
 `--native-companion` requires both other options; ordinary source and native modes
 remain unchanged. Use the [runtime procedure](../runtime/README.md) for subsequent
 checks and build. A successful tree check is separate from app installation,

@@ -35,6 +35,22 @@ new posting authority. Explicit account, channel and thread bindings still apply
 Use useful prose, without routing dumps, redundant terminal notices or internal
 inspection vocabulary. Explain a limitation by its effect on the request.
 
+## Discord goal commands
+
+A native `/goal` start or resume has two delivery stages. After the goal is saved,
+the command receives a confirmation before model work starts. That confirmation
+preserves the command's private or public visibility and explains that progress
+and results will appear in the originating conversation. Status queries, errors
+before admission and other control replies remain ordinary command responses.
+
+The admitted work uses the existing channel progress and final-delivery path,
+rather than the interaction token that can expire during a long task. Delegated
+continuations retain the same progress card. A continuation handoff does not
+count as a completed answer; partial or failed final delivery is not recorded as
+successful. Failure to deliver the command confirmation does not create another
+goal or abandon the one already saved. Source tests and fresh Discord acceptance
+must establish these stages separately.
+
 ## Progress should reduce uncertainty
 
 During substantial work, provide material milestones and explain a real dependency

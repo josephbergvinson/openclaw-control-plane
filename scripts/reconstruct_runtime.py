@@ -359,12 +359,14 @@ def load_native_distribution(directory: Path, manifest: dict, source_tree: str) 
     ), native.get("referenceCommit"), native.get("referenceTree"))
 
 
-def validate_companion_paths(paths: frozenset[str]) -> None:
-    """Admit only an explicit finite set of ordinary source paths."""
+def validate_companion_paths(paths: frozenset[str], *, allow_native_dependencies: bool = False) -> None:
+    """Admit finite source paths; dependency files belong only to source deltas."""
     if not isinstance(paths, frozenset) or not paths:
         raise ReconstructionError("Companion delta requires a nonempty exact source-path set")
     for name in paths:
-        if (not isinstance(name, str) or not name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/"))
+        if (not isinstance(name, str)
+                or not (name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/"))
+                        or (allow_native_dependencies and name in NATIVE_DELTA_PATHS))
                 or "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name)
                 or any(part in ("", ".", "..", ".git", "node_modules") for part in name.split("/"))):
             raise ReconstructionError("Companion delta contains an unsupported source path")
@@ -422,7 +424,7 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
                 or declared != sorted(set(declared))):
             raise ReconstructionError("Companion delta paths must be a sorted unique nonempty list")
         paths = frozenset(declared)
-    validate_companion_paths(paths)
+    validate_companion_paths(paths, allow_native_dependencies=True)
     base = require_digest(delta["distributionTree"], 40, "companion distribution tree SHA-1")
     if base != native.normalized_tree:
         raise ReconstructionError("Companion base must match the normalized native distribution")
@@ -671,7 +673,7 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
                 if len(fields) != 3 or not all(value.isdigit() for value in fields[:2]):
                     raise ReconstructionError("Companion delta must contain ordinary text changes")
                 paths.append(fields[2])
-            validate_companion_paths(companion.delta_paths)
+            validate_companion_paths(companion.delta_paths, allow_native_dependencies=True)
             if len(paths) != len(companion.delta_paths) or set(paths) != companion.delta_paths:
                 raise ReconstructionError("Companion delta must change exactly its declared source paths")
     if git(checkout, "rev-parse", "HEAD") != package.base_commit:
