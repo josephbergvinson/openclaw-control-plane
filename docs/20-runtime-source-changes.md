@@ -69,16 +69,17 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | Task source scope | Workspace reference guidance remains conditional on the task's permitted sources. A topic match does not require consulting a runbook outside that scope. |
 | Admitted model work | `src/agents/prepared-model-runtime*` retains the captured runtime for nested compaction and synthesis while plugin replacement waits for that admitted work to settle. Each admitted child retains its own reference, allowing preparation to return before the child runs. Only the final release disposes the captured runtime. Fresh or changed requests keep normal admission checks; a closed or canceled parent cannot lend its runtime. |
 | Tool-result formatting | Nested tool calls use the existing compact JSON serializer. Decoded values, result metadata, error handling and credential masking retain their contracts. Reduced formatting overhead is distinct from measured model latency or compaction gains. |
-| Compaction | Native context-pressure handling, summary construction and memory flushing retain recent task context and writer custody. Canonical task-state summaries read older history and the split-turn prefix together, so the latest correction and completed tool result can replace superseded pending work. Chunking, quality checks and the separate split-turn context retain their existing owners. Same-request retries carry earlier confirmed delivery facts forward once; accepted-child receipts keep their original completion obligation once per run identity. Real repeated message effects remain separate, and progress does not settle an owed child final. Genuine lifecycle updates use the existing presenter, including the same status card when that mode is enabled; successful compaction remains distinct from a later model-request failure. |
+| Compaction | The model-backed path in `src/agents/agent-hooks/compaction-safeguard.ts` combines older history and the split-turn prefix in one summary. Bounded recent-turn excerpts, required facts, chunking and the existing quality guard remain part of that path. Same-request retries carry earlier confirmed delivery facts forward once, and accepted-child receipts keep their original completion obligation once per run identity. Real repeated message effects remain separate, and progress does not settle an owed child final. Genuine lifecycle updates use the existing presenter, including the same status card when enabled. A later model request has its own outcome. |
 | Optional recall | Memory preparation and search have bounded scope and usable fallbacks. Deep-recall gating does not emit an unsupported claim about the user's recall intent. Fallback evidence comes from completed helper output; incomplete evidence remains unknown. Main and helper guidance starts a single unambiguous missing fact with one candidate and expands only when needed, preserving tool arguments and configured score thresholds. Current provider snapshots, explicitly supplied task assumptions and trusted loaded facts remain distinct from unstated personal preferences. Unavailable semantic search does not disable exact source lookup or justify claiming all context is missing. |
 | Known-record updates | The memory tool contract directs authenticated owner updates to known records without redundant semantic search. Exact reads preserve existing contents; search is used for missing facts or record locations and unresolved observed conflicts. Source and audience rules still apply. |
 | Prompt application observations | The existing hook runner and prompt-submission recorder retain host-only dispatch, handler-result and applied-projection observations tied to the admitted input. Bounded lengths and hashes separate offered context from the projection present at foreground dispatch. They do not add model instructions, and missing or ambiguous capture remains unknown. |
 | Trajectory context accounting | `src/trajectory/metadata.ts` places the existing run identity and current prompt report before large configuration, plugin and skill inventories in diagnostic projection. Their inventory size can no longer consume the shared object budget before those fields are visited. Existing field-size limits, truncation and credential masking remain; capture is evidence about the request, not proof of model comprehension. |
 | OAuth refresh | `src/agents/auth-profiles` retains refresh ownership and durable profile adoption under queue/cross-process locking. A caller timing out does not authorize a competing refresh or identity substitution. |
 | Request accounting | Transport metadata and accepted response identities distinguish configured model/reasoning preferences, outgoing requests, returned usage and goal totals. They do not expose hidden reasoning. |
+| Recovery usage | `src/agents/assistant-error-transcript.ts` and `src/agents/session-tool-result-guard.ts` retain valid observed usage once when recovery discards partial text or invalid tool calls. A later terminal-error entry carries zero additional usage for the same response. |
 | Cache measurements | Provider usage mapping preserves whether cached-token counts were reported. A reported zero is distinct from missing or invalid telemetry, so the observer does not diagnose a cache miss from absent data. Billing totals retain their existing calculation. |
 | Initial context reads | `src/agents/sessions` prepares and validates an unsent initial snapshot in its existing reader. A same-generation append can trigger one fresh read; rewrites, changed selection, cancellation and repeated changes remain rejected. Ordinary admitted reads keep their existing strict validation. |
-| ACP session stores | Configured ACP-only session owners use the existing session/index preparation without requiring an unrelated local model authentication profile. Configured paths and database integrity checks still apply. |
+| Session store startup | `src/gateway/server-agent-database-startup.ts` checks configured paths for configured owners and the registered physical store for a retained owner outside the roster. It rechecks ownership and configuration during preparation. ACP-only and retained owners can prepare their history and indexes without a local model authentication profile. |
 | SDK and plugin contracts | Compiled SDK surfaces, generated schemas and plugin metadata travel with their consumers and tests. A source export must include the dependency closure rather than a few hand-selected fixes. |
 
 [Memory and context](08-memory-and-context.md) explains loading boundaries and
@@ -176,6 +177,8 @@ Profile data and sign-in state remain; externally attached browsers retain
 their own lifecycle. Unknown observation leaves the browser running. Lifecycle
 cleanup also considers an existing idle managed instance when its last tracked
 tab was already explicitly closed, using the same ownership and activity checks.
+The cleanup regression covers downloads still pending after tab closure in both
+headed and headless Chrome.
 
 Account selection uses the registered route and the account shown on the page.
 An ordinary Chrome profile and an OpenClaw managed-profile name are separate
@@ -183,10 +186,13 @@ identities; a convenient label or the last-used company profile does not select
 the requested account. Personal tasks use the operator's registered personal
 profile unless the task calls for another account.
 
-The bundled browser guidance starts with the selected profile's existing tabs;
-setup diagnostics are for suspected setup failures. It also explains that configured
-cleanup can close task-owned tabs after final delivery, so a pre-final tab listing
-does not establish that those tabs will remain open.
+When sign-in state matters, the bundled browser guidance uses `profiles` to find
+the registered existing session and starts with its tabs. Use setup diagnostics
+for suspected setup failures. For Computer, `get_browser_state` takes an observed
+`windowRef` and returns the browser and page references for that window.
+`browser_prepare` prepares a fresh or named isolated profile and may open another
+browser. Dashboard authoring guidance lives in the control UI skill's dashboard
+reference. Configured cleanup can close task-owned tabs after final delivery.
 
 Completion cleanup covers ordinary and already-delivered replies. The existing
 delivery owner waits for the final-delivery record to finish updating before

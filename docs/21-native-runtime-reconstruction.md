@@ -61,8 +61,8 @@ companion source. The helper accepts either of these finite cases:
 
 A new finite declaration supplies `delta.paths`: a nonempty, sorted, unique list
 of exact relative source paths under `apps/`, `src/`, `extensions/`, `test/`,
-`docs/`, `scripts/` or `packages/`. A companion delta may also declare the root
-files `pnpm-lock.yaml` and `pnpm-workspace.yaml`, allowing the
+`docs/`, `scripts/`, `packages/` or `skills/`. A companion delta may also declare
+the root files `pnpm-lock.yaml` and `pnpm-workspace.yaml`, allowing the
 companion to restore its own dependency declarations after the distribution
 overlay. Other root files are refused. Traversal, control characters, Git metadata
 and dependency-store paths are refused. Extra or omitted patch paths fail before

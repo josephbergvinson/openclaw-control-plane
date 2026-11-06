@@ -365,7 +365,7 @@ def validate_companion_paths(paths: frozenset[str], *, allow_native_dependencies
         raise ReconstructionError("Companion delta requires a nonempty exact source-path set")
     for name in paths:
         if (not isinstance(name, str)
-                or not (name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/"))
+                or not (name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/", "skills/"))
                         or (allow_native_dependencies and name in NATIVE_DELTA_PATHS))
                 or "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name)
                 or any(part in ("", ".", "..", ".git", "node_modules") for part in name.split("/"))):
