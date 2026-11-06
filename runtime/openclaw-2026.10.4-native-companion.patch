@@ -1,866 +1,129 @@
-diff --git a/apps/macos/Sources/OpenClaw/DashboardManager+Construction.swift b/apps/macos/Sources/OpenClaw/DashboardManager+Construction.swift
-index e01991ca8ca114bd64498e831bc5ab73114efd97..5430c9eb79dd92ffc729cd7b4ddb0f27628e8801 100644
---- a/apps/macos/Sources/OpenClaw/DashboardManager+Construction.swift
-+++ b/apps/macos/Sources/OpenClaw/DashboardManager+Construction.swift
-@@ -329,7 +329,7 @@ extension DashboardManager {
-         guard state.connectionMode == .remote, state.hostsLocalGatewayWithRemotePrimary,
-               state.gatewayConfigIsCurrentForRouting else { throw CancellationError() }
-         let generation = state.gatewayRoutingGeneration
--        let endpoint = try GatewayEndpointStore.localEndpoint(hostingBesideRemotePrimary: true)
-+        let endpoint = try await GatewayEndpointStore.resolvedLocalEndpoint(hostingBesideRemotePrimary: true)
-         let resolved = try await dashboardConfiguration(
-             endpoint: endpoint, mode: .local, target: .local, token: endpoint.config.token)
-         guard state.connectionMode == .remote, state.hostsLocalGatewayWithRemotePrimary,
-diff --git a/apps/macos/Sources/OpenClaw/DashboardManager+Routes.swift b/apps/macos/Sources/OpenClaw/DashboardManager+Routes.swift
-index 1f927beef265efc8a0bebf54f67790746ab87429..c54e5130c73807c3c22b57d3c8464b5afb7bc710 100644
---- a/apps/macos/Sources/OpenClaw/DashboardManager+Routes.swift
-+++ b/apps/macos/Sources/OpenClaw/DashboardManager+Routes.swift
-@@ -70,24 +70,37 @@ extension DashboardManager {
-     }
+diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
+index d26bd8490421a6a0131ce0d74bb6e120213a6ca6..694b0e8e9e0c325fccc71aad21245be0f8c4470c 100644
+--- a/extensions/browser/skills/browser-automation/SKILL.md
++++ b/extensions/browser/skills/browser-automation/SKILL.md
+@@ -27,7 +27,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
+    - Use the same `targetId` for follow-up actions so refs stay on the same tab.
+    - For durable Playwright refs, request `refs="aria"` when supported. If you receive `axN` refs from `snapshotFormat="aria"`, use them only after that same snapshot call; stale or unbound `axN` refs fail fast and need a fresh snapshot.
+    - Use `urls=true` when link text is ambiguous or a direct navigation target would avoid brittle clicks.
+-   - Use `labels=true` on snapshot or screenshot when visual position matters. On Playwright-backed profiles, the response includes an `annotations` array (`{ref, number, role, name?, box}`) with each ref's bounding box in the captured image's coordinate space, so you can reason about position without re-snapshotting; screenshot labels can also combine with `fullPage=true` (CLI: `--full-page`) to label the whole document, or `ref` / `element` to clip to one element. Existing-session (chrome-mcp) profiles render an overlay into page screenshots but do not attach `annotations` or use the Playwright full-page/ref/element projection helper, so read positions from the labeled image itself on those profiles. The raw-CDP fallback (no Playwright) does not support labeled screenshots at all and returns a 501, so only request `labels` when Playwright is available.
++   - Use `labels=true` on snapshot or screenshot when visual position matters. On Playwright-backed profiles, the response includes an `annotations` array (`{ref, number, role, name?, box}`) with each ref's bounding box in the captured image's coordinate space, so you can reason about position without re-snapshotting; screenshot labels can also combine with `fullPage=true` (CLI: `--full-page`) to label the whole document, or `ref` / `element` to clip to one element. `profile="user"` and other existing-session (chrome-mcp) profiles render an overlay into page screenshots but do not attach `annotations` or use the Playwright full-page/ref/element projection helper, so read positions from the labeled image itself on those profiles. The raw-CDP fallback (no Playwright) does not support labeled screenshots at all and returns a 501, so only request `labels` when Playwright is available.
+ 4. Act narrowly:
+    - Prefer `action="act"` with a ref from the latest snapshot.
+    - `navigate` returns the loaded page's compact snapshot inline, and batch `act` results that report a cross-document navigation include fresh page state; use those refs directly instead of a follow-up snapshot call.
+@@ -42,7 +42,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
  
-     static func resolvePrimaryEndpoint(
--        mode: AppState.ConnectionMode) async throws -> GatewayConnection.EndpointSnapshot
-+        mode: AppState.ConnectionMode,
-+        endpointStore: GatewayEndpointStore = .shared) async throws -> GatewayConnection.EndpointSnapshot
-     {
--        if let endpoint = self.immediateDashboardEndpoint(mode: mode) {
-+        if mode == .remote, let endpoint = self.immediateDashboardEndpoint(mode: mode) {
-             return endpoint
-         }
--        return try await Task.detached(priority: .userInitiated) {
--            await GatewayEndpointStore.shared.refresh()
--            return try await GatewayEndpointStore.shared.requireEndpoint()
--        }.value
-+        // The endpoint owner resolves local SecretRefs and keeps credentials,
-+        // route authority, and revision in the same snapshot as native RPC.
-+        return try await endpointStore.requireEndpoint()
-     }
+ ## Browser batch CLI
  
-     static func immediateDashboardEndpoint(
-         mode: AppState.ConnectionMode) -> GatewayConnection.EndpointSnapshot?
-     {
-         let root = OpenClawConfigFile.loadDict()
-+        if mode == .local {
-+            guard ConnectionModeResolver.resolve(root: root).mode == .local else { return nil }
-+            let env = (GatewayLaunchAgentManager.launchdConfigSnapshot()?.environment ?? [:])
-+                .merging(ProcessInfo.processInfo.environment) { _, app in app }
-+            // Preload can use synchronous literal/environment credentials, but
-+            // an unresolved SecretRef must wait for the canonical endpoint owner.
-+            do {
-+                guard try GatewayLocalAuthResolver.request(root: root, env: env) == nil else { return nil }
-+                return try GatewayEndpointStore.localEndpoint(hostingBesideRemotePrimary: false, root: root)
-+            } catch {
-+                return nil
-+            }
-+        }
-+        guard mode == .remote else { return nil }
-         let resolution = GatewayRemoteConfig.resolveTransportResolution(root: root)
--        if mode == .remote,
--           resolution.transport == .direct,
-+        if resolution.transport == .direct,
-            let url = resolution.directURL
-         {
-             return GatewayConnection.EndpointSnapshot(
-@@ -102,10 +115,6 @@ extension DashboardManager {
-                 routeAuthority: nil)
-         }
+-`openclaw browser batch` runs an array of nested `/act` actions in one `/act` call (the same `kind="batch"` runtime reached through the agent tool), so CLI users and scripts can combine actions like `wait`, `click`, `type`, and `evaluate` into a single replayable plan without per-action round trips. Each entry in `actions[]` is a `BrowserActRequest` — the closed union the `/act` route accepts — not arbitrary `openclaw browser` subcommands. `batch` is not supported on existing-session (chrome-mcp) profiles; send actions individually there.
++`openclaw browser batch` runs an array of nested `/act` actions in one `/act` call (the same `kind="batch"` runtime reached through the agent tool), so CLI users and scripts can combine actions like `wait`, `click`, `type`, and `evaluate` into a single replayable plan without per-action round trips. Each entry in `actions[]` is a `BrowserActRequest` — the closed union the `/act` route accepts — not arbitrary `openclaw browser` subcommands. `batch` is not supported on `profile="user"` and other existing-session (chrome-mcp) profiles; send actions individually there.
  
--        if mode == .local {
--            return try? GatewayEndpointStore.localEndpoint(hostingBesideRemotePrimary: false)
--        }
--
-         return nil
-     }
- }
-diff --git a/apps/macos/Sources/OpenClaw/GatewayConnection.swift b/apps/macos/Sources/OpenClaw/GatewayConnection.swift
-index 5e3f74074275e94979e1b6234d0aebc466a28a1a..aabc59ba7e21681490208c0b0e51ae6ca49d4197 100644
---- a/apps/macos/Sources/OpenClaw/GatewayConnection.swift
-+++ b/apps/macos/Sources/OpenClaw/GatewayConnection.swift
-@@ -50,31 +50,6 @@ actor GatewayConnection: Observable {
+ - CLI: `openclaw browser batch --actions '<json>'`, `--actions-file plan.json`, or `--actions-file -` for stdin. `--actions-file` and stdin input are capped at 1,000,000 bytes; split larger plans into multiple batch commands. `--continue` sets `stopOnError=false`; default stops on first error.
+ - Ref lifecycle: refs come from a `snapshot` run before the batch (snapshot is not a nested action). A nested action that changes page state — such as a `click` that triggers navigation, or an `evaluate` that mutates the DOM — can invalidate earlier refs for the rest of the batch; put state-changing actions first, or split into a follow-up batch after re-snapshotting. Navigation and re-snapshotting happen outside the batch, since `open`, `navigate`, and `snapshot` are not `/act` kinds.
+@@ -146,11 +146,11 @@ If an action fails with a missing or stale ref:
  
-     typealias Config = (url: URL, token: String?, password: String?)
+ ## Existing User Browser
  
--    struct EndpointSnapshot {
--        let config: Config
--        let tls: GatewayTLSRoute?
--        let routeAuthority: UInt64?
--        let deviceAuthGatewayID: String?
--        let revision: UInt64?
--        let browserSession: GatewayBrowserSession?
--
--        init(
--            config: Config,
--            tls: GatewayTLSRoute? = nil,
--            routeAuthority: UInt64?,
--            deviceAuthGatewayID: String? = nil,
--            revision: UInt64? = nil,
--            browserSession: GatewayBrowserSession? = nil)
--        {
--            self.config = config
--            self.tls = tls
--            self.routeAuthority = routeAuthority
--            self.deviceAuthGatewayID = deviceAuthGatewayID
--            self.revision = revision
--            self.browserSession = browserSession
--        }
--    }
--
-     typealias EndpointProvider = @Sendable () async throws -> EndpointSnapshot
-     typealias SessionProvider = @Sendable (GatewayTLSRoute?) -> WebSocketSessionBox?
+-When existing cookies/login matter, use `action="profiles"` and select the registered profile that exposes the intended existing browser session. Do not assume a profile name.
++Use `profile="user"` only when existing cookies/login matter. This attaches to the user's running Chromium-based browser.
  
-@@ -980,6 +955,7 @@ extension GatewayConnection {
-         // Revalidate at the socket owner, after the actor hop: a superseded
-         // credential save must not disconnect a newer same-account renewal.
-         guard ifCurrent() else { return }
-+        self.configuredConnection?.endpoint.invalidateCredentials?()
-         let client = self.retireConfiguredConnection(disconnection: .disconnected(nil))
-         self.shutdownGeneration &+= 1
-         if let client {
-@@ -1164,7 +1140,7 @@ extension GatewayConnection {
-         guard routeGeneration == self.routeGeneration,
-               retireSocketGeneration(socketGeneration, reason: reason)
-         else { return }
--        if self.supportsSharedEndpointRecovery { GatewayLocalAuthResolver.invalidate() }
-+        self.configuredConnection?.endpoint.invalidateCredentials?()
-         self.finishRealtimeTalkSubscribers(socketGeneration: socketGeneration)
-         self.lastSnapshot = nil
-         self.resetCanvasPluginSurfaceState()
-diff --git a/apps/macos/Sources/OpenClaw/GatewayConnectionSupport.swift b/apps/macos/Sources/OpenClaw/GatewayConnectionSupport.swift
-index 7eb28a4b1a5680bd26c15b3d79794df6c6bebdc5..4e40929db7a594393a72681d220219970863a833 100644
---- a/apps/macos/Sources/OpenClaw/GatewayConnectionSupport.swift
-+++ b/apps/macos/Sources/OpenClaw/GatewayConnectionSupport.swift
-@@ -4,6 +4,36 @@ import OSLog
- import Security
+ On macOS, `action="importprofile"` is the alternative when the agent should use an isolated managed browser with cookies copied from a real Chrome-family profile. First use `action="profiles"` and inspect `systemProfiles`, then import into a fresh managed profile name. Import asks for one Keychain/Touch ID consent prompt. It copies cookies, not local storage or IndexedDB; device-bound session credentials (DBSC) mean some Google sessions may still require re-authentication.
  
- extension GatewayConnection {
-+    struct EndpointSnapshot {
-+        let config: Config
-+        let tls: GatewayTLSRoute?
-+        let routeAuthority: UInt64?
-+        let deviceAuthGatewayID: String?
-+        let revision: UInt64?
-+        let browserSession: GatewayBrowserSession?
-+        /// Retires credentials at their actual owner, independently of primary
-+        /// tunnel recovery. Remote routes never inherit local auth ownership.
-+        let invalidateCredentials: (@Sendable () -> Void)?
-+
-+        init(
-+            config: Config,
-+            tls: GatewayTLSRoute? = nil,
-+            routeAuthority: UInt64?,
-+            deviceAuthGatewayID: String? = nil,
-+            revision: UInt64? = nil,
-+            browserSession: GatewayBrowserSession? = nil,
-+            invalidateCredentials: (@Sendable () -> Void)? = nil)
-+        {
-+            self.config = config
-+            self.tls = tls
-+            self.routeAuthority = routeAuthority
-+            self.deviceAuthGatewayID = deviceAuthGatewayID
-+            self.revision = revision
-+            self.browserSession = browserSession
-+            self.invalidateCredentials = invalidateCredentials
-+        }
-+    }
-+
-     nonisolated static let requestRetryDelaysMs = [150, 400, 900]
- }
+-For existing-session profiles, omit `timeoutMs` on `act:type`, `hover`, `scrollIntoView`, `drag`, `select`, and `fill`; that driver rejects per-call timeout overrides for those actions. `act:evaluate` accepts `timeoutMs`.
++For `profile="user"` and other existing-session profiles, omit `timeoutMs` on `act:type`, `hover`, `scrollIntoView`, `drag`, `select`, and `fill`; that driver rejects per-call timeout overrides for those actions. `act:evaluate` accepts `timeoutMs`.
  
-diff --git a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
-index fd8b7a21cbbf0aa71592154538ebc60805370244..7aa42c97edfcd21c0c846521e9e4b2af288b43d7 100644
---- a/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
-+++ b/apps/macos/Sources/OpenClaw/GatewayEndpointStore.swift
-@@ -71,6 +71,8 @@ actor GatewayEndpointStore {
-         let remoteTLSFingerprint: String?
-         /// Invalidates a suspended SSH lookup when its desired route changes.
-         let sshRouteIdentity: SSHRouteIdentity?
-+        /// Identifies the resolved local cache entry retired with this endpoint.
-+        var localCredentialOwnerKey: Data?
-     }
+ ## Google Meet Notes
  
-     struct Deps {
-@@ -692,12 +694,16 @@ actor GatewayEndpointStore {
-         }
-         // First readiness keeps its admitted authority; source replacement and
-         // endpoint loss already retired it. Do not discard the first handshake result.
-+        let invalidateCredentials: (@Sendable () -> Void)? = source.localCredentialOwnerKey.map { ownerKey in
-+            { @Sendable in GatewayLocalAuthResolver.invalidate(ownerKey: ownerKey) }
-+        }
-         let endpoint = GatewayConnection.EndpointSnapshot(
-             config: (url, source.token, source.password),
-             tls: tls,
-             routeAuthority: routeAuthority,
-             deviceAuthGatewayID: source.deviceAuthGatewayID,
--            revision: self.routeRevision)
-+            revision: self.routeRevision,
-+            invalidateCredentials: invalidateCredentials)
-         self.resolvedEndpoint = endpoint
-         self.setState(.ready(
-             mode: mode,
-@@ -862,16 +868,18 @@ extension GatewayEndpointStore {
-         let deviceAuthGatewayID = GatewayDiscoveryPreferences.deviceAuthGatewayID(root: root, connectionMode: mode)
- 
-         var localCredentials: GatewayLocalAuthResolver.Credentials?
-+        var localCredentialOwnerKey: Data?
-         let serviceEnvironment = (launchdSnapshot?.environment ?? [:]).merging(env) { _, app in app }
-         if mode == .local, let request = try GatewayLocalAuthResolver.request(root: root, env: serviceEnvironment) {
-             let ownerKey = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
-             localCredentials = try await GatewayLocalAuthResolver.resolve(
-                 request: request, ownerKey: ownerKey, env: serviceEnvironment)
-+            localCredentialOwnerKey = ownerKey
-             try Task.checkCancellation()
-             guard NSDictionary(dictionary: root).isEqual(to: OpenClawConfigFile.loadDict()) else {
-                 throw CancellationError()
-             }
--        } else {
-+        } else if mode == .local {
-             GatewayLocalAuthResolver.invalidate()
-         }
-         let localConfig = mode == .local ? self.localConfig(
-@@ -912,7 +920,8 @@ extension GatewayEndpointStore {
-             remoteTransport: remoteResolution.transport,
-             directRemoteURL: remoteResolution.directURL,
-             remoteTLSFingerprint: isRemote ? GatewayRemoteConfig.resolveTLSFingerprint(root: root) : nil,
--            sshRouteIdentity: sshRouteIdentity)
-+            sshRouteIdentity: sshRouteIdentity,
-+            localCredentialOwnerKey: localCredentialOwnerKey)
-         let selectionIsCurrent = await acceptSource(source)
-         guard selectionIsCurrent, !Task.isCancelled else {
-             // An obsolete read is not an unconfigured selection. Do not publish
-@@ -1027,10 +1036,46 @@ extension GatewayEndpointStore {
-             deviceAuthGatewayID: GatewayDiscoveryPreferences.deviceAuthGatewayID(root: root, connectionMode: .local))
-     }
- 
-+    /// Authenticated consumers of the auxiliary local Gateway share the same
-+    /// SecretRef resolver as primary RPC. Synchronous route validation does
-+    /// not resolve SecretRefs or launch credential helpers.
-+    static func resolvedLocalEndpoint(
-+        hostingBesideRemotePrimary: Bool,
-+        invalidateCredentials: @escaping @Sendable (Data)
-+            -> Void = { GatewayLocalAuthResolver.invalidate(ownerKey: $0) },
-+        resolveCredentials: @Sendable (Data, Data, [String: String]) async throws
-+            -> GatewayLocalAuthResolver.Credentials = { request, ownerKey, env in
-+                try await GatewayLocalAuthResolver.resolve(request: request, ownerKey: ownerKey, env: env)
-+            }) async throws -> GatewayConnection.EndpointSnapshot
-+    {
-+        let root = OpenClawConfigFile.loadDict()
-+        guard !hostingBesideRemotePrimary || ConnectionModeResolver.resolve(root: root).mode == .remote else {
-+            throw CancellationError()
-+        }
-+        let endpoint = try self.localEndpoint(hostingBesideRemotePrimary: hostingBesideRemotePrimary, root: root)
-+        let env = (GatewayLaunchAgentManager.launchdConfigSnapshot()?.environment ?? [:])
-+            .merging(ProcessInfo.processInfo.environment) { _, app in app }
-+        guard let request = try GatewayLocalAuthResolver.request(
-+            root: root, env: env, hostingBesideRemotePrimary: hostingBesideRemotePrimary)
-+        else { return endpoint }
-+        let ownerKey = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
-+        let credentials = try await resolveCredentials(request, ownerKey, env)
-+        try Task.checkCancellation()
-+        guard NSDictionary(dictionary: root).isEqual(to: OpenClawConfigFile.loadDict()) else {
-+            throw CancellationError()
-+        }
-+        return self.localEndpoint(
-+            config: (endpoint.config.url, credentials.token, credentials.password),
-+            deviceAuthGatewayID: endpoint.deviceAuthGatewayID,
-+            invalidateCredentials: { invalidateCredentials(ownerKey) })
-+    }
-+
-     private static func localEndpoint(
-         config: GatewayConnection.Config,
-         deviceAuthGatewayID: String?,
--        revision: UInt64? = nil) -> GatewayConnection.EndpointSnapshot
-+        revision: UInt64? = nil,
-+        invalidateCredentials: (@Sendable () -> Void)? = nil)
-+        -> GatewayConnection.EndpointSnapshot
-     {
-         GatewayConnection.EndpointSnapshot(
-             config: config,
-@@ -1040,7 +1085,8 @@ extension GatewayEndpointStore {
-                 configuredFingerprint: nil),
-             routeAuthority: nil,
-             deviceAuthGatewayID: deviceAuthGatewayID,
--            revision: revision)
-+            revision: revision,
-+            invalidateCredentials: invalidateCredentials)
-     }
- 
-     private static func localConfig(
-diff --git a/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift b/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
-index f456df91132a33058675febd76c4ab0c39b217ce..da24d8ec1c8b93a195b3d4861de77aadef020776 100644
---- a/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
-+++ b/apps/macos/Sources/OpenClaw/GatewayLocalAuthResolver.swift
-@@ -17,8 +17,9 @@ enum GatewayLocalAuthResolver {
- 
-         private let current = LockIsolated<Entry?>(nil)
- 
--        func invalidate() {
-+        func invalidate(ownerKey: Data? = nil) {
-             self.current.withValue {
-+                if let ownerKey, $0?.key != ownerKey { return }
-                 $0?.task.cancel()
-                 $0 = nil
-             }
-@@ -53,8 +54,8 @@ enum GatewayLocalAuthResolver {
- 
-     private static let connectionCache = ConnectionCache()
- 
--    static func invalidate() {
--        self.connectionCache.invalidate()
-+    static func invalidate(ownerKey: Data? = nil) {
-+        self.connectionCache.invalidate(ownerKey: ownerKey)
-     }
- 
-     struct Credentials: Decodable, Equatable, Sendable {
-@@ -71,14 +72,20 @@ enum GatewayLocalAuthResolver {
-         }
-     }
- 
--    static func request(root: [String: Any], env: [String: String]) throws -> Data? {
-+    static func request(
-+        root: [String: Any],
-+        env: [String: String],
-+        hostingBesideRemotePrimary: Bool = false) throws -> Data?
-+    {
-         guard let gateway = root["gateway"] as? [String: Any],
--              gateway["mode"] as? String != "remote",
-+              hostingBesideRemotePrimary || gateway["mode"] as? String != "remote",
-               let auth = gateway["auth"] as? [String: Any]
-         else { return nil }
-         let remoteURL = ((gateway["remote"] as? [String: Any])?["url"] as? String)?
-             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
--        guard gateway["mode"] as? String == "local" || remoteURL.isEmpty else { return nil }
-+        guard hostingBesideRemotePrimary || gateway["mode"] as? String == "local" || remoteURL.isEmpty else {
-+            return nil
-+        }
-         let mode = auth["mode"] as? String
-         guard mode != "none", mode != "trusted-proxy" else { return nil }
-         let tokenIsReference = auth["token"] is [String: Any]
-diff --git a/apps/macos/Sources/OpenClaw/MacGatewayProfiles.swift b/apps/macos/Sources/OpenClaw/MacGatewayProfiles.swift
-index 7bf97ff167425f2491a037de45defd46ce3fe434..6222ff82dfac58176a1c804fe4fc0e9f513e2675 100644
---- a/apps/macos/Sources/OpenClaw/MacGatewayProfiles.swift
-+++ b/apps/macos/Sources/OpenClaw/MacGatewayProfiles.swift
-@@ -749,7 +749,7 @@ actor MacGatewayConnectionFleet {
-                 guard let generation else { throw URLError(.notConnectedToInternet) }
-                 let root = OpenClawConfigFile.loadDict()
-                 guard ConnectionModeResolver.resolve(root: root).mode == .remote else { throw CancellationError() }
--                let endpoint = try GatewayEndpointStore.localEndpoint(hostingBesideRemotePrimary: true, root: root)
-+                let endpoint = try await GatewayEndpointStore.resolvedLocalEndpoint(hostingBesideRemotePrimary: true)
-                 let isCurrent = await MainActor.run {
-                     let state = AppStateStore.shared
-                     return active.value && state.connectionMode == .remote &&
-diff --git a/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift b/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift
-index 3904dad61fd50bb735811170418248f3daeee08c..5e03951baddc61ddeae24fe5063798ab9204fbd7 100644
---- a/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift
-+++ b/apps/macos/Sources/OpenClaw/NativeCredentialPromptContext.swift
-@@ -77,6 +77,7 @@ enum NativeCredentialPromptContext {
-             case .unsupportedAdministratorAuthentication: "unsupported_administrator_authentication"
-             case .unsupportedKeychainAccess: "unsupported_keychain_access"
-             case .loginKeychainAuthentication: "login_keychain_authentication"
-+            case .loginKeychainAccessModification: "login_keychain_access_modification"
-             case .autoFillAuthentication: "autofill_authentication"
-             case .passwordsUnlockAuthentication: "passwords_unlock_authentication"
-             case .localPasskeyAuthentication: "local_passkey_authentication"
-@@ -188,6 +189,14 @@ enum NativeCredentialPromptContext {
-                   })
-             else { return nil }
-         }
-+        if case .loginKeychainAccessModification = purpose {
-+            guard bundleID == "com.apple.SecurityAgent",
-+                  controlText.isSuperset(of: ["Deny", "Allow"]), !controlText.contains("Always Allow"),
-+                  !formMembers.contains(where: {
-+                      $0 != field && [kAXTextFieldRole, kAXTextAreaRole].contains(nodes[$0].role)
-+                  })
-+            else { return nil }
-+        }
-         return Form(field: field, context: context, evidence: evidence)
-     }
- 
-diff --git a/apps/macos/Tests/OpenClawIPCTests/DashboardLocalCredentialTests.swift b/apps/macos/Tests/OpenClawIPCTests/DashboardLocalCredentialTests.swift
-new file mode 100644
-index 0000000000000000000000000000000000000000..18995d1a58a3e398c1210e6adf05f29978642b24
---- /dev/null
-+++ b/apps/macos/Tests/OpenClawIPCTests/DashboardLocalCredentialTests.swift
-@@ -0,0 +1,217 @@
-+import ConcurrencyExtras
-+import Foundation
-+import Testing
-+@testable import OpenClaw
-+@testable import OpenClawKit
-+
-+@MainActor
-+struct DashboardLocalCredentialTests {
-+    @Test(arguments: ["token", "password"])
-+    func `primary dashboard uses resolved endpoint instead of stale local config`(_ kind: String) async throws {
-+        try await self.withGateway(kind: kind, mode: "local") { _ in
-+            #expect(DashboardManager.immediateDashboardEndpoint(mode: .local) == nil)
-+            let source = GatewayEndpointStore.SourceSnapshot(
-+                routingGeneration: nil,
-+                mode: .local,
-+                token: kind == "token" ? "resolved-token" : nil,
-+                password: kind == "password" ? "resolved-password" : nil,
-+                deviceAuthGatewayID: "resolved-local-gateway",
-+                localPort: 18789,
-+                localHost: "127.0.0.1",
-+                scheme: "ws",
-+                bindMode: "loopback",
-+                remoteTransport: .ssh,
-+                directRemoteURL: nil,
-+                remoteTLSFingerprint: nil,
-+                sshRouteIdentity: nil)
-+            let store = GatewayEndpointStore(deps: .init(
-+                token: { "stale-token" },
-+                password: { "stale-password" },
-+                localPort: { 18789 },
-+                localUnavailableReason: { nil },
-+                remoteRouteIfRunning: { nil },
-+                remoteRouteIsCurrent: { _ in false },
-+                canStartRemoteTunnel: { false },
-+                ensureRemoteTunnel: { throw CancellationError() },
-+                liveSourceIsCurrent: { _ in true },
-+                sourceSnapshot: { source }))
-+            // Exercise the production selector, not DashboardManager's test endpoint override.
-+            let endpoint = try await DashboardManager.resolvePrimaryEndpoint(mode: .local, endpointStore: store)
-+            let nativeEndpoint = try await store.requireEndpoint()
-+            #expect(endpoint.config.token == source.token)
-+            #expect(endpoint.config.password == source.password)
-+            #expect(endpoint.deviceAuthGatewayID == nativeEndpoint.deviceAuthGatewayID)
-+            #expect(endpoint.revision == nativeEndpoint.revision)
-+        }
-+    }
-+
-+    @Test(arguments: ["literal-token", "${DASHBOARD_TEST_AUTH}"])
-+    func `literal and environment local auth retain synchronous preload`(_ token: String) async throws {
-+        try await self.withGateway(kind: "token", mode: "local", literal: token, staleAmbient: false) { _ in
-+            let endpoint = try #require(DashboardManager.immediateDashboardEndpoint(mode: .local))
-+            #expect(endpoint.config.token == (token == "literal-token" ? token : "environment-token"))
-+            #expect(endpoint.config.password == nil)
-+            #expect(endpoint.config.url.port == 18789)
-+        }
-+    }
-+
-+    @Test(arguments: ["token", "password"])
-+    func `auxiliary local endpoint resolves its reference without borrowing remote or ambient credentials`(
-+        _ kind: String) async throws
-+    {
-+        try await self.withGateway(kind: kind, mode: "remote") { _ in
-+            let endpoint = try await GatewayEndpointStore.resolvedLocalEndpoint(
-+                hostingBesideRemotePrimary: true,
-+                resolveCredentials: { request, ownerKey, env in
-+                    let payload = try #require(try JSONSerialization.jsonObject(with: request) as? [String: Any])
-+                    let auth = try #require(payload["auth"] as? [String: Any])
-+                    #expect((auth[kind] as? [String: String])?["id"] == "LOCAL_AUTH")
-+                    let owner = try #require(try JSONSerialization.jsonObject(with: ownerKey) as? [String: Any])
-+                    #expect((owner["gateway"] as? [String: Any])?["mode"] as? String == "remote")
-+                    #expect(env["OPENCLAW_GATEWAY_TOKEN"] == "stale-token")
-+                    #expect(env["OPENCLAW_GATEWAY_PASSWORD"] == "stale-password")
-+                    return .init(
-+                        version: 1,
-+                        token: kind == "token" ? "resolved-token" : nil,
-+                        password: kind == "password" ? "resolved-password" : nil)
+diff --git a/extensions/browser/src/browser-tool-description.ts b/extensions/browser/src/browser-tool-description.ts
+index 1a5271d371462bdc4896b6b648cbe4d7a010cc7d..5d47a02b48182f90d30c6c6ba8f191dac380361c 100644
+--- a/extensions/browser/src/browser-tool-description.ts
++++ b/extensions/browser/src/browser-tool-description.ts
+@@ -94,7 +94,7 @@ function describeBrowserTool(opts: {
+     "For multi-step browser work, login checks, stale refs, duplicate tabs, or Google Meet flows, use the bundled browser-automation skill when it is available.",
+     ...(!opts.capabilities.tabBound
+       ? [
+-          "Only create a Browser dashboard when the user asks for a dashboard. Opening the browser sidebar or side panel does not require a widget. For dashboard authoring and shared-page modes, read the control-ui skill's references/dashboards.md. Use dashboard=<widget name> without targetId/profile/route overrides.",
++          'Only create a Browser dashboard when the user asks for a dashboard. Opening the browser sidebar or side panel does not require a widget. For a requested agent-controllable HTTP(S) dashboard, first call tool dashboard with action="widget_put", pluginKind="browser:dashboard", name=<stable widget name>, props={url}, and size="full". Next call tool browser with action="open", dashboard=<that widget name>, and no targetUrl. Then call tool dashboard with action="set_presentation", presentation="expanded". The dashboard tool owns widget authoring and presentation; the browser tool owns page interaction. Use dashboard=<widget name> and omit targetId/profile/route overrides. Administrator dashboards use managed-profile state. Non-admin selectors use an empty isolated context in the configured default local managed profile; supported actions are tabs, focus, navigate, snapshot, screenshot, act, open and close. Session mode is unavailable when a sandbox is required or model selection is locked. Agent and viewer must use the same mode to share page state. Hiding a dashboard preserves its page; resetting a session closes its isolated context. General browser actions retain their configured host/profile access. Call browser with action="close" and dashboard to request stop, or action="open" and dashboard to resume its saved URL. A session:website widget is a lightweight iframe and cannot be controlled through this selector.',
+         ]
+       : []),
+     'For stable, self-resolving refs across calls, use snapshot with refs="aria" (Playwright aria-ref ids). Default refs="role" are role+name-based.',
+diff --git a/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts b/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
+index def0b9a527c81153b15f77e6fd9d84711df765bc..97527359cb7ed08cda3bf32dac9b66ae0ff2a0e0 100644
+--- a/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
++++ b/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
+@@ -175,18 +175,20 @@ describe.runIf(process.env.OPENCLAW_BROWSER_MANAGED_CLEANUP_E2E === "1")(
+               ),
+             ).toBe(true);
+             await track(restored.targetId);
+-            await inLease(() =>
+-              clickViaPlaywright({
+-                cdpUrl: profile.cdpUrl,
+-                targetId: restored.targetId,
+-                selector: "#download",
+-              }),
+-            );
+-            await expect
+-              .poll(() => pwAi.getManagedBrowserPendingDownloads(restarted)?.length, {
+-                timeout: 5_000,
+-              })
+-              .toBe(1);
++            if (headless) {
++              await inLease(() =>
++                clickViaPlaywright({
++                  cdpUrl: profile.cdpUrl,
++                  targetId: restored.targetId,
++                  selector: "#download",
++                }),
++              );
++              await expect
++                .poll(() => pwAi.getManagedBrowserPendingDownloads(restarted)?.length, {
++                  timeout: 5_000,
 +                })
-+            #expect(endpoint.config.url.port == 18789)
-+            #expect(endpoint.config.token == (kind == "token" ? "resolved-token" : nil))
-+            #expect(endpoint.config.password == (kind == "password" ? "resolved-password" : nil))
-+        }
-+    }
-+
-+    @Test func `auxiliary local credentials cannot publish after config changes during resolution`() async throws {
-+        try await self.withGateway(kind: "token", mode: "remote") { configPath in
-+            await #expect(throws: CancellationError.self) {
-+                try await GatewayEndpointStore.resolvedLocalEndpoint(
-+                    hostingBesideRemotePrimary: true,
-+                    resolveCredentials: { _, _, _ in
-+                        try Data(#"{"gateway":{"mode":"local","auth":{"mode":"none"}}}"#.utf8)
-+                            .write(to: URL(fileURLWithPath: configPath))
-+                        return .init(version: 1, token: "retired-token", password: nil)
-+                    })
++                .toBe(1);
 +            }
-+        }
-+    }
-+
-+    @Test(arguments: ["disconnect", "shutdown"])
-+    func `auxiliary local connection refreshes unchanged references after retirement`(
-+        _ retirement: String) async throws
-+    {
-+        try await self.withGateway(kind: "token", mode: "remote") { _ in
-+            let cache = GatewayLocalAuthResolver.ConnectionCache()
-+            let resolutions = LockIsolated(0)
-+            let resolve: @Sendable () async throws -> GatewayConnection.EndpointSnapshot = {
-+                try await GatewayEndpointStore.resolvedLocalEndpoint(
-+                    hostingBesideRemotePrimary: true,
-+                    invalidateCredentials: { cache.invalidate(ownerKey: $0) },
-+                    resolveCredentials: { _, key, _ in
-+                        try await cache.resolve(key: key) {
-+                            let revision = resolutions.withValue { $0 += 1
-+                                return $0
-+                            }
-+                            return .init(version: 1, token: "resolved-\(revision)", password: nil)
-+                        }
-+                    })
+             await tabs.closeTab(restored.targetId, { exactTargetId: true });
+             await untrackSessionBrowserTab({
+               sessionKey,
+@@ -196,17 +198,19 @@ describe.runIf(process.env.OPENCLAW_BROWSER_MANAGED_CLEANUP_E2E === "1")(
+             expect(runtime.running).toBe(restarted);
+             expect(() => process.kill(restarted.pid, 0)).not.toThrow();
+             expect(await cleanup()).toBe(0);
+-            expect(runtime.running).toBe(restarted);
+-            expect(() => process.kill(restarted.pid, 0)).not.toThrow();
+-            const pending = pwAi.getManagedBrowserPendingDownloads(restarted)!;
+-            expect(pending).toHaveLength(1);
+-            const retired = once(restarted.proc, "exit");
+-            slowResponse!.end("done");
+-            const [saved] = await Promise.all(pending);
+-            expect(saved!.path.startsWith(path.join(root, "downloads") + path.sep)).toBe(true);
+-            expect((await fs.readFile(saved!.path)).length).toBe(16_388);
+-            await retired;
+-            await getProfileLifecycle(runtime).tail;
++            if (headless) {
++              expect(runtime.running).toBe(restarted);
++              expect(() => process.kill(restarted.pid, 0)).not.toThrow();
++              const pending = pwAi.getManagedBrowserPendingDownloads(restarted)!;
++              expect(pending).toHaveLength(1);
++              const retired = once(restarted.proc, "exit");
++              slowResponse!.end("done");
++              const [saved] = await Promise.all(pending);
++              expect(saved!.path.startsWith(path.join(root, "downloads") + path.sep)).toBe(true);
++              expect((await fs.readFile(saved!.path)).length).toBe(16_388);
++              await retired;
++              await getProfileLifecycle(runtime).tail;
 +            }
-+            let connection = GatewayConnection(
-+                testEndpointProvider: resolve,
-+                sessionBox: WebSocketSessionBox(session: self.successfulSession()))
-+            let remote = try DashboardIdentityFixture(announcement: nil)
-+            do {
-+                // refresh configures a channel; a health request completes its fake-socket handshake.
-+                _ = try await connection.requestRaw(method: .health)
-+                #expect(try await resolve().config.token == "resolved-1")
-+                _ = try await remote.connection.requestRaw(method: .health)
-+                let remoteSocket = try #require(await remote.connection._test_activeSocketGeneration())
-+                await remote.connection._test_handleDisconnect(socketGeneration: remoteSocket)
-+                await remote.connection.shutdown()
-+                #expect(try await resolve().config.token == "resolved-1")
-+                #expect(resolutions.value == 1)
-+
-+                let originalRoute = await connection._test_routeGeneration()
-+                let originalSocket = try #require(await connection._test_activeSocketGeneration())
-+                if retirement == "disconnect" {
-+                    await connection._test_handleDisconnect(socketGeneration: originalSocket)
-+                } else {
-+                    await connection.shutdown()
-+                }
-+                _ = try await connection.requestRaw(method: .health)
-+                await connection._test_handleDisconnect(
-+                    routeGeneration: originalRoute, socketGeneration: originalSocket)
-+                #expect(try await resolve().config.token == "resolved-2")
-+                #expect(resolutions.value == 2)
-+                await connection.shutdown()
-+            } catch {
-+                await connection.shutdown()
-+                await remote.connection.shutdown()
-+                throw error
-+            }
-+        }
-+    }
-+
-+    @Test func `retired local credential owner cannot invalidate a replacement config`() async throws {
-+        let cache = GatewayLocalAuthResolver.ConnectionCache()
-+        _ = try await cache.resolve(key: Data([1])) { .init(version: 1, token: "retired", password: nil) }
-+        _ = try await cache.resolve(key: Data([2])) { .init(version: 1, token: "current", password: nil) }
-+        cache.invalidate(ownerKey: Data([1]))
-+        let current = try await cache.resolve(key: Data([2])) {
-+            Issue.record("Retired owner invalidated its replacement")
-+            return .init(version: 1, token: "unexpected", password: nil)
-+        }
-+        #expect(current.token == "current")
-+    }
-+
-+    private func successfulSession() -> GatewayTestWebSocketSession {
-+        GatewayTestWebSocketSession(taskFactory: {
-+            GatewayTestWebSocketTask(sendHook: { socket, message, index in
-+                guard index > 0, let id = GatewayWebSocketTestSupport.requestID(from: message) else { return }
-+                socket.emitReceiveSuccess(.data(GatewayWebSocketTestSupport.okResponseData(id: id)))
-+            }, receiveHook: { socket, index in
-+                if index == 0 { return .data(GatewayWebSocketTestSupport.connectChallengeData()) }
-+                return .data(GatewayWebSocketTestSupport
-+                    .connectOkData(id: socket.snapshotConnectRequestID() ?? "connect"))
-+            })
-+        })
-+    }
-+
-+    private func withGateway(
-+        kind: String,
-+        mode: String,
-+        literal: String? = nil,
-+        staleAmbient: Bool = true,
-+        _ body: (String) async throws -> Void) async throws
-+    {
-+        let temporaryRoot = try #require(ProcessInfo.processInfo.environment["TMPDIR"])
-+        let directory = URL(fileURLWithPath: temporaryRoot, isDirectory: true)
-+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-+        defer { try? FileManager.default.removeItem(at: directory) }
-+        let config = directory.appendingPathComponent("openclaw.json")
-+        let credential: Any = literal.map { $0 as Any } ??
-+            ["source": "store", "provider": "default", "id": "LOCAL_AUTH"]
-+        let root: [String: Any] = ["gateway": [
-+            "mode": mode,
-+            "port": 18789,
-+            "bind": "loopback",
-+            "auth": ["mode": kind, kind: credential],
-+            "remote": ["url": "ws://127.0.0.1:18889", "token": "remote-only-token"],
-+        ]]
-+        try JSONSerialization.data(withJSONObject: root).write(to: config)
-+        try await TestIsolation.withIsolatedState(
-+            launchAgentHomeDirectory: directory,
-+            env: [
-+                "OPENCLAW_CONFIG_PATH": config.path,
-+                "OPENCLAW_STATE_DIR": directory.appendingPathComponent("state", isDirectory: true).path,
-+                "OPENCLAW_GATEWAY_TOKEN": staleAmbient ? "stale-token" : nil,
-+                "OPENCLAW_GATEWAY_PASSWORD": staleAmbient ? "stale-password" : nil,
-+                "DASHBOARD_TEST_AUTH": "environment-token",
-+                "OPENCLAW_GATEWAY_PORT": nil,
-+            ],
-+            defaults: [connectionModeKey: mode, "gatewayPort": nil])
-+        {
-+            try await body(config.path)
-+        }
-+    }
-+}
-diff --git a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-index 2750bc3ab22e65ace688f627d44871b118d50be9..8eb7e8cd0ad8ac3b7e5d0e045573579b5359db48 100644
---- a/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-+++ b/apps/macos/Tests/OpenClawIPCTests/NativeCredentialEntryTests.swift
-@@ -496,14 +496,105 @@ struct NativeCredentialEntryTests {
-         #expect(NativeCredentialPromptContext.resolve(sheet, bundleID: "com.apple.SecurityAgent") != nil)
-     }
- 
--    @Test(arguments: ["principal", "host", "binding", "prompt", "scope"])
--    func `Keychain access revalidates current authority after opaque resolution`(_ change: String) async throws {
-+    private static func accessModificationNodes() -> [NativeCredentialPromptContext.Node] {
-+        [
-+            .init(parent: nil, role: "AXWindow", subrole: nil, text: []),
-+            .init(parent: 0, role: "AXStaticText", subrole: nil, text: [
-+                "fixture-agent wants to change access permissions of the “example.service” item in your keychain.",
-+                "To allow this, enter the “login” keychain password.",
-+            ]),
-+            .init(parent: 0, role: "AXTextField", subrole: "AXSecureTextField", text: []),
-+            .init(parent: 0, role: "AXButton", subrole: nil, text: ["Deny"]),
-+            .init(parent: 0, role: "AXButton", subrole: nil, text: ["Allow"]),
-+        ]
-+    }
-+
-+    @Test(arguments: [
-+        "valid",
-+        "owner",
-+        "deny",
-+        "allow",
-+        "editor",
-+        "other-editor",
-+        "second-password",
-+        "instruction",
-+        "body"
-+    ])
-+    func `access modification requires its actual native controls and one secure editor`(_ change: String) throws {
-+        var nodes = Self.accessModificationNodes()
-+        var owner = "com.apple.SecurityAgent"
-+        switch change {
-+        case "owner": owner = "com.apple.ScreenContinuity"
-+        case "deny": nodes[3] = .init(parent: 0, role: "AXStaticText", subrole: nil, text: ["Deny"])
-+        case "allow": nodes[4] = .init(parent: 0, role: "AXStaticText", subrole: nil, text: ["Allow"])
-+        case "editor": nodes.append(.init(parent: 0, role: "AXTextField", subrole: nil, text: []))
-+        case "other-editor": nodes.append(.init(parent: 0, role: "AXTextArea", subrole: nil, text: []))
-+        case "second-password": nodes.append(.init(
-+                parent: 0,
-+                role: "AXTextField",
-+                subrole: "AXSecureTextField",
-+                text: []))
-+        case "instruction":
-+            nodes[1] = .init(parent: 0, role: "AXStaticText", subrole: nil, text: Array(nodes[1].text.dropLast()))
-+        case "body":
-+            nodes[1] = .init(parent: 0, role: "AXStaticText", subrole: nil, text: Array(nodes[1].text.dropFirst()))
-+        default: break
-+        }
-+        let binding = try NativeCredentialBinding(
-+            alias: "mac.fixture.password",
-+            kind: .macLogin,
-+            account: "fixture-operator",
-+            hostID: "11111111-1111-4111-8111-111111111111",
-+            bundleIDs: ["com.apple.SecurityAgent"])
-+        let form = NativeCredentialPromptContext.resolve(nodes, bundleID: owner)
-+        let admitted = form.map {
-+            binding.authorizes(
-+                hostID: binding.hostID, bundleID: owner, accountEvidence: $0.evidence,
-+                localAccount: "fixture-operator")
-+        } ?? false
-+        #expect(admitted == (change == "valid"))
-+        if change == "valid" {
-+            #expect(form?.field == 2)
-+            #expect(form?.context == 0)
-+            #expect(NativeCredentialPromptPurpose.resolve(nativeEvidence: form?.evidence ?? []) ==
-+                .loginKeychainAccessModification)
-+        }
-+    }
-+
-+    @Test func `access modification uses the existing opaque single use entry owner`() async throws {
-+        let harness = try Harness()
-+        harness.localAccount = "fixture-operator"
-+        harness.promptBundleID = "com.apple.SecurityAgent"
-+        harness.accountEvidence = Self.accessModificationNodes().flatMap(\.text)
-+        harness.bindings = try [NativeCredentialBinding(
-+            alias: "apple.fixture.password",
-+            kind: .macLogin,
-+            account: harness.localAccount,
-+            hostID: harness.host,
-+            bundleIDs: [harness.promptBundleID])]
-+        let ref = try await harness.observe()
-+        #expect(harness.secretReads == 0)
-+        let result = try await harness.fill(ref)
-+        #expect(harness.entries == ["fixture-password"])
-+        #expect(result.effect == .unverifiable)
-+        let encoded = try #require(String(data: JSONEncoder().encode(result), encoding: .utf8))
-+        #expect(!encoded.contains("fixture-password"))
-+        await #expect(throws: NativeCredentialError.stalePrompt) { try await harness.fill(ref) }
-+        #expect(harness.secretReads == 1)
-+    }
-+
-+    @Test(arguments: ["principal", "host", "binding", "prompt", "scope"], [false, true])
-+    func `Keychain access revalidates current authority after opaque resolution`(
-+        _ change: String, _ modification: Bool) async throws
-+    {
-         let harness = try Harness()
-+        harness.localAccount = "fixture-operator"
-         harness.promptBundleID = "com.apple.SecurityAgent"
-         harness.accountEvidence = [
-             "security wants to use your confidential information stored in “example.service” in your keychain.",
-             "To allow this, enter the “login” keychain password.", "Always Allow", "Deny", "Allow",
-         ]
-+        if modification { harness.accountEvidence = Self.accessModificationNodes().flatMap(\.text) }
-         harness.bindings = try [NativeCredentialBinding(
-             alias: "apple.fixture.password",
-             kind: .macLogin,
-diff --git a/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
-index 626dc13335fde9e81a49b0ebd2ff1118c177ec3f..e42e56b0a91b7195bd040a91a23f9557580baf79 100644
---- a/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
-+++ b/apps/shared/OpenClawKit/Sources/OpenClawKit/NativeCredentialBinding.swift
-@@ -11,6 +11,7 @@ public enum NativeCredentialPromptPurpose: Equatable, Sendable {
-     case unsupportedAdministratorAuthentication
-     case unsupportedKeychainAccess
-     case loginKeychainAuthentication
-+    case loginKeychainAccessModification
-     case autoFillAuthentication
-     case passwordsUnlockAuthentication
-     case localPasskeyAuthentication
-@@ -70,8 +71,10 @@ public enum NativeCredentialPromptPurpose: Equatable, Sendable {
-         // An incomplete or different Keychain form must not borrow an account
-         // token from its item/requester text through the legacy account route.
-         let fallback: Self = evidence.contains("Always Allow") || !instructions.isEmpty || evidence.contains {
--            $0.contains(" wants to use your confidential information stored in ") &&
--                $0.hasSuffix(" in your keychain.")
-+            ($0.contains(" wants to use your confidential information stored in ") &&
-+                $0.hasSuffix(" in your keychain.")) ||
-+                $0.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-+                .contains(" wants to change access permissions ")
-         } ? .unsupportedKeychainAccess : .accountAuthentication
-         if fallback == .accountAuthentication, evidence.isSuperset(of: ["Unlock", "Cancel"]),
-            self.localPasskeyAccount(nativeEvidence: nativeEvidence) != nil
-@@ -93,9 +96,25 @@ public enum NativeCredentialPromptPurpose: Equatable, Sendable {
-             "To allow this, enter the “login” keychain password.",
-             "To allow this, enter the \"login\" keychain password.",
-         ]
--        guard evidence.isSuperset(of: ["Always Allow", "Deny", "Allow"]),
--              !instructions.isEmpty, instructions.allSatisfy(loginInstructions.contains)
-+        guard !instructions.isEmpty, instructions.allSatisfy(loginInstructions.contains)
-         else { return fallback }
-+        if !evidence.contains("Always Allow"), evidence.isSuperset(of: ["Deny", "Allow"]),
-+           instructions.count == 1
-+        {
-+            // Access-policy changes use the same local Keychain password but
-+            // have no Always Allow control. Require the complete native body;
-+            // arbitrary two-button forms must not acquire local-user authority.
-+            let changes = Set(evidence.map {
-+                $0.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-+            }.filter { $0.contains(" wants to change access permissions ") })
-+            let pattern = #"^[^\r\n]{1,256} wants to change access permissions of the "# +
-+                #"(?:“[^\r\n”]{1,512}”|"[^\r\n"]{1,512}") item in your keychain\.$"#
-+            guard changes.count == 1,
-+                  changes.first?.range(of: pattern, options: .regularExpression) != nil
-+            else { return fallback }
-+            return .loginKeychainAccessModification
-+        }
-+        guard evidence.isSuperset(of: ["Always Allow", "Deny", "Allow"]) else { return fallback }
-         // Signing, private-key and password-item bodies differ. The native
-         // password instruction identifies the Keychain authentication purpose;
-         // the complete body remains captured evidence for entry revalidation.
-@@ -212,7 +231,7 @@ public struct NativeCredentialBinding: Codable, Equatable, Sendable {
-                 self.account.caseInsensitiveCompare(localAccount) == .orderedSame &&
-                 selectedUsername?.caseInsensitiveCompare(localAccount) == .orderedSame
-         }
--        if case .loginKeychainAuthentication = purpose {
-+        if purpose == .loginKeychainAuthentication || purpose == .loginKeychainAccessModification {
-             // A login-Keychain access form identifies the local Keychain rather
-             // than repeating its account. Keep authority on this enrolled Mac
-             // and its current principal; never use this for a provider password.
-diff --git a/apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift b/apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift
-index 3220f1ad277244f6fd08eae4a25ede83ac5fe142..a89bedd637c9569a0e652b360f8eaa6c60fc9a9d 100644
---- a/apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift
-+++ b/apps/shared/OpenClawKit/Tests/OpenClawKitTests/NativeCredentialKeychainPurposeTests.swift
-@@ -15,6 +15,84 @@ struct NativeCredentialKeychainPurposeTests {
-         ]
-     }
- 
-+    private static func accessModificationEvidence(item: String) -> [String] {
-+        [
-+            "fixture-agent wants to change access permissions of the “\(item)” item in your keychain.",
-+            "To allow this, enter the “login” keychain password.",
-+            "Deny", "Allow",
-+        ]
-+    }
-+
-+    @Test(arguments: ["example.first.service", "example.other.service"], ["quoted", "ascii", "wrapped"])
-+    func `complete Keychain access modification authorizes only the enrolled local password`(
-+        _ item: String, _ variant: String) throws
-+    {
-+        let binding = try NativeCredentialBinding(
-+            alias: "mac.fixture.password",
-+            kind: .macLogin,
-+            account: "fixture",
-+            hostID: Self.host,
-+            bundleIDs: ["com.apple.SecurityAgent"])
-+        var evidence = Self.accessModificationEvidence(item: item)
-+        if variant == "wrapped" {
-+            evidence[0] = evidence[0].replacingOccurrences(of: " permissions ", with: " permissions\n")
-+        } else if variant == "ascii" {
-+            evidence = evidence.map {
-+                $0.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
-+            }
-+        }
-+        #expect(NativeCredentialPromptPurpose.resolve(nativeEvidence: evidence) == .loginKeychainAccessModification)
-+        #expect(binding.authorizes(
-+            hostID: Self.host,
-+            bundleID: "com.apple.SecurityAgent",
-+            accountEvidence: evidence,
-+            localAccount: "fixture"))
-+        #expect(!binding.authorizes(
-+            hostID: Self.host,
-+            bundleID: "com.apple.SecurityAgent",
-+            accountEvidence: evidence,
-+            purpose: .loginKeychainAuthentication,
-+            localAccount: "fixture"))
-+    }
-+
-+    @Test(arguments: [
-+        "body", "unquoted", "read-body", "instruction", "other-keychain", "conflict", "deny", "allow",
-+        "owner", "host", "principal",
-+    ])
-+    func `access modification never borrows authority from an incomplete form or another principal`(
-+        _ change: String) throws
-+    {
-+        let binding = try NativeCredentialBinding(
-+            alias: "mac.fixture.password",
-+            kind: .macLogin,
-+            account: "fixture",
-+            hostID: Self.host,
-+            bundleIDs: ["com.apple.SecurityAgent", "com.apple.ScreenContinuity"])
-+        var evidence = Self.accessModificationEvidence(item: "fixture")
-+        var host = Self.host
-+        var owner = "com.apple.SecurityAgent"
-+        var principal = "fixture"
-+        switch change {
-+        case "body": evidence.removeFirst()
-+        case "unquoted":
-+            evidence[0] = "fixture-agent wants to change access permissions of the fixture item in your keychain."
-+        case "read-body":
-+            evidence[0] = "fixture-agent wants to use your confidential information " +
-+                "stored in “fixture” in your keychain."
-+        case "instruction": evidence.remove(at: 1)
-+        case "other-keychain": evidence[1] = "To allow this, enter the “other” keychain password."
-+        case "conflict": evidence.append("To allow this, enter the “other” keychain password.")
-+        case "deny": evidence.remove(at: 2)
-+        case "allow": evidence.removeLast()
-+        case "owner": owner = "com.apple.ScreenContinuity"
-+        case "host": host = "22222222-2222-4222-8222-222222222222"
-+        case "principal": principal = "other"
-+        default: Issue.record("Unknown fixture")
-+        }
-+        #expect(!binding.authorizes(
-+            hostID: host, bundleID: owner, accountEvidence: evidence, localAccount: principal))
-+    }
-+
-     @Test(arguments: ["com.openclaw.browser-credentials.v1", "example.other.service"])
-     func `login Keychain access authorizes the enrolled current local principal without visible account`(
-         _ item: String) throws
+             expect(runtime.running).toBeNull();
+             expect(() => process.kill(restarted.pid, 0)).toThrow();
+             console.info(
+@@ -223,7 +227,7 @@ describe.runIf(process.env.OPENCLAW_BROWSER_MANAGED_CLEANUP_E2E === "1")(
+                 completionClosedTabs: 0,
+                 untrackedPagePreserved: true,
+                 cookiePersisted: true,
+-                pendingDownloadAcrossPageClose: true,
++                pendingDownloadAcrossPageClose: headless ? true : null,
+                 originalPid: running.pid,
+                 restartedPid: restarted.pid,
+                 retired: true,
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
 index 69bd127327ea22013be74345a7671f06b6611437..21eefbcc617e0f7d44058ba0a6afa4e98f5619d0 100644
 --- a/pnpm-lock.yaml
@@ -940,3 +203,1106 @@ index 6a514c5930c14a275846ec0956f61ef57d2befa0..ba55abf362f991a7dc6a017d992714cb
    "@codemirror/commands@6.11.1>@codemirror/view": 6.43.13
    "@codemirror/view@6.43.13>@codemirror/state": 6.7.6
    "@anthropic-ai/sdk": 0.128.0
+diff --git a/skills/control-ui/references/dashboards.md b/skills/control-ui/references/dashboards.md
+index 568e6d711a7ee1f41d6cba6c3e4417da513d901f..d98cb618d21a0d1d05f4fdd62589c486bec7b6ae 100644
+--- a/skills/control-ui/references/dashboards.md
++++ b/skills/control-ui/references/dashboards.md
+@@ -55,39 +55,6 @@ For external or live content, choose one supported boundary:
+ Do not weaken `embedSandbox` or expose an authenticated application just to make
+ a nested iframe render.
+ 
+-## Browser dashboards
+-
+-Create a Browser dashboard only when the user asks for one. Opening the browser
+-sidebar or side panel does not require a widget.
+-
+-For an agent-controllable HTTP(S) dashboard:
+-
+-1. Call `dashboard` with `action: "widget_put"`,
+-   `pluginKind: "browser:dashboard"`, a stable `name`, `props: {url}`, and
+-   `size: "full"`.
+-2. Call `browser` with `action: "open"`, `dashboard: <widget name>`, and no
+-   `targetUrl`.
+-3. Call `dashboard` with `action: "set_presentation"` and
+-   `presentation: "expanded"`.
+-
+-The dashboard tool owns authoring and presentation; the browser tool owns page
+-interaction. Use the widget's `dashboard` selector without `targetId`, `profile`,
+-or route overrides. A `session:website` widget is a lightweight iframe and cannot
+-be controlled through that selector.
+-
+-Administrator dashboards use local managed-profile state. Non-admin selectors
+-use an empty isolated context in the configured default local managed profile,
+-supporting `tabs`, `focus`, `navigate`, `snapshot`, `screenshot`, `act`, `open`,
+-and `close`. Session mode is unavailable when a sandbox is required or model
+-selection is locked. Agent and viewer must use the same mode to share page state.
+-These modes do not change general browser actions' configured host/profile access.
+-
+-Hiding a dashboard preserves its page. Resetting a session closes its isolated
+-non-admin context; administrator tabs remain. Call `browser` with `action:
+-"close"` and the `dashboard` selector to stop, or `action: "open"` to resume
+-from the saved URL. See `docs/web/dashboards.md` for the lifecycle and access
+-boundaries.
+-
+ ## Updating content
+ 
+ For a custom widget, call `show_widget` again with:
+diff --git a/src/agents/agent-hooks/compaction-safeguard-quality.test.ts b/src/agents/agent-hooks/compaction-safeguard-quality.test.ts
+index 71aaccb46d9beffd719c86b5fe1dc1c775a9d88c..1b5e91be47798f7e18ff936bcbad1ab151046507 100644
+--- a/src/agents/agent-hooks/compaction-safeguard-quality.test.ts
++++ b/src/agents/agent-hooks/compaction-safeguard-quality.test.ts
+@@ -45,6 +45,42 @@ describe("compaction summary request matching", () => {
+     expect(instructions).toContain("Its run owner will resume it after compaction");
+   });
+ 
++  it("scopes retained ask checks to the split prefix without matching shared numbers", () => {
++    const latestAsk = "Compare 10 and 20";
++    const prefixSummary = (pendingAsk?: string) =>
++      [
++        `## Original Request\n${latestAsk}`,
++        "## Early Progress\nValidated the provider boxes.",
++        "## Context for Suffix\nThe retained suffix owns continuation state.",
++        ...(pendingAsk ? [`## Pending user asks\n${pendingAsk}`] : []),
++      ].join("\n");
++    const decision = `${latestAsk} after validation.`;
++    const historySummary = structuredSummary(latestAsk, decision);
++    const structuralSummary = structuredSummary(
++      `Latest user request context: ${JSON.stringify(latestAsk)}`,
++      decision,
++    );
++    const auditRetained = (retainedTurnSummary: string) =>
++      auditSummaryQuality({
++        summary: `${structuralSummary}\n\n${retainedTurnSummary}`,
++        structuralSummary,
++        sourceSummaries: [historySummary, retainedTurnSummary],
++        identifiers: [],
++        latestAsk,
++        retainedTurnSummary,
++      });
++
++    expect(auditRetained(prefixSummary())).toEqual({ ok: true, reasons: [] });
++    expect(auditRetained(prefixSummary("Wait 10 to 20 seconds for deployment"))).toEqual({
++      ok: true,
++      reasons: [],
++    });
++    expect(auditRetained(historySummary).reasons).toContain("retained_turn_ask_marked_pending");
++    expect(auditRetained(prefixSummary(latestAsk)).reasons).toContain(
++      "retained_turn_ask_marked_pending",
++    );
++  });
++
+   it.each(["请提供状态更新", "How about now?"])("flags an omitted latest ask: %s", (latestAsk) => {
+     const summary = structuredSummary("No pending asks.");
+     const quality = auditSummaryQuality({
+diff --git a/src/agents/agent-hooks/compaction-safeguard-quality.ts b/src/agents/agent-hooks/compaction-safeguard-quality.ts
+index 405911f071ca282288e0621545d73d55606029e7..461551b2f22e30f371a3686f541a74f1a86590e0 100644
+--- a/src/agents/agent-hooks/compaction-safeguard-quality.ts
++++ b/src/agents/agent-hooks/compaction-safeguard-quality.ts
+@@ -466,6 +466,7 @@ export function auditSummaryQuality(params: {
+   identifiers: string[];
+   latestAsk: string | null;
+   latestUnresolvedUserRequest?: string;
++  retainedTurnSummary?: string;
+   identifierPolicy?: CompactionSummarizationInstructions["identifierPolicy"];
+ }): { ok: boolean; reasons: string[] } {
+   const reasons: string[] = [];
+@@ -503,5 +504,15 @@ export function auditSummaryQuality(params: {
+   ) {
+     reasons.push("latest_user_ask_not_reflected");
+   }
++  const retainedPendingAsk = extractLeadingPendingAsk(params.retainedTurnSummary ?? "");
++  if (
++    params.latestUnresolvedUserRequest
++      ? retainedPendingAsk && !isEmptyPendingAsk(retainedPendingAsk)
++      : params.retainedTurnSummary !== undefined &&
++        resolveAskOverlapRequirement(params.latestAsk) &&
++        hasAskOverlap(extractPendingAskSection(params.retainedTurnSummary), params.latestAsk)
++  ) {
++    reasons.push("retained_turn_ask_marked_pending");
++  }
+   return { ok: reasons.length === 0, reasons };
+ }
+diff --git a/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts b/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts
+index 1dadf278b7c7bd5920d6dd02ddf05960d3274366..94fae21beeeb58ce641b600bf70a0a2a62f761de 100644
+--- a/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts
++++ b/src/agents/agent-hooks/compaction-safeguard.provider-requests.test.ts
+@@ -20,7 +20,7 @@ import {
+ } from "./compaction-safeguard.fixtures.test-support.js";
+ import { testing } from "./compaction-safeguard.test-support.js";
+ 
+-const { MAX_COMPACTION_SUMMARY_CHARS } = testing;
++const { MAX_COMPACTION_SUMMARY_CHARS, MAX_SPLIT_TURN_CONTEXT_CHARS } = testing;
+ 
+ afterEach(() => {
+   testing.setSummarizeInStagesForTest();
+@@ -29,7 +29,7 @@ afterEach(() => {
+ 
+ describe("compaction-safeguard provider requests", () => {
+   it.each([false, true])(
+-    "summarizes the prepared context in one canonical request (prefix=%s)",
++    "sends one authoritative format per safeguard summary request (prefix=%s)",
+     async (prefix) => {
+       testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
+       const model = createAnthropicModelFixture({
+@@ -85,55 +85,57 @@ describe("compaction-safeguard provider requests", () => {
+       expect(result.cancel).not.toBe(true);
+       expect(result.compaction?.summary).toContain("provider summary");
+       expect(result.compaction?.summary).not.toContain("Earlier deployment decision");
+-      expect(providerPrompts).toHaveLength(1);
+-      for (const prompt of providerPrompts) {
++      expect(providerPrompts).toHaveLength(prefix ? 2 : 1);
++      for (const [index, prompt] of providerPrompts.entries()) {
++        const supportingPrefix = index === 1;
+         expect(prompt).toContain("[User]: summarize me");
+         expect(prompt).toContain("receipt_90210");
+         expect(prompt).toContain("Keep the deployment decision.");
+         expect(prompt).toContain(
+-          `Keep the final summary body within ${MAX_COMPACTION_SUMMARY_CHARS} UTF-16 code units.`,
++          `Keep the final summary body within ${supportingPrefix ? MAX_SPLIT_TURN_CONTEXT_CHARS : MAX_COMPACTION_SUMMARY_CHARS} UTF-16 code units.`,
+         );
+         expect(prompt).toContain("completed-effect facts, and unresolved asks");
+         expect(prompt).toContain("follow the configured identifier policy");
+         expect(prompt).toContain("Preserve all opaque identifiers exactly");
+         expect(prompt).not.toContain("## Goal");
+         expect(prompt).not.toContain("## Constraints & Preferences");
+-        expect(prompt).toContain("## Pending user asks");
+-        expect(prompt).not.toContain("## Original Request");
++        expect(prompt).toContain(supportingPrefix ? "## Original Request" : "## Pending user asks");
++        expect(prompt).not.toContain(
++          supportingPrefix ? "## Pending user asks" : "## Original Request",
++        );
+       }
+-      expect(providerBudgets).toEqual([3_200]);
++      expect(providerBudgets).toEqual(prefix ? [3_200, 2_000] : [3_200]);
+       if (!prefix) {
+         expect(providerPrompts[0]).toContain("Earlier deployment decision: use canary staging.");
+       }
+     },
+   );
+ 
+-  it.each([
+-    { earlierContext: "history", needsRepair: false },
+-    { earlierContext: "previous summary", needsRepair: false },
+-    { earlierContext: "history", needsRepair: true },
+-    { earlierContext: "previous summary", needsRepair: true },
+-  ] as const)(
+-    "retains split-turn corrections after $earlierContext (repair=$needsRepair)",
+-    async ({ earlierContext, needsRepair }) => {
++  it.each(["history", "previous summary"] as const)(
++    "includes split-turn corrections in the canonical summary request after %s",
++    async (earlierContext) => {
+       testing.setSummarizeInStagesForTest(actualCompactionModule.summarizeInStages);
+       const model = createAnthropicModelFixture({ api: "test-api" as never, baseUrl: "" });
+-      const sessionManager = createQualityGuardSessionManager({
+-        model,
+-        qualityGuardMaxRetries: needsRepair ? 1 : 0,
+-      });
++      const sessionManager = createQualityGuardSessionManager({ model, qualityGuardMaxRetries: 0 });
+       const oldIntent = "Publish the release notes publicly after my final review.";
+       const correction =
+         "My review is complete. Keep the release notes private; cancel publication.";
+       const completedEffect = "Private release notes saved; public publication cancelled.";
+       const unrelatedPending = "Translate the installation guide.";
+-      const compactionFocus = "Keep the audience decision and the pending translation.";
+       const previousSummary = structuredSummary({ asks: `${oldIntent}\n${unrelatedPending}` });
+       const canonicalSummary = structuredSummary({
+         decisions: completedEffect,
+         rules: "Keep the release notes private.",
+         asks: unrelatedPending,
+       });
++      const prefixSummary = [
++        "## Original Request",
++        correction,
++        "## Early Progress",
++        completedEffect,
++        "## Context for Suffix",
++        "The release notes remain private.",
++      ].join("\n");
+       const providerPrompts: string[] = [];
+       const streamFn: StreamFn = (_activeModel, context) => {
+         providerPrompts.push(JSON.stringify(context));
+@@ -146,10 +148,7 @@ describe("compaction-safeguard provider requests", () => {
+             content: [
+               {
+                 type: "text",
+-                text:
+-                  needsRepair && providerPrompts.length === 1
+-                    ? "Summary without required sections."
+-                    : canonicalSummary,
++                text: providerPrompts.length === 1 ? canonicalSummary : prefixSummary,
+               },
+             ],
+             api: model.api,
+@@ -164,7 +163,6 @@ describe("compaction-safeguard provider requests", () => {
+         return stream;
+       };
+       const event = createCompactionEvent({
+-        customInstructions: compactionFocus,
+         preparation: {
+           messagesToSummarize:
+             earlierContext === "history"
+@@ -194,24 +192,15 @@ describe("compaction-safeguard provider requests", () => {
+       expect(canonicalPrompt).toContain("## Pending user asks");
+       expect(canonicalPrompt).not.toContain("## Original Request");
+       expect(canonicalPrompt.indexOf(oldIntent)).toBeLessThan(canonicalPrompt.indexOf(correction));
+-      expect(providerPrompts).toHaveLength(needsRepair ? 2 : 1);
+-      for (const prompt of providerPrompts) {
+-        expect(prompt).toContain(compactionFocus);
+-        expect(prompt).toContain(oldIntent);
+-        expect(prompt).toContain(correction);
+-        expect(prompt).toContain(`[Tool result]: ${completedEffect}`);
+-        expect(prompt).toContain(unrelatedPending);
+-        expect(prompt).not.toContain("## Original Request");
+-      }
+-      if (needsRepair) {
+-        expect(providerPrompts[1]).toContain("Quality check feedback");
+-        expect(providerPrompts[1]).toContain("missing_section");
+-      }
++      expect(providerPrompts).toHaveLength(2);
++      expect(providerPrompts[1]).toContain("## Original Request");
++      expect(providerPrompts[1]).toContain(correction);
++      expect(providerPrompts[1]).not.toContain(oldIntent);
+       const summary = expectCompactionResult(result).summary;
+       expect(summary).toContain(`## Decisions\n${completedEffect}`);
+       expect(summary).toContain(`## Pending user asks\n${unrelatedPending}`);
+       expect(summary).not.toContain(oldIntent);
+-      expect(summary).not.toContain("**Turn Context (split turn):**");
++      expect(summary).toContain("### Early Progress");
+       expectCanonicalSummaryHeadingsOnce(summary);
+     },
+   );
+diff --git a/src/agents/agent-hooks/compaction-safeguard.test.ts b/src/agents/agent-hooks/compaction-safeguard.test.ts
+index c073ba08bf568b9ca2c9c751262897cd8a55905b..d757f9a3943131c48a64fe8622e29bdb97d3dbcd 100644
+--- a/src/agents/agent-hooks/compaction-safeguard.test.ts
++++ b/src/agents/agent-hooks/compaction-safeguard.test.ts
+@@ -1068,7 +1068,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     );
+   });
+ 
+-  it("restores split-turn source facts omitted by the single canonical summary", async () => {
++  it("restores source ask evidence omitted by the split-turn summary", async () => {
+     const olderAsk = "summarize the earlier provider migration";
+     const latestAsk = "confirm whether the aurora migration completed successfully";
+     const identifier = "/tmp/split-turn-retention.log";
+@@ -1079,7 +1079,8 @@ describe("compaction-safeguard recent-turn preservation", () => {
+       ].join("\n"),
+       asks: olderAsk,
+     });
+-    mockSummarizeInStages.mockResolvedValueOnce(historySummary);
++    const splitSummary = `Unrelated active-turn context. ${identifier} ${"z".repeat(MAX_COMPACTION_SUMMARY_CHARS)}`;
++    mockSummarizeInStages.mockResolvedValueOnce(historySummary).mockResolvedValueOnce(splitSummary);
+ 
+     const sessionManager = createQualityGuardSessionManager({ qualityGuardMaxRetries: 0 });
+     const event = createCompactionEvent({
+@@ -1109,7 +1110,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+         latestAsk: `${latestAsk} ${identifier}`,
+       }).ok,
+     ).toBe(true);
+-    expect(mockSummarizeInStages).toHaveBeenCalledOnce();
++    expect(mockSummarizeInStages).toHaveBeenCalledTimes(2);
+ 
+     const redistillMessages = prependPreviousSummaryForRedistill({
+       messages: [userMessage("continue", 3)],
+@@ -1275,7 +1276,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     expect(consumeCompactionSafeguardCancellation(sessionManager)).toBeNull();
+   });
+ 
+-  it("keeps an owner-provided split-turn request pending in the canonical summary", async () => {
++  it("keeps an owner-provided split-turn request pending across retained context", async () => {
+     const latestAsk = "combine the provider boxes into one completed artifact";
+     const identifier = "/tmp/pr130620/live/marker";
+     const canonicalSummary = structuredSummary({
+@@ -1284,7 +1285,21 @@ describe("compaction-safeguard recent-turn preservation", () => {
+       asks: "None.",
+       identifiers: identifier,
+     });
+-    mockSummarizeInStages.mockResolvedValueOnce(canonicalSummary);
++    const prefixSummary = (pendingAsk?: string) =>
++      [
++        "## Original Request",
++        latestAsk,
++        "## Early Progress",
++        "The RCA is complete.",
++        "## Context for Suffix",
++        `Implementation remains. Preserve ${identifier}.`,
++        ...(pendingAsk ? ["## Pending user asks", pendingAsk] : []),
++      ].join("\n");
++    mockSummarizeInStages
++      .mockResolvedValueOnce(canonicalSummary)
++      .mockResolvedValueOnce(prefixSummary(latestAsk))
++      .mockResolvedValueOnce(canonicalSummary)
++      .mockResolvedValueOnce(prefixSummary());
+ 
+     const sessionManager = createQualityGuardSessionManager();
+     const event = createCompactionEvent({
+@@ -1313,14 +1328,13 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     });
+ 
+     const finalSummary = expectCompactionResult(result).summary;
+-    expect(mockSummarizeInStages).toHaveBeenCalledOnce();
++    expect(mockSummarizeInStages).toHaveBeenCalledTimes(4);
++    const retry = requireRecord(mockCallArg(mockSummarizeInStages, 2));
++    expect(retry.customInstructions).toContain("retained_turn_ask_marked_pending");
+     expect(finalSummary).toContain(
+       `## Pending user asks\nLatest user request context: ${JSON.stringify(latestAsk)}`,
+     );
+-    expect(finalSummary).toContain("## Decisions\nThe RCA is complete.");
+-    expect(finalSummary).toContain("## Open TODOs\nImplementation remains.");
+-    expect(finalSummary).toContain(identifier);
+-    expect(finalSummary).not.toContain("**Turn Context (split turn):**");
++    expect(finalSummary).toContain("### Context for Suffix\nImplementation remains.");
+     expect(finalSummary).not.toContain(`## Pending user asks\n${latestAsk}`);
+     expectCanonicalSummaryHeadingsOnce(finalSummary);
+   });
+@@ -1333,7 +1347,9 @@ describe("compaction-safeguard recent-turn preservation", () => {
+       rules: "Preserve the pending request.",
+       asks: latestAsk,
+     });
+-    mockSummarizeInStages.mockResolvedValueOnce(historySummary);
++    mockSummarizeInStages
++      .mockResolvedValueOnce(historySummary)
++      .mockResolvedValueOnce("Maintenance activity continues in the retained suffix.");
+ 
+     const sessionManager = createQualityGuardSessionManager({ qualityGuardMaxRetries: 0 });
+     const { result } = await runCompactionScenario(
+@@ -1365,7 +1381,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
+       `## Pending user asks\nLatest user request context: ${JSON.stringify(latestAsk)}\n${latestAsk}`,
+     );
+     expectCanonicalSummaryHeadingsOnce(finalSummary);
+-    expect(mockSummarizeInStages).toHaveBeenCalledOnce();
++    expect(mockSummarizeInStages).toHaveBeenCalledTimes(2);
+   });
+ 
+   it("ignores truncated numeric tool-result noise in strict all-preserved audits", async () => {
+@@ -1487,9 +1503,11 @@ describe("compaction-safeguard recent-turn preservation", () => {
+ 
+   it("cancels when corrective generation fails after finalized quality rejection", async () => {
+     const oversizedHistorySummary = "history detail ".repeat(MAX_COMPACTION_SUMMARY_CHARS);
++    const splitTurnPrefixSummary = "split-turn prefix context that must survive capping";
+     const correctiveFailureMarker = "USER_SESSION_TEXT_issue119932_corrective";
+     mockSummarizeInStages
+       .mockResolvedValueOnce(oversizedHistorySummary)
++      .mockResolvedValueOnce(splitTurnPrefixSummary)
+       .mockRejectedValueOnce(new Error(correctiveFailureMarker));
+ 
+     const sessionManager = createQualityGuardSessionManager({ recentTurnsPreserve: 1 });
+@@ -1510,8 +1528,8 @@ describe("compaction-safeguard recent-turn preservation", () => {
+     const { result } = await runCompactionScenario(sessionManager, event);
+ 
+     expect(result).toEqual({ cancel: true });
+-    expect(mockSummarizeInStages).toHaveBeenCalledTimes(2);
+-    expect(requireRecord(mockCallArg(mockSummarizeInStages, 1)).customInstructions).toContain(
++    expect(mockSummarizeInStages).toHaveBeenCalledTimes(3);
++    expect(requireRecord(mockCallArg(mockSummarizeInStages, 2)).customInstructions).toContain(
+       "Quality check feedback",
+     );
+     expect(consumeCompactionSafeguardCancellation(sessionManager)?.reason).toBe(
+diff --git a/src/agents/agent-hooks/compaction-safeguard.ts b/src/agents/agent-hooks/compaction-safeguard.ts
+index f67059bd1d17e49be174195c9c82d82342c62ad3..34d071e87ca6815629b7aeb8c0024b1b324a19fa 100644
+--- a/src/agents/agent-hooks/compaction-safeguard.ts
++++ b/src/agents/agent-hooks/compaction-safeguard.ts
+@@ -93,7 +93,12 @@ const PREVIOUS_SUMMARY_REDISTILL_PREFIX =
+ const compactionSafeguardDeps = {
+   summarizeInStages,
+ };
+-type CompactionLoss = "summary-tail" | "suffix-head" | "split-turn-head" | "preserved-turn-head";
++type CompactionLoss =
++  | "summary-tail"
++  | "suffix-head"
++  | "split-turn-head"
++  | "split-turn-tail"
++  | "preserved-turn-head";
+ 
+ function prependPreviousSummaryForRedistill(params: {
+   messages: AgentMessage[];
+@@ -118,6 +123,10 @@ function prependPreviousSummaryForRedistill(params: {
+   ];
+ }
+ 
++function nestMarkdownHeadings(text: string): string {
++  return text.replace(/^##(?=[ \t]+\S)/gmu, "###");
++}
++
+ function normalizeLegacySplitTurnSummary(summary: string | undefined): string | undefined {
+   const splitTurnStart = summary?.indexOf(SPLIT_TURN_SECTION_HEADING) ?? -1;
+   if (!summary || splitTurnStart < 0) {
+@@ -231,6 +240,7 @@ type SummaryQualityRetention = {
+ 
+ function assembleSuffix(parts: {
+   splitTurnSection?: ContextSection;
++  generatedSplitTurnSection?: string;
+   preservedTurnsSection?: ContextSection;
+   toolFailureSection?: string;
+   fileOpsSummary?: string;
+@@ -761,6 +771,17 @@ function buildSplitTurnContextSection(messages: AgentMessage[]): ContextSection
+   });
+ }
+ 
++function formatGeneratedSplitTurnSection(summary: string, onTruncated?: () => void): string {
++  const heading = `${SPLIT_TURN_SECTION_HEADING}\n\n`;
++  const summaryBudget = MAX_SPLIT_TURN_CONTEXT_CHARS - heading.length;
++  const nestedSummary = nestMarkdownHeadings(summary);
++  const cappedSummary = capCompactionSummary(nestedSummary, summaryBudget);
++  if (cappedSummary.length < nestedSummary.length) {
++    onTruncated?.();
++  }
++  return `${heading}${cappedSummary}`;
++}
++
+ function formatRequiredAskContext(rawAsk: string): string {
+   const source = rawAsk.trim();
+   if (source.length <= MAX_REQUIRED_ASK_CONTEXT_CHARS) {
+@@ -957,8 +978,10 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+       body: string,
+       sections: {
+         splitTurnSection?: ContextSection;
++        generatedSplitTurnSection?: string;
+         preservedTurnsSection?: ContextSection;
+       },
++      producerLosses: ReadonlySet<CompactionLoss> = new Set(),
+       qualityRetention?: SummaryQualityRetention,
+     ) => {
+       workspaceContextPromise ??= readWorkspaceContextForSummary(
+@@ -967,6 +990,7 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+       );
+       const suffix = assembleSuffix({
+         splitTurnSection: sections.splitTurnSection,
++        generatedSplitTurnSection: sections.generatedSplitTurnSection,
+         preservedTurnsSection: sections.preservedTurnsSection,
+         toolFailureSection,
+         fileOpsSummary,
+@@ -979,7 +1003,7 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+         throw fitted.error;
+       }
+       const finalized = fitted.value;
+-      const losses = new Set<CompactionLoss>();
++      const losses = new Set(producerLosses);
+       for (const section of Object.values(sections)) {
+         if (typeof section !== "string" && section?.truncatedLoss) {
+           losses.add(section.truncatedLoss);
+@@ -1199,7 +1223,10 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+       const totalAttempts = qualityGuardEnabled ? qualityGuardMaxRetries + 1 : 1;
+ 
+       for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
++        let splitTurnSectionLocal = "";
++        let splitTurnSummaryLocal = "";
+         let historySummary = "";
++        const producerLosses = new Set<CompactionLoss>();
+         try {
+           historySummary =
+             allMessages.length > 0
+@@ -1215,6 +1242,31 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+                   previousSummary: effectivePreviousSummary,
+                 })
+               : buildStructuredFallbackSummary(effectivePreviousSummary);
++
++          if (preparation.isSplitTurn && turnPrefixMessages.length > 0) {
++            const splitTurnFocusLabel = "Additional context from /compact";
++            const splitTurnFocus = wrapUntrustedInstructionBlock(
++              splitTurnFocusLabel,
++              customInstructions,
++            );
++            const prefixSummary = await summarizeViaLLM({
++              ...llmSummaryParams,
++              messages: turnPrefixMessages,
++              maxChunkTokens,
++              summaryPrompt: { kind: "turn-prefix" },
++              finalSummaryInstructions: finalSummaryBudgetInstructions(
++                MAX_SPLIT_TURN_CONTEXT_CHARS,
++              ),
++              customInstructions: [splitTurnFocus, correctiveInstructions]
++                .filter(Boolean)
++                .join("\n\n"),
++              previousSummary: undefined,
++            });
++            splitTurnSummaryLocal = prefixSummary;
++            splitTurnSectionLocal = formatGeneratedSplitTurnSection(prefixSummary, () => {
++              producerLosses.add("split-turn-tail");
++            });
++          }
+         } catch (attemptError) {
+           if (signal?.aborted) {
+             signal.throwIfAborted();
+@@ -1230,14 +1282,24 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+           }
+           throw attemptError;
+         }
+-        const finalized = await finalizeSummaryText(
++        const unbudgetedSummary = appendSummarySection(
+           historySummary,
++          splitTurnSectionLocal ? `\n\n${splitTurnSectionLocal}` : "",
++        );
++        const structuralSummary = qualityGuardEnabled ? historySummary : unbudgetedSummary;
++        const finalized = await finalizeSummaryText(
++          structuralSummary,
+           {
++            generatedSplitTurnSection:
++              qualityGuardEnabled && splitTurnSectionLocal
++                ? `\n\n${splitTurnSectionLocal}`
++                : undefined,
+             preservedTurnsSection: preservedTurnsSectionLocal,
+           },
++          producerLosses,
+           qualityGuardEnabled
+             ? {
+-                auditSummary: historySummary,
++                auditSummary: unbudgetedSummary,
+                 identifiers,
+                 latestAsk: latestUserAsk,
+                 latestAskInRetainedTurn: splitUserAsk !== null,
+@@ -1266,10 +1328,11 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
+         const quality = auditSummaryQuality({
+           summary: finalized.summary,
+           structuralSummary: finalized.structuralSummary,
+-          sourceSummaries: [historySummary],
++          sourceSummaries: [historySummary, splitTurnSummaryLocal].filter(Boolean),
+           identifiers,
+           latestAsk: latestUserAsk,
+           latestUnresolvedUserRequest: latestUnresolvedUserRequest ?? undefined,
++          retainedTurnSummary: splitUserAsk !== null ? splitTurnSummaryLocal : undefined,
+           identifierPolicy,
+         });
+         if (quality.ok) {
+diff --git a/src/agents/assistant-error-transcript.ts b/src/agents/assistant-error-transcript.ts
+index f202eb33f1177a7e5867ed0459ab7f34074b383b..dfc810d1d762a54cad813345e4969efdce1eaf53 100644
+--- a/src/agents/assistant-error-transcript.ts
++++ b/src/agents/assistant-error-transcript.ts
+@@ -17,7 +17,7 @@ import {
+ import type { AgentMessage } from "./runtime/index.js";
+ import type { SessionManager } from "./sessions/index.js";
+ import { extractToolCallsFromAssistant } from "./tool-call-id.js";
+-import { hasObservedModelUsage, makeZeroUsageSnapshot, normalizeUsage } from "./usage.js";
++import { makeZeroUsageSnapshot } from "./usage.js";
+ 
+ type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
+ type TranscriptTarget = NonNullable<ReturnType<SessionManager["getSessionTarget"]>>;
+@@ -76,8 +76,7 @@ export function createAssistantErrorTranscript(params: { runId: string; config?:
+         !hasAssistantDisplayableNonTextContent(message) &&
+         !hasAssistantDisplayableNonTextContent({ content: displayContent }) &&
+         !hasPersistedMedia(message) &&
+-        !message.openclawDelivery?.mediaUrls?.length &&
+-        !hasObservedModelUsage(normalizeUsage(message.usage))
++        !message.openclawDelivery?.mediaUrls?.length
+       ) {
+         return undefined;
+       }
+diff --git a/src/agents/assistant-error-transcript.usage.test.ts b/src/agents/assistant-error-transcript.usage.test.ts
+deleted file mode 100644
+index a70ba04dcb468e2c4283778121844c0fb45949da..0000000000000000000000000000000000000000
+--- a/src/agents/assistant-error-transcript.usage.test.ts
++++ /dev/null
+@@ -1,192 +0,0 @@
+-import path from "node:path";
+-import { afterEach, describe, expect, it } from "vitest";
+-import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
+-import { withOwnedSessionTranscriptWrites } from "../config/sessions/transcript-write-context.js";
+-import { loadSessionCostSummary } from "../infra/session-cost-usage.js";
+-import {
+-  closeOpenClawAgentDatabasesAsync,
+-  closeOpenClawAgentDatabasesForTest,
+-} from "../state/openclaw-agent-db.js";
+-import {
+-  createOpenClawTestState,
+-  type OpenClawTestState,
+-} from "../test-utils/openclaw-test-state.js";
+-import { createAssistantErrorTranscript } from "./assistant-error-transcript.js";
+-import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
+-import { SessionManager } from "./sessions/session-manager.js";
+-import {
+-  makeAgentAssistantMessage,
+-  makeAgentUserMessage,
+-} from "./test-helpers/agent-message-fixtures.js";
+-import { makeZeroUsageSnapshot } from "./usage.js";
+-
+-let state: OpenClawTestState | undefined;
+-afterEach(async () => {
+-  await state?.cleanup();
+-  state = undefined;
+-});
+-const failedUsage = {
+-  ...makeZeroUsageSnapshot(),
+-  input: 3,
+-  output: 7,
+-  cacheRead: 5,
+-  reasoningTokens: 2,
+-  totalTokens: 15,
+-  cost: { input: 0.03, output: 0.07, cacheRead: 0.05, cacheWrite: 0, total: 0.15 },
+-};
+-const recoveredUsage = {
+-  ...makeZeroUsageSnapshot(),
+-  input: 2,
+-  output: 3,
+-  totalTokens: 5,
+-  cost: { input: 0.02, output: 0.03, cacheRead: 0, cacheWrite: 0, total: 0.05 },
+-};
+-const incompleteCall = {
+-  type: "toolCall" as const,
+-  id: "unfinished-call",
+-  name: "read",
+-  arguments: {},
+-  partialJson: '{"path":',
+-};
+-
+-async function setup() {
+-  state = await createOpenClawTestState({ label: "error-usage", scenario: "minimal" });
+-  const root = state.workspaceDir;
+-  const target = {
+-    agentId: "main",
+-    sessionId: "error-usage",
+-    sessionKey: "agent:main:error-usage",
+-    storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
+-  };
+-  await upsertSessionEntryCore(target, {
+-    sessionId: target.sessionId,
+-    updatedAt: 1,
+-    lifecycleRevision: "original-lifecycle",
+-    activeWriterRunId: "usage-run",
+-  });
+-  const manager = await SessionManager.openAsync(target, root);
+-  // The async assistant writer validates against an existing canonical user turn.
+-  await manager.appendMessageAsync(
+-    makeAgentUserMessage({ content: "Synthetic usage question", timestamp: 0 }),
+-  );
+-  const owner = createAssistantErrorTranscript({ runId: "usage-run" });
+-  const guard = installSessionToolResultGuard(manager, {
+-    runId: "usage-run",
+-    assistantErrorTranscript: owner,
+-  });
+-  return { root, target, manager, owner, guard };
+-}
+-
+-async function reopenMessages(fixture: Awaited<ReturnType<typeof setup>>) {
+-  await closeOpenClawAgentDatabasesAsync();
+-  closeOpenClawAgentDatabasesForTest();
+-  const reopened = await SessionManager.openAsync(fixture.target, fixture.root);
+-  const [input, ...messages] = reopened
+-    .getBranch()
+-    .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+-  expect(input).toMatchObject({ role: "user", content: "Synthetic usage question" });
+-  return messages;
+-}
+-
+-const partialError = () =>
+-  makeAgentAssistantMessage({
+-    content: [{ type: "text", text: "Superseded partial reply" }],
+-    stopReason: "error",
+-    errorCode: "incomplete_tool_call",
+-    errorMessage: "provider failed",
+-    usage: failedUsage,
+-    timestamp: 1_000,
+-  });
+-
+-describe("persisted failed-response usage", () => {
+-  it.each([
+-    { name: "an incomplete-only tool call", content: [incompleteCall] },
+-    {
+-      name: "a text-only failed response",
+-      content: [{ type: "text" as const, text: "Superseded partial reply" }],
+-    },
+-  ])("retains $name exactly once after recovery, including cost reporting", async ({ content }) => {
+-    const fixture = await setup();
+-    const { manager, owner, guard, target } = fixture;
+-    const failed = { ...partialError(), content, openclawDisplayContent: content };
+-    await manager.appendMessageAsync(failed);
+-    owner.clear();
+-    await manager.appendMessageAsync(
+-      makeAgentAssistantMessage({
+-        content: [{ type: "text", text: "Recovered answer" }],
+-        usage: recoveredUsage,
+-        timestamp: 2_000,
+-      }),
+-    );
+-    await owner.settle(false);
+-    expect(guard.getPendingIds()).toEqual([]);
+-
+-    const messages = await reopenMessages(fixture);
+-    expect(messages).toMatchObject([
+-      { role: "assistant", content: [], usage: failedUsage, stopReason: "stop" },
+-      { role: "assistant", content: [{ type: "text", text: "Recovered answer" }] },
+-    ]);
+-    expect(messages[0]).not.toHaveProperty("errorMessage");
+-    expect(messages[0]).not.toHaveProperty("errorCode");
+-    expect(JSON.stringify(messages)).not.toMatch(/Superseded|unfinished-call|partialJson/);
+-    const summary = await loadSessionCostSummary({
+-      agentId: target.agentId,
+-      sessionId: target.sessionId,
+-      sessionTarget: target,
+-      config: {},
+-    });
+-    expect(summary).toMatchObject({
+-      input: 5,
+-      output: 10,
+-      cacheRead: 5,
+-      totalTokens: 20,
+-      missingCostEntries: 0,
+-    });
+-    expect(summary?.totalCost).toBeCloseTo(0.2);
+-  });
+-
+-  it("keeps terminal error prose without counting its already-persisted usage twice", async () => {
+-    const fixture = await setup();
+-    await fixture.manager.appendMessageAsync(partialError());
+-    await fixture.owner.settle(true);
+-    await fixture.owner.settle(true);
+-    const messages = await reopenMessages(fixture);
+-    expect(messages).toMatchObject([
+-      { role: "assistant", content: [], usage: failedUsage, stopReason: "stop" },
+-      {
+-        role: "assistant",
+-        content: [{ type: "text", text: "Superseded partial reply" }],
+-        usage: makeZeroUsageSnapshot(),
+-        stopReason: "error",
+-        errorMessage: "provider failed",
+-      },
+-    ]);
+-  });
+-
+-  it("rejects a terminal write through the original writer fence after replacement", async () => {
+-    const fixture = await setup();
+-    await withOwnedSessionTranscriptWrites(
+-      {
+-        sessionTarget: {
+-          ...fixture.target,
+-          expectedLifecycleRevision: "original-lifecycle",
+-          expectedWriterRunId: "usage-run",
+-        },
+-        withTranscriptWrite: async (write) => await write(),
+-      },
+-      async () => {
+-        await fixture.manager.appendMessageAsync(partialError());
+-      },
+-    );
+-    await upsertSessionEntryCore(fixture.target, {
+-      sessionId: fixture.target.sessionId,
+-      updatedAt: 2,
+-      lifecycleRevision: "replacement-lifecycle",
+-      activeWriterRunId: "replacement-run",
+-    });
+-    await expect(fixture.owner.settle(true)).rejects.toThrow("session rebound");
+-    expect(await reopenMessages(fixture)).toMatchObject([
+-      { role: "assistant", content: [], usage: failedUsage, stopReason: "stop" },
+-    ]);
+-  });
+-});
+diff --git a/src/agents/session-tool-result-guard.ts b/src/agents/session-tool-result-guard.ts
+index 19eb1411c355d166fd98a9937dd98fc65f5c0e5b..313b2cb35756377ae0a7654986666347399537b9 100644
+--- a/src/agents/session-tool-result-guard.ts
++++ b/src/agents/session-tool-result-guard.ts
+@@ -1,4 +1,3 @@
+-import { replaceCompactionReplayOwnerContent } from "@openclaw/ai/transports";
+ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { publishTranscriptUpdate } from "../config/sessions/session-accessor.js";
+ import type { TranscriptEntryAnchor } from "../config/sessions/transcript-entry-anchor.js";
+@@ -12,7 +11,6 @@ import {
+   resolveTerminalAssistantTranscriptRunId,
+ } from "../sessions/transcript-events.js";
+ import { withRuntimeUserTurnTranscriptRecorder } from "../sessions/user-turn-transcript-runtime-context.js";
+-import { ASSISTANT_DISPLAY_CONTENT_FIELD } from "../shared/assistant-display-content.js";
+ import { isTranscriptOnlyOpenClawAssistantModel } from "../shared/transcript-only-openclaw-assistant.js";
+ import type { AssistantErrorTranscript } from "./assistant-error-transcript.js";
+ import type { AgentMessage } from "./runtime/index.js";
+@@ -53,7 +51,6 @@ import {
+   withCodeModeSourceAppend,
+   type CodeModeSourceAppend,
+ } from "./transcript-code-mode-source.js";
+-import { hasObservedModelUsage, normalizeUsage } from "./usage.js";
+ 
+ type UserAgentMessage = Extract<AgentMessage, { role: "user" }>;
+ type AsyncMessageCallback<T extends AgentMessage> = (message: T) => void | Promise<void>;
+@@ -476,19 +473,9 @@ export function installSessionToolResultGuard(
+         if (pending.size > 0) {
+           yield* flushPendingToolResultsOperation();
+         }
+-        if (!hasObservedModelUsage(normalizeUsage(message.usage))) {
+-          return undefined;
+-        }
+-        // Replay repair can remove every invalid call without erasing recorded response usage.
+-        nextMessage = {
+-          ...replaceCompactionReplayOwnerContent(message, []),
+-          ...(ASSISTANT_DISPLAY_CONTENT_FIELD in message
+-            ? { [ASSISTANT_DISPLAY_CONTENT_FIELD]: [] }
+-            : {}),
+-        };
+-      } else {
+-        nextMessage = sanitized[0]!;
++        return undefined;
+       }
++      nextMessage = sanitized[0]!;
+       copyCodeModeSourceAppend(message, nextMessage, sourceAppend);
+     }
+     if (nextMessage.role === "toolResult") {
+diff --git a/src/agents/tools/computer-tool-schema.ts b/src/agents/tools/computer-tool-schema.ts
+index fd5acd9feaf716f36b01e456513dd20a09d0fc0b..d1c4f58646862b3888c06395e7db942fd1451250 100644
+--- a/src/agents/tools/computer-tool-schema.ts
++++ b/src/agents/tools/computer-tool-schema.ts
+@@ -140,7 +140,7 @@ export function createComputerToolSchema(
+     windowRef: Type.Optional(
+       Type.String({
+         description:
+-          "Opaque window reference from list_windows; required for browser_prepare. To reuse an existing browser, call get_browser_state with windowRef; browser_prepare instead prepares an isolated profile and may launch another browser. Pass the returned browserRef and pageRef together for page snapshots and browser actions. Window actions also use windowRef; screenshot and wait do not.",
++          "Opaque window reference from list_windows; required for browser_prepare. To discover browser pages, call get_browser_state with windowRef, then pass the returned browserRef and pageRef together for page snapshots and browser actions. Window actions also use windowRef; screenshot and wait do not.",
+       }),
+     ),
+     browserRef: Type.Optional(
+@@ -198,18 +198,8 @@ export function createComputerToolSchema(
+     snapshotFormat: optionalStringEnum(["dom_refs_v1", "semantic_v2"] as const),
+     continuation: Type.Optional(Type.String()),
+     includeScreenshot: Type.Optional(Type.Boolean()),
+-    profile: optionalStringEnum(["isolated_new", "isolated_named"] as const, {
+-      description:
+-        "browser_prepare only: isolated_new (default) creates a fresh isolated profile; isolated_named uses profileName. This does not select or attach an existing personal Chrome profile.",
+-    }),
+-    profileName: Type.Optional(
+-      Type.String({
+-        minLength: 1,
+-        maxLength: 64,
+-        description:
+-          "Required only for browser_prepare with isolated_named; names an isolated profile, not an ordinary Chrome profile.",
+-      }),
+-    ),
++    profile: optionalStringEnum(["isolated_new", "isolated_named"] as const),
++    profileName: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+     url: Type.Optional(Type.String()),
+     inputRoute: optionalStringEnum(["trusted", "dom_event"] as const),
+     mode: optionalStringEnum(["insert_text", "keystrokes"] as const),
+diff --git a/src/config/zod-schema.agent-defaults-base.ts b/src/config/zod-schema.agent-defaults-base.ts
+index 21cc2c4e945e5b1c1e04232daad501b68e9f9d92..cf663ff28df65711aeca776e78f2200796f476ae 100644
+--- a/src/config/zod-schema.agent-defaults-base.ts
++++ b/src/config/zod-schema.agent-defaults-base.ts
+@@ -157,7 +157,7 @@ export const AgentDefaultsBaseSchema = z.strictObject({
+       /** Optional quality-audit retries for safeguard compaction summaries. */
+       qualityGuard: z
+         .strictObject({
+-          /** Enable compaction summary quality audits and regeneration retries. Default: true in safeguard mode. */
++          /** Enable compaction summary quality audits and regeneration retries. Default: false. */
+           enabled: z.boolean().optional(),
+           /** Maximum regeneration retries after a failed quality audit. Default: 1 when enabled. */
+           maxRetries: z.number().int().nonnegative().optional(),
+diff --git a/src/gateway/server-agent-database-startup.test.ts b/src/gateway/server-agent-database-startup.test.ts
+index b7d90d907d82e238bb379bc2e54bec1dc3082c26..0fcb7005507d73ac77294b1e1a339ea021ee8b6e 100644
+--- a/src/gateway/server-agent-database-startup.test.ts
++++ b/src/gateway/server-agent-database-startup.test.ts
+@@ -36,10 +36,7 @@ import {
+   withAgentDatabaseStartupAdmission,
+ } from "../state/agent-database-startup.js";
+ import { withOpenClawAgentDatabaseReadOnly } from "../state/openclaw-agent-db-readonly.js";
+-import {
+-  registerOpenClawAgentDatabase,
+-  unregisterOpenClawAgentDatabase,
+-} from "../state/openclaw-agent-db-registry.js";
++import { unregisterOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
+ import {
+   closeOpenClawAgentDatabasesAsync,
+   closeOpenClawAgentDatabasesForTest,
+@@ -134,11 +131,6 @@ it.for([
+   { outcome: "recover", agentId: "acp-worker" },
+   { outcome: "superseded", agentId: "acp-worker" },
+   { outcome: "shutdown", agentId: "acp-worker" },
+-  { outcome: "recover", agentId: "retired-worker" },
+-  { outcome: "superseded", agentId: "retired-worker" },
+-  { outcome: "shutdown", agentId: "retired-worker" },
+-  { outcome: "unregistered", agentId: "retired-worker" },
+-  { outcome: "registration-moved", agentId: "retired-worker" },
+   { outcome: "corrupt", agentId: "worker" },
+   { outcome: "physical-corrupt", agentId: "main" },
+   { outcome: "shutdown", agentId: "worker" },
+@@ -151,8 +143,7 @@ it.for([
+ ] as const)(
+   "applies startup admission while $agentId follows its $outcome lifecycle",
+   async ({ outcome, agentId }, { signal }) => {
+-    const retainedOwner = agentId === "acp-worker" || agentId === "retired-worker";
+-    const registrationChanged = outcome === "unregistered" || outcome === "registration-moved";
++    const retainedOwner = agentId === "acp-worker";
+     let retainedProjection: import("./session-row-projection.js").SessionRowProjection | undefined;
+     if (retainedOwner) {
+       const rows = await import("./session-row-projection.js");
+@@ -191,7 +182,7 @@ it.for([
+         ["recover", "shutdown", "shutdown-preparation"].includes(outcome));
+     testState.agentsConfig = { ownership: "explicit", entries: { main: {}, worker: {} } };
+     testState.agentConfig = { systemAgent: { agentId: "main" } };
+-    if (agentId === "acp-worker") {
++    if (retainedOwner) {
+       // ACP declares a session store without a local agent or local model/auth runtime.
+       fs.writeFileSync(
+         path.join(testConfigRoot.value, "openclaw.json"),
+@@ -265,11 +256,6 @@ it.for([
+       await closeStateDatabaseForTest();
+     }
+     const agentBytes = fs.readFileSync(agentPath);
+-    // Capture a closed fixture before startup; never copy a live database or change its file identity.
+-    const replacementPath = path.join(root, "replacement-agent.sqlite");
+-    if (outcome === "registration-moved") {
+-      fs.writeFileSync(replacementPath, agentBytes);
+-    }
+     const paused = outcome !== "corrupt" && outcome !== "physical-corrupt" && outcome !== "fast";
+     const pause = paused
+       ? pauseIntegrityInspections({
+@@ -317,7 +303,6 @@ it.for([
+     if (
+       outcome === "recover" ||
+       outcome === "superseded" ||
+-      registrationChanged ||
+       (retainedOwner && outcome === "shutdown")
+     ) {
+       const session = await import("./server-startup-session-migration.js");
+@@ -499,7 +484,6 @@ it.for([
+       } else if (
+         outcome === "recover" ||
+         outcome === "superseded" ||
+-        registrationChanged ||
+         (retainedOwner && outcome === "shutdown")
+       ) {
+         fs.writeFileSync(releasePath, "resume");
+@@ -556,12 +540,6 @@ it.for([
+         if (retainedOwner && outcome === "superseded") {
+           setRuntimeConfigSnapshot({ ...getRuntimeConfig() });
+         }
+-        if (registrationChanged) {
+-          unregisterOpenClawAgentDatabase({ agentId, path: agentPath, env });
+-          if (outcome === "registration-moved") {
+-            registerOpenClawAgentDatabase({ agentId, path: replacementPath, env });
+-          }
+-        }
+         preparationRelease.resolve();
+         if (preparationTerminal) {
+           await withinTest(preparationTerminal, signal);
+@@ -576,23 +554,6 @@ it.for([
+             ).not.toContainEqual(expect.objectContaining({ agentId }));
+             return;
+           }
+-          if (registrationChanged) {
+-            expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+-              code: "agent-database-inspection-failed",
+-              reason: expect.stringContaining("registry"),
+-            });
+-            expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
+-            expect(
+-              listConfiguredOwnerInputs(getRuntimeConfig(), undefined, true),
+-            ).not.toContainEqual(expect.objectContaining({ agentId }));
+-            expect(
+-              getActiveSecretsRuntimeSnapshot()?.authStores.some(
+-                (entry) => entry.databasePath === agentPath,
+-              ),
+-            ).not.toBe(true);
+-            expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(503);
+-            return;
+-          }
+           expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toBeUndefined();
+         } else if (outcome === "superseded") {
+           await vi.waitFor(
+diff --git a/src/gateway/server-agent-database-startup.ts b/src/gateway/server-agent-database-startup.ts
+index b2d75dd926c1dfad98d3cb2da9323971dfd6da85..2ee8e2b87039b7db0b9dc1dca337dbe3f12c6240 100644
+--- a/src/gateway/server-agent-database-startup.ts
++++ b/src/gateway/server-agent-database-startup.ts
+@@ -1,17 +1,13 @@
+ import { listAgentIds, resolveAgentDir } from "../agents/agent-scope-config.js";
+ import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.js";
+-import { createSessionStoreRegistryMutationFilter } from "../config/sessions/session-store-target-inventory.js";
+-import { listConfiguredSessionStoreAgentIds } from "../config/sessions/targets-configured-agents.js";
+ import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+-import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js";
+ import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
+ import type { PluginRegistry } from "../plugins/registry-types.js";
+ import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
+ import { getSpawnBroker, runWithSpawnBroker } from "../process/spawn-broker/context.js";
+ import { withAgentDatabasePreparationGuard } from "../state/agent-database-admission.js";
+ import type { getAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
+-import { prepareOpenClawAgentDatabaseRegistrySnapshotRead } from "../state/openclaw-agent-db-registry-listing.js";
+ import { isSameOpenClawAgentDatabasePath } from "../state/openclaw-agent-db.paths.js";
+ 
+ /** Finish only the deferred agent's preparation before its admission owner recovers it. */
+@@ -45,64 +41,32 @@ export function activateGatewayAgentDatabaseStartup(params: {
+         ]);
+         assertCurrent();
+         const beforeConfig = params.getConfig();
+-        const configuredOwner = listConfiguredSessionStoreAgentIds(beforeConfig).includes(agentId);
+-        let assertRegistryCurrent: (() => void) | undefined;
+-        const assertRetainedCurrent = () => {
+-          signal.throwIfAborted();
+-          assertCurrent();
+-          if (!params.isCurrent() || params.getConfig() !== beforeConfig) {
+-            throw new Error(`Agent ${agentId} retained database preparation was superseded`);
+-          }
+-          assertRegistryCurrent?.();
+-        };
+-        let ownerPaths: { path: string }[];
+-        if (configuredOwner) {
+-          ownerPaths = resolveConfiguredAgentDatabaseTargets(beforeConfig, { env }).filter(
+-            (target) => target.agentId === agentId,
+-          );
+-        } else {
+-          // Retained stores are admitted by their registered physical owner, not the local roster.
+-          // Keep the native registry witness through preparation; unchanged registrations are valid.
+-          const preparedSources = paths.map((pathname) => {
+-            const identity = readDatabasePathIdentitySync(pathname);
+-            if (identity.birthtime === undefined) {
+-              throw new Error(`Agent ${agentId} retained database file identity is unavailable`);
+-            }
+-            return {
+-              agentId,
+-              path: pathname,
+-              identity: identity.key,
+-              birthtime: identity.birthtime,
+-            };
+-          });
+-          const registry = prepareOpenClawAgentDatabaseRegistrySnapshotRead(
+-            { env },
+-            createSessionStoreRegistryMutationFilter({ captured: [], preparedSources }),
+-          );
+-          assertRegistryCurrent = registry.assertCurrent;
+-          const registered = await registry.read(signal);
+-          assertRetainedCurrent();
+-          ownerPaths =
+-            registered.result.status === "available"
+-              ? registered.result.entries.filter((entry) => entry.agentId === agentId)
+-              : [];
+-        }
++        const configuredPaths = resolveConfiguredAgentDatabaseTargets(beforeConfig, { env }).filter(
++          (target) => target.agentId === agentId,
++        );
+         if (
+-          ownerPaths.length === 0 ||
++          configuredPaths.length === 0 ||
+           paths.some(
+             (pathname) =>
+-              !ownerPaths.some((target) => isSameOpenClawAgentDatabasePath(target.path, pathname)),
++              !configuredPaths.some((target) =>
++                isSameOpenClawAgentDatabasePath(target.path, pathname),
++              ),
+           )
+         ) {
+           throw new Error(
+-            configuredOwner
+-              ? `Agent ${agentId} database configuration changed during startup inspection`
+-              : `Agent ${agentId} retained database registration changed during startup inspection`,
++            `Agent ${agentId} database configuration changed during startup inspection`,
+           );
+         }
+         if (!listAgentIds(beforeConfig).includes(agentId)) {
+-          // ACP and retained owners need history/index preparation without local model/auth state.
+-          assertRetainedCurrent();
++          // ACP can own a session store without a local agent/model/auth runtime.
++          // Its history still needs the same session/index preparation.
++          const assertRetainedCurrent = () => {
++            signal.throwIfAborted();
++            assertCurrent();
++            if (!params.isCurrent() || params.getConfig() !== beforeConfig) {
++              throw new Error(`Agent ${agentId} retained database preparation was superseded`);
++            }
++          };
+           await withAgentDatabasePreparationGuard(assertRetainedCurrent, async () => {
+             await runStartupSessionMigration({
+               cfg: beforeConfig,
+diff --git a/test/vitest/vitest.database-worker-core-paths.mjs b/test/vitest/vitest.database-worker-core-paths.mjs
+index 64cdc7f2078a0fae08b2a2cb260ae1dfb2e082ce..6157cb5288d71a0d077abfdec4d5a2f1f5c3f7e1 100644
+--- a/test/vitest/vitest.database-worker-core-paths.mjs
++++ b/test/vitest/vitest.database-worker-core-paths.mjs
+@@ -497,7 +497,6 @@ export const databaseWorkerCoreTestFiles = [
+   "src/agents/sessions/session-manager.test.ts",
+   "src/agents/sessions/agent-session-models.admission.test.ts",
+   "src/agents/session-tool-result-guard.transcript-events.test.ts",
+-  "src/agents/assistant-error-transcript.usage.test.ts",
+   "src/agents/embedded-agent-runner/compact.delegate.test.ts",
+   "src/agents/embedded-agent-runner/compact.delegate-resources.test.ts",
+   "src/agents/embedded-agent-runner/compact.foreground-resources.test.ts",

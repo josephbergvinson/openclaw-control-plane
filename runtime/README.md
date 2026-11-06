@@ -18,10 +18,13 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R86, verified on 4 November
-2026. A fresh owner-origin native Discord goal
-verified its command acknowledgment, one progress message, a separate final reply
-and completed delegated work. Native `/goal` start and resume commands acknowledge
+The selected and loaded external gateway reference is R87, verified on 6 November
+2026. The manifest records the canonical source and native distribution for that
+release alongside the separately retained Mac companion source.
+
+An owner-origin Discord goal on R86 verified its command acknowledgment, one
+progress message, a separate final reply and completed delegated work. Native
+`/goal` start and resume commands acknowledge
 a saved goal before model work begins. Progress and
 results then use the originating conversation's normal delivery path, so a long
 task does not depend on the slash command's expiring interaction token. A private

@@ -150,6 +150,14 @@ The recent-tail setting is higher than the pinned native 20,000-token default in
 less room for new retrieval between compactions, so measure that tradeoff on real
 workflows before adopting the value unchanged.
 
+The model-backed safeguard combines older history and the part of a split turn
+before the cut in one summary. Completed results and later corrections can
+inform the same task state. Bounded recent-turn excerpts supplement the summary.
+The quality guard checks the fitted summary for required sections, identifiers
+required by policy and the latest request, with any unresolved request given
+priority. It can request a correction within the configured retry allowance and
+preserves the history if required facts cannot fit or the checks still fail.
+
 Memory flushing is a separate maintenance step. The selected `memory-core` plugin
 uses its native 4,000-token soft margin because
 `agents.defaults.compaction.memoryFlush.softThresholdTokens` is unset. The explicit

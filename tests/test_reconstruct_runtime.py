@@ -205,7 +205,8 @@ class RuntimeReconstructionTests(unittest.TestCase):
             opener.assert_not_called()
 
     def test_companion_dependency_delta_loads_and_restores_its_complete_source_tree(self) -> None:
-        package, contents = self.companion_package(restore_native_dependencies=True)
+        skill = "skills/control-ui/references/dashboards.md"
+        package, contents = self.companion_package((skill,), restore_native_dependencies=True)
         directory = Path(self.temporary.name) / "companion-package"
         directory.mkdir()
         (directory / "companion.patch").write_bytes(package.companion.patch)
@@ -226,11 +227,38 @@ class RuntimeReconstructionTests(unittest.TestCase):
         self.assertTrue(result["nativeCompanion"]["normalizedTreeVerified"])
         self.assertEqual(companion.source_tree, self.run_git("write-tree"))
         self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        self.assertEqual("// companion fixture\n", (self.checkout / skill).read_text())
         for name in RUNTIME.NATIVE_DELTA_PATHS:
             actual = (self.checkout / name).read_bytes()
             self.assertEqual(self.run_git_bytes("show", package.normalized_tree + ":" + name), actual)
             self.assertNotEqual(self.run_git_bytes("show", package.native.normalized_tree + ":" + name), actual)
         opener.open.assert_called_once()
+
+    def test_skill_companion_scope_refuses_unsafe_or_inexact_paths_before_apply(self) -> None:
+        skill = "skills/control-ui/references/dashboards.md"
+        package, _ = self.companion_package((skill,))
+        unsafe = (
+            "skills/../outside", "skills/.git/config", "skills/node_modules/package/index.js",
+            "skills/control-ui\\outside", "skills/control-ui/line\nbreak.md",
+            "skills/control-ui/delete\x7f.md", "skills//dashboard.md", "skills/./dashboard.md",
+            "/skills/dashboard.md", "skills-other/dashboard.md", "skills.json",
+        )
+        invalid = [(package.companion.delta_paths | {name}, "unsupported source path")
+                   for name in unsafe]
+        invalid += [
+            (package.companion.delta_paths - {skill}, "exactly its declared source paths"),
+            (package.companion.delta_paths | {"skills/unexpected.md"}, "exactly its declared source paths"),
+        ]
+        with patch.object(RUNTIME, "build_opener") as opener:
+            for paths, reason in invalid:
+                with self.subTest(paths=paths):
+                    broken = replace(package, companion=replace(package.companion, delta_paths=paths))
+                    with self.assertRaisesRegex(RUNTIME.ReconstructionError, reason):
+                        RUNTIME.reconstruct(self.checkout, broken, apply=True)
+                    self.assertEqual("", self.run_git("status", "--porcelain"))
+                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
+                    self.assertFalse((self.checkout / "native-package-artifacts").exists())
+            opener.assert_not_called()
 
     def test_companion_dependency_delta_refuses_inexact_paths_before_any_source_change(self) -> None:
         package, _ = self.companion_package(restore_native_dependencies=True)
