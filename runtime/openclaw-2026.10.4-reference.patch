@@ -10479,10 +10479,28 @@ index 9a73d18b063ace5b01c7ff3ef1c7d1df859b9cad..a2ad829708880f3569db1794008e5858
  path. Other memory providers keep their own recall behavior but do not
  automatically receive private transcript authorization. `openclaw doctor`
 diff --git a/docs/concepts/active-memory/how-it-works.md b/docs/concepts/active-memory/how-it-works.md
-index 29db65d6d6d4d88a888ebc67d897e85a73829f05..c05a38112880f4ea569a2d535c6a30d55a046681 100644
+index 29db65d6d6d4d88a888ebc67d897e85a73829f05..981e56c9e037c7233d1c5f8d866db75d31e3fda4 100644
 --- a/docs/concepts/active-memory/how-it-works.md
 +++ b/docs/concepts/active-memory/how-it-works.md
-@@ -13,10 +13,10 @@ flowchart LR
+@@ -8,15 +8,28 @@ title: "How active memory works"
+ 
+ ## How it works
+ 
++With Memory Core and `mode: "escalate"`, an eligible Remember across
++conversations turn leaves missing-fact retrieval to the foreground agent.
++`memory_search` with `corpus: "sessions"` can search protected same-agent private
++history when ordinary session search is disabled. It excludes the active
++conversation and keeps the existing private-anchor, alias, reset and deleted
++history rules. Ordinary memory and wiki searches keep their configured behavior.
++Self-contained requests therefore do not wait for a separate recall model.
++Session toggles, chat controls and current invocation authority still apply.
++
++The helper flow below remains for `always`, providers without foreground
++protected recall, and advanced recall tools not covered by the selected memory
++provider. Deterministic trigger recall remains available independently.
++
+ ```mermaid
+ flowchart LR
    U["User Message"] --> D["Deterministic Trigger Recall"]
    D -->|strong trusted match| I["Inject Bounded Hidden Context"]
    D -->|weak or empty| H["Check Recall Intent"]
@@ -10495,7 +10513,7 @@ index 29db65d6d6d4d88a888ebc67d897e85a73829f05..c05a38112880f4ea569a2d535c6a30d5
    R -->|relevant summary| I
    O --> M["Main Reply"]
    I --> M
-@@ -25,8 +25,15 @@ flowchart LR
+@@ -25,8 +38,15 @@ flowchart LR
  The deep-recall sub-agent can call only the configured memory recall tools (see
  [Memory tools](/concepts/active-memory/memory-tools#memory-tools)). If the connection between the query and
  available memory is weak, it returns `NONE` and the main reply proceeds without
@@ -10513,6 +10531,23 @@ index 29db65d6d6d4d88a888ebc67d897e85a73829f05..c05a38112880f4ea569a2d535c6a30d5
  
  Active memory is a conversational enrichment feature, not a platform-wide
  inference feature:
+@@ -70,11 +90,11 @@ for that turn, and the main reply is unaffected.
+ 
+ `config.mode` controls when a targeted turn starts the blocking sub-agent:
+ 
+-| Mode       | Behavior                                                                |
+-| ---------- | ----------------------------------------------------------------------- |
+-| `escalate` | Default. Run only for recall intent when lane 1 has no strong hit.      |
+-| `always`   | Preserve the previous behavior and run on every eligible targeted turn. |
+-| `off`      | Disable deep recall without unloading the plugin.                       |
++| Mode       | Behavior                                                                                                                           |
++| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
++| `escalate` | Default. Use protected foreground recall when supported; otherwise run the helper for recall intent when lane 1 has no strong hit. |
++| `always`   | Preserve the previous behavior and run on every eligible targeted turn.                                                            |
++| `off`      | Disable deep recall without unloading the plugin.                                                                                  |
+ 
+ The deterministic trusted-trigger lane remains available in `off` mode.
+ `rememberAcrossConversations` is unchanged: it still controls whether deep
 diff --git a/docs/concepts/active-memory/tuning.md b/docs/concepts/active-memory/tuning.md
 index a1b233d0d04a92f072810f0cb6ad14d0ef8a600e..06d611161e55e2961e7366847d5c1152afec5ad4 100644
 --- a/docs/concepts/active-memory/tuning.md
@@ -10647,6 +10682,38 @@ index ba8f4390c92a5e5d65ba7b2a3be1a0ce1a08fc96..3518cdf24dc66b2c6ef28fd2dab44a90
  Progress callbacks report what the operator can see, not merely what a plugin queued. Return
  `true` after accepting visible progress and `false` while delivery is pending or when no visible
  update occurred. Existing synchronous and asynchronous callbacks that return `void` remain
+diff --git a/docs/plugins/sdk-overview/memory-and-context.md b/docs/plugins/sdk-overview/memory-and-context.md
+index 5b410ce7aa0db3a560baf85d3bc78f1442479ae8..32eb19fa5bc6c2459df2c38d2a7c9115599ebb49 100644
+--- a/docs/plugins/sdk-overview/memory-and-context.md
++++ b/docs/plugins/sdk-overview/memory-and-context.md
+@@ -341,3 +341,27 @@ read-only database access, the shared SQLite idle lifetime, and vector primitive
+ embedding input limits. These facades avoid loading provider registries or
+ writable-store initialization into worker threads. They are bundled runtime
+ contracts, not third-party typed SDK entrypoints.
++
++## Foreground protected recall
++
++A memory slot owner can declare `supportsOnDemandPrivateTranscriptRecall` when
++its foreground search tool consumes `resolveMemoryConversationRecall` from
++`openclaw/plugin-sdk/memory-host-core`. Recall admission plugins register an
++invocation-bound resolver with `api.registerMemoryRecallPreparation`. The resolver
++receives the trusted tool context, fixed tool name and abort signal; model
++arguments never supply its run identity, anchor or scope. The host checks
++invocation and optional memory-audience currency around preparation. Registry
++scopes preserve the resolver's plugin instance and terminal cleanup removes its
++per-run context through the existing `api.runContext` lifecycle.
++
++Active Memory records admission only after its interactive-turn, session,
++provider and tool-policy checks. Memory Core requests preparation only for an
++explicit sessions search when ordinary session search is disabled, then rechecks
++before retrieval and before publishing results. The existing visibility filter
++still decides which transcript hits are readable. Helpers retain their explicit
++`conversationRecall` contract; memory/wiki and configured session searches retain
++their normal behavior. Providers without this capability retain automatic recall.
++Explicit `always` and `off` modes and advanced custom recall tools keep their existing
++behavior. Turn admission failures withhold results without marking the search
++provider unhealthy; genuine provider failures retain their existing cooldown.
++The capability adds no independent cache, storage or retrieval lifecycle.
 diff --git a/docs/plugins/sdk-runtime.md b/docs/plugins/sdk-runtime.md
 index b2a9f809b196aba5d270916b936ac2399c967a65..6e66a4c1ae591e0c2d8cead4a756866fb6932397 100644
 --- a/docs/plugins/sdk-runtime.md
@@ -11235,12 +11302,206 @@ index 1e1acec7731b51a7855ffa49d0235710d61ff28a..20f8ca89052ec2c56c4149d5347c4b49
      - On completion, OpenClaw best-effort closes tracked browser tabs/processes opened by that sub-agent session before the announce cleanup flow continues.
  
    </Accordion>
+diff --git a/extensions/active-memory/index.foreground-recall.test-support.ts b/extensions/active-memory/index.foreground-recall.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3651dcc5b328b615a443125be96e654334d60ec7
+--- /dev/null
++++ b/extensions/active-memory/index.foreground-recall.test-support.ts
+@@ -0,0 +1,185 @@
++import { expect, it, vi, type Mock } from "vitest";
++
++type ForegroundRecallTestParams = {
++  memoryCapability: {
++    supportsOnDemandPrivateTranscriptRecall: boolean;
++    recallToolNames: readonly string[] | undefined;
++  };
++  api: {
++    config: Record<string, unknown>;
++    on: Mock;
++    registerMemoryRecallPreparation: Mock;
++    runContext: {
++      setRunContext: Mock;
++      getRunContext: Mock;
++      clearRunContext: Mock;
++    };
++  };
++  getActiveMemorySearchManager: Mock;
++  runEmbeddedAgent: Mock;
++  registerPluginConfig: (overrides: Record<string, unknown>) => void;
++  syncRuntimePluginConfig: (overrides: Record<string, unknown>) => void;
++  runPromptBuild: (
++    event: Record<string, unknown>,
++    context?: Record<string, unknown>,
++  ) => Promise<unknown>;
++  runActiveMemoryCommand: (params: Record<string, unknown>) => Promise<unknown>;
++  lastEmbeddedRunParams: () => Record<string, unknown>;
++  hasInfoLine: (text: string) => boolean;
++};
++
++export function registerActiveMemoryForegroundRecallTests({
++  memoryCapability,
++  api,
++  getActiveMemorySearchManager,
++  runEmbeddedAgent,
++  registerPluginConfig,
++  syncRuntimePluginConfig,
++  runPromptBuild,
++  runActiveMemoryCommand,
++  lastEmbeddedRunParams,
++  hasInfoLine,
++}: ForegroundRecallTestParams): void {
++  const enableForegroundRecall = () => {
++    memoryCapability.supportsOnDemandPrivateTranscriptRecall = true;
++    memoryCapability.recallToolNames = ["memory_search", "memory_get"];
++    api.config = { ...api.config, memory: { search: { rememberAcrossConversations: true } } };
++    const admitted = new Map<string, unknown>();
++    api.runContext.setRunContext.mockImplementation(
++      ({ runId, value }: { runId: string; value: unknown }) => {
++        admitted.set(runId, value);
++        return true;
++      },
++    );
++    api.runContext.getRunContext.mockImplementation(({ runId }: { runId: string }) =>
++      admitted.get(runId),
++    );
++    api.runContext.clearRunContext.mockImplementation(({ runId }: { runId: string }) =>
++      admitted.delete(runId),
++    );
++    return admitted;
++  };
++
++  it("defers self-contained retrospective wording to protected foreground recall", async () => {
++    enableForegroundRecall();
++    registerPluginConfig({ mode: "escalate" });
++    const context = {
++      runId: "foreground-request",
++      sessionKey: "agent:main:main",
++      sessionId: "s-main",
++    };
++    await runPromptBuild(
++      { prompt: "Process these supplied records while preserving earlier decisions." },
++      context,
++    );
++    expect(runEmbeddedAgent).not.toHaveBeenCalled();
++    const prepare = api.registerMemoryRecallPreparation.mock.calls.at(-1)?.[0];
++    const toolContext = { ...context, agentId: "main", assertInvocationCurrent: vi.fn() };
++    await expect(prepare({ context: toolContext, toolName: "memory_search" })).resolves.toEqual({
++      anchorSessionKey: context.sessionKey,
++      scope: "same-agent-private",
++      corpus: "sessions",
++    });
++    await expect(
++      prepare({ context: { ...toolContext, runId: "another-run" }, toolName: "memory_search" }),
++    ).resolves.toBeUndefined();
++    for (const changed of [
++      { sessionId: "reset-session" },
++      { agentId: "other" },
++      { sandboxed: true },
++    ]) {
++      await expect(
++        prepare({ context: { ...toolContext, ...changed }, toolName: "memory_search" }),
++      ).resolves.toBeUndefined();
++    }
++    await expect(
++      prepare({
++        context: { ...toolContext, sessionKey: "agent:other:main" },
++        toolName: "memory_search",
++      }),
++    ).resolves.toBeUndefined();
++    await expect(
++      prepare({ context: toolContext, toolName: "memory_get" }),
++    ).resolves.toBeUndefined();
++    await runActiveMemoryCommand({ args: "off", sessionKey: context.sessionKey });
++    await expect(
++      prepare({ context: toolContext, toolName: "memory_search" }),
++    ).resolves.toBeUndefined();
++  });
++
++  it.each([
++    { mode: "always", toolsAllow: ["memory_search", "memory_get"], helperCalls: 1 },
++    { mode: "off", toolsAllow: ["memory_search", "memory_get"], helperCalls: 0 },
++    { mode: "escalate", toolsAllow: ["memory_search", "memory_lookup_custom"], helperCalls: 1 },
++  ])(
++    "preserves supported-provider mode=$mode with tools=$toolsAllow",
++    async ({ mode, toolsAllow, helperCalls }) => {
++      const admitted = enableForegroundRecall();
++      registerPluginConfig({ mode, toolsAllow });
++      await runPromptBuild(
++        { prompt: "What did we previously decide about my food preferences?" },
++        { runId: "advanced-request", sessionKey: "agent:main:main", sessionId: "s-main" },
++      );
++      expect(runEmbeddedAgent).toHaveBeenCalledTimes(helperCalls);
++      expect(admitted.size).toBe(0);
++      if (helperCalls) {
++        expect(lastEmbeddedRunParams().conversationRecall).toMatchObject({
++          anchorSessionKey: "agent:main:main",
++          scope: "same-agent-private",
++        });
++      }
++    },
++  );
++
++  it("revokes foreground admission when config changes or its run context is cleared", async () => {
++    const admitted = enableForegroundRecall();
++    registerPluginConfig({ mode: "escalate" });
++    const context = {
++      runId: "foreground-request",
++      sessionKey: "agent:main:main",
++      sessionId: "s-main",
++      agentId: "main",
++      assertInvocationCurrent: vi.fn(),
++    };
++    await runPromptBuild({ prompt: "Use the supplied records." }, context);
++    const prepare = api.registerMemoryRecallPreparation.mock.calls.at(-1)?.[0];
++    const request = { context, toolName: "memory_search" };
++    expect(await prepare(request)).toBeDefined();
++    syncRuntimePluginConfig({ mode: "off" });
++    expect(await prepare(request)).toBeUndefined();
++    syncRuntimePluginConfig({ mode: "escalate" });
++    expect(await prepare(request)).toBeDefined();
++    api.config = { ...api.config, memory: { search: { rememberAcrossConversations: false } } };
++    expect(await prepare(request)).toBeUndefined();
++    api.config = { ...api.config, memory: { search: { rememberAcrossConversations: true } } };
++    expect(await prepare(request)).toBeDefined();
++    admitted.clear();
++    expect(await prepare(request)).toBeUndefined();
++  });
++
++  it("does not read or inject memory when the turn authority denies recall tools", async () => {
++    expect(api.on).toHaveBeenCalledWith(
++      "before_prompt_build",
++      expect.any(Function),
++      expect.objectContaining({ requiresToolAuthority: true }),
++    );
++    const assertActive = vi.fn();
++
++    const result = await runPromptBuild(
++      { prompt: "what wings should i order?" },
++      {
++        toolAuthority: {
++          fingerprint: "denied-memory-authority",
++          allows: () => false,
++          assertActive,
++        },
++      },
++    );
++
++    expect(result).toBeUndefined();
++    expect(assertActive).toHaveBeenCalled();
++    expect(getActiveMemorySearchManager).not.toHaveBeenCalled();
++    expect(runEmbeddedAgent).not.toHaveBeenCalled();
++    expect(hasInfoLine("active-memory: recall skipped reason=policy-disabled")).toBe(true);
++  });
++}
 diff --git a/extensions/active-memory/index.test.ts b/extensions/active-memory/index.test.ts
-index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce90b7869f 100644
+index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..bc147463b581ea879f8f1183b0698fcafe8733fc 100644
 --- a/extensions/active-memory/index.test.ts
 +++ b/extensions/active-memory/index.test.ts
-@@ -40,6 +40,10 @@ import {
+@@ -38,8 +38,13 @@ import {
+   setMinimumTimeoutMsForTests,
+   setSetupGraceTimeoutMsForTests,
  } from "./config.js";
++import { registerActiveMemoryForegroundRecallTests } from "./index.foreground-recall.test-support.js";
  import plugin from "./index.js";
  import { registerActiveMemoryProviderTests } from "./index.memory-provider.test-support.js";
 +import {
@@ -11250,7 +11511,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
  import * as recallRun from "./recall-run.js";
  import {
    buildCacheKey,
-@@ -51,7 +55,6 @@ import {
+@@ -51,7 +56,6 @@ import {
    setCachedResult,
  } from "./recall-state.js";
  import {
@@ -11258,7 +11519,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    resetActiveMemoryTranscriptForTests,
    setTimeoutPartialDataGraceMsForTests,
  } from "./transcript-result.js";
-@@ -59,16 +62,6 @@ import * as transcriptWatch from "./transcript-watch.js";
+@@ -59,16 +63,6 @@ import * as transcriptWatch from "./transcript-watch.js";
  import { readMemoryResultFromSessionRecord } from "./transcript.js";
  import { resetTriggerRecallRunsForTests } from "./trigger-recall.js";
  
@@ -11275,7 +11536,15 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
  const hoisted = vi.hoisted(() => {
    const sessionStore: Record<string, Record<string, unknown>> = {
      "agent:main:main": {
-@@ -137,6 +130,7 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
+@@ -90,6 +84,7 @@ const hoisted = vi.hoisted(() => {
+       recallToolNames: undefined as readonly string[] | undefined,
+       providerRuntime: undefined as { open: () => unknown } | undefined,
+       supportsPrivateTranscriptRecall: true,
++      supportsOnDemandPrivateTranscriptRecall: false,
+     },
+     updateSessionStore: vi.fn(
+       async (
+@@ -137,6 +132,7 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
    const actual = await vi.importActual<
      typeof import("openclaw/plugin-sdk/session-transcript-runtime")
    >("openclaw/plugin-sdk/session-transcript-runtime");
@@ -11283,7 +11552,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    return {
      ...actual,
      readSessionTranscriptRawDelta: async (
-@@ -151,37 +145,9 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
+@@ -151,37 +147,9 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
        if (!testSessionFile) {
          return await actual.readSessionTranscriptRawDelta(params);
        }
@@ -11324,7 +11593,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
        }
        return await actual.readSessionTranscriptRawDelta(params);
      },
-@@ -215,8 +181,6 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
+@@ -215,8 +183,6 @@ vi.mock("openclaw/plugin-sdk/session-transcript-runtime", async () => {
  });
  
  describe("active-memory plugin", () => {
@@ -11333,7 +11602,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    const unavailableRecallContext =
      "Active Memory could not retrieve memory for this turn. Do not assume that no relevant memory exists.";
  
-@@ -257,6 +221,7 @@ describe("active-memory plugin", () => {
+@@ -257,6 +223,7 @@ describe("active-memory plugin", () => {
      return {
        ...resultRecord,
        meta: {
@@ -11341,7 +11610,70 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
          ...meta,
          agentMeta: {
            sessionId,
-@@ -1649,7 +1614,7 @@ describe("active-memory plugin", () => {
+@@ -394,6 +361,12 @@ describe("active-memory plugin", () => {
+         ),
+       },
+     },
++    registerMemoryRecallPreparation: vi.fn(),
++    runContext: {
++      setRunContext: vi.fn(),
++      getRunContext: vi.fn(),
++      clearRunContext: vi.fn(),
++    },
+     registerCommand: vi.fn((command) => {
+       registeredCommands[command.name] = command;
+     }),
+@@ -657,6 +630,7 @@ describe("active-memory plugin", () => {
+     api.pluginConfig = { agents: ["main"] };
+     hoisted.memoryCapability.deterministicRecallToolName = "memory_search";
+     hoisted.memoryCapability.recallToolNames = undefined;
++    hoisted.memoryCapability.supportsOnDemandPrivateTranscriptRecall = false;
+     // Memory Core is the legacy slot owner unless a test selects a native provider.
+     hoisted.memoryCapability.providerRuntime = undefined;
+     stateDir = path.join(fixtureRoot, `state-${++stateIndex}`);
+@@ -788,30 +762,17 @@ describe("active-memory plugin", () => {
+     stateDir = "";
+   });
+ 
+-  it("does not read or inject memory when the turn authority denies recall tools", async () => {
+-    expect(api.on).toHaveBeenCalledWith(
+-      "before_prompt_build",
+-      expect.any(Function),
+-      expect.objectContaining({ requiresToolAuthority: true }),
+-    );
+-    const assertActive = vi.fn();
+-
+-    const result = await runPromptBuild(
+-      { prompt: "what wings should i order?" },
+-      {
+-        toolAuthority: {
+-          fingerprint: "denied-memory-authority",
+-          allows: () => false,
+-          assertActive,
+-        },
+-      },
+-    );
+-
+-    expect(result).toBeUndefined();
+-    expect(assertActive).toHaveBeenCalled();
+-    expect(hoisted.getActiveMemorySearchManager).not.toHaveBeenCalled();
+-    expect(runEmbeddedAgent).not.toHaveBeenCalled();
+-    expect(hasInfoLine("active-memory: recall skipped reason=policy-disabled")).toBe(true);
++  registerActiveMemoryForegroundRecallTests({
++    memoryCapability: hoisted.memoryCapability,
++    api,
++    getActiveMemorySearchManager: hoisted.getActiveMemorySearchManager,
++    runEmbeddedAgent,
++    registerPluginConfig,
++    syncRuntimePluginConfig,
++    runPromptBuild,
++    runActiveMemoryCommand,
++    lastEmbeddedRunParams,
++    hasInfoLine,
+   });
+ 
+   it.each([
+@@ -1649,7 +1610,7 @@ describe("active-memory plugin", () => {
        { sessionKey: "agent:main:live-config-removed" },
      );
  
@@ -11350,7 +11682,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
      expect(runEmbeddedAgent).not.toHaveBeenCalled();
    });
  
-@@ -1671,10 +1636,10 @@ describe("active-memory plugin", () => {
+@@ -1671,10 +1632,10 @@ describe("active-memory plugin", () => {
          channelId: "owner",
        };
        const ordinary = await runPromptBuild({ prompt: ordinaryPrompt }, context);
@@ -11363,7 +11695,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
        expect(runEmbeddedAgent).not.toHaveBeenCalled();
        const recall = await runPromptBuild({ prompt }, context);
        expect(runEmbeddedAgent).toHaveBeenCalledOnce();
-@@ -1683,6 +1648,20 @@ describe("active-memory plugin", () => {
+@@ -1683,6 +1644,20 @@ describe("active-memory plugin", () => {
      },
    );
  
@@ -11384,7 +11716,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    it("does not run for agents that are not explicitly targeted", async () => {
      const result = await runPromptBuild(
        { prompt: "what wings should i order?" },
-@@ -1835,48 +1814,53 @@ describe("active-memory plugin", () => {
+@@ -1835,48 +1810,53 @@ describe("active-memory plugin", () => {
      },
    );
  
@@ -11477,7 +11809,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
  
    it.each([-1_000])(
      "continues model recall after trigger timeout with a %d ms wall-clock change",
-@@ -1992,7 +1976,7 @@ describe("active-memory plugin", () => {
+@@ -1992,7 +1972,7 @@ describe("active-memory plugin", () => {
      expect(allowGatewaySubagentBinding).toBe(true);
      expect(prompt).toContain("Another model is preparing the final user-facing answer.");
      expect(prompt).toContain("Do not answer the user directly.");
@@ -11486,7 +11818,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
      expect(prompt).toContain("Mutable operational facts");
      expect(prompt).toContain("source timestamp");
      expect(prompt).toContain("verify live");
-@@ -2510,12 +2494,13 @@ describe("active-memory plugin", () => {
+@@ -2510,12 +2490,13 @@ describe("active-memory plugin", () => {
    );
  
    it.each([
@@ -11505,7 +11837,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
        setMinimumTimeoutMsForTests(1);
        setSetupGraceTimeoutMsForTests(0);
-@@ -2555,7 +2540,7 @@ describe("active-memory plugin", () => {
+@@ -2555,7 +2536,7 @@ describe("active-memory plugin", () => {
              assistantRecord(summary),
            ]);
            return {
@@ -11514,7 +11846,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
              meta: {
                durationMs: 0,
                ...(failed ? { error: { kind: "incomplete_turn", message: "No final reply." } } : {}),
-@@ -2588,7 +2573,7 @@ describe("active-memory plugin", () => {
+@@ -2588,7 +2569,7 @@ describe("active-memory plugin", () => {
            expect.stringContaining("failed to clean up recall session"),
          );
        }
@@ -11523,7 +11855,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
          expectPrependContextContains(result, summary);
          expectLinesToContain(getActiveMemoryLines(sessionKey), "status=timeout_partial");
        } else {
-@@ -2601,7 +2586,55 @@ describe("active-memory plugin", () => {
+@@ -2601,7 +2582,55 @@ describe("active-memory plugin", () => {
      },
    );
  
@@ -11580,7 +11912,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
      setMinimumTimeoutMsForTests(1);
      setSetupGraceTimeoutMsForTests(0);
-@@ -2646,22 +2679,14 @@ describe("active-memory plugin", () => {
+@@ -2646,22 +2675,14 @@ describe("active-memory plugin", () => {
      const result = await resultPromise;
  
      expect(lastEmbeddedPrompt()).toContain("summary under 40 characters total");
@@ -11607,7 +11939,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
      setMinimumTimeoutMsForTests(1);
      setSetupGraceTimeoutMsForTests(0);
-@@ -2704,9 +2729,7 @@ describe("active-memory plugin", () => {
+@@ -2704,9 +2725,7 @@ describe("active-memory plugin", () => {
      await vi.advanceTimersByTimeAsync(100);
      const result = await resultPromise;
  
@@ -11618,7 +11950,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
      expect(sessionRuntime.getSessionEntry(target)).toBeUndefined();
      expect(await transcriptRuntime.readSessionTranscriptEvents(target)).toEqual([]);
      expect(hoisted.rawDeltaReads).toContainEqual({
-@@ -2715,11 +2738,8 @@ describe("active-memory plugin", () => {
+@@ -2715,11 +2734,8 @@ describe("active-memory plugin", () => {
        maxEvents: 2_000,
      });
      const lines = getActiveMemoryLines(sessionKey);
@@ -11632,7 +11964,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    });
  
    it("rejects a timeout partial without usable memory evidence", async () => {
-@@ -2840,67 +2860,80 @@ describe("active-memory plugin", () => {
+@@ -2840,67 +2856,80 @@ describe("active-memory plugin", () => {
        );
      }
      const lines = getActiveMemoryLines(sessionKey);
@@ -11769,7 +12101,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
  
    it("skips generic subagent errors without using partial transcript output", async () => {
      registerPluginConfig({ persistTranscripts: true, logging: true });
-@@ -2941,42 +2974,6 @@ describe("active-memory plugin", () => {
+@@ -2941,42 +2970,6 @@ describe("active-memory plugin", () => {
      );
    });
  
@@ -11812,7 +12144,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
    it("schedules timeout cleanup before slow status persistence", async () => {
      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
      configureRecallTimeout(1);
-@@ -3437,7 +3434,7 @@ describe("active-memory plugin", () => {
+@@ -3437,7 +3430,7 @@ describe("active-memory plugin", () => {
  
    it.each([
      {
@@ -11821,7 +12153,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
        summary: true,
        error: true,
        failed: true,
-@@ -3494,7 +3491,9 @@ describe("active-memory plugin", () => {
+@@ -3494,7 +3487,9 @@ describe("active-memory plugin", () => {
          });
          return {
            payloads: [
@@ -11832,7 +12164,7 @@ index 6664f07842f66e1c66fcce6c9acd0bbfebfd8326..67b1e343978f0664a3ec71efd0b158ce
              ...(testCase.error ? [{ text: errorText, isError: true }] : []),
            ],
            meta: {
-@@ -3514,6 +3513,7 @@ describe("active-memory plugin", () => {
+@@ -3514,6 +3509,7 @@ describe("active-memory plugin", () => {
        const context = requirePrependContext(result);
        expect(context).toContain(summary);
        expect(context).not.toContain("Please try again.");
@@ -11900,7 +12232,7 @@ index 0000000000000000000000000000000000000000..29f65a07386ce2d9934041598f551d92
 +  return undefined;
 +}
 diff --git a/extensions/active-memory/index.ts b/extensions/active-memory/index.ts
-index e0bf07b9ce8267c4e05a2dbbc80e0b37f13a9836..7ee8cea970afcc364e2f81056caf2d465cafa1c7 100644
+index e0bf07b9ce8267c4e05a2dbbc80e0b37f13a9836..ab8d0297289fe6670b9b3da6dc686fd57f80f64d 100644
 --- a/extensions/active-memory/index.ts
 +++ b/extensions/active-memory/index.ts
 @@ -14,7 +14,7 @@ import {
@@ -11912,7 +12244,120 @@ index e0bf07b9ce8267c4e05a2dbbc80e0b37f13a9836..7ee8cea970afcc364e2f81056caf2d46
  import { buildQuery, buildSearchQuery, extractRecentTurns, getModelRef } from "./query.js";
  import { forgetActiveRecallRun, toSingleLineErrorMessage } from "./recall-state.js";
  import { maybeResolveActiveRecall } from "./recall.js";
-@@ -498,13 +498,8 @@ export default definePluginEntry({
+@@ -107,6 +107,58 @@ export default definePluginEntry({
+         warnDeprecatedModelFallbackPolicy(livePluginConfig);
+       }
+     };
++    const foregroundRecallNamespace = "protected-foreground-recall";
++    api.registerMemoryRecallPreparation(async ({ context, toolName, signal }) => {
++      const { runId, sessionKey, sessionId, agentId } = context;
++      if (!runId || !sessionKey || !sessionId || !agentId || context.sandboxed) {
++        return undefined;
++      }
++      const admitted = api.runContext.getRunContext({
++        runId,
++        namespace: foregroundRecallNamespace,
++      });
++      if (
++        !admitted ||
++        typeof admitted !== "object" ||
++        Array.isArray(admitted) ||
++        admitted.sessionKey !== sessionKey ||
++        admitted.sessionId !== sessionId ||
++        admitted.agentId !== agentId ||
++        admitted.toolName !== toolName
++      ) {
++        return undefined;
++      }
++      refreshLiveConfigFromRuntime();
++      const liveConfig = readCurrentConfig();
++      const liveRecallConfig = config;
++      const registration = getMemoryCapabilityRegistration();
++      const memorySlot = normalizePluginsConfig(liveConfig.plugins).slots.memory;
++      if (
++        !liveRecallConfig.enabled ||
++        liveRecallConfig.mode !== "escalate" ||
++        !resolveRememberAcrossConversations(liveConfig, agentId) ||
++        !liveRecallConfig.toolsAllow.includes(toolName) ||
++        registration?.pluginId !== memorySlot ||
++        registration?.capability.supportsOnDemandPrivateTranscriptRecall !== true ||
++        registration.capability.deterministicRecallToolName !== toolName ||
++        !isAllowedChatId(liveRecallConfig, {
++          sessionKey,
++          messageProvider:
++            typeof admitted.messageProvider === "string" ? admitted.messageProvider : undefined,
++          channelId: typeof admitted.channelId === "string" ? admitted.channelId : undefined,
++        }) ||
++        (await isSessionActiveMemoryDisabled({ api, sessionKey }))
++      ) {
++        return undefined;
++      }
++      signal?.throwIfAborted();
++      context.assertInvocationCurrent();
++      context.assertMemoryAudienceCurrent?.();
++      if (readCurrentConfig() !== liveConfig) {
++        return undefined;
++      }
++      return { anchorSessionKey: sessionKey, scope: "same-agent-private", corpus: "sessions" };
++    });
+     api.registerCommand({
+       name: "active-memory",
+       description: "Enable, disable, or inspect Active Memory for this session.",
+@@ -218,6 +270,12 @@ export default definePluginEntry({
+           return undefined;
+         }
+         toolAuthority.assertActive();
++        if (ctx.runId) {
++          api.runContext.clearRunContext({
++            runId: ctx.runId,
++            namespace: foregroundRecallNamespace,
++          });
++        }
+         refreshLiveConfigFromRuntime();
+         const liveConfig = readCurrentConfig();
+         // Resolve the runner's CLI budget before arming any recall deadlines.
+@@ -492,19 +550,49 @@ export default definePluginEntry({
+               await skipRecall("destination-not-allowed");
+               return publishPrependContext([laneOneContext]);
+             }
++            // A provider's ordinary foreground tools already own missing-fact decisions.
++            // Keep custom advanced tools and explicit always/off behavior on their existing path.
++            if (
++              invocationConfig.mode === "escalate" &&
++              productRecallToolName &&
++              memoryCapability?.supportsOnDemandPrivateTranscriptRecall === true &&
++              authorityAllowedRecallTools.every((name) =>
++                memoryCapability.recallToolNames?.includes(name),
++              ) &&
++              ctx.runId &&
++              ctx.sessionId &&
++              resolvedSessionKey &&
++              effectiveAgentId
++            ) {
++              deadlineController.signal.throwIfAborted();
++              toolAuthority.assertActive();
++              ctx.hookInvocation?.assertActive();
++              ctx.assertMemoryAudienceCurrent?.();
++              if (
++                api.runContext.setRunContext({
++                  runId: ctx.runId,
++                  namespace: foregroundRecallNamespace,
++                  value: {
++                    sessionKey: resolvedSessionKey,
++                    sessionId: ctx.sessionId,
++                    agentId: effectiveAgentId,
++                    toolName: productRecallToolName,
++                    messageProvider: ctx.messageProvider ?? null,
++                    channelId: ctx.channelId ?? null,
++                  },
++                })
++              ) {
++                return publishPrependContext([laneOneContext]);
++              }
++            }
+             const escalationDecision = resolveRecallEscalationDecision({
+               mode: invocationConfig.mode,
+               message: currentUserMessage,
                hasStrongLaneOneHit: laneOne.hasStrongHit,
              });
              if (escalationDecision !== "recall") {
@@ -11927,7 +12372,7 @@ index e0bf07b9ce8267c4e05a2dbbc80e0b37f13a9836..7ee8cea970afcc364e2f81056caf2d46
              }
              const conversationRecall: ConversationRecallContext | undefined =
                productRecallAllowed && resolvedSessionKey
-@@ -553,7 +548,7 @@ export default definePluginEntry({
+@@ -553,7 +641,7 @@ export default definePluginEntry({
              const recallContext = result.summary
                ? buildPromptPrefix(result.summary)
                : result.status === "unavailable"
@@ -43177,6 +43622,45 @@ index 11d75b49645aa63c0473839e9d805a9a593f53e1..3664d3c9ee58b7b6113e1ce5e9cfa7f7
    });
  
    it("limits the guidance to memory_get when only get is available", () => {
+diff --git a/extensions/memory-core/index.ts b/extensions/memory-core/index.ts
+index fa1afb002e5759f1daad7ee10c46bc93bf5d71a8..1e390bd25f89012e5e6b925fd85d7edce62602f3 100644
+--- a/extensions/memory-core/index.ts
++++ b/extensions/memory-core/index.ts
+@@ -153,6 +153,7 @@ function resolveMemoryToolOptions(
+   const getConfig = ctx.getRuntimeConfig
+     ? () => ctx.getRuntimeConfig?.()
+     : () => ctx.runtimeConfig ?? ctx.config;
++  const assertInvocationCurrent = ctx.assertInvocationCurrent;
+   return {
+     config: getConfig(),
+     getConfig,
+@@ -161,6 +162,18 @@ function resolveMemoryToolOptions(
+     sandboxed: ctx.sandboxed,
+     oneShotCliRun: ctx.oneShotCliRun,
+     conversationRecall: ctx.conversationRecall,
++    resolveConversationRecall: assertInvocationCurrent
++      ? async (signal) => {
++          assertInvocationCurrent();
++          const { resolveMemoryConversationRecall } =
++            await import("openclaw/plugin-sdk/memory-host-core");
++          return resolveMemoryConversationRecall({
++            context: { ...ctx, assertInvocationCurrent },
++            toolName: MEMORY_SEARCH_TOOL_CONTRACT.name,
++            signal,
++          });
++        }
++      : undefined,
+     activeProjectKeys: ctx.activeProjectKeys,
+     ...(host.acquireLocalService ? { acquireLocalService: host.acquireLocalService } : {}),
+     runInBackgroundContext: host.runInBackgroundContext,
+@@ -218,6 +231,7 @@ export default definePluginEntry({
+       recallToolNames: ["memory_search", "memory_get"],
+       deterministicRecallToolName: "memory_search",
+       supportsPrivateTranscriptRecall: true,
++      supportsOnDemandPrivateTranscriptRecall: true,
+       promptBuilder: (params) => {
+         if (
+           !params.availableTools.has("memory_search") &&
 diff --git a/extensions/memory-core/openclaw.plugin.json b/extensions/memory-core/openclaw.plugin.json
 index 8cce2ecca6a21a83d84c0be9a5371c6cfa3d629d..3a1610d6efebf064f60b6950515008a8b3fdb8ef 100644
 --- a/extensions/memory-core/openclaw.plugin.json
@@ -43888,10 +44372,21 @@ index 0000000000000000000000000000000000000000..2dc39d309d91e767b801ef432bb1e68f
 +  });
 +});
 diff --git a/extensions/memory-core/src/memory-tool-contract.ts b/extensions/memory-core/src/memory-tool-contract.ts
-index a68a06ada6b9a97152ae4c45e396ce5edcdd9a5e..d94879de64d994324c0a453738a69f8e36f614b0 100644
+index a68a06ada6b9a97152ae4c45e396ce5edcdd9a5e..de5562b9bec25af8e52ce249d2bccb5c7d8e77b2 100644
 --- a/extensions/memory-core/src/memory-tool-contract.ts
 +++ b/extensions/memory-core/src/memory-tool-contract.ts
-@@ -84,6 +84,15 @@ export function resolveMemoryToolContext(options: MemoryToolOptions) {
+@@ -19,6 +19,10 @@ export type MemoryToolOptions = {
+   sandboxed?: boolean;
+   oneShotCliRun?: boolean;
+   conversationRecall?: OpenClawPluginToolContext["conversationRecall"];
++  /** Host-bound foreground preparation; never accepted from model arguments. */
++  resolveConversationRecall?: (
++    signal?: AbortSignal,
++  ) => Promise<OpenClawPluginToolContext["conversationRecall"]>;
+   activeProjectKeys?: readonly string[];
+   acquireLocalService?: MemoryCoreAcquireLocalService;
+   runInBackgroundContext?: MemoryCoreRuntimeHost["runInBackgroundContext"];
+@@ -84,6 +88,15 @@ export function resolveMemoryToolContext(options: MemoryToolOptions) {
      : null;
  }
  
@@ -43907,16 +44402,16 @@ index a68a06ada6b9a97152ae4c45e396ce5edcdd9a5e..d94879de64d994324c0a453738a69f8e
  const SEARCH_CORPUS_OUTCOME_GUIDANCE =
    "Corpus outcomes cover each requested corpus; only a top-level corpus warning means results are partial and must be surfaced to the user. An optional corpus outcome of not-registered in a multi-corpus result is informational.";
  const GET_READ_OUTCOME_GUIDANCE =
-@@ -114,7 +123,7 @@ export const MEMORY_SEARCH_TOOL_CONTRACT = {
+@@ -114,7 +127,7 @@ export const MEMORY_SEARCH_TOOL_CONTRACT = {
      return normalized;
    },
    describe: ({ search }: MemorySourceContract) =>
 -    `Mandatory recall step: semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
-+    `${LOADED_PROFILE_RECALL_GUIDANCE} ${MEMORY_FACT_LOOKUP_GUIDANCE} When recall is still needed, semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. ${STAGED_MEMORY_SEARCH_GUIDANCE} Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
++    `${LOADED_PROFILE_RECALL_GUIDANCE} ${MEMORY_FACT_LOOKUP_GUIDANCE} When recall is still needed, semantically search ${search} before answering questions about prior work, decisions, dates, people, preferences, or todos. ${STAGED_MEMORY_SEARCH_GUIDANCE} Omit \`corpus\` to search those configured sources. Session results are transcript search references, not readable memory-file paths. Optional \`corpus=wiki\` or \`corpus=all\` also searches registered compiled-wiki supplements; use \`corpus=all\` only when compiled wiki supplements are needed. \`corpus=memory\` restricts hits to indexed memory files (excludes session transcript chunks from ranking). \`corpus=sessions\` searches indexed session transcripts under the same visibility rules as session history tools and returns unavailable when semantic session indexing is disabled. When ordinary session search is disabled, an admitted Remember across conversations turn can use \`corpus=sessions\` for protected same-agent private history; the current conversation is excluded. ${SEARCH_CORPUS_OUTCOME_GUIDANCE} If response has disabled=true or stale=true, tell the user and include the warning/action guidance.`,
  } as const;
  
  export const MEMORY_GET_TOOL_CONTRACT = {
-@@ -142,10 +151,10 @@ export function buildMemoryPromptSection({
+@@ -142,10 +155,10 @@ export function buildMemoryPromptSection({
  
    // Code mode may defer tool descriptions; recall and disclosure policy must stay here.
    const guidance = hasMemorySearch
@@ -43926,12 +44421,12 @@ index a68a06ada6b9a97152ae4c45e396ce5edcdd9a5e..d94879de64d994324c0a453738a69f8e
 -    : "Before answering anything about prior work, decisions, dates, people, preferences, or todos that point to a specific memory file: run memory_get to pull only the needed lines. If low confidence after reading, say you checked.";
 +    ? `When recall is still needed, run memory_search without corpus to search the configured sources. ${STAGED_MEMORY_SEARCH_GUIDANCE}${
 +        hasMemoryGet ? " For memory-file hits, use memory_get to pull only the needed lines." : ""
-+      } Use corpus=all only when compiled wiki supplements are needed. If low confidence after search, say you checked.`
++      } For a missing fact from another private conversation, use corpus=sessions when Remember across conversations is enabled; the runtime checks eligibility. Use corpus=all only when compiled wiki supplements are needed. If low confidence after search, say you checked.`
 +    : "When recall is still needed, before answering anything about prior work, decisions, dates, people, preferences, or todos that point to a specific memory file: run memory_get to pull only the needed lines. If low confidence after reading, say you checked.";
    const sessionGuidance = !hasMemorySearch
      ? []
      : [
-@@ -166,5 +175,12 @@ export function buildMemoryPromptSection({
+@@ -166,5 +179,12 @@ export function buildMemoryPromptSection({
      citationsMode === "off"
        ? "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks."
        : "Citations: include Source: <path#line> when it helps the user verify memory snippets.";
@@ -44062,6 +44557,404 @@ index 1ff3c053852464c5f4e53b523698187c446c3717..1f82e3cc71f894ff5a4fbd2623af5fbc
      return this.withPublishedDatabase(() => this.publishedStatus());
    }
  
+diff --git a/extensions/memory-core/src/tools.test-helpers.ts b/extensions/memory-core/src/tools.test-helpers.ts
+index 48d1639a725fabc66071526abda51fdba0d68c2f..09818024af14613f791f6ce6cafc61e188610226 100644
+--- a/extensions/memory-core/src/tools.test-helpers.ts
++++ b/extensions/memory-core/src/tools.test-helpers.ts
+@@ -2,6 +2,7 @@ import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry
+ // Memory Core helper module supports tools helpers behavior.
+ import { expect } from "vitest";
+ import type { OpenClawConfig } from "../api.js";
++import type { MemoryToolOptions } from "./memory-tool-contract.js";
+ import { runInMemoryTestBackgroundContext } from "./memory/background-context.test-support.js";
+ import { isolateMemoryManagerTestConfig } from "./memory/test-config-helpers.js";
+ import { createMemoryGetTool, createMemorySearchTool } from "./tools.js";
+@@ -20,6 +21,7 @@ export function createMemorySearchToolOrThrow(params?: {
+   agentSessionKey?: string;
+   oneShotCliRun?: boolean;
+   conversationRecall?: OpenClawPluginToolContext["conversationRecall"];
++  resolveConversationRecall?: MemoryToolOptions["resolveConversationRecall"];
+   activeProjectKeys?: readonly string[];
+ }) {
+   const tool = createMemorySearchTool({
+@@ -29,6 +31,9 @@ export function createMemorySearchToolOrThrow(params?: {
+     ...(params?.agentSessionKey ? { agentSessionKey: params.agentSessionKey } : {}),
+     ...(params?.oneShotCliRun ? { oneShotCliRun: params.oneShotCliRun } : {}),
+     ...(params?.conversationRecall ? { conversationRecall: params.conversationRecall } : {}),
++    ...(params?.resolveConversationRecall
++      ? { resolveConversationRecall: params.resolveConversationRecall }
++      : {}),
+     ...(params?.activeProjectKeys ? { activeProjectKeys: params.activeProjectKeys } : {}),
+   });
+   if (!tool) {
+diff --git a/extensions/memory-core/src/tools.test.ts b/extensions/memory-core/src/tools.test.ts
+index 42a28945b7ace64f076b0de2667b984132cfdab4..25d8c9c707c95245f3d99c72488efc519c965914 100644
+--- a/extensions/memory-core/src/tools.test.ts
++++ b/extensions/memory-core/src/tools.test.ts
+@@ -1,4 +1,5 @@
+ import "./tools.session-catalog.test-mocks.js";
++import { createDeferred } from "openclaw/plugin-sdk/concurrency-runtime";
+ import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
+ import { clearMemoryPluginState } from "openclaw/plugin-sdk/memory-host-core";
+ import { Value } from "typebox/value";
+@@ -41,7 +42,10 @@ function searchHits(hits: MemorySearchResult[]) {
+ 
+ function corpusTool(
+   search: NonNullable<NonNullable<MemoryToolOptions["config"]>["memory"]>["search"] = {},
+-  options: Pick<MemoryToolOptions, "agentSessionKey" | "conversationRecall"> = {},
++  options: Pick<
++    MemoryToolOptions,
++    "agentSessionKey" | "conversationRecall" | "resolveConversationRecall"
++  > = {},
+   visibility: "self" | "agent" | "all" = "self",
+   dmScope?: "per-channel-peer",
+ ) {
+@@ -385,6 +389,170 @@ describe("memory_search corpus labels", () => {
+     },
+   );
+ 
++  it("retrieves another private conversation on demand without changing normal memory search", async () => {
++    const search = searchHits([
++      hit("MEMORY.md", "memory", "Ordinary memory fact", 0.95),
++      hit("sessions/past-thread.jsonl", "sessions", "The earlier decision was to use SQLite", 0.9),
++      hit("sessions/thread-1.jsonl", "sessions", "Active conversation must be excluded", 0.98),
++      hit(
++        "sessions/another-agent/secret.jsonl",
++        "sessions",
++        "Another agent must be excluded",
++        0.99,
++      ),
++    ]);
++    const prepare = vi.fn(async () => recall("sessions"));
++    const tool = corpusTool({}, { resolveConversationRecall: prepare });
++    const normal = await tool.execute("normal", { query: "ordinary fact", corpus: "memory" });
++    expect(prepare).not.toHaveBeenCalled();
++    expect((normal.details as { results: Array<{ path: string }> }).results).toEqual([
++      expect.objectContaining({ path: "MEMORY.md" }),
++    ]);
++    const history = await tool.execute("historical", {
++      query: "Which database did we decide to use?",
++      corpus: "sessions",
++    });
++    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ sources: ["sessions"] }));
++    expect(
++      (history.details as { results: Array<{ path: string; snippet: string }> }).results,
++    ).toEqual([
++      expect.objectContaining({
++        path: "sessions/past-thread.jsonl",
++        snippet: "The earlier decision was to use SQLite",
++      }),
++    ]);
++  });
++
++  it("withholds protected results when admission is revoked during retrieval", async () => {
++    let admitted = true;
++    setMemorySearchImpl(async () => {
++      admitted = false;
++      return [hit("sessions/past-thread.jsonl", "sessions", "Private historical fact")];
++    });
++    const tool = corpusTool(
++      {},
++      { resolveConversationRecall: async () => (admitted ? recall("sessions") : undefined) },
++    );
++    const result = await tool.execute("revoked", { query: "earlier decision", corpus: "sessions" });
++    expect(result.details).toMatchObject({
++      unavailable: true,
++      results: [],
++      warning: expect.stringContaining("turn's access"),
++      action: expect.stringContaining("no provider cooldown"),
++    });
++    expect(JSON.stringify(result)).not.toContain("Private historical fact");
++
++    // The same agent/config must remain usable immediately, without clearing cooldown state.
++    admitted = true;
++    const search = searchHits([hit("sessions/past-thread.jsonl", "sessions", "Authorized fact")]);
++    const next = await tool.execute("next-admitted", {
++      query: "earlier decision",
++      corpus: "sessions",
++    });
++    expect(search).toHaveBeenCalledOnce();
++    expect(next.details).toMatchObject({ results: [{ snippet: "Authorized fact" }] });
++    expect(next.details).not.toHaveProperty("unavailable");
++  });
++
++  it.each(["initial", "before-search", "after-search"] as const)(
++    "does not cool down the provider when foreground invocation closes %s",
++    async (phase) => {
++      let checks = 0;
++      let closed = false;
++      const prepare = async () => {
++        checks += 1;
++        if (
++          closed ||
++          (phase === "initial" && checks === 1) ||
++          (phase === "before-search" && checks === 2)
++        ) {
++          throw new Error("Plugin invocation scope is closed");
++        }
++        return recall("sessions");
++      };
++      const search = vi.fn(async () => {
++        closed = phase === "after-search";
++        return [hit("sessions/past-thread.jsonl", "sessions", "Must stay private")];
++      });
++      setMemorySearchImpl(search);
++      const tool = corpusTool({}, { resolveConversationRecall: prepare });
++      const result = await tool.execute("closed", {
++        query: "earlier decision",
++        corpus: "sessions",
++      });
++      expect(result.details).toMatchObject({
++        unavailable: true,
++        results: [],
++        warning: expect.stringContaining("turn's access"),
++        action: expect.stringContaining("no provider cooldown"),
++      });
++      expect(JSON.stringify(result)).not.toContain("Must stay private");
++      expect(search).toHaveBeenCalledTimes(phase === "after-search" ? 1 : 0);
++
++      const ordinary = searchHits([hit("MEMORY.md", "memory", "Ordinary fact")]);
++      const next = await corpusTool().execute("ordinary-next", { query: "ordinary fact" });
++      expect(ordinary).toHaveBeenCalledOnce();
++      expect(next.details).toMatchObject({ results: [{ snippet: "Ordinary fact" }] });
++      expect(next.details).not.toHaveProperty("unavailable");
++    },
++  );
++
++  it.each(["initial", "before-search"] as const)(
++    "does not cool down the provider when the deadline expires during %s recall preparation",
++    async (phase) => {
++      vi.useFakeTimers();
++      const entered = createDeferred();
++      const finish = createDeferred();
++      let checks = 0;
++      const prepare = async () => {
++        if (++checks === (phase === "initial" ? 1 : 2)) {
++          entered.resolve();
++          await finish.promise;
++        }
++        return recall("sessions");
++      };
++      const tool = corpusTool({}, { resolveConversationRecall: prepare });
++      let settled = false;
++      const pending = tool
++        .execute("admission-timeout", {
++          query: "earlier decision",
++          corpus: "sessions",
++        })
++        .then((result) => {
++          settled = true;
++          return result;
++        });
++      try {
++        await entered.promise;
++        await vi.advanceTimersByTimeAsync(30_000);
++        expect(settled).toBe(true);
++        const result = await pending;
++        expect(result.details).toMatchObject({
++          unavailable: true,
++          timedOut: true,
++          results: [],
++          warning: expect.stringContaining("turn's access"),
++          action: expect.stringContaining("no provider cooldown"),
++        });
++
++        const search = searchHits([hit("MEMORY.md", "memory", "Ordinary fact")]);
++        const next = await corpusTool().execute("ordinary-after-admission-timeout", {
++          query: "ordinary fact",
++        });
++        expect(next.details).toMatchObject({ results: [{ snippet: "Ordinary fact" }] });
++        expect(next.details).not.toHaveProperty("unavailable");
++        finish.resolve();
++        await vi.advanceTimersByTimeAsync(0);
++        // Late policy settlement cannot start the expired protected search.
++        expect(search).toHaveBeenCalledOnce();
++      } finally {
++        finish.resolve();
++        await pending;
++        vi.useRealTimers();
++      }
++    },
++  );
++
+   it("forces trusted conversation recall onto its authorized transcript corpus", async () => {
+     const search = searchHits([
+       hit("MEMORY.md", "memory", "Shared memory note", 0.95),
+diff --git a/extensions/memory-core/src/tools.ts b/extensions/memory-core/src/tools.ts
+index 753d49ad5ad279c9cc2bc9fbe9780186634b0308..3d63addb1b50081af99904051086865b6c03fe53 100644
+--- a/extensions/memory-core/src/tools.ts
++++ b/extensions/memory-core/src/tools.ts
+@@ -15,6 +15,7 @@ import {
+ } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
+ import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
+ import { resolveMemoryDreamingConfig } from "openclaw/plugin-sdk/memory-core-host-status";
++import { racePromiseWithAbortSignal } from "openclaw/plugin-sdk/time-runtime";
+ import {
+   attemptMemoryCorpus,
+   composeMemoryCorpusMetadata,
+@@ -71,6 +72,11 @@ type PrimaryMemorySearchValue = {
+ };
+ 
+ const MEMORY_SEARCH_TOOL_COOLDOWN_MS = 60_000;
++const FOREGROUND_RECALL_UNAVAILABLE_GUIDANCE = {
++  warning:
++    "Protected conversation recall is unavailable because this turn's access could not be confirmed.",
++  action: "Retry recall from a current eligible turn; no provider cooldown was applied.",
++};
+ 
+ const memorySearchToolCooldowns = new Map<
+   string,
+@@ -243,22 +249,41 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+           "all",
+           "sessions",
+         ]);
++        // Ordinary corpora keep their configured semantics. Only an explicit transcript
++        // request can consume a foreground grant when normal session search is disabled.
++        const needsForegroundRecall =
++          modelRequestedCorpus === "sessions" &&
++          !options.conversationRecall &&
++          !settings.searchSources.includes("sessions");
++        let foregroundRecall: MemoryToolOptions["conversationRecall"];
++        let conversationRecall = options.conversationRecall;
++        // Admission failures belong to this invocation, not the provider's health.
++        // Set provenance before awaiting policy: the corpus deadline can settle
++        // while preparation is still pending, before any rejection handler runs.
++        const memoryFailure: { scope: "provider" | "admission" } = { scope: "provider" };
++        const assertForegroundRecallCurrent = async (signal: AbortSignal) => {
++          if (!foregroundRecall) {
++            return;
++          }
++          memoryFailure.scope = "admission";
++          const current = await racePromiseWithAbortSignal(
++            async () => options.resolveConversationRecall?.(signal),
++            signal,
++            resolveMemorySearchAbortError,
++          );
++          signal.throwIfAborted();
++          if (
++            current?.anchorSessionKey !== foregroundRecall.anchorSessionKey ||
++            current?.scope !== foregroundRecall.scope ||
++            current?.corpus !== foregroundRecall.corpus
++          ) {
++            throw new Error("Protected conversation recall is no longer available for this turn.");
++          }
++          memoryFailure.scope = "provider";
++        };
+         // The trusted runtime chooses the recall corpus; model-authored arguments cannot broaden it.
+         const requestedCorpus =
+           options.conversationRecall?.corpus === "sessions" ? "sessions" : modelRequestedCorpus;
+-        if (
+-          requestedCorpus === "sessions" &&
+-          !options.conversationRecall &&
+-          !settings.searchSources.includes("sessions")
+-        ) {
+-          return jsonResult(
+-            buildMemorySearchUnavailableResult("Session transcript search is not enabled.", {
+-              warning: "Session transcript search is unavailable for this agent.",
+-              action:
+-                'If an exact session-history capability is available for this run, use it. Otherwise, ask the operator to enable semantic session search by enabling memory.search.experimental.sessionMemory and adding "sessions" to memory.search.sources.',
+-            }),
+-          );
+-        }
+         const cooldown =
+           requestedCorpus === "wiki" ? undefined : readMemorySearchToolCooldown(agentId, cfg);
+         const toolStartedAt = Date.now();
+@@ -310,9 +335,10 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+                 throw new Error(memory.error ?? "memory search unavailable");
+               }
+               signal.throwIfAborted();
++              await assertForegroundRecallCurrent(signal);
+               const explicitSources: MemorySource[] | undefined =
+                 requestedCorpus === "sessions" &&
+-                (options.conversationRecall || settings.searchSources.includes("sessions"))
++                (conversationRecall || settings.searchSources.includes("sessions"))
+                   ? ["sessions"]
+                   : requestedCorpus === "memory"
+                     ? ["memory"]
+@@ -336,7 +362,7 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+                   requestedCorpus,
+                   sessionKey: options.agentSessionKey,
+                   activeProjectKeys: options.activeProjectKeys,
+-                  conversationRecall: options.conversationRecall,
++                  conversationRecall,
+                 },
+                 visibility: { cfg, agentId, sandboxed: options.sandboxed === true },
+                 signal,
+@@ -362,7 +388,9 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+                     ...(attempted.code ? { code: attempted.code } : {}),
+                   }
+                 : { error: "memory search unavailable", deadline: false };
+-            recordMemorySearchToolCooldown(agentId, cfg, failure);
++            if (memoryFailure.scope === "provider") {
++              recordMemorySearchToolCooldown(agentId, cfg, failure);
++            }
+             return {
+               corpus: "memory",
+               outcome: "unavailable",
+@@ -420,6 +448,30 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+             parentSignal: callerSignal,
+             run: async (signal, deadlineControl) => {
+               searchSignal = signal;
++              if (needsForegroundRecall) {
++                memoryFailure.scope = "admission";
++                foregroundRecall = await racePromiseWithAbortSignal(
++                  async () => options.resolveConversationRecall?.(signal),
++                  signal,
++                  resolveMemorySearchAbortError,
++                );
++                signal.throwIfAborted();
++                conversationRecall = foregroundRecall;
++                memoryFailure.scope = "provider";
++              }
++              if (
++                requestedCorpus === "sessions" &&
++                !conversationRecall &&
++                !settings.searchSources.includes("sessions")
++              ) {
++                return jsonResult(
++                  buildMemorySearchUnavailableResult("Session transcript search is not enabled.", {
++                    warning: "Session transcript search is unavailable for this agent.",
++                    action:
++                      'If an exact session-history capability is available for this run, use it. Otherwise, ask the operator to enable semantic session search by enabling memory.search.experimental.sessionMemory and adding "sessions" to memory.search.sources.',
++                  }),
++                );
++              }
+               const [memory, wiki] = await Promise.all([
+                 searchesMemory ? searchMemory(signal, deadlineControl) : Promise.resolve(null),
+                 searchesWiki
+@@ -448,9 +500,13 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+                       agentId,
+                       deadline: memory.deadline,
+                       code: memory.code,
++                      ...(memoryFailure.scope === "admission"
++                        ? FOREGROUND_RECALL_UNAVAILABLE_GUIDANCE
++                        : {}),
+                     }),
+                 );
+               }
++              await assertForegroundRecallCurrent(signal);
+               const wikiResults = wiki?.outcome === "not-registered" ? [] : (wiki?.value ?? []);
+               // Primary results already own their configured limit; only wiki/all need aggregation.
+               const results = searchesWiki
+@@ -542,7 +598,7 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+             throw resolveMemorySearchAbortError(callerSignal);
+           }
+           const failed = unavailableMemoryCorpus("memory", null, error);
+-          if (requestedCorpus !== "wiki") {
++          if (requestedCorpus !== "wiki" && memoryFailure.scope === "provider") {
+             recordMemorySearchToolCooldown(agentId, cfg, failed);
+           }
+           return jsonResult(
+@@ -551,6 +607,9 @@ export function createMemorySearchTool(options: MemoryToolOptions) {
+               agentId,
+               deadline: failed.deadline,
+               code: failed.code,
++              ...(memoryFailure.scope === "admission"
++                ? FOREGROUND_RECALL_UNAVAILABLE_GUIDANCE
++                : {}),
+             }),
+           );
+         } finally {
 diff --git a/extensions/oc-path/package.json b/extensions/oc-path/package.json
 index 7cd05006a83d8e2437de1f7ddd2720ae20ea66c9..1c54f2c930d597398829624b35cdb8e0fd50dc6b 100644
 --- a/extensions/oc-path/package.json
@@ -44075,6 +44968,319 @@ index 7cd05006a83d8e2437de1f7ddd2720ae20ea66c9..1c54f2c930d597398829624b35cdb8e0
      "yaml": "2.9.1"
    },
    "devDependencies": {
+diff --git a/extensions/openai/image-generation-models.ts b/extensions/openai/image-generation-models.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..27d49bba663a1f3af05b0015e23d5e58375d2676
+--- /dev/null
++++ b/extensions/openai/image-generation-models.ts
+@@ -0,0 +1,70 @@
++import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
++import { OPENAI_DEFAULT_IMAGE_MODEL as DEFAULT_OPENAI_IMAGE_MODEL } from "./default-models.js";
++
++export const OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL = "gpt-image-1.5";
++export const OPENAI_SUPPORTED_SIZES = [
++  "1024x1024",
++  "1536x1024",
++  "1024x1536",
++  "2048x2048",
++  "2048x1152",
++  "3840x2160",
++  "2160x3840",
++] as const;
++export const OPENAI_LEGACY_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
++const OPENAI_MAX_INPUT_IMAGES = 5;
++export const OPENAI_MAX_IMAGE_RESULTS = 4;
++const OPENAI_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
++const OPENAI_BACKGROUNDS = ["transparent", "opaque", "auto"] as const;
++const OPENAI_QUALITIES = ["low", "medium", "high", "auto"] as const;
++export const OPENAI_IMAGE_25_MODELS = ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const;
++const OPENAI_IMAGE_26_MODELS = ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"] as const;
++const OPENAI_EXTENDED_IMAGE_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
++export const OPENAI_IMAGE_MODELS = [
++  DEFAULT_OPENAI_IMAGE_MODEL,
++  ...OPENAI_IMAGE_25_MODELS,
++  ...OPENAI_IMAGE_26_MODELS,
++  OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL,
++  "gpt-image-1",
++  "gpt-image-1-mini",
++] as const;
++export const OPENAI_FLEXIBLE_IMAGE_MODELS = [
++  DEFAULT_OPENAI_IMAGE_MODEL,
++  ...OPENAI_IMAGE_25_MODELS,
++  "gpt-image-2-2026-04-21",
++] as const;
++
++export function buildOpenAIImageCapabilities(): ImageGenerationProvider["capabilities"] {
++  return {
++    generate: {
++      maxCount: 4,
++      supportsSize: true,
++      supportsAspectRatio: false,
++      supportsResolution: false,
++    },
++    edit: {
++      enabled: true,
++      maxCount: 4,
++      maxInputImages: OPENAI_MAX_INPUT_IMAGES,
++      supportsSize: true,
++      supportsAspectRatio: false,
++      supportsResolution: false,
++    },
++    geometry: {
++      sizes: [...OPENAI_SUPPORTED_SIZES],
++      // Empty model-specific lists stop core from snapping valid flexible dimensions.
++      sizesByModel: Object.fromEntries(OPENAI_FLEXIBLE_IMAGE_MODELS.map((model) => [model, []])),
++    },
++    output: {
++      formats: [...OPENAI_OUTPUT_FORMATS],
++      qualities: [...OPENAI_QUALITIES],
++      qualitiesByModel: Object.fromEntries(
++        [...OPENAI_IMAGE_25_MODELS, ...OPENAI_IMAGE_26_MODELS].map((model) => [
++          model,
++          [...OPENAI_EXTENDED_IMAGE_QUALITIES],
++        ]),
++      ),
++      backgrounds: [...OPENAI_BACKGROUNDS],
++    },
++  };
++}
+diff --git a/extensions/openai/image-generation-provider.auth.test.ts b/extensions/openai/image-generation-provider.auth.test.ts
+index 32526d262b8b83a53115574b5eae0509e7a3b274..8a621cb92f0e9ddf9e4276f34b807d9eb33fcbf6 100644
+--- a/extensions/openai/image-generation-provider.auth.test.ts
++++ b/extensions/openai/image-generation-provider.auth.test.ts
+@@ -33,6 +33,21 @@ afterEach(() => {
+ });
+ 
+ describe("OpenAI image generation auth availability", () => {
++  it.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])(
++    "advertises %s with the documented rendering quality levels",
++    (model) => {
++      expect(provider.models).toContain(model);
++      expect(provider.capabilities.output?.qualitiesByModel?.[model]).toEqual([
++        "low",
++        "medium",
++        "high",
++        "xhigh",
++        "max",
++        "auto",
++      ]);
++    },
++  );
++
+   it("uses capability-aware credential availability before checking the image route", () => {
+     isProviderApiKeyConfiguredMock.mockReturnValue(true);
+     expect(provider.isConfigured?.({ agentDir: "/tmp/agent" })).toBe(true);
+diff --git a/extensions/openai/image-generation-provider.test-support.ts b/extensions/openai/image-generation-provider.test-support.ts
+index 77779656da791f36937004c046ae0d762f5aeb01..ef15c37d29b67fb3653f47e36608e649ecb30745 100644
+--- a/extensions/openai/image-generation-provider.test-support.ts
++++ b/extensions/openai/image-generation-provider.test-support.ts
+@@ -1,4 +1,4 @@
+-// Synthetic auth and endpoint configuration for OpenAI image provider tests.
++// Synthetic auth, endpoint, and response fixtures for OpenAI image provider tests.
+ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+ import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
+ 
+@@ -76,3 +76,18 @@ export function createMixedOpenAIAuthStore() {
+     },
+   };
+ }
++
++export function imageItem(
++  result: string | null = Buffer.from("codex-image").toString("base64"),
++  status?: string,
++) {
++  return { type: "image_generation_call", result, ...(status ? { status } : {}) };
++}
++
++export function done(item = imageItem()) {
++  return { type: "response.output_item.done", item };
++}
++
++export function completed(output: unknown[] = []) {
++  return { type: "response.completed", response: { output } };
++}
+diff --git a/extensions/openai/image-generation-provider.test.ts b/extensions/openai/image-generation-provider.test.ts
+index 30735daf887bbae600af899ebea7d81c0b449ee6..ab7a9b1105f3ee89867400c085ebe7723f59e3c5 100644
+--- a/extensions/openai/image-generation-provider.test.ts
++++ b/extensions/openai/image-generation-provider.test.ts
+@@ -7,11 +7,14 @@ import type { AuthProfileStore } from "openclaw/plugin-sdk/provider-auth";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { buildOpenAIImageGenerationProvider } from "./image-generation-provider.js";
+ import {
++  completed,
+   createCodexApiKeyAuthStore,
+   createCodexOAuthAuthStore,
+   createCodexTokenAuthStore,
+   createMixedCodexAuthStore,
+   createMixedOpenAIAuthStore,
++  done,
++  imageItem,
+   openAIImageConfig,
+ } from "./image-generation-provider.test-support.js";
+ 
+@@ -118,21 +121,6 @@ function mockCodexEvents(events: unknown[]) {
+   mockCodexRawStream(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+ }
+ 
+-function imageItem(
+-  result: string | null = Buffer.from("codex-image").toString("base64"),
+-  status?: string,
+-) {
+-  return { type: "image_generation_call", result, ...(status ? { status } : {}) };
+-}
+-
+-function done(item = imageItem()) {
+-  return { type: "response.output_item.done", item };
+-}
+-
+-function completed(output: unknown[] = []) {
+-  return { type: "response.completed", response: { output } };
+-}
+-
+ function mockCodexImageStream() {
+   mockCodexEvents([done(), completed()]);
+ }
+@@ -428,19 +416,27 @@ describe("openai image generation provider", () => {
+       },
+     };
+ 
+-    it("keeps the default Codex OAuth image model while the account accepts it", async () => {
+-      mockCodexAuthOnly();
+-      mockCodexImageStream();
+-
+-      const result = await generateOpenAIImage("Draw with the default model", {
+-        authStore: { version: 1, profiles: {} },
+-        cfg: configuredOpenAIFallback,
+-      });
++    it.each(["gpt-image-2", "gpt-image-2.6-flare"])(
++      "keeps the Codex OAuth host model for image selector %s",
++      async (model) => {
++        mockCodexAuthOnly();
++        mockCodexImageStream();
+ 
+-      expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
+-      expect((jsonRequestCall().body as Record<string, unknown>).model).toBe("gpt-6-astra");
+-      expect(result.images[0]?.buffer).toEqual(Buffer.from("codex-image"));
+-    });
++        const result = await generateOpenAIImage("Draw with the default model", {
++          authStore: { version: 1, profiles: {} },
++          cfg: configuredOpenAIFallback,
++          model,
++        });
++
++        expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
++        expect(jsonRequestCall().url).toBe("https://chatgpt.com/backend-api/codex/responses");
++        expect(jsonRequestCall().body).toMatchObject({
++          tools: [{ type: "image_generation", model }],
++        });
++        expect((jsonRequestCall().body as Record<string, unknown>).model).toBe("gpt-6-astra");
++        expect(result.images[0]?.buffer).toEqual(Buffer.from("codex-image"));
++      },
++    );
+ 
+     it.each(["", "x-request-id", "request-id"])("retries rejection (%s)", async (header) => {
+       mockCodexAuthOnly();
+diff --git a/extensions/openai/image-generation-provider.ts b/extensions/openai/image-generation-provider.ts
+index 815e45dc8eae1ef9f6c25a171cc228a1682306fb..4243c02b0c19e195a51dfdaf596156b8ccf7cd67 100644
+--- a/extensions/openai/image-generation-provider.ts
++++ b/extensions/openai/image-generation-provider.ts
+@@ -28,6 +28,16 @@ import {
+   OPENAI_CODEX_DEFAULT_MODEL,
+   OPENAI_DEFAULT_IMAGE_MODEL as DEFAULT_OPENAI_IMAGE_MODEL,
+ } from "./default-models.js";
++import {
++  buildOpenAIImageCapabilities,
++  OPENAI_FLEXIBLE_IMAGE_MODELS,
++  OPENAI_IMAGE_25_MODELS,
++  OPENAI_IMAGE_MODELS,
++  OPENAI_LEGACY_IMAGE_SIZES,
++  OPENAI_MAX_IMAGE_RESULTS,
++  OPENAI_SUPPORTED_SIZES,
++  OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL,
++} from "./image-generation-models.js";
+ import { resolveModelAuthPolicy } from "./provider-policy-api.js";
+ import { resolveConfiguredOpenAIBaseUrl } from "./shared.js";
+ 
+@@ -38,42 +48,12 @@ const DEFAULT_OPENAI_CODEX_IMAGE_RESPONSES_MODEL = OPENAI_CODEX_DEFAULT_MODEL.sl
+   OPENAI_MODEL_REF_PREFIX.length,
+ );
+ const OPENAI_CODEX_IMAGE_INSTRUCTIONS = "You are an image generation assistant.";
+-const OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL = "gpt-image-1.5";
+ const DEFAULT_OPENAI_IMAGE_TIMEOUT_MS = 180_000;
+ const DEFAULT_AZURE_OPENAI_IMAGE_TIMEOUT_MS = 600_000;
+ const DEFAULT_OUTPUT_MIME = "image/png";
+ const DEFAULT_SIZE = "1024x1024";
+-const OPENAI_SUPPORTED_SIZES = [
+-  "1024x1024",
+-  "1536x1024",
+-  "1024x1536",
+-  "2048x2048",
+-  "2048x1152",
+-  "3840x2160",
+-  "2160x3840",
+-] as const;
+-const OPENAI_LEGACY_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
+-const OPENAI_MAX_INPUT_IMAGES = 5;
+-const OPENAI_MAX_IMAGE_RESULTS = 4;
+ const LOG_VALUE_MAX_CHARS = 256;
+ const MOCK_OPENAI_PROVIDER_ID = "mock-openai";
+-const OPENAI_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
+-const OPENAI_BACKGROUNDS = ["transparent", "opaque", "auto"] as const;
+-const OPENAI_QUALITIES = ["low", "medium", "high", "auto"] as const;
+-const OPENAI_IMAGE_25_MODELS = ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const;
+-const OPENAI_IMAGE_25_QUALITIES = ["low", "medium", "high", "xhigh", "max", "auto"] as const;
+-const OPENAI_IMAGE_MODELS = [
+-  DEFAULT_OPENAI_IMAGE_MODEL,
+-  ...OPENAI_IMAGE_25_MODELS,
+-  OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL,
+-  "gpt-image-1",
+-  "gpt-image-1-mini",
+-] as const;
+-const OPENAI_FLEXIBLE_IMAGE_MODELS = [
+-  DEFAULT_OPENAI_IMAGE_MODEL,
+-  ...OPENAI_IMAGE_25_MODELS,
+-  "gpt-image-2-2026-04-21",
+-] as const;
+ 
+ const AZURE_HOSTNAME_SUFFIXES = [
+   ".openai.azure.com",
+@@ -668,35 +648,7 @@ export function buildOpenAIImageGenerationProvider(
+     label: "OpenAI",
+     defaultModel: DEFAULT_OPENAI_IMAGE_MODEL,
+     models: [...OPENAI_IMAGE_MODELS],
+-    capabilities: {
+-      generate: {
+-        maxCount: 4,
+-        supportsSize: true,
+-        supportsAspectRatio: false,
+-        supportsResolution: false,
+-      },
+-      edit: {
+-        enabled: true,
+-        maxCount: 4,
+-        maxInputImages: OPENAI_MAX_INPUT_IMAGES,
+-        supportsSize: true,
+-        supportsAspectRatio: false,
+-        supportsResolution: false,
+-      },
+-      geometry: {
+-        sizes: [...OPENAI_SUPPORTED_SIZES],
+-        // Empty model-specific lists stop core from snapping valid flexible dimensions.
+-        sizesByModel: Object.fromEntries(OPENAI_FLEXIBLE_IMAGE_MODELS.map((model) => [model, []])),
+-      },
+-      output: {
+-        formats: [...OPENAI_OUTPUT_FORMATS],
+-        qualities: [...OPENAI_QUALITIES],
+-        qualitiesByModel: Object.fromEntries(
+-          OPENAI_IMAGE_25_MODELS.map((model) => [model, [...OPENAI_IMAGE_25_QUALITIES]]),
+-        ),
+-        backgrounds: [...OPENAI_BACKGROUNDS],
+-      },
+-    },
++    capabilities: buildOpenAIImageCapabilities(),
+     isConfigured: ({ cfg, agentDir }) =>
+       modelAuth.isProviderApiKeyConfigured({
+         provider: "openai",
 diff --git a/extensions/openai/realtime-voice-bridge-events.test.ts b/extensions/openai/realtime-voice-bridge-events.test.ts
 index 05f778b9b6b37eac8eb8a0d1b04e74dce6b09f81..ecdd6a079e66993e83c918360ed6c1c71ca566c2 100644
 --- a/extensions/openai/realtime-voice-bridge-events.test.ts
@@ -49043,10 +50249,10 @@ index 98b9d4a87f478d111d3c0c10c3a9c41fd55d3632..48110c69a3ed535c44b16074fe9843da
    } catch (error) {
 diff --git a/scripts/lib/managed-darwin-session.mts b/scripts/lib/managed-darwin-session.mts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7b4b2cbca
+index 0000000000000000000000000000000000000000..84a258c450599251f4c45b3eaab1895e2211974e
 --- /dev/null
 +++ b/scripts/lib/managed-darwin-session.mts
-@@ -0,0 +1,464 @@
+@@ -0,0 +1,490 @@
 +import { createRequire } from "node:module";
 +
 +const BSD_INFO_BYTES = 136;
@@ -49054,6 +50260,12 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +const MAX_PROCESS_IDS = 4096;
 +const MISSING_PROCESS = 3; // Darwin ESRCH; other failures never certify absence.
 +const PERMISSION_DENIED = 1;
++const BSD_EXITING = 4; // PROC_FLAG_INEXIT
++const PUBLIC_EXITING = 0x2000; // P_WEXIT
++
++function hasTerminalState(status: number, flags: number, exitingFlag: number) {
++  return status === 5 || (status >= 1 && status < 5 && (flags & exitingFlag) !== 0);
++}
 +
 +export type DarwinProcessIdentity = {
 +  pid: number;
@@ -49279,6 +50491,26 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +    error: new Error(message),
 +  });
 +  const terminalBirths = new Map<number, DarwinTerminalIdentity>();
++  const confirmedTerminalIdentity = (
++    identity: DarwinTerminalIdentity,
++    status: number,
++  ): IdentityResult => {
++    if (status !== 5) {
++      // XNU moves exiting processes to zombproc before p_stat becomes SZOMB.
++      // The exit marker alone precedes that move: ordinary lookup must also
++      // confirm absence, so a still-live/reused PID cannot be excluded.
++      const bytes = Buffer.alloc(BSD_INFO_BYTES);
++      koffi.errno(0);
++      const size = query(identity.pid, 3, 0n, bytes, bytes.length);
++      const error = koffi.errno();
++      if (size !== 0 || error !== MISSING_PROCESS) {
++        return unknown(
++          `Darwin exiting identity is not absent: pid=${identity.pid}, bytes=${size}, errno=${error}`,
++        );
++      }
++    }
++    return { state: "missing", terminalIdentity: identity };
++  };
 +  const publicTerminalIdentity = (pid: number): IdentityResult => {
 +    // The public 64-bit kinfo_proc ABI supplies the same birth tuple when
 +    // libproc denies a terminal row. The native SDK fixture verifies its layout.
@@ -49296,7 +50528,7 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +      error !== 0 ||
 +      size !== BigInt(KINFO_PROC_BYTES) ||
 +      bytes.readInt32LE(40) !== pid ||
-+      bytes.readUInt8(36) !== 5
++      !hasTerminalState(bytes.readUInt8(36), bytes.readUInt32LE(32), PUBLIC_EXITING)
 +    ) {
 +      return unknown(
 +        `Darwin public terminal identity unavailable: pid=${pid}, result=${result}, bytes=${size}, errno=${error}`,
@@ -49309,7 +50541,7 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +    if (ppid < 1 || pgid < 1 || startSec <= 0n || startUsec < 0n || startUsec >= 1_000_000n) {
 +      return unknown(`Invalid Darwin public terminal identity ABI: pid=${pid}`);
 +    }
-+    return { state: "missing", terminalIdentity: { pid, ppid, pgid, startSec, startUsec } };
++    return confirmedTerminalIdentity({ pid, ppid, pgid, startSec, startUsec }, bytes.readUInt8(36));
 +  };
 +  const terminalIdentity = (pid: number): IdentityResult => {
 +    // arg=1 includes zombproc. getsid/ordinary BSDINFO exclude those rows.
@@ -49327,7 +50559,7 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +      size !== BSD_INFO_BYTES ||
 +      error !== 0 ||
 +      bytes.readUInt32LE(12) !== pid ||
-+      bytes.readUInt32LE(4) !== 5
++      !hasTerminalState(bytes.readUInt32LE(4), bytes.readUInt32LE(0), BSD_EXITING)
 +    ) {
 +      return unknown(
 +        `Darwin terminal identity unavailable: pid=${pid}, bytes=${size}, errno=${error}`,
@@ -49339,10 +50571,10 @@ index 0000000000000000000000000000000000000000..8de5a149e6d98b5eedf6ce8d3063d2b7
 +    if (pgid < 1 || pgid > 0x7fffffff || startSec === 0n || startUsec >= 1_000_000n) {
 +      return unknown(`Invalid Darwin terminal identity ABI: pid=${pid}`);
 +    }
-+    return {
-+      state: "missing",
-+      terminalIdentity: { pid, ppid: bytes.readUInt32LE(16), pgid, startSec, startUsec },
-+    };
++    return confirmedTerminalIdentity(
++      { pid, ppid: bytes.readUInt32LE(16), pgid, startSec, startUsec },
++      bytes.readUInt32LE(4),
++    );
 +  };
 +  const missingAfter = (pid: number, expected?: DarwinTerminalIdentity): IdentityResult => {
 +    const observed = terminalIdentity(pid);
@@ -49543,26 +50775,28 @@ index ca72da68959f3e549b432894c05499ccf2a75be1..ebb00d11aa198667a769259123545947
    selected = selected.filter(({ name, version }) => {
      const field = packageRuntimeDependencyField(packageJson, name);
 diff --git a/scripts/plugin-sdk-surface-report.mts b/scripts/plugin-sdk-surface-report.mts
-index 7c088694a61298b9c0c0bf548623c336c8b427b5..fdc54a15d123234b85f4a8c43e425e0aa8308600 100644
+index 7c088694a61298b9c0c0bf548623c336c8b427b5..363b48889ecb4a051c79c14351476ddddc7bb887 100644
 --- a/scripts/plugin-sdk-surface-report.mts
 +++ b/scripts/plugin-sdk-surface-report.mts
-@@ -188,7 +188,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
+@@ -188,7 +188,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
        // +4: owner-approved replay V2 types on core and plugin-entry (2026-10-01).
        // +11: ten service-lifetime type exports and the owner-bound scheduler resolver.
        // +1: owner-approved async watched-session preparation with retained sync compatibility.
 -      3644,
 +      // +2: expose existing ambient-agent and plugin-instance owners to Discord voice.
-+      3646,
++      // +1: invocation-bound protected recall preparation shared by memory plugins.
++      3647,
        env,
      ),
      publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
-@@ -197,7 +198,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
+@@ -197,7 +199,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
        // +1: createSessionHeaderLink shares plugin-owned conversation navigation (PR #158742).
        // +1: resolvePluginServiceScheduler borrows an existing service/account/CLI owner.
        // +1: owner-approved async watched-session preparation with retained sync compatibility.
 -      2109,
 +      // +2: resolveAmbientOwnerAgentId and wrapCurrentPluginInstance retain native ownership.
-+      2111,
++      // +1: resolveMemoryConversationRecall uses existing run and plugin lifetime owners.
++      2112,
        env,
      ),
      publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -57220,10 +58454,10 @@ index dfc810d1d762a54cad813345e4969efdce1eaf53..f202eb33f1177a7e5867ed0459ab7f34
        }
 diff --git a/src/agents/assistant-error-transcript.usage.test.ts b/src/agents/assistant-error-transcript.usage.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a70ba04dcb468e2c4283778121844c0fb45949da
+index 0000000000000000000000000000000000000000..1f6d6ecfc26c369685161bf2f663f67dd26dfe0d
 --- /dev/null
 +++ b/src/agents/assistant-error-transcript.usage.test.ts
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,222 @@
 +import path from "node:path";
 +import { afterEach, describe, expect, it } from "vitest";
 +import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
@@ -57387,6 +58621,21 @@ index 0000000000000000000000000000000000000000..a70ba04dcb468e2c4283778121844c0f
 +        errorMessage: "provider failed",
 +      },
 +    ]);
++    const summary = await loadSessionCostSummary({
++      agentId: fixture.target.agentId,
++      sessionId: fixture.target.sessionId,
++      sessionTarget: fixture.target,
++      config: {},
++    });
++    expect(summary).toMatchObject({
++      input: 3,
++      output: 7,
++      cacheRead: 5,
++      cacheWrite: 0,
++      totalTokens: 15,
++      missingCostEntries: 0,
++    });
++    expect(summary?.totalCost).toBeCloseTo(0.15);
 +  });
 +
 +  it("rejects a terminal write through the original writer fence after replacement", async () => {
@@ -57414,6 +58663,21 @@ index 0000000000000000000000000000000000000000..a70ba04dcb468e2c4283778121844c0f
 +    expect(await reopenMessages(fixture)).toMatchObject([
 +      { role: "assistant", content: [], usage: failedUsage, stopReason: "stop" },
 +    ]);
++    const summary = await loadSessionCostSummary({
++      agentId: fixture.target.agentId,
++      sessionId: fixture.target.sessionId,
++      sessionTarget: fixture.target,
++      config: {},
++    });
++    expect(summary).toMatchObject({
++      input: 3,
++      output: 7,
++      cacheRead: 5,
++      cacheWrite: 0,
++      totalTokens: 15,
++      missingCostEntries: 0,
++    });
++    expect(summary?.totalCost).toBeCloseTo(0.15);
 +  });
 +});
 diff --git a/src/agents/auth-profiles/path-resolve.ts b/src/agents/auth-profiles/path-resolve.ts
@@ -73555,6 +74819,34 @@ index ac124a84008c7bca156fa9072c8c1f0491aed112..683d805cd8ffd7251acae31c1a7bb633
    );
  }
  
+diff --git a/src/agents/openclaw-tools.plugin-context.test.ts b/src/agents/openclaw-tools.plugin-context.test.ts
+index 3bb6ce1375964d1118727e547a2daba75f46f902..7e968bf85cab5e3b4c4f7c2d86c1c52ecd414aa3 100644
+--- a/src/agents/openclaw-tools.plugin-context.test.ts
++++ b/src/agents/openclaw-tools.plugin-context.test.ts
+@@ -23,6 +23,11 @@ function resolve(options: OpenClawPluginToolOptions) {
+ }
+ 
+ describe("openclaw plugin tool context", () => {
++  it("carries the host run identity for invocation-bound recall preparation", () => {
++    const result = resolve({ runId: "admitted-run" });
++    expect(result.context.runId).toBe("admitted-run");
++  });
++
+   it("forwards one host-minted memory audience and its currency assertion", async () => {
+     const sessionId = randomUUID();
+     const entry = { sessionId, updatedAt: 1, chatType: "direct" as const };
+diff --git a/src/agents/openclaw-tools.plugin-context.ts b/src/agents/openclaw-tools.plugin-context.ts
+index f07b58cfd6a362a57477204ea761d1adfb338c9e..a6d4c91cb19f9d339b2d5fdd99c02f7d3f7f15c9 100644
+--- a/src/agents/openclaw-tools.plugin-context.ts
++++ b/src/agents/openclaw-tools.plugin-context.ts
+@@ -120,6 +120,7 @@ export function resolveOpenClawPluginToolInputs(params: {
+       agentDir: options?.agentDir,
+       agentId: sessionAgentId,
+       sessionKey,
++      runId: options?.runId,
+       sessionId: options?.sessionId,
+       toolBindings: options?.toolBindings,
+       activeProjectKeys: options?.activeProjectKeys,
 diff --git a/src/agents/openclaw-tools.sessions-send-child-coordination.test.ts b/src/agents/openclaw-tools.sessions-send-child-coordination.test.ts
 index 488ef2a636934c2706ed3e30decdbf3b57135e1b..3a73b47709f0ccc9ab3721a7ea14d925cca97d95 100644
 --- a/src/agents/openclaw-tools.sessions-send-child-coordination.test.ts
@@ -77254,6 +78546,362 @@ index 0000000000000000000000000000000000000000..452e87f6547a5fac74a80e1cedb626db
 +    }
 +  });
 +});
+diff --git a/src/agents/sessions/agent-session-interrupted-compaction.test-support.ts b/src/agents/sessions/agent-session-interrupted-compaction.test-support.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..32950d87792883447a9a56f805799574494b53cb
+--- /dev/null
++++ b/src/agents/sessions/agent-session-interrupted-compaction.test-support.ts
+@@ -0,0 +1,267 @@
++import {
++  createAssistantMessageEventStream,
++  type Context,
++  type Model,
++  type SimpleStreamOptions,
++} from "openclaw/plugin-sdk/llm";
++import { Type } from "typebox";
++import { expect, vi } from "vitest";
++import {
++  awaitGateBeforeSettlement,
++  createDeferred,
++  withinTest,
++} from "../../../test/helpers/promise.js";
++import type { CompactionProvider } from "../../plugins/compaction-provider.js";
++import { requireActivePluginRegistry } from "../../plugins/runtime.js";
++import { setCompactionSafeguardRuntime } from "../agent-hooks/compaction-safeguard-runtime.js";
++import compactionSafeguardExtension from "../agent-hooks/compaction-safeguard.js";
++import {
++  createAssistant,
++  createAssistantResultStream,
++  createTestSession,
++  streamMocks,
++  testModel,
++} from "./agent-session-loop-correctness.test-support.js";
++import { createResourceLoader } from "./agent-session-loop-resource-loader.test-support.js";
++import { createEventBus } from "./event-bus.js";
++import { loadExtensionFromFactory } from "./extensions/loader.js";
++import type { ToolDefinition } from "./extensions/types.js";
++import type { SessionManager } from "./session-manager.js";
++import { SettingsManager } from "./settings-manager.js";
++
++export const interruptedTask = {
++  objective: "Prepare the release note for release-42 after both reviewers finish.",
++  correction: "Correction: use the revised title Harbor, not the original title Orchard.",
++  receipt: "Saved draft-42 exactly once; do not recreate it.",
++  children: ["review-alpha-42", "review-beta-42"],
++  final: "Harbor: draft-42 is saved and both reviews are complete.",
++};
++
++/** Real AgentSession interruption and compaction; only the provider is scripted. */
++export async function compactInterruptedParent(params: {
++  sessionManager: SessionManager;
++  signal: AbortSignal;
++  cancelCompaction?: boolean;
++  checkpoint?: () => Promise<void>;
++}) {
++  const { sessionManager } = params;
++  const beforeCorrection = createDeferred();
++  const afterCorrection = createDeferred();
++  const summaryStarted = createDeferred();
++  const releaseSummary = createDeferred();
++  const model = { ...testModel, api: "compaction-test-api" };
++  const contexts: Context[] = [];
++  const summaryInputs: Array<{ messages: unknown[]; previousSummary?: string }> = [];
++  let releaseBeforeCorrection = () => {};
++  let interruptedStreams = 0;
++  const checkpoint = vi.fn(async () => {
++    await params.checkpoint?.();
++    return {
++      content: [
++        {
++          type: "text" as const,
++          text: [
++            interruptedTask.receipt,
++            `Pending children: ${interruptedTask.children.join(", ")}.`,
++            "Supporting log: " + "ordinary build output. ".repeat(256),
++          ].join("\n"),
++        },
++      ],
++      details: {},
++    };
++  });
++  const tool: ToolDefinition = {
++    name: "save_draft",
++    label: "Save draft",
++    description: "Save the draft and start its reviews.",
++    parameters: Type.Object({}),
++    execute: checkpoint,
++  };
++  const summarize = vi.fn<CompactionProvider["summarize"]>(
++    async ({ messages, previousSummary }) => {
++      const input = { messages: structuredClone(messages), previousSummary };
++      summaryInputs.push(input);
++      summaryStarted.resolve();
++      await releaseSummary.promise;
++      // This provider may only summarize facts it received. In particular, a
++      // correction outside the summarized prefix must survive in the kept suffix.
++      const supplied = JSON.stringify(input);
++      const present = (fact: string) => supplied.includes(fact);
++      return [
++        `## Decisions\n${present(interruptedTask.objective) ? interruptedTask.objective : "None in supplied history."}`,
++        `## Open TODOs\nAwait ${interruptedTask.children.filter(present).join(" and ")}.`,
++        `## Constraints/Rules\n${present(interruptedTask.receipt) ? interruptedTask.receipt : "None in supplied history."}`,
++        `## Pending user asks\n${present(interruptedTask.correction) ? interruptedTask.correction : "No correction in this prefix."}`,
++        `## Exact identifiers\n${["release-42", "draft-42", "checkpoint-42", ...interruptedTask.children].filter(present).join(", ")}`,
++      ].join("\n\n");
++    },
++  );
++  const registration = {
++    provider: { id: "interrupted-parent-test", label: "Interrupted parent test", summarize },
++  };
++  const registry = requireActivePluginRegistry();
++  registry.compactionProviders.push(registration);
++  const eventBus = createEventBus();
++  try {
++    const resourceLoader = createResourceLoader();
++    const extensions = resourceLoader.getExtensions();
++    extensions.extensions.push(
++      await loadExtensionFromFactory(
++        compactionSafeguardExtension,
++        sessionManager.getCwd(),
++        eventBus,
++        extensions.runtime,
++      ),
++    );
++    setCompactionSafeguardRuntime(sessionManager, {
++      provider: registration.provider.id,
++      model,
++      recentTurnsPreserve: 0,
++      qualityGuardEnabled: true,
++      qualityGuardMaxRetries: 0,
++    });
++    streamMocks.streamSimple.mockImplementation(
++      (activeModel: Model, context: Context, options?: SimpleStreamOptions) => {
++        contexts.push({
++          systemPrompt: context.systemPrompt,
++          messages: structuredClone(context.messages),
++        });
++        if (contexts.length === 1) {
++          return createAssistantResultStream(
++            createAssistant(
++              activeModel,
++              [{ type: "toolCall", id: "checkpoint-42", name: "save_draft", arguments: {} }],
++              "toolUse",
++            ),
++          );
++        }
++        if (contexts.length > 3) {
++          return createAssistantResultStream(
++            createAssistant(activeModel, [{ type: "text", text: interruptedTask.final }]),
++          );
++        }
++        const stream = createAssistantMessageEventStream();
++        let ended = false;
++        const finish = (aborted: boolean) => {
++          if (ended) {
++            return;
++          }
++          ended = true;
++          options?.signal?.removeEventListener("abort", abort);
++          const message = createAssistant(
++            activeModel,
++            aborted
++              ? []
++              : [{ type: "text", text: "The draft is saved; the two reviews are still pending." }],
++            aborted ? "aborted" : "stop",
++          );
++          if (aborted) {
++            interruptedStreams += 1;
++            stream.push({ type: "error", reason: "aborted", error: message });
++          } else {
++            stream.push({ type: "done", reason: "stop", message });
++          }
++          stream.end();
++        };
++        const abort = () => finish(true);
++        options?.signal?.addEventListener("abort", abort, { once: true });
++        if (contexts.length === 2) {
++          releaseBeforeCorrection = () => finish(false);
++          beforeCorrection.resolve();
++        } else {
++          afterCorrection.resolve();
++        }
++        if (options?.signal?.aborted) {
++          abort();
++        }
++        return stream;
++      },
++    );
++    const { session } = await createTestSession({
++      model,
++      sessionManager,
++      resourceLoader,
++      settingsManager: SettingsManager.inMemory({
++        compaction: { enabled: false, reserveTokens: 64, keepRecentTokens: 1 },
++        retry: { enabled: false },
++      }),
++      customTools: [tool],
++    });
++    const prompt = session.prompt(interruptedTask.objective).then(() => {
++      const terminal = session.messages.at(-1);
++      if (terminal?.role === "assistant" && terminal.stopReason === "error") {
++        throw new Error(terminal.errorMessage ?? "Scripted provider returned an error");
++      }
++    });
++    let pendingCompaction: Promise<unknown> | undefined;
++    try {
++      await withinTest(
++        awaitGateBeforeSettlement(
++          beforeCorrection.promise,
++          prompt,
++          "The task settled before accepting its correction",
++        ),
++        params.signal,
++      );
++      await session.steer(interruptedTask.correction);
++      releaseBeforeCorrection();
++      await withinTest(
++        awaitGateBeforeSettlement(
++          afterCorrection.promise,
++          prompt,
++          "The corrected task settled before active compaction",
++        ),
++        params.signal,
++      );
++      expect(session.isStreaming).toBe(true);
++      expect(JSON.stringify(contexts[2])).toContain(interruptedTask.correction);
++      expect(checkpoint).toHaveBeenCalledOnce();
++
++      const compaction = session.compact().then(
++        (result) => ({ status: "completed" as const, result }),
++        (error: unknown) => ({ status: "rejected" as const, error }),
++      );
++      pendingCompaction = compaction;
++      await withinTest(
++        awaitGateBeforeSettlement(
++          summaryStarted.promise,
++          compaction,
++          "Active compaction settled without invoking its summary provider",
++        ),
++        params.signal,
++      );
++      expect(interruptedStreams).toBe(1);
++      await prompt;
++      if (params.cancelCompaction) {
++        session.abortCompaction();
++      }
++      releaseSummary.resolve();
++      const outcome = await withinTest(compaction, params.signal);
++      sessionManager.flushPendingPersistence();
++      // Provider input is checked independently of the scripted summary: returning
++      // fixture facts alone would not prove that compaction received the history.
++      const input = JSON.stringify(summaryInputs);
++      expect(input).toContain(interruptedTask.objective);
++      expect(input).toContain(interruptedTask.receipt);
++      for (const child of interruptedTask.children) {
++        expect(input).toContain(child);
++      }
++      return { outcome, contexts, checkpoint, tool };
++    } finally {
++      releaseBeforeCorrection();
++      releaseSummary.resolve();
++      session.abortCompaction();
++      await pendingCompaction;
++      await session.abort();
++      try {
++        await prompt;
++      } finally {
++        session.dispose();
++      }
++    }
++  } finally {
++    setCompactionSafeguardRuntime(sessionManager, null);
++    registry.compactionProviders.splice(registry.compactionProviders.indexOf(registration), 1);
++    eventBus.clear();
++  }
++}
+diff --git a/src/agents/sessions/agent-session-interrupted-compaction.test.ts b/src/agents/sessions/agent-session-interrupted-compaction.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..386a605a939e7e644d45470c6a66d7f5f9391420
+--- /dev/null
++++ b/src/agents/sessions/agent-session-interrupted-compaction.test.ts
+@@ -0,0 +1,77 @@
++import path from "node:path";
++import { afterEach, expect, it } from "vitest";
++import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
++import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
++import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
++import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
++import {
++  compactInterruptedParent,
++  interruptedTask,
++} from "./agent-session-interrupted-compaction.test-support.js";
++import {
++  createTestSession,
++  registerAgentSessionLoopTestLifecycle,
++} from "./agent-session-loop-correctness.test-support.js";
++import { SessionManager } from "./session-manager.js";
++
++const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
++  afterEach(async () => {
++    for (const stateDir of tempDirs.dirs) {
++      await cleanupSessionStateForTest({ stateDir });
++    }
++    cleanup();
++  }),
++);
++registerAgentSessionLoopTestLifecycle();
++
++it.for([false, true])(
++  "retains an actively interrupted task after durable reopen (cancel summary: %s)",
++  async (cancelCompaction, { signal }) => {
++    const stateDir = tempDirs.make("openclaw-active-compaction-");
++    const target = {
++      agentId: "main",
++      sessionId: "interrupted-parent-42",
++      sessionKey: "agent:main:interrupted-parent-42",
++      storePath: path.join(stateDir, "agents", "main", "sessions", "sessions.json"),
++    };
++    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++    const manager = await SessionManager.openAsync(target, stateDir);
++    const proof = await compactInterruptedParent({
++      sessionManager: manager,
++      signal,
++      cancelCompaction,
++    });
++    expect(proof.outcome.status).toBe(cancelCompaction ? "rejected" : "completed");
++    await closeOpenClawAgentDatabasesAsync(stateDir);
++    const reopened = await SessionManager.openAsync(target, stateDir);
++    expect(reopened.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(
++      cancelCompaction ? 0 : 1,
++    );
++    const retained = JSON.stringify(reopened.buildSessionContext().messages);
++    for (const fact of [
++      interruptedTask.objective,
++      interruptedTask.correction,
++      interruptedTask.receipt,
++      ...interruptedTask.children,
++    ]) {
++      expect(retained).toContain(fact);
++    }
++    const { session } = await createTestSession({
++      sessionManager: reopened,
++      customTools: [proof.tool],
++    });
++    try {
++      await session.prompt("Continue the retained task after both reviews completed.");
++      expect(proof.checkpoint).toHaveBeenCalledOnce();
++      const resumed = JSON.stringify(proof.contexts.at(-1));
++      expect(resumed).toContain(interruptedTask.correction);
++      expect(resumed).toContain(interruptedTask.receipt);
++      expect(session.messages.at(-1)).toMatchObject({
++        role: "assistant",
++        content: [{ type: "text", text: interruptedTask.final }],
++      });
++    } finally {
++      session.dispose();
++    }
++  },
++);
 diff --git a/src/agents/sessions/agent-session-prompting.ts b/src/agents/sessions/agent-session-prompting.ts
 index 62ff0810930f6ceee3f347844a74ca037a4ba465..c4731cb554e0f6613b9d80ca681985f57797d9b7 100644
 --- a/src/agents/sessions/agent-session-prompting.ts
@@ -79193,6 +80841,272 @@ index 0000000000000000000000000000000000000000..45073f46f48ffb9eeec5ffa1619710c8
 +  }
 +  return delivery;
 +}
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-compaction-lifecycle.test.ts b/src/agents/subagents/announce/subagent-announce.requester-compaction-lifecycle.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ef55dceddfb47837c29e50e1f3251858f7001ed5
+--- /dev/null
++++ b/src/agents/subagents/announce/subagent-announce.requester-compaction-lifecycle.test.ts
+@@ -0,0 +1,260 @@
++// Preserve the existing native registry/SQLite fixture before its consumers.
++// oxfmt-ignore
++import { useSubagentControlFixture } from "../registry/subagent-control.test-support.js";
++import { afterEach, expect, it, vi } from "vitest";
++import { withinTest } from "../../../../test/helpers/promise.js";
++import { getRuntimeConfig } from "../../../config/config.js";
++import { abortControlledSubagents } from "../../../gateway/server-methods/chat-abort-runtime.js";
++import {
++  emitAgentEventIfCurrent,
++  getAgentEventLifecycleGeneration,
++  rotateAgentEventLifecycleGeneration,
++} from "../../../infra/agent-events.js";
++import { createDeferredCore } from "../../../shared/deferred.js";
++import { closeOpenClawAgentDatabasesAsync } from "../../../state/openclaw-agent-db.js";
++import {
++  prepareSystemAgentRunAdmission,
++  resolveAdmittedRunActiveAssertion,
++} from "../../admitted-run-context.js";
++import {
++  compactInterruptedParent,
++  interruptedTask,
++} from "../../sessions/agent-session-interrupted-compaction.test-support.js";
++import {
++  createTestSession,
++  registerAgentSessionLoopTestLifecycle,
++} from "../../sessions/agent-session-loop-correctness.test-support.js";
++import { SessionManager } from "../../sessions/session-manager.js";
++import { subagentRuns } from "../registry/subagent-registry-memory.js";
++import {
++  initSubagentRegistry,
++  markRequesterTurnYielded,
++  registerSubagentRun,
++  settleRequesterAfterSessionSpawns,
++} from "../registry/subagent-registry.js";
++import { writeSubagentSessionEntry } from "../registry/subagent-registry.persistence.test-support.js";
++import { loadSubagentRegistryFromSqlite } from "../registry/subagent-registry.store.sqlite.js";
++import {
++  resetSubagentRegistryForTests,
++  testing,
++} from "../registry/subagent-registry.test-helpers.js";
++import {
++  setSubagentAnnounceDeliveryDepsForTest,
++  type SubagentAnnounceDeliveryTestDeps,
++} from "./subagent-announce-overrides.test-support.js";
++import { dispatchGatewayMethodInProcess } from "./subagent-announce.runtime.js";
++
++const fixture = useSubagentControlFixture();
++registerAgentSessionLoopTestLifecycle();
++afterEach(() => setSubagentAnnounceDeliveryDepsForTest());
++
++it.for([false, true])(
++  "settles a compacted parent once after registry replacement (cancel admitted continuation: %s)",
++  async (cancel, { signal }) => {
++    const requesterKey = "agent:main:compaction-parent-42";
++    const requesterTurnRunId = "parent-turn-42";
++    const sessionId = "compaction-parent-42";
++    const storePath = await writeSubagentSessionEntry({
++      stateDir: fixture.stateDir,
++      agentId: "main",
++      sessionKey: requesterKey,
++      defaultSessionId: sessionId,
++    });
++    const target = { agentId: "main", sessionKey: requesterKey, sessionId, storePath };
++    const children = interruptedTask.children.map((runId) => ({
++      runId,
++      childSessionKey: `agent:main:subagent:${runId}`,
++      expectsCompletionMessage: true,
++    }));
++    // Child transport is scripted; registry completion, handoff, restart restore,
++    // cancellation, and the parent's resumed AgentSession remain native.
++    fixture.announce.mockResolvedValue("delivered");
++    const proof = await compactInterruptedParent({
++      sessionManager: await SessionManager.openAsync(target, fixture.stateDir),
++      signal,
++      checkpoint: async () => {
++        for (const child of children) {
++          await writeSubagentSessionEntry({
++            stateDir: fixture.stateDir,
++            agentId: "main",
++            sessionKey: child.childSessionKey,
++            defaultSessionId: `${child.runId}-session`,
++          });
++          await registerSubagentRun({
++            ...child,
++            requesterSessionKey: requesterKey,
++            requesterAgentId: "main",
++            requesterDisplayKey: requesterKey,
++            requesterTurnRunId,
++            task: `Review ${child.runId}`,
++            cleanup: "keep",
++          });
++          expect(subagentRuns.get(child.runId)?.execution.status).toBe("running");
++        }
++      },
++    });
++    expect(proof.outcome.status).toBe("completed");
++    expect(
++      await markRequesterTurnYielded({
++        requesterSessionKey: requesterKey,
++        requesterAgentId: "main",
++        requesterTurnRunId,
++      }),
++    ).toBe(2);
++    for (const child of children.toReversed()) {
++      expect(
++        emitAgentEventIfCurrent({
++          runId: child.runId,
++          sessionKey: child.childSessionKey,
++          lifecycleGeneration: getAgentEventLifecycleGeneration(),
++          stream: "lifecycle",
++          data: {
++            phase: "end",
++            endedAt: Date.now(),
++            terminalReply: {
++              disposition: "visible",
++              text: `Review ${child.runId} complete`,
++            },
++          },
++        }),
++      ).toBe(true);
++      await fixture.settle();
++      expect(subagentRuns.get(child.runId)?.execution).toMatchObject({
++        status: "terminal",
++        outcome: { status: "ok" },
++      });
++    }
++    const completedOutcomes = new Map(
++      children.map((child) => [
++        child.runId,
++        structuredClone(subagentRuns.get(child.runId)?.execution.outcome),
++      ]),
++    );
++    // Retire the logical lifecycle and its in-memory registry, not a host process.
++    // The replacement must consume the committed parent history and child receipts.
++    await resetSubagentRegistryForTests({ persist: false });
++    rotateAgentEventLifecycleGeneration();
++    await closeOpenClawAgentDatabasesAsync(fixture.stateDir);
++    await initSubagentRegistry();
++    const reopened = await SessionManager.openAsync(target, fixture.stateDir);
++    const retained = JSON.stringify(reopened.buildSessionContext().messages);
++    expect(retained).toContain(interruptedTask.correction);
++    expect(retained).toContain(interruptedTask.receipt);
++    for (const child of children) {
++      expect(subagentRuns.get(child.runId)?.completion?.resultText).toContain(
++        `Review ${child.runId} complete`,
++      );
++    }
++    const { session } = await createTestSession({
++      sessionManager: reopened,
++      customTools: [proof.tool],
++    });
++    const admitted = createDeferredCore();
++    const execute = createDeferredCore();
++    const finals: string[] = [];
++    const attempts: string[] = [];
++    let admission: ReturnType<typeof prepareSystemAgentRunAdmission> | undefined;
++    type Dispatch = SubagentAnnounceDeliveryTestDeps["dispatchGatewayMethodInProcess"];
++    const transport = { dispatch: dispatchGatewayMethodInProcess };
++    vi.spyOn(transport, "dispatch").mockResolvedValue({
++      status: "ok",
++      inputProcessingCompleted: true,
++      result: { payloads: [{ text: interruptedTask.final }], meta: {} },
++    });
++    const dispatch: Dispatch = async <T>(...args: Parameters<Dispatch>): Promise<T> => {
++      const [, params, options] = args;
++      const runId = String(params?.idempotencyKey);
++      attempts.push(runId);
++      const owner = prepareSystemAgentRunAdmission(
++        getRuntimeConfig(),
++        runId,
++        "main",
++        "compaction-settle-test",
++      );
++      admission = owner;
++      const assertCurrent = resolveAdmittedRunActiveAssertion(await owner.admit("embedded"))!;
++      try {
++        admitted.resolve();
++        await execute.promise;
++        assertCurrent();
++        options?.onExecutionStarted?.();
++        const message = String(params?.message);
++        for (const child of children) {
++          expect(message).toContain(`Review ${child.runId} complete`);
++        }
++        await session.prompt(message);
++        assertCurrent();
++        const resumedContext = JSON.stringify(proof.contexts.at(-1));
++        expect(resumedContext).toContain(interruptedTask.correction);
++        expect(resumedContext).toContain(interruptedTask.receipt);
++        expect(session.messages.at(-1)).toMatchObject({
++          role: "assistant",
++          content: [{ type: "text", text: interruptedTask.final }],
++        });
++        finals.push(interruptedTask.final);
++        return await transport.dispatch<T>(...args);
++      } finally {
++        owner.close();
++      }
++    };
++    setSubagentAnnounceDeliveryDepsForTest({ dispatchGatewayMethodInProcess: dispatch });
++    try {
++      expect(
++        await settleRequesterAfterSessionSpawns({
++          requesterSessionKey: requesterKey,
++          requesterAgentId: "main",
++          requesterTurnRunId,
++          requesterYielded: true,
++          acceptedSessionSpawns: children,
++        }),
++      ).toBe(true);
++      await testing.sweepOnceForTests();
++      await withinTest(admitted.promise, signal);
++      expect(finals).toEqual([]);
++      if (cancel) {
++        expect(
++          await abortControlledSubagents({
++            cfg: getRuntimeConfig(),
++            sessionKey: requesterKey,
++            agentId: "main",
++            beforeKill: () => {
++              admission?.close();
++              return true;
++            },
++          }),
++        ).toMatchObject({ status: "ok" });
++      }
++      execute.resolve();
++      await withinTest(fixture.settle(), signal);
++      await testing.sweepOnceForTests();
++      await withinTest(fixture.settle(), signal);
++      expect(attempts).toHaveLength(1);
++      expect(finals).toEqual(cancel ? [] : [interruptedTask.final]);
++      expect(transport.dispatch).toHaveBeenCalledTimes(cancel ? 0 : 1);
++      expect(proof.checkpoint).toHaveBeenCalledOnce();
++      // A retired outbox can also mean permanent delivery failure. Require the
++      // native settle owner to report success, not merely an empty wake field.
++      const wakeResults = await Promise.all(
++        fixture.wake.mock.results
++          .filter((result) => result.type === "return")
++          .map((result) => result.value),
++      );
++      expect(wakeResults.filter((delivered) => delivered)).toHaveLength(cancel ? 0 : 1);
++      for (const child of children) {
++        const persisted = loadSubagentRegistryFromSqlite().get(child.runId);
++        expect(persisted?.requesterSettleWake).toBeUndefined();
++        expect(persisted?.execution.outcome).toEqual(completedOutcomes.get(child.runId));
++        expect(persisted?.completion?.resultText).toContain(`Review ${child.runId} complete`);
++        if (cancel) {
++          expect(persisted?.suppressCompletionDelivery).toBe(true);
++        }
++      }
++    } finally {
++      admission?.close();
++      execute.resolve();
++      await fixture.settle();
++      await session.abort();
++      session.dispose();
++    }
++  },
++);
 diff --git a/src/agents/subagents/announce/subagent-announce.requester-pause-progress.test.ts b/src/agents/subagents/announce/subagent-announce.requester-pause-progress.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..71b949f552e205e62ec9ccbd5b58812f424cd957
@@ -136764,6 +138678,28 @@ index d87da2b1b567fcffd378bf469ec254731d1cca94..b5727024af5201407ede7805436969c3
 +  inspectExecApprovalsState,
 +  type ExecApprovalsInspection,
 +} from "../infra/exec-approvals-inspection.js";
+diff --git a/src/plugin-sdk/memory-host-core.ts b/src/plugin-sdk/memory-host-core.ts
+index ef5c89ea4fe3a6c1dd2636c20adf43b218892633..843432bbfd719b308eff597872bb7af00d3b1663 100644
+--- a/src/plugin-sdk/memory-host-core.ts
++++ b/src/plugin-sdk/memory-host-core.ts
+@@ -450,3 +450,5 @@ export async function listMemoryHostPublicArtifacts(params: {
+   }
+   return artifacts;
+ }
++
++export { resolveMemoryConversationRecall } from "../plugins/memory-state.js";
+diff --git a/src/plugin-sdk/plugin-test-api.ts b/src/plugin-sdk/plugin-test-api.ts
+index 535d9e1c8fc3deb8ef43531fa78dc33137f0f2a3..8e5a3c8c6efd0ee665d408480e0f9ac98c4c1c71 100644
+--- a/src/plugin-sdk/plugin-test-api.ts
++++ b/src/plugin-sdk/plugin-test-api.ts
+@@ -101,6 +101,7 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
+     registerMemoryCapability() {},
+     registerMemoryPromptSupplement() {},
+     registerMemoryPromptPreparation() {},
++    registerMemoryRecallPreparation() {},
+     registerMemoryCorpusSupplement() {},
+     resolvePath(input: string) {
+       return input;
 diff --git a/src/plugin-sdk/realtime-bootstrap-context.ts b/src/plugin-sdk/realtime-bootstrap-context.ts
 index ae1ac334a88e83fec3c3cb7234211d9b6c1e1a98..f96d686ac214ffee746e599ae3c25c68b685be01 100644
 --- a/src/plugin-sdk/realtime-bootstrap-context.ts
@@ -136933,6 +138869,18 @@ index 9f4af6d8ed0b02eaf5d8b5fd4c7429dae2c3cd54..ee518a0b4e5af9bc24beb6c2e85dbc7e
  export {
    createMeetingTranscriptSourceProvider,
    type MeetingTranscriptSourceRuntime,
+diff --git a/src/plugins/api-builder.ts b/src/plugins/api-builder.ts
+index 11fd6b89ced22396b27bc0cbf6bf6e476faf4de5..43814ae04f81f76443b94dd12305a26f6edd02e5 100644
+--- a/src/plugins/api-builder.ts
++++ b/src/plugins/api-builder.ts
+@@ -97,6 +97,7 @@ const noops = {
+   registerMemoryCapability: () => {},
+   registerMemoryPromptSupplement: () => {},
+   registerMemoryPromptPreparation: () => {},
++  registerMemoryRecallPreparation: () => {},
+   registerMemoryCorpusSupplement: () => {},
+   on: () => {},
+ } satisfies Partial<OpenClawPluginApi>;
 diff --git a/src/plugins/api-facades.background.test.ts b/src/plugins/api-facades.background.test.ts
 index 40c4edcad44172e2690258b953e5959e64ac6c58..a15cd2c6270b6f77afba66cc2e29b700e650b582 100644
 --- a/src/plugins/api-facades.background.test.ts
@@ -137953,6 +139901,377 @@ index 8362860fbb075d0082f7cbe5d4a4cf71156c1e51..a697428a83516c1e11f08c40d0b4566e
      }
    }
  
+diff --git a/src/plugins/memory-state.test.ts b/src/plugins/memory-state.test.ts
+index eb955632b0cb396b47ca838e85a29738c07a3941..7942452043f4e17adeaae5a27e22bddce807b818 100644
+--- a/src/plugins/memory-state.test.ts
++++ b/src/plugins/memory-state.test.ts
+@@ -1,5 +1,6 @@
+ // Covers plugin-backed memory state registration and reset behavior.
+ import { afterEach, describe, expect, it, vi } from "vitest";
++import { createDeferredCore } from "../shared/deferred.js";
+ import {
+   adoptRuntimeMemoryRegistrations,
+   buildMemoryPromptSection,
+@@ -17,6 +18,7 @@ import {
+   registerMemoryPromptSupplement,
+   registerTestMemoryPromptBuilder,
+   resolveMemoryFlushPlan,
++  resolveMemoryConversationRecall,
+   type MemoryPluginPublicArtifact,
+ } from "./memory-state.test-fixtures.js";
+ import { createEmptyPluginRegistry } from "./registry-empty.js";
+@@ -83,6 +85,109 @@ describe("memory plugin state", () => {
+     clearMemoryPluginState();
+   });
+ 
++  it("fences foreground recall preparation after an awaited invocation or audience revocation", async () => {
++    const registry = createEmptyPluginRegistry();
++    setActivePluginRegistry(registry);
++    let current = true;
++    const assertInvocationCurrent = () => {
++      if (!current) {
++        throw new Error("invocation revoked");
++      }
++    };
++    registry.memoryRecallPreparations.push({
++      pluginId: "recall-owner",
++      prepare: async () => {
++        current = false;
++        return {
++          anchorSessionKey: "agent:main:main",
++          scope: "same-agent-private",
++          corpus: "sessions",
++        };
++      },
++    });
++    await expect(
++      resolveMemoryConversationRecall({
++        toolName: "memory_search",
++        context: { assertInvocationCurrent },
++      }),
++    ).rejects.toThrow("invocation revoked");
++    const prepare = vi.fn(async () => undefined);
++    registry.memoryRecallPreparations = [{ pluginId: "recall-owner", prepare }];
++    await expect(
++      resolveMemoryConversationRecall({
++        toolName: "memory_search",
++        context: {
++          assertInvocationCurrent: () => {},
++          assertMemoryAudienceCurrent: () => {
++            throw new Error("audience revoked");
++          },
++        },
++      }),
++    ).rejects.toThrow("audience revoked");
++    expect(prepare).not.toHaveBeenCalled();
++  });
++
++  it("fences foreground recall cancellation before and during preparation", async () => {
++    const registry = createEmptyPluginRegistry();
++    setActivePluginRegistry(registry);
++    const controller = new AbortController();
++    const entered = createDeferredCore();
++    const finish = createDeferredCore();
++    const prepare = vi.fn(async () => {
++      entered.resolve();
++      await finish.promise;
++      return {
++        anchorSessionKey: "agent:main:main",
++        scope: "same-agent-private" as const,
++        corpus: "sessions" as const,
++      };
++    });
++    registry.memoryRecallPreparations.push({ pluginId: "recall-owner", prepare });
++    const request = {
++      context: { assertInvocationCurrent: () => {} },
++      toolName: "memory_search",
++      signal: controller.signal,
++    };
++    try {
++      const pending = resolveMemoryConversationRecall(request);
++      await entered.promise;
++      const cancellation = new Error("recall cancelled");
++      controller.abort(cancellation);
++      // Cancellation must settle without waiting for the policy callback to finish.
++      await expect(pending).rejects.toBe(cancellation);
++      expect(prepare).toHaveBeenCalledOnce();
++      await expect(resolveMemoryConversationRecall(request)).rejects.toBe(cancellation);
++      expect(prepare).toHaveBeenCalledOnce();
++    } finally {
++      finish.resolve();
++    }
++  });
++
++  it("rejects conflicting recall grants and removes registrations on reset", async () => {
++    const registry = createEmptyPluginRegistry();
++    setActivePluginRegistry(registry);
++    for (const [pluginId, anchorSessionKey] of [
++      ["first", "agent:main:first"],
++      ["second", "agent:main:second"],
++    ] as const) {
++      registry.memoryRecallPreparations.push({
++        pluginId,
++        prepare: async () => ({
++          anchorSessionKey,
++          scope: "same-agent-private",
++          corpus: "sessions",
++        }),
++      });
++    }
++    const request = { context: { assertInvocationCurrent: () => {} }, toolName: "memory_search" };
++    await expect(resolveMemoryConversationRecall(request)).rejects.toThrow(
++      "conflicting protected memory recall preparations",
++    );
++    clearMemoryPluginState();
++    expect(registry.memoryRecallPreparations).toEqual([]);
++    await expect(resolveMemoryConversationRecall(request)).resolves.toBeUndefined();
++  });
++
+   it("keeps a cleared registry absent while reading memory capability state", async () => {
+     await clearActivePluginRegistry();
+ 
+@@ -423,6 +528,7 @@ describe("memory plugin state", () => {
+     root.plugins.push(createPluginRecord({ id: "memory-wiki", source: "/root/wiki.js" }));
+     root.memoryCorpusSupplements.push({ pluginId: "memory-wiki", supplement });
+     root.memoryPromptPreparations.push({ pluginId: "memory-wiki", prepare });
++    root.memoryRecallPreparations.push({ pluginId: "memory-wiki", prepare: async () => undefined });
+     root.memoryPromptSupplements.push({ pluginId: "memory-wiki", builder });
+     const scoped = createEmptyPluginRegistry();
+     scoped.plugins.push(createPluginRecord({ id: "memory-wiki", source: "/shadow/wiki.js" }));
+@@ -434,6 +540,7 @@ describe("memory plugin state", () => {
+     ).toBe(scoped);
+     expect(scoped.memoryCorpusSupplements).toEqual([]);
+     expect(scoped.memoryPromptPreparations).toEqual([]);
++    expect(scoped.memoryRecallPreparations).toEqual([]);
+     expect(scoped.memoryPromptSupplements).toEqual([]);
+   });
+ 
+diff --git a/src/plugins/memory-state.ts b/src/plugins/memory-state.ts
+index 0aac11302fd5cdbb345e0ef7e026656714fad444..060068cb99b1ee6e734fd4e0d4d99a2974bc7fa3 100644
+--- a/src/plugins/memory-state.ts
++++ b/src/plugins/memory-state.ts
+@@ -1,6 +1,7 @@
+ import { AsyncLocalStorage } from "node:async_hooks";
+ import { filterStringEntries } from "@openclaw/normalization-core/string-normalization";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
+ import { createSubsystemLogger } from "../logging/subsystem.js";
+ import { normalizePluginsConfig, resolveEffectivePluginActivationState } from "./config-state.js";
+ import { wrapCurrentPluginInstance } from "./plugin-instance-scope.js";
+@@ -15,6 +16,7 @@ import type {
+   MemoryPluginPublicArtifact,
+   MemoryPluginRuntime,
+   MemoryPromptPreparationRegistration,
++  MemoryRecallPreparation,
+   MemoryPromptSectionBuilder,
+   MemoryPromptSectionParams,
+   MemoryPromptSectionPreparer,
+@@ -230,6 +232,11 @@ export function adoptRuntimeMemoryRegistrations(
+     runtimeRegistry.memoryPromptPreparations,
+     canAdopt,
+   );
++  const memoryRecallPreparations = adoptEligibleRuntimeMemoryRegistrations(
++    targetRegistry.memoryRecallPreparations,
++    runtimeRegistry.memoryRecallPreparations,
++    canAdopt,
++  );
+   const memoryPromptSupplements = adoptEligibleRuntimeMemoryRegistrations(
+     targetRegistry.memoryPromptSupplements,
+     runtimeRegistry.memoryPromptSupplements,
+@@ -237,12 +244,14 @@ export function adoptRuntimeMemoryRegistrations(
+   );
+   return memoryCorpusSupplements === targetRegistry.memoryCorpusSupplements &&
+     memoryPromptPreparations === targetRegistry.memoryPromptPreparations &&
++    memoryRecallPreparations === targetRegistry.memoryRecallPreparations &&
+     memoryPromptSupplements === targetRegistry.memoryPromptSupplements
+     ? targetRegistry
+     : {
+         ...targetRegistry,
+         memoryCorpusSupplements,
+         memoryPromptPreparations,
++        memoryRecallPreparations,
+         memoryPromptSupplements,
+       };
+ }
+@@ -390,6 +399,40 @@ export function buildMemoryPromptSection(
+   return [...synchronous.primary, ...synchronous.supplements.flatMap((entry) => entry.lines)];
+ }
+ 
++/** Preparation is run-bound policy, never authority supplied by model arguments. */
++export async function resolveMemoryConversationRecall(
++  params: Parameters<MemoryRecallPreparation>[0],
++): ReturnType<MemoryRecallPreparation> {
++  const assertCurrent = () => {
++    params.signal?.throwIfAborted();
++    params.context.assertInvocationCurrent();
++    params.context.assertMemoryAudienceCurrent?.();
++  };
++  assertCurrent();
++  let resolved: Awaited<ReturnType<MemoryRecallPreparation>>;
++  for (const { prepare } of getPluginRegistryForContext()?.memoryRecallPreparations ?? []) {
++    const next = await racePromiseWithAbortSignal(
++      () => prepare(params),
++      params.signal,
++      (signal) => signal.reason,
++    );
++    assertCurrent();
++    if (!next) {
++      continue;
++    }
++    if (
++      resolved &&
++      (resolved.anchorSessionKey !== next.anchorSessionKey ||
++        resolved.scope !== next.scope ||
++        resolved.corpus !== next.corpus)
++    ) {
++      throw new Error("conflicting protected memory recall preparations");
++    }
++    resolved = next;
++  }
++  return resolved;
++}
++
+ export function listMemoryPromptPreparations(): MemoryPromptPreparationRegistration[] {
+   return [...requireActivePluginRegistry().memoryPromptPreparations];
+ }
+@@ -559,5 +602,6 @@ export function clearMemoryPluginState(): void {
+   registry.memoryCapabilities = [];
+   registry.memoryCorpusSupplements = [];
+   registry.memoryPromptPreparations = [];
++  registry.memoryRecallPreparations = [];
+   registry.memoryPromptSupplements = [];
+ }
+diff --git a/src/plugins/plugin-api.types.ts b/src/plugins/plugin-api.types.ts
+index 5b1ed2f43b8684f3472850fcf7a192c062696039..92aeed6c9a8731fe6a2f5e85949291d37ee791d7 100644
+--- a/src/plugins/plugin-api.types.ts
++++ b/src/plugins/plugin-api.types.ts
+@@ -84,6 +84,7 @@ import type {
+   ContextEngineFactory,
+   MemoryCorpusSupplement,
+   MemoryPluginCapability,
++  MemoryRecallPreparation,
+   MemoryPromptSectionBuilder,
+   MemoryPromptSectionParams,
+ } from "./registry-contribution-types.js";
+@@ -482,6 +483,8 @@ export type OpenClawPluginApi = {
+   registerMemoryPromptPreparation: (
+     prepare: (params: MemoryPromptSectionParams) => Promise<readonly string[]>,
+   ) => void;
++  /** Register invocation-bound preparation for protected foreground transcript recall. */
++  registerMemoryRecallPreparation: (prepare: MemoryRecallPreparation) => void;
+   /** Register an additive memory-adjacent search/read corpus supplement (non-exclusive). */
+   registerMemoryCorpusSupplement: (supplement: MemoryCorpusSupplement) => void;
+   resolvePath: (input: string) => string;
+diff --git a/src/plugins/plugin-invocation-scope.ts b/src/plugins/plugin-invocation-scope.ts
+index 0a7f7e283e4ccec98881d0d80727effbba7b416e..f40e3f46cadf380c7eb6ef1b9e3cfa4c0faccfcb 100644
+--- a/src/plugins/plugin-invocation-scope.ts
++++ b/src/plugins/plugin-invocation-scope.ts
+@@ -203,6 +203,7 @@ export function collectRegistryInvocationInstances(
+     ...registry.widgetPresenters.map(({ presenter }) => presenter),
+     ...registry.memoryCorpusSupplements.map(({ supplement }) => supplement),
+     ...registry.memoryPromptPreparations.map(({ prepare }) => prepare),
++    ...registry.memoryRecallPreparations.map(({ prepare }) => prepare),
+     ...registry.memoryPromptSupplements.map(({ builder }) => builder),
+   ];
+   for (const value of values) {
+diff --git a/src/plugins/registry-contribution-types.ts b/src/plugins/registry-contribution-types.ts
+index 2517073e097ba75fecd2660ef1912301149278b9..68fed8815f4129ecc8c4ecfee2a73df1ac93e037 100644
+--- a/src/plugins/registry-contribution-types.ts
++++ b/src/plugins/registry-contribution-types.ts
+@@ -192,6 +192,18 @@ export type MemoryPromptSupplementRegistration = {
+   builder: MemoryPromptSectionBuilder;
+ };
+ 
++/** Resolve protected recall only for a current, admitted foreground tool invocation. */
++export type MemoryRecallPreparation = (params: {
++  context: import("./tool-types.js").OpenClawPluginToolContext<2>;
++  toolName: string;
++  signal?: AbortSignal;
++}) => Promise<ConversationRecallContext | undefined>;
++
++export type MemoryRecallPreparationRegistration = {
++  pluginId: string;
++  prepare: MemoryRecallPreparation;
++};
++
+ export type MemoryPromptPreparationRegistration = {
+   pluginId: string;
+   prepare: MemoryPromptSectionPreparer;
+@@ -358,6 +370,8 @@ export type MemoryPluginCapability = {
+   deterministicRecallToolName?: string;
+   /** Whether recall may read protected same-agent private session transcripts. */
+   supportsPrivateTranscriptRecall?: boolean;
++  /** The provider's foreground tools consume registered protected-recall preparation. */
++  supportsOnDemandPrivateTranscriptRecall?: boolean;
+ };
+ 
+ export type MemoryPluginCapabilityRegistration = {
+diff --git a/src/plugins/registry-empty.ts b/src/plugins/registry-empty.ts
+index b03fa06f41d6a7603b5857ef9aa0827553e6b2cb..cc1be64b68f69a10aab511476686cf8996099245 100644
+--- a/src/plugins/registry-empty.ts
++++ b/src/plugins/registry-empty.ts
+@@ -33,6 +33,7 @@ export const pluginArrays = [
+   "memoryCapabilities",
+   "memoryCorpusSupplements",
+   "memoryPromptPreparations",
++  "memoryRecallPreparations",
+   "memoryPromptSupplements",
+   "hostedMediaResolvers",
+   "widgetPresenters",
+diff --git a/src/plugins/registry-registrars-memory.ts b/src/plugins/registry-registrars-memory.ts
+index 58d78cee5b632f9e1d7b989e426efb49357b9750..5b9b5fbfc40efe8bc5a9d948bba00fae7b5b9583 100644
+--- a/src/plugins/registry-registrars-memory.ts
++++ b/src/plugins/registry-registrars-memory.ts
+@@ -30,7 +30,8 @@ export function createMemoryRegistrars(state: PluginRegistryState) {
+         capability.providerRuntime !== undefined ||
+         capability.recallToolNames !== undefined ||
+         capability.deterministicRecallToolName !== undefined ||
+-        capability.supportsPrivateTranscriptRecall !== undefined);
++        capability.supportsPrivateTranscriptRecall !== undefined ||
++        capability.supportsOnDemandPrivateTranscriptRecall !== undefined);
+     if (dropsSlotOwnerFacts) {
+       reportRegistrationWarning(
+         record,
+@@ -43,6 +44,7 @@ export function createMemoryRegistrars(state: PluginRegistryState) {
+       recallToolNames: _droppedRecallToolNames,
+       deterministicRecallToolName: _droppedRecallToolName,
+       supportsPrivateTranscriptRecall: _droppedPrivateRecall,
++      supportsOnDemandPrivateTranscriptRecall: _droppedOnDemandRecall,
+       ...consolidationCapability
+     } = capability;
+     if (memorySlotSelected && capability.runtime) {
+@@ -87,6 +89,23 @@ export function createMemoryRegistrars(state: PluginRegistryState) {
+     registry.memoryPromptPreparations.push({ pluginId: record.id, prepare });
+   };
+ 
++  const registerMemoryRecallPreparation = (
++    record: PluginRecord,
++    prepare: Parameters<OpenClawPluginApi["registerMemoryRecallPreparation"]>[0],
++  ) => {
++    if (typeof prepare !== "function") {
++      reportRegistrationError(
++        record,
++        "memory recall preparation registration missing prepare function",
++      );
++      return;
++    }
++    registry.memoryRecallPreparations = registry.memoryRecallPreparations.filter(
++      (entry) => entry.pluginId !== record.id,
++    );
++    registry.memoryRecallPreparations.push({ pluginId: record.id, prepare });
++  };
++
+   const registerMemoryCorpusSupplement = (
+     record: PluginRecord,
+     supplement: Parameters<OpenClawPluginApi["registerMemoryCorpusSupplement"]>[0],
+@@ -101,6 +120,7 @@ export function createMemoryRegistrars(state: PluginRegistryState) {
+     registerMemoryCapability,
+     registerMemoryPromptSupplement,
+     registerMemoryPromptPreparation,
++    registerMemoryRecallPreparation,
+     registerMemoryCorpusSupplement,
+   };
+ }
 diff --git a/src/plugins/registry-runtime.channel-ingress.test-support.ts b/src/plugins/registry-runtime.channel-ingress.test-support.ts
 index 987c0c019c8bf71e9ef0c1253f6ec556efd255fd..074f9a925ed97b87fe2123a216363dc5c270e905 100644
 --- a/src/plugins/registry-runtime.channel-ingress.test-support.ts
@@ -138326,6 +140645,170 @@ index ea49622035de64e2e5aef593b51a070a649ead67..68856c550bc99864502c57efe4698d92
              );
            };
            const scopedAgent = Object.create(
+diff --git a/src/plugins/registry-types.ts b/src/plugins/registry-types.ts
+index 7a9a3170ffff40566415a5cfc53cd1403cd69302..0ee1e7dbb996972b252acce594f685d1b8b2fd16 100644
+--- a/src/plugins/registry-types.ts
++++ b/src/plugins/registry-types.ts
+@@ -52,6 +52,7 @@ import type {
+   MemoryCorpusSupplementRegistration,
+   MemoryPluginCapabilityRegistration,
+   MemoryPromptPreparationRegistration,
++  MemoryRecallPreparationRegistration,
+   MemoryPromptSupplementRegistration,
+   RegisteredCompactionProvider,
+   ResolvedPluginRuntimeArtifact,
+@@ -449,6 +450,7 @@ export type PluginRegistry = {
+   memoryCapabilities: MemoryPluginCapabilityRegistration[];
+   memoryCorpusSupplements: MemoryCorpusSupplementRegistration[];
+   memoryPromptPreparations: MemoryPromptPreparationRegistration[];
++  memoryRecallPreparations: MemoryRecallPreparationRegistration[];
+   memoryPromptSupplements: MemoryPromptSupplementRegistration[];
+   sessionDiscussionProviders: Map<string, PluginSessionDiscussionRegistration>;
+   contextEngines: Map<string, ContextEngineRegistration>;
+diff --git a/src/plugins/registry.dual-kind-memory-gate.test.ts b/src/plugins/registry.dual-kind-memory-gate.test.ts
+index bacdf934614954915b148d031abd0350e91aa550..9ccc1795622d57d6abb71a6fd3e4466bfda2bb51 100644
+--- a/src/plugins/registry.dual-kind-memory-gate.test.ts
++++ b/src/plugins/registry.dual-kind-memory-gate.test.ts
+@@ -2,9 +2,19 @@ import {
+   createPluginRegistryFixture,
+   registerTestPlugin,
+ } from "openclaw/plugin-sdk/plugin-test-contracts";
+-import { describe, expect, it } from "vitest";
+-import { resolveMemoryCapabilityRegistration } from "./memory-state.js";
++import { describe, expect, it, vi } from "vitest";
++import { createDeferredCore } from "../shared/deferred.js";
++import {
++  resolveMemoryCapabilityRegistration,
++  resolveMemoryConversationRecall,
++} from "./memory-state.js";
++import { getPluginInstance } from "./plugin-instance-scope.js";
++import {
++  collectRegistryInvocationInstances,
++  PluginInvocationScope,
++} from "./plugin-invocation-scope.js";
+ import type { MemoryPluginCapability } from "./registry-contribution-types.js";
++import { withPluginRuntimeRegistryScope } from "./runtime/gateway-request-scope.js";
+ import { createPluginRecord } from "./status.test-fixtures.js";
+ 
+ function createStubMemoryRuntime() {
+@@ -41,6 +51,101 @@ function fixture() {
+ }
+ 
+ describe("memory capability ownership", () => {
++  it("binds foreground recall through the host registration and revokes retained callbacks at close", async () => {
++    const { config, registry } = createPluginRegistryFixture();
++    const record = createPluginRecord({ id: "recall-owner" });
++    const entered = createDeferredCore();
++    const finish = createDeferredCore();
++    let wait = false;
++    const prepare = vi.fn(async () => {
++      if (wait) {
++        entered.resolve();
++        await finish.promise;
++      }
++      return {
++        anchorSessionKey: "agent:main:main",
++        scope: "same-agent-private" as const,
++        corpus: "sessions" as const,
++      };
++    });
++    registerTestPlugin({
++      registry,
++      config,
++      record,
++      register(api) {
++        api.registerMemoryRecallPreparation(prepare);
++      },
++    });
++    expect(registry.registry.memoryRecallPreparations).toHaveLength(1);
++    const instance = getPluginInstance(record)!;
++    const instances = collectRegistryInvocationInstances(registry.registry);
++    expect(instances.has(instance)).toBe(true);
++    const scope = new PluginInvocationScope(registry.registry, instances);
++    const context = {
++      runId: "foreground-run",
++      sessionKey: "agent:main:main",
++      sessionId: "session",
++      agentId: "main",
++      // The host context must carry the same live invocation authority it promises.
++      assertInvocationCurrent: () => scope.run(() => {}),
++    };
++    const run = () =>
++      withPluginRuntimeRegistryScope(registry.registry, () =>
++        scope.run(() => resolveMemoryConversationRecall({ context, toolName: "memory_search" })),
++      );
++    const retained = scope.run(() =>
++      scope.wrap(registry.registry.memoryRecallPreparations[0]!.prepare),
++    );
++    try {
++      await expect(run()).resolves.toEqual({
++        anchorSessionKey: context.sessionKey,
++        scope: "same-agent-private",
++        corpus: "sessions",
++      });
++      expect(prepare).toHaveBeenCalledWith(
++        expect.objectContaining({
++          toolName: "memory_search",
++          context: expect.objectContaining({ runId: context.runId }),
++        }),
++      );
++      wait = true;
++      const pending = run();
++      void pending.catch(() => {});
++      await entered.promise;
++      scope.release();
++      finish.resolve();
++      await expect(pending).rejects.toThrow(/scope is closed/);
++      await expect(async () => retained({ context, toolName: "memory_search" })).rejects.toThrow(
++        /scope is closed/,
++      );
++      expect(prepare).toHaveBeenCalledTimes(2);
++    } finally {
++      finish.resolve();
++      scope.release();
++      await instance.dispose();
++    }
++  });
++
++  it("rejects a foreground recall resolver retained after its plugin instance retires", async () => {
++    const { config, registry } = createPluginRegistryFixture();
++    const record = createPluginRecord({ id: "retiring-recall-owner" });
++    const prepare = vi.fn(async () => undefined);
++    registerTestPlugin({
++      registry,
++      config,
++      record,
++      register(api) {
++        api.registerMemoryRecallPreparation(prepare);
++      },
++    });
++    const retained = registry.registry.memoryRecallPreparations[0]!.prepare;
++    await getPluginInstance(record)!.dispose();
++    await expect(async () =>
++      retained({ context: { assertInvocationCurrent: () => {} }, toolName: "memory_search" }),
++    ).rejects.toThrow(/reloaded or disabled/);
++    expect(prepare).not.toHaveBeenCalled();
++  });
++
+   it("blocks memory registration for an unselected dual-kind plugin", () => {
+     const { registry, add } = fixture();
+     add(
+@@ -189,6 +294,7 @@ describe("memory capability ownership", () => {
+       recallToolNames: ["memory_search", "memory_get"],
+       deterministicRecallToolName: "memory_search",
+       supportsPrivateTranscriptRecall: true,
++      supportsOnDemandPrivateTranscriptRecall: true,
+       promptBuilder: () => ["sidecar prompt"],
+       flushPlanResolver: () => null,
+       publicArtifacts: { listArtifacts: async () => [] },
+@@ -199,6 +305,7 @@ describe("memory capability ownership", () => {
+     expect(owner?.capability.deterministicRecallToolName).toBeUndefined();
+     expect(owner?.capability.recallToolNames).toEqual(["acme_recall"]);
+     expect(owner?.capability.supportsPrivateTranscriptRecall).toBeUndefined();
++    expect(owner?.capability.supportsOnDemandPrivateTranscriptRecall).toBeUndefined();
+     await expect(
+       owner?.capability.runtime?.getMemorySearchManager({ cfg: config, agentId: "main" }),
+     ).resolves.toEqual({ manager: null, error: "missing" });
 diff --git a/src/plugins/runtime/runtime-agent.ts b/src/plugins/runtime/runtime-agent.ts
 index c1403518a6052c6dfda943e8540a28b049169944..ba899de62eb9c6b263588eb3dab4cde4fdd100d5 100644
 --- a/src/plugins/runtime/runtime-agent.ts
@@ -138396,6 +140879,19 @@ index 7072367a467d90ecfe87f181b2ad0b292f86f413..864f0917451d003363bf9a67cd041f7d
    "sessionStartedAt",
    "ambientTranscriptWatermarks",
    "lastInteractionAt",
+diff --git a/src/plugins/tool-types.ts b/src/plugins/tool-types.ts
+index fede2afd4d37a831f6bcc9c247507a5af0680ac5..af9f11c93f6f510ccb8621befb3ff453f30a0fc5 100644
+--- a/src/plugins/tool-types.ts
++++ b/src/plugins/tool-types.ts
+@@ -31,6 +31,8 @@ type OpenClawPluginToolContextBase = {
+   agentDir?: string;
+   agentId?: string;
+   sessionKey?: string;
++  /** Admitted run identity for plugin-owned run context; never a tool argument. */
++  runId?: string;
+   /** Ephemeral session UUID - regenerated on /new and /reset. Use for per-conversation isolation. */
+   sessionId?: string;
+   /** Out-of-band plugin-owned bindings attached by the current run initiator. */
 diff --git a/src/process/gateway-work-admission.test.ts b/src/process/gateway-work-admission.test.ts
 index 80338547a381be2c86c33c08b668602a867b64f7..6b01d0edbab97a42c716b8a35ddc460cd7aa139b 100644
 --- a/src/process/gateway-work-admission.test.ts
@@ -148373,10 +150869,10 @@ index 0000000000000000000000000000000000000000..18ad9da433538656e36fea49887b8774
 +});
 diff --git a/test/scripts/managed-child-process.darwin.test.ts b/test/scripts/managed-child-process.darwin.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1ded7eedd
+index 0000000000000000000000000000000000000000..f2caf7dbafa8b5245805c695cfc0b62f96d84a04
 --- /dev/null
 +++ b/test/scripts/managed-child-process.darwin.test.ts
-@@ -0,0 +1,1217 @@
+@@ -0,0 +1,1283 @@
 +import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 +import { once } from "node:events";
 +import fs from "node:fs";
@@ -148751,6 +151247,7 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +
 +const publicTerminalProbe = String.raw`#include <sys/types.h>
 +#include <sys/proc.h>
++#include <sys/proc_info.h>
 +#include <sys/sysctl.h>
 +#include <stddef.h>
 +#include <stdio.h>
@@ -148758,9 +151255,10 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +#include <errno.h>
 +int main(int argc, char **argv) {
 + if (argc == 1) {
-+  printf("{\"bytes\":%zu,\"startSec\":%zu,\"startUsec\":%zu,\"startSecBytes\":%zu,\"startUsecBytes\":%zu,\"status\":%zu,\"pid\":%zu,\"ppid\":%zu,\"pgid\":%zu}\n",
++  printf("{\"bytes\":%zu,\"startSec\":%zu,\"startUsec\":%zu,\"startSecBytes\":%zu,\"startUsecBytes\":%zu,\"flags\":%zu,\"publicExitFlag\":%d,\"bsdFlags\":%zu,\"bsdExitFlag\":%d,\"status\":%zu,\"pid\":%zu,\"ppid\":%zu,\"pgid\":%zu}\n",
 +   sizeof(struct kinfo_proc), offsetof(struct kinfo_proc,kp_proc.p_starttime.tv_sec), offsetof(struct kinfo_proc,kp_proc.p_starttime.tv_usec),
 +   sizeof(((struct kinfo_proc *)0)->kp_proc.p_starttime.tv_sec), sizeof(((struct kinfo_proc *)0)->kp_proc.p_starttime.tv_usec),
++   offsetof(struct kinfo_proc,kp_proc.p_flag), P_WEXIT, offsetof(struct proc_bsdinfo,pbi_flags), PROC_FLAG_INEXIT,
 +   offsetof(struct kinfo_proc,kp_proc.p_stat), offsetof(struct kinfo_proc,kp_proc.p_pid),
 +   offsetof(struct kinfo_proc,kp_eproc.e_ppid), offsetof(struct kinfo_proc,kp_eproc.e_pgid));
 +  return 0;
@@ -148808,6 +151306,10 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +    startUsec: 8,
 +    startSecBytes: 8,
 +    startUsecBytes: 4,
++    flags: 32,
++    publicExitFlag: 0x2000,
++    bsdFlags: 0,
++    bsdExitFlag: 4,
 +    status: 36,
 +    pid: 40,
 +    ppid: 560,
@@ -148818,9 +151320,13 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +
 +function fakeNativeProcessApi() {
 +  const state = {
-+    rows: new Map<number, DarwinProcessIdentity | Omit<DarwinProcessIdentity, "sid">>([
-+      [200, rootIdentity],
-+    ]),
++    rows: new Map<
++      number,
++      (DarwinProcessIdentity | Omit<DarwinProcessIdentity, "sid">) & {
++        flags?: number;
++        status?: number;
++      }
++    >([[200, rootIdentity]]),
 +    listed: [200],
 +    count: undefined as number | undefined,
 +    terminalBytes: 136,
@@ -148834,6 +151340,7 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +          ppid: number;
 +          pgid: number;
 +          status: number;
++          flags?: number;
 +          startSec: bigint;
 +          startUsec: bigint;
 +        }
@@ -148871,6 +151378,7 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +              bytes.writeInt32LE(row.ppid, 560);
 +              bytes.writeInt32LE(row.pgid, 564);
 +              bytes.writeUInt8(row.status, 36);
++              bytes.writeUInt32LE(row.flags ?? 0, 32);
 +              bytes.writeBigInt64LE(row.startSec, 0);
 +              bytes.writeInt32LE(Number(row.startUsec), 8);
 +            }
@@ -148885,7 +151393,8 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +              state.errno = 3;
 +              return 0;
 +            }
-+            bytes.writeUInt32LE("sid" in row ? 2 : 5, 4);
++            bytes.writeUInt32LE(row.flags ?? 0, 0);
++            bytes.writeUInt32LE(row.status ?? ("sid" in row ? 2 : 5), 4);
 +            bytes.writeUInt32LE(row.pid, 12);
 +            bytes.writeUInt32LE(row.ppid, 16);
 +            bytes.writeUInt32LE(row.pgid, 100);
@@ -149091,6 +151600,35 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +    expect(api.census(Date.now() + 1000, 200)).toEqual([200]);
 +  });
 +
++  it.for([false, true])(
++    "recognizes a kernel exiting row before SZOMB without losing later descendants (BSDINFO denied=%s)",
++    (denied) => {
++      const { state, api } = fakeNativeProcessApi();
++      const { sid: _sid, ...terminal } = leafIdentity;
++      state.rows.set(300, { ...terminal, status: 2, flags: 4 });
++      state.listed = [200, 300];
++      if (denied) {
++        Object.assign(state, {
++          terminalBytes: 0,
++          terminalError: 1,
++          publicResult: 0,
++          publicError: 0,
++        });
++        state.publicRow = { ...terminal, status: 2, flags: 0x2000 };
++      }
++      expect(api.identity(300)).toEqual({ state: "missing", terminalIdentity: terminal });
++      expect(() => api.census(Date.now() + 1000, 200)).toThrow("newly terminal PIDs=300");
++      state.rows.set(302, { ...leafIdentity, pid: 302, startUsec: 126n });
++      state.listed.push(302);
++      expect(api.census(Date.now() + 1000, 200)).toEqual([200, 302]);
++      state.rows.set(300, { ...terminal, status: 2, flags: 4, startUsec: 999n });
++      if (state.publicRow) {
++        state.publicRow.startUsec = 999n;
++      }
++      expect(() => api.census(Date.now() + 1000, 200)).toThrow("newly terminal PIDs=300");
++    },
++  );
++
 +  it("accepts a stable foreign terminal PGID 1 without treating it as an owned live group", () => {
 +    const { state, api } = fakeNativeProcessApi();
 +    const { sid: _sid, ...terminal } = leafIdentity;
@@ -149150,34 +151688,46 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +    expect(() => api.census(Date.now() + 1000, 200)).toThrow("newly terminal");
 +  });
 +
-+  it.each(["missing", "EPERM", "short", "live status", "invalid birth"])(
-+    "does not certify an ESRCH row with %s terminal evidence",
-+    (failure) => {
-+      const { state, api } = fakeNativeProcessApi();
-+      const { sid: _sid, ...terminal } = leafIdentity;
-+      state.rows.set(300, terminal);
-+      state.listed = [200, 300];
-+      if (failure === "missing") {
-+        state.rows.delete(300);
-+      }
-+      if (failure === "EPERM") {
-+        state.terminalBytes = 0;
-+        state.terminalError = 1;
-+      }
-+      if (failure === "short") {
-+        state.terminalBytes = 135;
-+      }
-+      if (failure === "invalid birth") {
-+        state.rows.set(300, { ...terminal, startUsec: 1_000_000n });
-+      }
-+      if (failure === "live status") {
-+        // getsid failed but the arg=1 identity became live: still uncertain.
-+        state.rows.set(300, leafIdentity);
-+        state.sidErrorPid = 300;
-+      }
-+      expect(() => api.census(Date.now() + 1000, 200)).toThrow();
-+    },
-+  );
++  it.each([
++    "missing",
++    "EPERM",
++    "short",
++    "live status",
++    "exiting live row",
++    "exiting invalid status",
++    "invalid birth",
++  ])("does not certify an ESRCH row with %s terminal evidence", (failure) => {
++    const { state, api } = fakeNativeProcessApi();
++    const { sid: _sid, ...terminal } = leafIdentity;
++    state.rows.set(300, terminal);
++    state.listed = [200, 300];
++    if (failure === "missing") {
++      state.rows.delete(300);
++    }
++    if (failure === "EPERM") {
++      state.terminalBytes = 0;
++      state.terminalError = 1;
++    }
++    if (failure === "short") {
++      state.terminalBytes = 135;
++    }
++    if (failure === "invalid birth") {
++      state.rows.set(300, { ...terminal, startUsec: 1_000_000n });
++    }
++    if (failure === "live status") {
++      // getsid failed but the arg=1 identity became live: still uncertain.
++      state.rows.set(300, leafIdentity);
++      state.sidErrorPid = 300;
++    }
++    if (failure === "exiting live row") {
++      state.rows.set(300, { ...leafIdentity, flags: 4 });
++      state.sidErrorPid = 300;
++    }
++    if (failure === "exiting invalid status") {
++      state.rows.set(300, { ...terminal, flags: 4, status: 6 });
++    }
++    expect(() => api.census(Date.now() + 1000, 200)).toThrow();
++  });
 +
 +  it("keeps public terminal births dirty and observes later live descendants", () => {
 +    const { state, api } = fakeNativeProcessApi();
@@ -149206,6 +151756,8 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +    "long",
 +    "PID mismatch",
 +    "live",
++    "exiting live row",
++    "exiting invalid status",
 +    "parent",
 +    "group",
 +    "zero birth",
@@ -149243,6 +151795,16 @@ index 0000000000000000000000000000000000000000..6c0f446e6abcb1e9565befdaedb293f1
 +        break;
 +      case "live":
 +        state.publicRow.status = 2;
++        break;
++      case "exiting live row":
++        state.publicRow.status = 2;
++        state.publicRow.flags = 0x2000;
++        state.rows.set(300, leafIdentity);
++        state.sidErrorPid = 300;
++        break;
++      case "exiting invalid status":
++        state.publicRow.status = 6;
++        state.publicRow.flags = 0x2000;
 +        break;
 +      case "parent":
 +        state.publicRow.ppid = 0;
@@ -151168,7 +153730,7 @@ index 96c6fd56a97ecc6c2243178fb363e7eca30e34c9..cf5783712d26babc35a25528cdefc9ec
    embeddedIncompleteTurn: {
      kind: "agentEmbeddedIncompleteTurn",
 diff --git a/test/vitest/vitest.database-worker-core-paths.mjs b/test/vitest/vitest.database-worker-core-paths.mjs
-index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1dfb2e082ce 100644
+index 0b189c00f60d403c0750a4036174fdce1f8cf65b..c014107dda7d998a72cc508be68bedff6c5bbd60 100644
 --- a/test/vitest/vitest.database-worker-core-paths.mjs
 +++ b/test/vitest/vitest.database-worker-core-paths.mjs
 @@ -1,5 +1,13 @@
@@ -151220,7 +153782,15 @@ index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1df
    "src/auto-reply/reply/get-reply.explicit-owner.test.ts",
    "src/auto-reply/reply/get-reply.fast-path.test.ts",
    "src/auto-reply/reply/get-reply.timeout.test.ts",
-@@ -484,6 +497,7 @@ export const databaseWorkerCoreTestFiles = [
+@@ -469,6 +482,7 @@ export const databaseWorkerCoreTestFiles = [
+   "src/agents/sessions/agent-session-code-mode-source.test.ts",
+   "src/agents/sessions/agent-session-compaction.admission.test.ts",
+   "src/agents/sessions/agent-session-compaction.test.ts",
++  "src/agents/sessions/agent-session-interrupted-compaction.test.ts",
+   "src/agents/sessions/agent-session-runtime-projection.test.ts",
+   "src/agents/sessions/agent-session.reclamation-admission.test.ts",
+   "src/agents/sessions/sdk.tool-outcomes.test.ts",
+@@ -484,6 +498,7 @@ export const databaseWorkerCoreTestFiles = [
    "src/agents/sessions/session-manager.test.ts",
    "src/agents/sessions/agent-session-models.admission.test.ts",
    "src/agents/session-tool-result-guard.transcript-events.test.ts",
@@ -151228,7 +153798,7 @@ index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1df
    "src/agents/embedded-agent-runner/compact.delegate.test.ts",
    "src/agents/embedded-agent-runner/compact.delegate-resources.test.ts",
    "src/agents/embedded-agent-runner/compact.foreground-resources.test.ts",
-@@ -588,6 +602,9 @@ export const databaseWorkerCoreTestFiles = [
+@@ -588,6 +603,9 @@ export const databaseWorkerCoreTestFiles = [
    "src/meeting-bot/transcripts-bridge.test.ts",
    "src/transcripts/capture-stop.test.ts",
    "src/transcripts/capture-append-drain.test.ts",
@@ -151238,7 +153808,7 @@ index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1df
    "src/transcripts/library.async.test.ts",
    "src/transcripts/library.query-budget.test.ts",
    "src/transcripts/library.search.test.ts",
-@@ -600,6 +617,7 @@ export const databaseWorkerCoreTestFiles = [
+@@ -600,6 +618,7 @@ export const databaseWorkerCoreTestFiles = [
    "src/transcripts/status.provider-reload.test.ts",
    "src/transcripts/status.test.ts",
    "src/transcripts/store.test.ts",
@@ -151246,7 +153816,7 @@ index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1df
    "test/transcripts-tool.discord-lifecycle.integration.test.ts",
    "test/transcripts-tool.discord-provider.integration.test.ts",
    "test/twitch-message-tool-delivery.test.ts",
-@@ -699,6 +717,7 @@ export const databaseWorkerCoreTestFiles = [
+@@ -699,6 +718,7 @@ export const databaseWorkerCoreTestFiles = [
    "src/commands/doctor-project-clone-shape.test.ts",
    "src/auto-reply/reply/commands-plugins.install.test.ts",
    "src/auto-reply/reply/agent-runner-node-authority.test.ts",
@@ -151254,6 +153824,14 @@ index 0b189c00f60d403c0750a4036174fdce1f8cf65b..64cdc7f2078a0fae08b2a2cb260ae1df
    "src/auto-reply/reply/commands-plugins.install-clawhub-spec.test.ts",
    "src/system-agent/setup-inference-credentials.lifecycle.test.ts",
    "src/system-agent/setup-inference.provider-install-owner.test.ts",
+@@ -867,6 +887,7 @@ export const databaseWorkerCoreTestFiles = [
+   "src/commands/doctor-sandbox-legacy-registry.test.ts",
+   "src/agents/tools/sessions-tool.batch.test.ts",
+   "src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts",
++  "src/agents/subagents/announce/subagent-announce.requester-compaction-lifecycle.test.ts",
+   "src/agents/subagents/completion/subagent-completion-admission.store.test.ts",
+   "src/commands/doctor-db-bloat.worker.test.ts",
+   "src/commands/doctor-device-pairing.worker.test.ts",
 diff --git a/test/vitest/vitest.extension-database-workers-paths.mjs b/test/vitest/vitest.extension-database-workers-paths.mjs
 index 715f70989d934694f4e6375e88adb61b18d36fa5..52f8c1d851c721b1c63d232803962cafe15296bb 100644
 --- a/test/vitest/vitest.extension-database-workers-paths.mjs

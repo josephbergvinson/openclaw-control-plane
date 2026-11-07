@@ -100,7 +100,7 @@ Read `registry/integration_routes.json` and resolve the typed facts already supp
 
 Derive the relevant portfolio without requiring the operator to enumerate every source. Use its bounded claim-relevant read set. Retain account and source identity with every result. Multiple read accounts do not create ambiguity by themselves and never select the single sender or write destination.
 
-Prefer a supported native/upstream capability, then a maintained integration/API, then the registered managed browser, then host UI when needed. Check current target access when useful. Missing or stale readiness is not an automatic veto of an otherwise supported authorized operation. Verify every external mutation through the same route or an equally authoritative read path.
+Prefer a supported native/upstream capability, then a maintained integration/API, then the intended existing browser session through supported Browser or Computer tools. Use a managed profile when an explicit account binding or required capability needs it. Check current target access when useful. Missing or stale readiness is not an automatic veto of an otherwise supported authorized operation. Verify every external mutation through the same route or an equally authoritative read path.
 
 A registered team Discord guild may be a source-only portfolio route. That does not establish an inbound assistant binding or authority to post, reply, react or mutate there. Membership and an open logged-in tab are not operator authority.
 
@@ -188,7 +188,7 @@ Keep reads narrow, subject-scoped and read-only. Never expose DSNs, secrets or u
 
 ## Browser and host UI
 
-Use existing registered signed-in browser state. Reinspect the actual tab, origin, account and current UI before acting. Do not start a fresh login because an earlier observation or stale identifier failed. Keep credentials inside the managed browser/profile or sanctioned opaque broker boundary; never copy cookies or authentication values into another process.
+For ordinary browsing, reuse the intended signed-in Chrome session through the current Browser tool or Computer. The tools reference owns the adopter's host/account mapping; an explicit company route retains its bound profile. A missing connector alone does not require another Chrome instance. Inspect the existing session through supported Computer tools before creating a managed browser for a required capability. Reinspect the actual tab, origin, account and current UI before acting. Do not start a fresh login because an earlier observation or stale identifier failed. Keep credentials inside the managed browser/profile or sanctioned opaque broker boundary; never copy cookies or authentication values into another process.
 
 For a password challenge, discover configured aliases with `browser action:"credentialBindings", target:"host"`. On an existing approved Playwright/CDP host profile, use `browser action:"act"` with `request:{kind:"typeSecret", alias:"<binding alias>", targetId:"<observed tab>", ref:"<observed password field>", submit:true}` and an optional observed `submitRef`. The native browser resolves the SecretRef after exact-origin, field and trace checks; supply only the alias and observed controls. Verify the resulting account and requested service. Do not put secret text in generic `type/fill` or invoke a SecretRef provider into tool output.
 
@@ -220,9 +220,9 @@ Submit at most once and reconcile an ambiguous result against authoritative sett
 
 ## Image generation
 
-Use the configured Images 2.5 generation/editing route, `openai/gpt-image-2.5-flare`, through the existing OpenAI OAuth integration. Its configuration owner is `agents.defaults.mediaModels.image`, separate from the reasoning model's image understanding. Keep generation fallbacks empty: an unavailable route is not permission to silently use an older model or create API-key billing.
+Use the configured Images 2.6 generation/editing route, `openai/gpt-image-2.6-flare`, through the existing OpenAI OAuth integration. Its configuration owner is `agents.defaults.mediaModels.image`, separate from the reasoning model's image understanding. Keep generation fallbacks empty: an unavailable route is not permission to silently use an older model or create API-key billing.
 
-Preflight the complete prompt and intended reference images before the call. An `image_generate` call produces a user-visible delivery; default to one intended call. Inspect the result. An unplanned corrective second delivery needs one natural confirmation unless variants or multiple images were named or implied. Do not assume a hidden generation mode. The requested selector is not independent returned backend attestation if the provider does not supply that identity.
+Preflight the complete prompt and intended reference images before the call. An `image_generate` call produces a user-visible delivery; default to one intended call. Inspect the result and correct an unsatisfactory result within the original brief without another generic approval. Ask for clarification only if the correction would materially change the requested outcome or spending. Inspect actual output dimensions and report them when material; requested dimensions do not prove delivered dimensions. Do not assume a hidden generation mode. The requested selector is not independent returned backend attestation if the provider does not supply that identity.
 
 ## Discord voice and meeting minutes
 

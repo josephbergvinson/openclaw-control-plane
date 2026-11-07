@@ -18,7 +18,7 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R87, verified on 6 November
+The selected and loaded external gateway reference is R88, verified on 7 November
 2026. The manifest records the canonical source and native distribution for that
 release alongside the separately retained Mac companion source.
 

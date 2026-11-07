@@ -112,6 +112,8 @@ The relevant portfolio can contain more than one mailbox or knowledge system. Qu
 
 Semantic memory search is optional assistance. If it times out or is unavailable, use exact pointers, indexed files, permitted recent conversation and the registered read-only subject/context route. Do not turn a successful fallback into a generic warning about memory. State a specific missing fact when it materially limits the answer.
 
+With Memory Core, eligible Remember across conversations turns in `escalate` mode leave missing-fact retrieval to the foreground agent. An explicit `memory_search` with `corpus: "sessions"` can search permitted earlier conversations when ordinary session search is disabled. Self-contained requests do not wait for a separate recall model. The active conversation is excluded, and session controls, audience boundaries and current invocation authority still apply. Explicit `always` and `off` modes, advanced custom tools and providers without this capability retain their existing behavior.
+
 Conflicting evidence is resolved by authority and freshness. “Not in the indexed notes” is a bounded retrieval result, not proof that something never happened. A historical daily aggregate and a fresh raw-data query may cover different windows or definitions. Preserve those distinctions rather than averaging incompatible records or inventing missing detail.
 
 ## Writing durable memory

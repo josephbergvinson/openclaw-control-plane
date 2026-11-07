@@ -63,9 +63,17 @@ Do not call an entire capability unavailable after trying one mismatched lane. C
 
 ## Supported fallback order
 
-Prefer the native/upstream capability, then a maintained API/integration or supported CLI, then the registered managed browser, then host UI where necessary. The sequence is about a verifiable way to complete this operation. It does not permit transferring cookies, switching accounts or bypassing a native access boundary.
+Prefer the native/upstream capability or maintained API/CLI when it supports the operation. For browser work, reuse the intended signed-in Chrome session through the existing browser or computer-use tools. Use a registered managed profile when its explicit account binding or the operation requires it. The sequence is about a verifiable way to complete this operation. It does not permit transferring cookies, switching accounts or bypassing a native access boundary.
 
 An existing signed-in browser can be the correct route. Inspect its actual account and current state; do not reauthenticate blindly or assume that an open tab belongs to the task. Human-presence challenges remain human steps, and credentials stay inside the supported browser/profile or opaque broker.
+
+The routing-default key is `browser_profile_primary`; it replaces
+`managed_browser_primary`. Adopters updating an existing registry should migrate
+that key with its account binding and keep explicit company-profile overrides.
+The generic default prefers `chrome`, with `openclaw` as its registered fallback;
+company routes retain their own ordered profiles. A profile name selects a route,
+not proof of a signed-in account. Verify the live account before input, reuse
+suitable tabs, and close only task-owned tabs or windows after completion.
 
 Source-only Discord routes are a useful case. A registered company guild may be readable through the existing account-bound CLI while remaining outside the assistant's inbound bindings. A delegated message-tool rejection does not prove that supported source route is unavailable. Use the exact registered guild/channel bounds; do not add inbound bindings or post there merely to make a read easier.
 

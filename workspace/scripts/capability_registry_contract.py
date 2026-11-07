@@ -55,7 +55,7 @@ ROUTING_DEFAULT_FIELDS = frozenset(
         "browser_secret_entry",
         "fallback_order",
         "human_only_auth_gates",
-        "managed_browser_primary",
+        "browser_profile_primary",
         "native_lane_class",
         "native_lane_kinds",
     }

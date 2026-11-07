@@ -316,19 +316,19 @@ class ResolveCapabilityTests(unittest.TestCase):
             [
                 "declared_native_route",
                 "declared_probe_or_readiness_check",
-                "persistent_managed_browser",
                 "stock_extension_existing_session_browser",
-                "host_os_ui_last_resort",
+                "existing_session_computer_use",
+                "persistent_managed_browser",
             ],
         )
-        self.assertEqual(defaults["managed_browser_primary"]["profile_id"], "openclaw")
-        self.assertEqual(defaults["managed_browser_primary"]["transport"], "managed_cdp")
-        self.assertTrue(defaults["managed_browser_primary"]["persistent"])
+        self.assertEqual(defaults["browser_profile_primary"]["profile_id"], "chrome")
+        self.assertEqual(defaults["browser_profile_primary"]["transport"], "stock_extension")
+        self.assertTrue(defaults["browser_profile_primary"]["persistent"])
         self.assertEqual(
             defaults["browser_profile_fallbacks"],
             [
                 {
-                    "profile_id": "chrome",
+                    "profile_id": "openclaw",
                     "automatic": True,
                     "requires_explicit_existing_session_handoff": False,
                 }
@@ -350,14 +350,15 @@ class ResolveCapabilityTests(unittest.TestCase):
 
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         tools = (ROOT / "TOOLS.md").read_text(encoding="utf-8")
-        self.assertIn("Prefer the supported native/upstream capability", agents)
+        self.assertIn("Use supported native/API/CLI and registered browser/host alternatives", agents)
+        self.assertIn("reuse the intended signed-in Chrome session", tools)
         self.assertIn("human_only_auth_gates", json_registry["routing_defaults"])
-        self.assertTrue(defaults["managed_browser_primary"]["persistent"])
+        self.assertTrue(defaults["browser_profile_primary"]["persistent"])
         self.assertEqual(defaults["browser_secret_entry"], "opaque_secret_broker_only")
 
     def test_native_subagents_use_current_policy_and_probe_diagnostics(self) -> None:
         policy = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn("native subagent sessions receive `AGENTS.md`", policy)
+        self.assertIn("Brief children with the objective and corrections", policy)
         payload = self.run_resolver("--system", "apple-calendar", "--intent", "read", "--required-operation", "calendar-list")
         self.assertFalse(payload["authoritative_probe_evidence"]["valid"])
         self.assertFalse(payload["route_readiness"]["live_probe_authoritative_passed"])
@@ -875,9 +876,9 @@ class ResolveCapabilityTests(unittest.TestCase):
 
         defaults = payload["routing_defaults"]
         self.assertEqual(defaults["native_lane_class"], "declared_native")
-        self.assertEqual(defaults["managed_browser_primary"]["profile_id"], "openclaw")
-        self.assertEqual(defaults["managed_browser_primary"]["transport"], "managed_cdp")
-        self.assertTrue(defaults["managed_browser_primary"]["persistent"])
+        self.assertEqual(defaults["browser_profile_primary"]["profile_id"], "chrome")
+        self.assertEqual(defaults["browser_profile_primary"]["transport"], "stock_extension")
+        self.assertTrue(defaults["browser_profile_primary"]["persistent"])
         self.assertTrue(defaults["browser_profile_fallbacks"][0]["automatic"])
         self.assertIn("captcha", defaults["human_only_auth_gates"])
 
@@ -948,7 +949,7 @@ class ResolveCapabilityTests(unittest.TestCase):
                 self.assertEqual(gate["matched_predicates"], [])
                 self.assertEqual(gate["decision"], "stay_on_declared_native_route")
 
-    def test_failed_api_predicate_keeps_managed_default_then_stock_chrome(self) -> None:
+    def test_failed_api_predicate_prefers_existing_chrome_without_new_instance(self) -> None:
         payload = self.run_resolver(
             "--system",
             "notion",
@@ -973,10 +974,11 @@ class ResolveCapabilityTests(unittest.TestCase):
             gate["decision"],
             "require_runtime_verified_browser_route_and_account",
         )
-        self.assertEqual(gate["preferred_browser_profile"], "openclaw")
-        self.assertEqual(gate["browser_profile_order"], ["openclaw", "chrome"])
+        self.assertEqual(gate["preferred_browser_profile"], "chrome")
+        self.assertEqual(gate["preferred_browser_transport"], "stock_extension")
+        self.assertEqual(gate["browser_profile_order"], ["chrome", "openclaw"])
         self.assertEqual(
-            gate["automatic_browser_profile_fallbacks"], ["chrome"]
+            gate["automatic_browser_profile_fallbacks"], ["openclaw"]
         )
         self.assertEqual(gate["attended_browser_profile_fallbacks"], [])
         self.assertFalse(gate["user_browser_attach_required"])
@@ -1022,7 +1024,7 @@ class ResolveCapabilityTests(unittest.TestCase):
                     payload["browser_fallback_gate"]["matched_predicates"],
                 )
 
-    def test_generic_unsupported_operation_selects_persistent_managed_openclaw(self) -> None:
+    def test_generic_unsupported_operation_selects_existing_chrome(self) -> None:
         payload = self.run_resolver(
             "--system",
             "notion",
@@ -1043,7 +1045,7 @@ class ResolveCapabilityTests(unittest.TestCase):
         gate = payload["browser_fallback_gate"]
         self.assertTrue(gate["eligible"])
         self.assertFalse(gate["allowed"])
-        self.assertEqual(gate["preferred_browser_profile"], "openclaw")
+        self.assertEqual(gate["preferred_browser_profile"], "chrome")
         self.assertTrue(gate["persistent_profile"])
         self.assertIn("native_operation_unsupported", gate["matched_predicates"])
         self.assertFalse(gate["automatic_user_profile_fallback_allowed"])
@@ -1283,7 +1285,7 @@ class ResolveCapabilityTests(unittest.TestCase):
         self.assertFalse(native_payload["browser_fallback_gate"]["allowed"])
         self.assertEqual(
             native_payload["browser_fallback_gate"]["preferred_browser_profile"],
-            "openclaw",
+            "chrome",
         )
         self.assertFalse(native_payload["execution_guard"]["allowed"])
         self.assertNotEqual(
@@ -1468,7 +1470,7 @@ class ResolveCapabilityTests(unittest.TestCase):
         self.assertFalse(guard["completion_claim_allowed"])
         self.assertEqual(
             guard["browser_profile_primary"],
-            {"profile_id": "openclaw", "transport": "managed_cdp"},
+            {"profile_id": "chrome", "transport": "stock_extension"},
         )
         self.assertFalse(guard["automatic_user_profile_fallback_allowed"])
 
@@ -2702,7 +2704,7 @@ class ResolveCapabilityTests(unittest.TestCase):
         self.assertEqual(chrome["preferred_lane"]["readiness"]["state"], "ready")
         self.assertEqual(
             chrome["browser_fallback_gate"]["browser_profile_order"],
-            ["openclaw", "chrome"],
+            ["chrome", "openclaw"],
         )
         self.assertNotIn("act", chrome["preferred_lane"]["operations"])
         self.assertNotIn("capture", chrome["preferred_lane"]["operations"])
@@ -3482,10 +3484,10 @@ class ResolveCapabilityTests(unittest.TestCase):
                 self.assertFalse(gate["account_identity_verified"])
                 self.assertFalse(gate["completion_claim_allowed"])
                 self.assertEqual(
-                    gate["browser_profile_order"], ["openclaw", "chrome"]
+                    gate["browser_profile_order"], ["chrome", "openclaw"]
                 )
                 self.assertEqual(
-                    gate["automatic_browser_profile_fallbacks"], ["chrome"]
+                    gate["automatic_browser_profile_fallbacks"], ["openclaw"]
                 )
                 self.assertEqual(gate["attended_browser_profile_fallbacks"], [])
                 self.assertFalse(payload["execution_guard"]["allowed"])
