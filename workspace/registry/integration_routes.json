@@ -146,18 +146,13 @@
     "fallback_order": [
       "declared_native_route",
       "declared_probe_or_readiness_check",
-      "persistent_managed_browser",
       "stock_extension_existing_session_browser",
-      "host_os_ui_last_resort"
+      "existing_session_computer_use",
+      "persistent_managed_browser"
     ],
-    "managed_browser_primary": {
-      "profile_id": "openclaw",
-      "transport": "managed_cdp",
-      "persistent": true
-    },
     "browser_profile_fallbacks": [
       {
-        "profile_id": "chrome",
+        "profile_id": "openclaw",
         "automatic": true,
         "requires_explicit_existing_session_handoff": false
       }
@@ -188,7 +183,12 @@
       "unexpected_account_or_tenant_switch",
       "unexpected_scope_admin_consent_or_privilege",
       "ungranted_legal_acceptance"
-    ]
+    ],
+    "browser_profile_primary": {
+      "profile_id": "chrome",
+      "transport": "stock_extension",
+      "persistent": true
+    }
   },
   "credential_handles": [
     {
@@ -4299,7 +4299,7 @@
         "profile=chrome"
       ],
       "access_probe_id": "openclaw-browser-chrome-session-probe",
-      "notes": "The stock OpenClaw extension reuses an ordinary signed-in Chrome tab automatically after a registered browser-fallback predicate. Managed profile=openclaw remains the autonomous default. The retired Chrome-MCP profiles user and operator are not fallbacks for this route."
+      "notes": "Reuse the task's intended ordinary signed-in Chrome session without requiring an explicit tab handoff. Browser and host UI in the tools reference owns account mapping and route selection. This route adds no competing default or fallback order; retired custom profiles remain retired."
     },
     {
       "route_id": "company-alpha-walletconnect-testnet",
@@ -4705,7 +4705,14 @@
         "profile_id": "personal",
         "transport": "managed_cdp"
       },
-      "notes": "The managed profile name personal is a legacy browser-transport label only; every use must select and verify the company_alpha team rather than the account's personal Vercel scope. No API, CLI, deployment, configuration, domain, environment, secret, or other mutation operation is declared."
+      "notes": "The managed profile name personal is a legacy browser-transport label only; every use must select and verify the company_alpha team rather than the account's personal Vercel scope. No API, CLI, deployment, configuration, domain, environment, secret, or other mutation operation is declared.",
+      "browser_profile_fallbacks": [
+        {
+          "profile_id": "chrome",
+          "automatic": true,
+          "requires_explicit_existing_session_handoff": false
+        }
+      ]
     },
     {
       "route_id": "vercel-company-beta-browser",
@@ -4781,7 +4788,14 @@
         "profile_id": "openclaw",
         "transport": "managed_cdp"
       },
-      "notes": "One exact company-beta-site Preview redeploy reached Ready and its exact disposable deployment was then deleted, accepting preview-deploy and preview-delete through profile=openclaw only after verifying the Preview environment and provider result. No API or CLI route, production deployment or promotion, configuration, custom-domain, environment-variable, secret, or other mutation operation is declared; the CompanyAlpha Vercel identity is not a substitute."
+      "notes": "One exact company-beta-site Preview redeploy reached Ready and its exact disposable deployment was then deleted, accepting preview-deploy and preview-delete through profile=openclaw only after verifying the Preview environment and provider result. No API or CLI route, production deployment or promotion, configuration, custom-domain, environment-variable, secret, or other mutation operation is declared; the CompanyAlpha Vercel identity is not a substitute.",
+      "browser_profile_fallbacks": [
+        {
+          "profile_id": "chrome",
+          "automatic": true,
+          "requires_explicit_existing_session_handoff": false
+        }
+      ]
     },
     {
       "route_id": "discord-source-company-alpha-team",

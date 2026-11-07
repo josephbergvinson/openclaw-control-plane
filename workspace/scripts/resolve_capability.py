@@ -3826,7 +3826,7 @@ def browser_profile_contract(
     preferred = preferred or {}
     routing_defaults = routing_defaults or {}
     raw_primary = preferred.get("browser_profile_primary") or routing_defaults.get(
-        "managed_browser_primary"
+        "browser_profile_primary"
     )
     primary: dict[str, str] | None = None
     if isinstance(raw_primary, dict):
@@ -5260,13 +5260,13 @@ def resolve(
     elif normalized_candidate_lane == "declared_native":
         if operation_contract["native_route_unavailable"]:
             execution_blocker = "blocked_no_declared_native_route"
-            execution_decision = "use_persistent_managed_browser"
+            execution_decision = "use_account_bound_browser"
         elif operation_contract["authenticated_ui_required"]:
             execution_blocker = "blocked_required_operation_requires_authenticated_ui"
-            execution_decision = "use_persistent_managed_browser"
+            execution_decision = "use_account_bound_browser"
         elif operation_contract["native_unsupported"]:
             execution_blocker = "blocked_required_operation_unsupported_by_native_route"
-            execution_decision = "use_persistent_managed_browser"
+            execution_decision = "use_account_bound_browser"
         else:
             execution_allowed = True
     elif normalized_candidate_lane == "browser":
@@ -5276,9 +5276,9 @@ def resolve(
     default_fallback_order = [
         "declared_native_route",
         "declared_probe_or_readiness_check",
-        "persistent_managed_browser",
         "stock_extension_existing_session_browser",
-        "host_os_ui_last_resort",
+        "existing_session_computer_use",
+        "persistent_managed_browser",
     ]
     fallback_order = routing_defaults.get("fallback_order")
     if not isinstance(fallback_order, list) or not all(
@@ -5416,11 +5416,11 @@ def resolve(
             "Prefer the declared API, connector, integration, or supported CLI route and use readiness/probe state as diagnostics, not task authority.",
             "Failure reports must name each checked lane and pass/fail/blocker status.",
             "A ready personal/default route must not satisfy a named workspace/account route.",
-            "Use persistent profile=openclaw as the autonomous default; after a registered browser-fallback predicate, stock extension profile=chrome is the automatic existing signed-in tab route.",
-            "Navigate managed UI adaptively from observed state; route bindings must not prescribe ephemeral refs or deterministic click chains.",
+            "For ordinary browsing, reuse the intended signed-in Chrome session through profile=chrome or Computer. Respect an explicit route's browser profile and verify the page account. A missing connector does not require a new browser instance: inspect the same session with supported Computer tools. Use a managed browser when the bound account or required capability calls for it; do not exhaust unrelated profiles.",
+            "Navigate UI adaptively from observed state; route bindings must not prescribe ephemeral refs or deterministic click chains.",
             "Stop for CAPTCHA, provider-required physical biometric/security-key presence, verification without a supported secure route, password reset/change/recovery, or unexpected privilege. A passkey label alone is not a human-only gate: inspect the current native prompt and use its observed password fallback through the supported opaque credential route when available.",
         ],
-        "failure_report_template": "Checked <system> native route <route_id>: <pass|failed|blocked>; checked managed profile=openclaw: <pass|failed|blocked|not_attempted_reason>; checked stock extension profile=chrome when an existing signed-in tab was required: <pass|failed|not_attempted_reason>.",
+        "failure_report_template": "Checked <system> route <route_id>: <pass|failed|blocked>; checked intended account <account> through <actual browser profile or Computer route>: <pass|failed|blocked|not_attempted_reason>. State only the routes actually checked and the relevant remaining limitation.",
         "execution_guard": {
             "candidate_lane": normalized_candidate_lane,
             "selected_route_id": preferred.get("route_id") if preferred else None,
@@ -5496,8 +5496,8 @@ def resolve(
                 else None
             ),
             "persistent_profile": bool(
-                isinstance(routing_defaults.get("managed_browser_primary"), dict)
-                and routing_defaults["managed_browser_primary"].get("persistent")
+                isinstance(routing_defaults.get("browser_profile_primary"), dict)
+                and routing_defaults["browser_profile_primary"].get("persistent")
             ),
             "browser_profile_fallbacks": browser_profile_fallbacks,
             "browser_profile_order": browser_profiles["order"],
