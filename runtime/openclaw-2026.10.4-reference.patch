@@ -10620,6 +10620,18 @@ index 52d316bfe5ea6c080141c167c11d098dd9966aba..a0eb3787083e6134167d94db25b95364
  discarded so stale background updates are not prepended to the first prompt in
  the new session.
  
+diff --git a/docs/concepts/system-prompt.md b/docs/concepts/system-prompt.md
+index b61f7d41f92b7017a5b93e6af795b9c8305213ee..7aa69adbbfdeb39ba81ff05270abf33024bded34 100644
+--- a/docs/concepts/system-prompt.md
++++ b/docs/concepts/system-prompt.md
+@@ -31,6 +31,7 @@ The built-in GPT-5-family prompt contribution (`resolveGpt5SystemPromptContribut
+ The prompt is compact, with fixed sections:
+ 
+ - **Tooling**: structured-tool source-of-truth reminder plus runtime tool-use guidance. When `progress_card` is enabled (`tools.updatePlan`, on by default), its own description explains how to maintain one durable plan and status note, keep at most one step `in_progress`, and skip routine updates that do not change the picture.
++- **Tool Call Style**: acknowledge substantial interactive tasks before tool work while keeping individual routine calls silent. Task-level progress is separate from narration of complex, sensitive or user-requested steps.
+ - **Execution Bias**: act in-turn on actionable requests, continue until done or blocked, recover from weak tool results, check mutable state live, and verify before finalizing. A requested action with an available tool is authorized: tool policy, sandboxing, and exec approvals gate risk at runtime, so the prompt does not ask the model to pre-refuse, warn, or seek extra permission.
+ - **Promised Work**: promising future, background, delegated, or continued work creates follow-through ownership: arrange an available completion or watch path before ending the turn, proactively return with the result or a concrete blocker, and never treat progress (like `running`) as completion.
+ - **Care**: inspect and merge before editing existing config or scheduler files, use or store credentials the user shares as asked, private delivery of short-lived login codes in groups, and a terminal setup route when no control tools are available.
 diff --git a/docs/gateway/config-extensions.md b/docs/gateway/config-extensions.md
 index 497d799b23a5c3e39af64c7af8489f681d0e5f71..0804ba2f6f1ce26294071ad6c16c5c70105efcd4 100644
 --- a/docs/gateway/config-extensions.md
@@ -13191,7 +13203,7 @@ index f7ee5e42d577780a6e34273a496d365f20d2389b..1cf9159f7d48244a1be5d5783fd3555e
      epoch?: TabAccessEpoch,
      afterNavigation?: boolean,
 diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
-index 43af27bd1b742fb32af3f4fca1079f45405a156c..eabfd466895c13885dc982c903839d07149be08d 100644
+index 43af27bd1b742fb32af3f4fca1079f45405a156c..6337ed7a605f20642f499bcf57374b777114c71b 100644
 --- a/extensions/browser/index.test.ts
 +++ b/extensions/browser/index.test.ts
 @@ -326,6 +326,8 @@ describe("browser plugin", () => {
@@ -13203,6 +13215,14 @@ index 43af27bd1b742fb32af3f4fca1079f45405a156c..eabfd466895c13885dc982c903839d07
        "close",
        "console",
        "requests",
+@@ -335,6 +337,7 @@ describe("browser plugin", () => {
+       "dialog",
+       "download",
+       "focus",
++      "retain",
+       "navigate",
+       "pdf",
+       "screenshot",
 diff --git a/extensions/browser/openclaw.plugin.json b/extensions/browser/openclaw.plugin.json
 index bed0cbe67260bb1e60e6499b151864e0d3c52aba..53cad5ddbdd095e1b00972e8fd93d793fe30fd8e 100644
 --- a/extensions/browser/openclaw.plugin.json
@@ -94892,6 +94912,19 @@ index 7f63fd73279489715316beaefddd7a18cf2a028b..10087cc402e32ed8fe520e4c27e959ff
      message: buildSubagentTaskMessage({ ...params, childDepth, maxSpawnDepth }),
      acceptedNote: omitAcceptedNote
        ? undefined
+diff --git a/src/agents/system-prompt-messaging.ts b/src/agents/system-prompt-messaging.ts
+index 16904c10a81c3be24185433cca91229211ab8b48..c43e573199bb381a8d14165f2cd1d8ca225f1de1 100644
+--- a/src/agents/system-prompt-messaging.ts
++++ b/src/agents/system-prompt-messaging.ts
+@@ -43,7 +43,7 @@ export function buildMessagingSection(params: {
+   const messageToolTargetInstruction = `- ${buildMessageToolTargetGuidance(params.requireExplicitMessageTarget === true)}`;
+   const routingGuidance = [
+     "- OpenClaw messaging: use available messaging tools, never shell commands, the CLI, curl, or direct RPC. Missing messaging tools are not permission to use another route.",
+-    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments or duplicate completion reports.",
++    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments back to a child merely to confirm its completion or repeat its completion report.",
+     "- Other services (e.g. email): user-authorized CLI/API use is allowed; normal tool permissions and approvals still apply.",
+   ];
+   if (params.isMinimal) {
 diff --git a/src/agents/system-prompt-openclaw-control.test.ts b/src/agents/system-prompt-openclaw-control.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..3c8cd5ec570e66795278e96f3ea0b6fd4bc5a6ac
@@ -95087,7 +95120,7 @@ index 638f80e1c1d47f1725903ecc0536a2d1b182366d..bca9a00a09bd1eaeb6df1fbb40bf99fb
 +  });
 +});
 diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
-index 689576cf359e678401861775bfeb068b2436e600..83d1ea03c7d7766b63f87571479aeebf521fc23f 100644
+index 689576cf359e678401861775bfeb068b2436e600..7f6ab3b73ed952bec8ef2d7fee221efaea21f3b6 100644
 --- a/src/agents/system-prompt.ts
 +++ b/src/agents/system-prompt.ts
 @@ -3,7 +3,6 @@
@@ -95211,6 +95244,17 @@ index 689576cf359e678401861775bfeb068b2436e600..83d1ea03c7d7766b63f87571479aeebf
      "Before config/scheduler edits (crontab/systemd/nginx/shell rc/timers): inspect; preserve/merge. Whole-file replacement only explicit.",
      buildCredentialSafetyPrompt({
        controlToolsAvailable: availableTools.has("openclaw") || availableTools.has("gateway"),
+@@ -746,8 +682,8 @@ export function buildAgentSystemPrompt(params: {
+           ? [providerSectionOverrides.tool_call_style]
+           : [
+               "## Tool Call Style",
+-              "Routine low-risk: call silently.",
+-              "Narrate only complex, sensitive/destructive, or requested steps.",
++              "Before substantial multi-step tool work on an interactive user request, give a brief acknowledgment of the concrete work you are starting. Keep individual routine low-risk calls silent.",
++              "Narrate individual steps only when complex, sensitive/destructive, or requested; task-level progress updates are separate.",
+               "First-class tool exists: use it; never ask user for equivalent CLI/slash.",
+               "/approve is user command; never execute via shell/tool.",
+               "allow-once covers only that exact command; later commands need their own exec policy decision.",
 @@ -764,7 +700,7 @@ export function buildAgentSystemPrompt(params: {
                "- Actionable request: act now.",
                "- Requested action with an available tool: do it. Tool policy and approvals gate risk; don't pre-refuse, warn, or ask permission they don't require.",

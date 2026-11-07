@@ -39,6 +39,18 @@ index 981e56c9e037c7233d1c5f8d866db75d31e3fda4..c05a38112880f4ea569a2d535c6a30d5
  
  The deterministic trusted-trigger lane remains available in `off` mode.
  `rememberAcrossConversations` is unchanged: it still controls whether deep
+diff --git a/docs/concepts/system-prompt.md b/docs/concepts/system-prompt.md
+index 7aa69adbbfdeb39ba81ff05270abf33024bded34..b61f7d41f92b7017a5b93e6af795b9c8305213ee 100644
+--- a/docs/concepts/system-prompt.md
++++ b/docs/concepts/system-prompt.md
+@@ -31,7 +31,6 @@ The built-in GPT-5-family prompt contribution (`resolveGpt5SystemPromptContribut
+ The prompt is compact, with fixed sections:
+ 
+ - **Tooling**: structured-tool source-of-truth reminder plus runtime tool-use guidance. When `progress_card` is enabled (`tools.updatePlan`, on by default), its own description explains how to maintain one durable plan and status note, keep at most one step `in_progress`, and skip routine updates that do not change the picture.
+-- **Tool Call Style**: acknowledge substantial interactive tasks before tool work while keeping individual routine calls silent. Task-level progress is separate from narration of complex, sensitive or user-requested steps.
+ - **Execution Bias**: act in-turn on actionable requests, continue until done or blocked, recover from weak tool results, check mutable state live, and verify before finalizing. A requested action with an available tool is authorized: tool policy, sandboxing, and exec approvals gate risk at runtime, so the prompt does not ask the model to pre-refuse, warn, or seek extra permission.
+ - **Promised Work**: promising future, background, delegated, or continued work creates follow-through ownership: arrange an available completion or watch path before ending the turn, proactively return with the result or a concrete blocker, and never treat progress (like `running`) as completion.
+ - **Care**: inspect and merge before editing existing config or scheduler files, use or store credentials the user shares as asked, private delivery of short-lived login codes in groups, and a terminal setup route when no control tools are available.
 diff --git a/docs/plugins/sdk-overview/memory-and-context.md b/docs/plugins/sdk-overview/memory-and-context.md
 index 32eb19fa5bc6c2459df2c38d2a7c9115599ebb49..5b410ce7aa0db3a560baf85d3bc78f1442479ae8 100644
 --- a/docs/plugins/sdk-overview/memory-and-context.md
@@ -504,6 +516,18 @@ index ab8d0297289fe6670b9b3da6dc686fd57f80f64d..7ee8cea970afcc364e2f81056caf2d46
              const escalationDecision = resolveRecallEscalationDecision({
                mode: invocationConfig.mode,
                message: currentUserMessage,
+diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
+index 6337ed7a605f20642f499bcf57374b777114c71b..eabfd466895c13885dc982c903839d07149be08d 100644
+--- a/extensions/browser/index.test.ts
++++ b/extensions/browser/index.test.ts
+@@ -337,7 +337,6 @@ describe("browser plugin", () => {
+       "dialog",
+       "download",
+       "focus",
+-      "retain",
+       "navigate",
+       "pdf",
+       "screenshot",
 diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
 index 976fdac78c35fb3f4a1b80b8516d28c6ef64aac7..694b0e8e9e0c325fccc71aad21245be0f8c4470c 100644
 --- a/extensions/browser/skills/browser-automation/SKILL.md
@@ -4471,6 +4495,34 @@ index ef55dceddfb47837c29e50e1f3251858f7001ed5..00000000000000000000000000000000
 -    }
 -  },
 -);
+diff --git a/src/agents/system-prompt-messaging.ts b/src/agents/system-prompt-messaging.ts
+index c43e573199bb381a8d14165f2cd1d8ca225f1de1..16904c10a81c3be24185433cca91229211ab8b48 100644
+--- a/src/agents/system-prompt-messaging.ts
++++ b/src/agents/system-prompt-messaging.ts
+@@ -43,7 +43,7 @@ export function buildMessagingSection(params: {
+   const messageToolTargetInstruction = `- ${buildMessageToolTargetGuidance(params.requireExplicitMessageTarget === true)}`;
+   const routingGuidance = [
+     "- OpenClaw messaging: use available messaging tools, never shell commands, the CLI, curl, or direct RPC. Missing messaging tools are not permission to use another route.",
+-    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments back to a child merely to confirm its completion or repeat its completion report.",
++    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments or duplicate completion reports.",
+     "- Other services (e.g. email): user-authorized CLI/API use is allowed; normal tool permissions and approvals still apply.",
+   ];
+   if (params.isMinimal) {
+diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
+index 7f6ab3b73ed952bec8ef2d7fee221efaea21f3b6..83d1ea03c7d7766b63f87571479aeebf521fc23f 100644
+--- a/src/agents/system-prompt.ts
++++ b/src/agents/system-prompt.ts
+@@ -682,8 +682,8 @@ export function buildAgentSystemPrompt(params: {
+           ? [providerSectionOverrides.tool_call_style]
+           : [
+               "## Tool Call Style",
+-              "Before substantial multi-step tool work on an interactive user request, give a brief acknowledgment of the concrete work you are starting. Keep individual routine low-risk calls silent.",
+-              "Narrate individual steps only when complex, sensitive/destructive, or requested; task-level progress updates are separate.",
++              "Routine low-risk: call silently.",
++              "Narrate only complex, sensitive/destructive, or requested steps.",
+               "First-class tool exists: use it; never ask user for equivalent CLI/slash.",
+               "/approve is user command; never execute via shell/tool.",
+               "allow-once covers only that exact command; later commands need their own exec policy decision.",
 diff --git a/src/agents/tools/computer-tool-schema.ts b/src/agents/tools/computer-tool-schema.ts
 index fd5acd9feaf716f36b01e456513dd20a09d0fc0b..d1c4f58646862b3888c06395e7db942fd1451250 100644
 --- a/src/agents/tools/computer-tool-schema.ts

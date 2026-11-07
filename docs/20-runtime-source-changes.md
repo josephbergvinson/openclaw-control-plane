@@ -30,6 +30,12 @@ late child result neither reopens a finished answer nor settles unrelated newer
 work. See `src/agents/tools/sessions-send*` and the existing subagent registry and
 announcement code. Progress remains separate from the final result.
 
+Before substantial interactive tool work, the main agent acknowledges the task.
+Avoiding redundant acknowledgments of child completion does not remove the
+parent's responsibility for requester-facing progress or a final answer. This
+guidance uses the existing prompt and delivery paths, without a separate timer
+or message generator.
+
 ## Requests, tools and durable work
 
 Execution preflight checks a directly invoked Python file without treating an
