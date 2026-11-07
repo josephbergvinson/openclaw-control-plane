@@ -18,7 +18,7 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R88, verified on 7 November
+The selected and loaded external gateway reference is R90, verified on 7 November
 2026. The manifest records the canonical source and native distribution for that
 release alongside the separately retained Mac companion source.
 
@@ -43,8 +43,9 @@ behavior is retained. The companion source packet is separate from the installed
 gateway reference: reconstruction does not install the app or establish live
 dashboard acceptance.
 
-Benchmark comparisons remain in progress; this source update does not establish
-an overall performance advantage over another harness.
+The bounded comparison did not establish an overall performance advantage over
+native Codex. These targeted repairs do not establish consistently fast responses
+or superiority over other harnesses.
 
 ## Source identities
 

@@ -30,6 +30,12 @@ late child result neither reopens a finished answer nor settles unrelated newer
 work. See `src/agents/tools/sessions-send*` and the existing subagent registry and
 announcement code. Progress remains separate from the final result.
 
+Before substantial interactive tool work, the main agent acknowledges the task.
+Avoiding redundant acknowledgments of child completion does not remove the
+parent's responsibility for requester-facing progress or a final answer. This
+guidance uses the existing prompt and delivery paths, without a separate timer
+or message generator.
+
 ## Requests, tools and durable work
 
 Execution preflight checks a directly invoked Python file without treating an
@@ -48,7 +54,7 @@ supported shells. These changes preserve tool authorization and failure reportin
 | Native goals | Goal/run accounting preserves the objective, accepted usage and terminal state across attempts. A model response ending does not itself satisfy the goal. Discord's native command keeps objective text separate from an explicitly selected lifecycle action: omitted action plus text starts a literal objective, while empty arguments show status. A saved start or resume receives its command confirmation before model work, then uses ordinary conversation progress and final delivery instead of an expiring interaction token. Confirmation visibility is preserved; child handoffs and partial delivery do not falsely settle the final answer. Text commands retain their documented parsing. |
 | Yield and continuation | Native requester continuation, reply dispatch and harness custody preserve the return route while a child runs. A successful explicit yield with accepted completion children retains its requester handoff through internal prompt cleanup. The existing dispatcher can transfer an already confirmed current progress card without a new payload; recovered prepared cohorts retain its progress reference. Cancellation, failure and completed-output checks still apply. For an otherwise-silent explicit yield, the LLM-authored `acknowledgment` gives visible verified progress, the current wait and next step; `message` stays private continuation context. Missing acknowledgment can still use the generic waiting fallback. |
 | Original task context | Session creation, continuation and scheduled recovery retain the original request and source bindings. Later steering can correct ongoing work without silently replacing its objective. |
-| Follow-up admission | Queue and steering owners distinguish live corrections, queued follow-ups and independent requests. The shared native target owner can wait for the exact admitted continuation's publication through child settlement or compaction. Queue admission stays gated until that owner and terminal persistence settle, including across an existing drain or stale-drain retirement. Cancellation removes its foreground observer without consuming a still-valid queued input; replacement cannot redirect that input into a successor. Native tool authority and source checks still apply. |
+| Follow-up admission | Queue and steering owners distinguish live corrections, queued follow-ups and independent requests. The shared native target owner can wait for the exact admitted continuation's publication through child settlement or compaction. Queue admission stays gated until that owner and terminal persistence settle, including across an existing drain or stale-drain retirement. Cancellation removes its foreground observer without consuming a still-valid queued input; replacement cannot redirect that input into a successor. A correction from the same admitted requester can use the direct continuation path after projection to that request's tool authority. More restrictive caller authority remains binding, as do source, owner and message identity checks. |
 | Completion recovery claims | `src/agents/agent-command-restart-recovery.ts` scopes a consumed, current internal completion handoff to its own continuation run. Exact source/target/session and current completion-cohort checks remain binding at persistence. Existing recovered claims retain their admitted source and route; arbitrary deliverable commands do not gain that scope. |
 | Admitted requester scope | Same-child follow-up execution and its completion record retain the admitted requester, account and channel partition through existing private in-process metadata. Target incarnation and source custody remain binding; later sender context does not silently replace the admitted scope. Finite mismatch diagnostics name the comparison stage and differing fields without exposing identity values. Parent-only completion targets survive accepted-result normalization, requester adoption and restart restoration; a scheduled parent's final silence cannot promote its private child report into channel output. |
 | Child completion | Registry, announcement and requester-continuation paths keep result delivery owned through settlement and cleanup. Gateway start notification waits for both runner entry and live admission. Its deferred observers inherit the owning execution context rather than a shorter model-attempt scope, so normal model completion does not cancel a still-authorized final handoff. Source revocation and cancellation checks remain binding. A late completion does not justify another copy of an already delivered final. |
@@ -179,6 +185,14 @@ cleanup also considers an existing idle managed instance when its last tracked
 tab was already explicitly closed, using the same ownership and activity checks.
 The cleanup regression covers downloads still pending after tab closure in both
 headed and headless Chrome.
+
+When a user asks to keep an owned tab for a later follow-up, open it with
+`keepOpen:true` or use `action:"retain"` with its `targetId` and `keepOpen:true`.
+Ordinary completion, idle and tab-cap cleanup preserve that tab. Set
+`keepOpen:false` when it no longer needs to remain open. Explicit close and
+terminal session cleanup still close it. Retention does not adopt another
+session's tab or reverse a close already dispatched; session, profile and target
+ownership remain binding.
 
 Account selection uses the registered route and the account shown on the page.
 An ordinary Chrome profile and an OpenClaw managed-profile name are separate
