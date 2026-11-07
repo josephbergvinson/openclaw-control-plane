@@ -39,6 +39,18 @@ index 981e56c9e037c7233d1c5f8d866db75d31e3fda4..c05a38112880f4ea569a2d535c6a30d5
  
  The deterministic trusted-trigger lane remains available in `off` mode.
  `rememberAcrossConversations` is unchanged: it still controls whether deep
+diff --git a/docs/concepts/system-prompt.md b/docs/concepts/system-prompt.md
+index 7aa69adbbfdeb39ba81ff05270abf33024bded34..b61f7d41f92b7017a5b93e6af795b9c8305213ee 100644
+--- a/docs/concepts/system-prompt.md
++++ b/docs/concepts/system-prompt.md
+@@ -31,7 +31,6 @@ The built-in GPT-5-family prompt contribution (`resolveGpt5SystemPromptContribut
+ The prompt is compact, with fixed sections:
+ 
+ - **Tooling**: structured-tool source-of-truth reminder plus runtime tool-use guidance. When `progress_card` is enabled (`tools.updatePlan`, on by default), its own description explains how to maintain one durable plan and status note, keep at most one step `in_progress`, and skip routine updates that do not change the picture.
+-- **Tool Call Style**: acknowledge substantial interactive tasks before tool work while keeping individual routine calls silent. Task-level progress is separate from narration of complex, sensitive or user-requested steps.
+ - **Execution Bias**: act in-turn on actionable requests, continue until done or blocked, recover from weak tool results, check mutable state live, and verify before finalizing. A requested action with an available tool is authorized: tool policy, sandboxing, and exec approvals gate risk at runtime, so the prompt does not ask the model to pre-refuse, warn, or seek extra permission.
+ - **Promised Work**: promising future, background, delegated, or continued work creates follow-through ownership: arrange an available completion or watch path before ending the turn, proactively return with the result or a concrete blocker, and never treat progress (like `running`) as completion.
+ - **Care**: inspect and merge before editing existing config or scheduler files, use or store credentials the user shares as asked, private delivery of short-lived login codes in groups, and a terminal setup route when no control tools are available.
 diff --git a/docs/plugins/sdk-overview/memory-and-context.md b/docs/plugins/sdk-overview/memory-and-context.md
 index 32eb19fa5bc6c2459df2c38d2a7c9115599ebb49..5b410ce7aa0db3a560baf85d3bc78f1442479ae8 100644
 --- a/docs/plugins/sdk-overview/memory-and-context.md
@@ -71,6 +83,47 @@ index 32eb19fa5bc6c2459df2c38d2a7c9115599ebb49..5b410ce7aa0db3a560baf85d3bc78f14
 -behavior. Turn admission failures withhold results without marking the search
 -provider unhealthy; genuine provider failures retain their existing cooldown.
 -The capability adds no independent cache, storage or retrieval lifecycle.
+diff --git a/docs/tools/browser/configuration.md b/docs/tools/browser/configuration.md
+index 571a8af8e074868bb7e3fb8fa08d2e0df7278dca..dcb89cc09f36b7ee4da427379fb6bc561a438742 100644
+--- a/docs/tools/browser/configuration.md
++++ b/docs/tools/browser/configuration.md
+@@ -95,15 +95,6 @@ open, opened outside OpenClaw, or otherwise have unknown ownership. The
+ sessions. Changes apply on the next sweep without restarting the browser;
+ disabling it does not disable explicit session lifecycle cleanup.
+ 
+-To keep a task-owned tab open for a requested follow-up, pass `keepOpen: true`
+-to `action: "open"`, or use `action: "retain"` with its `targetId`, the same
+-profile and `keepOpen: true`. The tab stays owned by that session. Ordinary
+-completion, idle cleanup and tab-cap eviction skip it. `retain` with
+-`keepOpen: false` restores automatic cleanup; explicit `close` and terminal
+-session cleanup still apply. Retention cannot adopt user tabs or another
+-session's tabs, and is refused once registry cleanup has admitted a close.
+-It cannot undo a close already dispatched by another operation.
+-
+ Periodic cleanup belongs to the Browser plugin service and continues after the
+ request that first started browser control ends. Stopping or reloading that
+ service cancels future sweeps and waits for active cleanup to finish.
+@@ -111,7 +102,6 @@ service cancels future sweeps and waits for active cleanup to finish.
+ OpenClaw-managed Chrome also applies a separate, best-effort cap of eight page
+ tabs when opening a tab. This cap is independent of `browser.tabCleanup`;
+ remote and attach-only profiles do not use it.
+-Explicitly retained tabs are excluded from this cap too.
+ 
+ For host-local opens, ownership with a stable native CDP target and browser
+ identity is stored in the shared SQLite state. Those records survive a Gateway
+@@ -127,12 +117,6 @@ regular remote CDP profiles, and existing-session profiles with an explicit
+ browser identity. Before closing a durable record, OpenClaw verifies that the
+ configured profile and browser instance still match.
+ 
+-The follow-up preference is stored only when true in the existing durable tab
+-record, and survives restart wherever ownership is durable. No database migration
+-is needed; old records retain automatic cleanup. Older runtime versions ignore
+-this added preference and may close retained tabs after rollback. Process-local
+-tabs retain their existing process lifetime described below.
+-
+ Chrome MCP `--autoConnect`, CDP endpoints whose `/json/version` response lacks
+ a stable browser identity, and opens whose native target cannot be resolved
+ remain process-local best-effort tracking. They can be cleaned up while that
 diff --git a/extensions/active-memory/index.foreground-recall.test-support.ts b/extensions/active-memory/index.foreground-recall.test-support.ts
 deleted file mode 100644
 index 3651dcc5b328b615a443125be96e654334d60ec7..0000000000000000000000000000000000000000
@@ -463,8 +516,20 @@ index ab8d0297289fe6670b9b3da6dc686fd57f80f64d..7ee8cea970afcc364e2f81056caf2d46
              const escalationDecision = resolveRecallEscalationDecision({
                mode: invocationConfig.mode,
                message: currentUserMessage,
+diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
+index 6337ed7a605f20642f499bcf57374b777114c71b..eabfd466895c13885dc982c903839d07149be08d 100644
+--- a/extensions/browser/index.test.ts
++++ b/extensions/browser/index.test.ts
+@@ -337,7 +337,6 @@ describe("browser plugin", () => {
+       "dialog",
+       "download",
+       "focus",
+-      "retain",
+       "navigate",
+       "pdf",
+       "screenshot",
 diff --git a/extensions/browser/skills/browser-automation/SKILL.md b/extensions/browser/skills/browser-automation/SKILL.md
-index d26bd8490421a6a0131ce0d74bb6e120213a6ca6..694b0e8e9e0c325fccc71aad21245be0f8c4470c 100644
+index 976fdac78c35fb3f4a1b80b8516d28c6ef64aac7..694b0e8e9e0c325fccc71aad21245be0f8c4470c 100644
 --- a/extensions/browser/skills/browser-automation/SKILL.md
 +++ b/extensions/browser/skills/browser-automation/SKILL.md
 @@ -27,7 +27,7 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
@@ -485,6 +550,15 @@ index d26bd8490421a6a0131ce0d74bb6e120213a6ca6..694b0e8e9e0c325fccc71aad21245be0
  
  - CLI: `openclaw browser batch --actions '<json>'`, `--actions-file plan.json`, or `--actions-file -` for stdin. `--actions-file` and stdin input are capped at 1,000,000 bytes; split larger plans into multiple batch commands. `--continue` sets `stopOnError=false`; default stops on first error.
  - Ref lifecycle: refs come from a `snapshot` run before the batch (snapshot is not a nested action). A nested action that changes page state — such as a `click` that triggers navigation, or an `evaluate` that mutates the DOM — can invalidate earlier refs for the rest of the batch; put state-changing actions first, or split into a follow-up batch after re-snapshotting. Navigation and re-snapshotting happen outside the batch, since `open`, `navigate`, and `snapshot` are not `/act` kinds.
+@@ -105,7 +105,7 @@ When evaluate is unavailable, keep the loop on structured state only.
+ 
+ ## Tab Hygiene
+ 
+-Ordinary task-owned tabs may close after final delivery. When the user asks to leave a tab open for a follow-up, use `keepOpen: true` with `open`, or `action: "retain"` with that owned `targetId` and `keepOpen: true`. Keep using the same profile and target. This retains cleanup ownership; do not open an untracked window or disable cleanup to keep a tab alive. After the follow-up, close the tab if requested, or use `retain` with `keepOpen: false` to restore automatic cleanup. Explicit close and session end still close retained tabs. User-owned tabs are not adopted.
++With task-completion cleanup enabled, tracked task-owned tabs may close after final delivery; a pre-final tab listing does not guarantee they remain open.
+ 
+ Before creating a tab for a named task, list tabs and reuse an existing matching label or URL when it is still usable.
+ 
 @@ -146,11 +146,11 @@ If an action fails with a missing or stale ref:
  
  ## Existing User Browser
@@ -499,12 +573,27 @@ index d26bd8490421a6a0131ce0d74bb6e120213a6ca6..694b0e8e9e0c325fccc71aad21245be0
  
  ## Google Meet Notes
  
+diff --git a/extensions/browser/src/browser-tool-binding.ts b/extensions/browser/src/browser-tool-binding.ts
+index 1963c9a50048bc23dc4be2aeb25b3ef86374d692..f76444caf715393668fcc5dd177befd4c540d25a 100644
+--- a/extensions/browser/src/browser-tool-binding.ts
++++ b/extensions/browser/src/browser-tool-binding.ts
+@@ -59,7 +59,6 @@ export const BROWSER_TAB_BOUND_ACTIONS = [
+   "dialog",
+   "download",
+   "focus",
+-  "retain",
+   "navigate",
+   "pdf",
+   "screenshot",
 diff --git a/extensions/browser/src/browser-tool-description.ts b/extensions/browser/src/browser-tool-description.ts
-index 1a5271d371462bdc4896b6b648cbe4d7a010cc7d..5d47a02b48182f90d30c6c6ba8f191dac380361c 100644
+index 2d2582eb7ac23da892b6d3920eb47d57a1bf4cb0..5d47a02b48182f90d30c6c6ba8f191dac380361c 100644
 --- a/extensions/browser/src/browser-tool-description.ts
 +++ b/extensions/browser/src/browser-tool-description.ts
-@@ -94,7 +94,7 @@ function describeBrowserTool(opts: {
+@@ -92,10 +92,9 @@ function describeBrowserTool(opts: {
+       : []),
+     "When using refs from snapshot (e.g. e12), keep the same tab: prefer passing targetId from the snapshot response into subsequent actions (act/click/type/etc). For tab operations, targetId also accepts tabId handles (t1) and labels from action=tabs.",
      "For multi-step browser work, login checks, stale refs, duplicate tabs, or Google Meet flows, use the bundled browser-automation skill when it is available.",
+-    "For a requested follow-up, open with keepOpen=true or use action=retain with targetId and keepOpen=true on a tab this session owns. keepOpen=false restores automatic cleanup; close and session end still close retained tabs.",
      ...(!opts.capabilities.tabBound
        ? [
 -          "Only create a Browser dashboard when the user asks for a dashboard. Opening the browser sidebar or side panel does not require a widget. For dashboard authoring and shared-page modes, read the control-ui skill's references/dashboards.md. Use dashboard=<widget name> without targetId/profile/route overrides.",
@@ -512,6 +601,307 @@ index 1a5271d371462bdc4896b6b648cbe4d7a010cc7d..5d47a02b48182f90d30c6c6ba8f191da
          ]
        : []),
      'For stable, self-resolving refs across calls, use snapshot with refs="aria" (Playwright aria-ref ids). Default refs="role" are role+name-based.',
+diff --git a/extensions/browser/src/browser-tool-dispatch.ts b/extensions/browser/src/browser-tool-dispatch.ts
+index 1f61477c3c6fd01145453d7dbe2591c5d9de4cbb..680f331c488017a204c3fa1ca42b91f3e4587387 100644
+--- a/extensions/browser/src/browser-tool-dispatch.ts
++++ b/extensions/browser/src/browser-tool-dispatch.ts
+@@ -150,16 +150,14 @@ export async function executeBrowserTabAction(context: {
+           timeoutMs: toolTimeoutMs,
+         });
+       };
+-      await sessionTabs.trackOpened(opened, closeOpenedTab, params.keepOpen === true);
++      await sessionTabs.trackOpened(opened, closeOpenedTab);
+       await context.onTabActivity(
+         readStringValue(asNullableRecord(opened)?.targetId),
+         readStringValue(asNullableRecord(opened)?.resolvedProfile),
+       );
+       return formatBrowserExternalToolResult({
+         kind: "tabs",
+-        payload: stripBrowserOpenInternalMetadata(
+-          params.keepOpen ? { ...asNullableRecord(opened), keepOpen: true } : opened,
+-        ),
++        payload: stripBrowserOpenInternalMetadata(opened),
+       });
+     }
+     case "focus": {
+@@ -169,11 +167,6 @@ export async function executeBrowserTabAction(context: {
+       const result = await browserFocusTab(proxyRequest ?? baseUrl, targetId, clientOptions);
+       return await trackedTabResult(result, targetId);
+     }
+-    case "retain": {
+-      const targetId = readStringParam(params, "targetId", { required: true });
+-      await sessionTabs.retain(targetId, params.keepOpen === true);
+-      return jsonResult({ ok: true, targetId, keepOpen: params.keepOpen });
+-    }
+     case "close": {
+       const targetId = readStringParam(params, "targetId");
+       const result = targetId
+diff --git a/extensions/browser/src/browser-tool-session-tabs.test.ts b/extensions/browser/src/browser-tool-session-tabs.test.ts
+index 158bc7eb4b8b27517cb92f0580bdd574ed7f3063..27e1b46afb2ba99116a26504d3ccbeb110c09435 100644
+--- a/extensions/browser/src/browser-tool-session-tabs.test.ts
++++ b/extensions/browser/src/browser-tool-session-tabs.test.ts
+@@ -16,85 +16,12 @@ describe("browser tool tab persistence", () => {
+     browserConfigMocks.resolveBrowserConfig.mockReturnValue({
+       enabled: true,
+       controlPort: 18791,
+-      profiles: {
+-        user: { driver: "existing-session", attachOnly: true, color: "#00AA00" },
+-        chrome: { driver: "extension", attachOnly: true, color: "#00AA00" },
+-      },
++      profiles: { user: { driver: "existing-session", attachOnly: true, color: "#00AA00" } },
+       defaultProfile: "openclaw",
+       actionTimeoutMs: 60_000,
+     });
+   });
+ 
+-  it.each(["user", "chrome"])(
+-    "registers follow-up retention on %s and later restores automatic cleanup",
+-    async (profile) => {
+-      browserClientMocks.browserOpenTab.mockResolvedValueOnce({
+-        targetId: "owned-tab",
+-        resolvedProfile: profile,
+-        url: "https://example.com",
+-      });
+-      const tool = createBrowserTool({ agentSessionKey: "agent:main:main" });
+-      const opened = await tool.execute("open", {
+-        action: "open",
+-        target: "host",
+-        profile,
+-        targetUrl: "https://example.com",
+-        keepOpen: true,
+-      });
+-      expect(sessionTabRegistryMocks.trackSessionBrowserTab).toHaveBeenCalledExactlyOnceWith(
+-        expect.objectContaining({
+-          sessionKey: "agent:main:main",
+-          targetId: "owned-tab",
+-          profile,
+-          keepOpen: true,
+-        }),
+-      );
+-      expect(opened.details).toMatchObject({ keepOpen: true });
+-      expect(
+-        (
+-          await tool.execute("release", {
+-            action: "retain",
+-            target: "host",
+-            profile,
+-            targetId: "owned-tab",
+-            keepOpen: false,
+-          })
+-        ).details,
+-      ).toEqual({ ok: true, targetId: "owned-tab", keepOpen: false });
+-      expect(sessionTabRegistryMocks.setSessionBrowserTabKeepOpen).toHaveBeenCalledExactlyOnceWith(
+-        expect.objectContaining({
+-          sessionKey: "agent:main:main",
+-          targetId: "owned-tab",
+-          profile,
+-          keepOpen: false,
+-        }),
+-      );
+-      expect(sessionTabRegistryMocks.untrackSessionBrowserTab).not.toHaveBeenCalled();
+-    },
+-  );
+-
+-  it("refuses invalid retention before creating a page or changing another lifetime", async () => {
+-    for (const args of [
+-      { action: "retain", targetId: "t1" },
+-      { action: "open", targetUrl: "https://example.com", keepOpen: "true" },
+-      { action: "close", targetId: "t1", keepOpen: true },
+-      { action: "open", dashboard: "board", keepOpen: true },
+-    ]) {
+-      await expect(
+-        createBrowserTool({ agentSessionKey: "agent:main:main" }).execute("invalid", args),
+-      ).rejects.toThrow("keepOpen requires");
+-    }
+-    await expect(
+-      createBrowserTool().execute("unowned", {
+-        action: "open",
+-        targetUrl: "https://example.com",
+-        keepOpen: true,
+-      }),
+-    ).rejects.toThrow("keepOpen requires");
+-    expect(browserClientMocks.browserOpenTab).not.toHaveBeenCalled();
+-    expect(sessionTabRegistryMocks.setSessionBrowserTabKeepOpen).not.toHaveBeenCalled();
+-  });
+-
+   it("propagates async activity failure without retrying the completed action", async () => {
+     const trackingError = new Error("404: tab not found");
+     sessionTabRegistryMocks.touchSessionBrowserTab.mockRejectedValueOnce(trackingError);
+diff --git a/extensions/browser/src/browser-tool-session-tabs.ts b/extensions/browser/src/browser-tool-session-tabs.ts
+index 4773d6c4e54bc3276742ba466d27be435997c971..44c0c102c5343cc30127fee13fffb03af6e7686f 100644
+--- a/extensions/browser/src/browser-tool-session-tabs.ts
++++ b/extensions/browser/src/browser-tool-session-tabs.ts
+@@ -9,10 +9,7 @@ import type { BrowserSessionTabRoute } from "./browser/session-tab-route.js";
+ 
+ type SessionTabRegistry = Pick<
+   typeof sessionTabRegistry,
+-  | "trackSessionBrowserTab"
+-  | "touchSessionBrowserTab"
+-  | "untrackSessionBrowserTab"
+-  | "setSessionBrowserTabKeepOpen"
++  "trackSessionBrowserTab" | "touchSessionBrowserTab" | "untrackSessionBrowserTab"
+ >;
+ 
+ function readOpenedTab(result: unknown): {
+@@ -84,9 +81,6 @@ export function createBrowserToolSessionTabs(params: {
+     };
+   };
+   return {
+-    retain: async (targetId: string, keepOpen: boolean): Promise<void> => {
+-      await params.registry.setSessionBrowserTabKeepOpen({ ...identity(targetId), keepOpen });
+-    },
+     touch: async (targetId: string | undefined): Promise<void> => {
+       if (targetId) {
+         await params.registry.touchSessionBrowserTab(identity(targetId));
+@@ -100,7 +94,6 @@ export function createBrowserToolSessionTabs(params: {
+     trackOpened: async (
+       result: unknown,
+       closeTab: (targetId: string, openedProfile?: string) => Promise<void>,
+-      keepOpen?: boolean,
+     ): Promise<void> => {
+       const route = trackedRoute();
+       const fallbackProfile = trackedProfile(route);
+@@ -120,7 +113,6 @@ export function createBrowserToolSessionTabs(params: {
+           ownership:
+             route.kind === "browser-control" && route.baseUrl ? undefined : opened.ownership,
+           aliases: opened.aliases,
+-          ...(keepOpen ? { keepOpen: true } : {}),
+           ...(params.authority ? { authority: params.authority } : {}),
+         });
+       } catch (trackingError) {
+diff --git a/extensions/browser/src/browser-tool.runtime.ts b/extensions/browser/src/browser-tool.runtime.ts
+index e1e34b56f61248398f0e2ce200161a1b8931eec4..2dcfa70ef6d9d1c9c207efb9e32c5c1e9a834ddd 100644
+--- a/extensions/browser/src/browser-tool.runtime.ts
++++ b/extensions/browser/src/browser-tool.runtime.ts
+@@ -78,6 +78,5 @@ export { stageBrowserScreenshotForSharing } from "./browser/screenshot-sharing.j
+ export {
+   touchSessionBrowserTab,
+   trackSessionBrowserTab,
+-  setSessionBrowserTabKeepOpen,
+   untrackSessionBrowserTab,
+ } from "./browser/session-tab-registry.js";
+diff --git a/extensions/browser/src/browser-tool.schema.ts b/extensions/browser/src/browser-tool.schema.ts
+index c56274347593b7c6364fc92702fdd4791f2492db..93a75e6c53c74cd017843c193bf3ff334b028c1e 100644
+--- a/extensions/browser/src/browser-tool.schema.ts
++++ b/extensions/browser/src/browser-tool.schema.ts
+@@ -40,7 +40,6 @@ const BROWSER_TOOL_ACTIONS = [
+   "tabs",
+   "open",
+   "focus",
+-  "retain",
+   "close",
+   "snapshot",
+   "screenshot",
+@@ -149,7 +148,9 @@ function createBrowserActProperties(capabilities: BrowserToolCapabilities) {
+         supportsBatch ? { description: "batch actions." } : {},
+       ),
+     ),
+-    stopOnError: Type.Optional(Type.Boolean(supportsBatch ? { description: "Default true." } : {})),
++    stopOnError: Type.Optional(
++      Type.Boolean(supportsBatch ? { description: "Stop on error; default true." } : {}),
++    ),
+     doubleClick: Type.Optional(Type.Boolean({ description: "Double-click/clickCoords." })),
+     button: Type.Optional(Type.String()),
+     modifiers: Type.Optional(Type.Array(Type.String())),
+@@ -222,7 +223,6 @@ export function createBrowserToolSchema(capabilities: BrowserToolCapabilities) {
+     domains: Type.Optional(Type.Array(Type.String())),
+     targetUrl: Type.Optional(Type.String()),
+     label: Type.Optional(Type.String()),
+-    keepOpen: Type.Optional(Type.Boolean()),
+     limit: optionalPositiveIntegerSchema(),
+     maxChars: optionalNonNegativeIntegerSchema(),
+     mode: optionalStringEnum(BROWSER_SNAPSHOT_MODES),
+diff --git a/extensions/browser/src/browser-tool.tabs.test.ts b/extensions/browser/src/browser-tool.tabs.test.ts
+index 90af7ac27d7fc678c957a61af474dd46f5c5e472..ac002ad4e18725edb02036e2fd02ad6b36b3d01a 100644
+--- a/extensions/browser/src/browser-tool.tabs.test.ts
++++ b/extensions/browser/src/browser-tool.tabs.test.ts
+@@ -44,7 +44,6 @@ vi.mock("./browser-tool.runtime.js", async () => {
+     wrapExternalContent,
+     touchSessionBrowserTab: vi.fn(),
+     trackSessionBrowserTab: vi.fn(),
+-    setSessionBrowserTabKeepOpen: vi.fn(),
+     untrackSessionBrowserTab: vi.fn(),
+   };
+ });
+diff --git a/extensions/browser/src/browser-tool.test-support.ts b/extensions/browser/src/browser-tool.test-support.ts
+index aba79a46b74af882cab01a4a137c52d0947a7728..ddc5b535a101ec338b14425a20a813da7a24b445 100644
+--- a/extensions/browser/src/browser-tool.test-support.ts
++++ b/extensions/browser/src/browser-tool.test-support.ts
+@@ -136,10 +136,7 @@ const browserConfigMocks = vi.hoisted(() => ({
+     if (!profile) {
+       return null;
+     }
+-    const driver =
+-      profile.driver === "existing-session" || profile.driver === "extension"
+-        ? profile.driver
+-        : "openclaw";
++    const driver = profile.driver === "existing-session" ? "existing-session" : "openclaw";
+     if (driver === "existing-session") {
+       return {
+         name,
+@@ -219,7 +216,6 @@ const pathValidationMocks = vi.hoisted(() => ({
+ const sessionTabRegistryMocks = vi.hoisted(() => ({
+   touchSessionBrowserTab: vi.fn(),
+   trackSessionBrowserTab: vi.fn(),
+-  setSessionBrowserTabKeepOpen: vi.fn(),
+   untrackSessionBrowserTab: vi.fn(),
+ }));
+ vi.mock("./browser/session-tab-registry.js", () => sessionTabRegistryMocks);
+diff --git a/extensions/browser/src/browser-tool.ts b/extensions/browser/src/browser-tool.ts
+index 8017d0a0f539e4274a50482bff12628e2271a17f..dc31010ddfd119d74b2b4d1be7cd47dcfcde114e 100644
+--- a/extensions/browser/src/browser-tool.ts
++++ b/extensions/browser/src/browser-tool.ts
+@@ -31,7 +31,6 @@ import {
+   resolveProfile,
+   touchSessionBrowserTab,
+   trackSessionBrowserTab,
+-  setSessionBrowserTabKeepOpen,
+   untrackSessionBrowserTab,
+   jsonResult,
+   callGatewayTool,
+@@ -198,18 +197,6 @@ export function createBrowserTool(
+         ? applyBrowserTabToolBinding(args as Record<string, unknown>, binding)
+         : (args as Record<string, unknown>);
+       const action = readStringParam(params, "action", { required: true });
+-      if (action === "retain" || params.keepOpen !== undefined) {
+-        if (
+-          (action !== "open" && action !== "retain") ||
+-          typeof params.keepOpen !== "boolean" ||
+-          !opts?.agentSessionKey ||
+-          params.dashboard
+-        ) {
+-          throw new Error(
+-            "keepOpen requires open or retain in an owning session, without a dashboard selector",
+-          );
+-        }
+-      }
+       if (!capabilities.actions.some((candidate) => candidate === action)) {
+         throw new Error(
+           `browser action ${JSON.stringify(action)} is unavailable for this run; use an available action such as snapshot, or select a managed browser profile in an unbound run.`,
+@@ -347,9 +334,6 @@ export function createBrowserTool(
+             signal,
+             opts,
+             sessionTabs: {
+-              retain: async () => {
+-                throw new Error("Dashboard owns its context.");
+-              },
+               touch: async () => {},
+               untrack: async () => {},
+               trackOpened: async () => {
+@@ -501,12 +485,7 @@ export function createBrowserTool(
+           return route?.status === "resolved" ? route.profile : undefined;
+         },
+         isHostFallbackActive: proxyRequest?.isHostFallbackActive,
+-        registry: {
+-          touchSessionBrowserTab,
+-          trackSessionBrowserTab,
+-          untrackSessionBrowserTab,
+-          setSessionBrowserTabKeepOpen,
+-        },
++        registry: { touchSessionBrowserTab, trackSessionBrowserTab, untrackSessionBrowserTab },
+       });
+       switch (action) {
+         case "doctor":
 diff --git a/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts b/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
 index def0b9a527c81153b15f77e6fd9d84711df765bc..97527359cb7ed08cda3bf32dac9b66ae0ff2a0e0 100644
 --- a/extensions/browser/src/browser/server-context.idle-retirement.chromium.test.ts
@@ -589,6 +979,1042 @@ index def0b9a527c81153b15f77e6fd9d84711df765bc..97527359cb7ed08cda3bf32dac9b66ae
                  originalPid: running.pid,
                  restartedPid: restarted.pid,
                  retired: true,
+diff --git a/extensions/browser/src/browser/server-context.tab-ops.ts b/extensions/browser/src/browser/server-context.tab-ops.ts
+index 485cb2a22569b00c08bfd83f79f035f733dec2de..9a55a9b971ee8b865019bc53fa4fef0e2e8950d2 100644
+--- a/extensions/browser/src/browser/server-context.tab-ops.ts
++++ b/extensions/browser/src/browser/server-context.tab-ops.ts
+@@ -103,16 +103,10 @@ function normalizeWsUrl(raw: string | undefined, cdpBaseUrl: string): string | u
+  * Durable records and volatile registrations both carry lastUsedAt; durable
+  * native identities also fold in activity observed after the record froze.
+  */
+-async function readProfileTabActivity(profileName: string) {
++async function readProfileTabLastUsedAt(profileName: string): Promise<Map<string, number>> {
+   const profile = normalizeOptionalLowercaseString(profileName);
+   const lastUsedByTarget = new Map<string, number>();
+-  const keptOpenTargets = new Set<string>();
+-  const observe = (
+-    targetId: string,
+-    recordProfile: string | undefined,
+-    lastUsedAt: number,
+-    keepOpen?: boolean,
+-  ) => {
++  const observe = (targetId: string, recordProfile: string | undefined, lastUsedAt: number) => {
+     if (!targetId || normalizeOptionalLowercaseString(recordProfile) !== profile) {
+       return;
+     }
+@@ -120,33 +114,20 @@ async function readProfileTabActivity(profileName: string) {
+     if (previous === undefined || lastUsedAt > previous) {
+       lastUsedByTarget.set(targetId, lastUsedAt);
+     }
+-    if (keepOpen) {
+-      keptOpenTargets.add(targetId);
+-    }
+   };
+   for (const record of await readDurableTabs()) {
+     const observedAt =
+       record.interactionTargetKind === "native"
+         ? readColdNativeActivity(browserSessionTabNativeIdentity(record))
+         : undefined;
+-    observe(
+-      record.nativeTargetId,
+-      record.profile,
+-      Math.max(record.lastUsedAt, observedAt ?? 0),
+-      record.keepOpen,
+-    );
++    observe(record.nativeTargetId, record.profile, Math.max(record.lastUsedAt, observedAt ?? 0));
+   }
+   for (const sessionTabs of volatileTabsBySession().values()) {
+     for (const tab of sessionTabs.values()) {
+-      observe(
+-        tab.targetId,
+-        tab.profile,
+-        tab.lastUsedAt,
+-        tab.route.kind === "browser-control" && !tab.route.baseUrl && tab.keepOpen,
+-      );
++      observe(tab.targetId, tab.profile, tab.lastUsedAt);
+     }
+   }
+-  return { lastUsedByTarget, keptOpenTargets };
++  return lastUsedByTarget;
+ }
+ 
+ /**
+@@ -329,14 +310,13 @@ export function createProfileTabOps({ profile, state, runtime }: TabOpsDeps): Pr
+     }
+ 
+     const retained = await readBrowserDashboardTabs();
+-    const { lastUsedByTarget, keptOpenTargets } = await readProfileTabActivity(profile.name);
+     const candidates = pageTabs.filter(
+       (tab) =>
+         tab.targetId !== keepTargetId &&
+-        !keptOpenTargets.has(tab.targetId) &&
+         !findRetainedBrowserDashboardTab(tab.targetId, profile.name, retained),
+     );
+     const excessCount = pageTabs.length - MANAGED_BROWSER_PAGE_TAB_LIMIT;
++    const lastUsedByTarget = await readProfileTabLastUsedAt(profile.name);
+     const evictionOrder = orderManagedTabEvictionCandidates(candidates, lastUsedByTarget);
+     for (const tab of evictionOrder.slice(0, excessCount)) {
+       options?.signal?.throwIfAborted();
+diff --git a/extensions/browser/src/browser/server-context.tab-selection-state.test.ts b/extensions/browser/src/browser/server-context.tab-selection-state.test.ts
+index e0af035f4939c5cc027e79f42d1d5353ab5cffd5..63ad1faacc139007e061c07e9080ba75054eaf3f 100644
+--- a/extensions/browser/src/browser/server-context.tab-selection-state.test.ts
++++ b/extensions/browser/src/browser/server-context.tab-selection-state.test.ts
+@@ -62,13 +62,11 @@ function retainedDashboardRecord(targetId: string): DurableTabRecord {
+   };
+ }
+ 
+-function seedVolatileTabActivity(
+-  entries: Array<{ targetId: string; lastUsedAt: number; keepOpen?: true }>,
+-) {
++function seedVolatileTabActivity(entries: Array<{ targetId: string; lastUsedAt: number }>) {
+   const sessionKey = "agent:main:eviction";
+   const sessions = volatileTabsBySession();
+   const tabs = sessions.get(sessionKey) ?? new Map<string, VolatileSessionTab>();
+-  for (const { targetId, lastUsedAt, keepOpen } of entries) {
++  for (const { targetId, lastUsedAt } of entries) {
+     const identity = {
+       sessionKey,
+       targetId,
+@@ -81,7 +79,6 @@ function seedVolatileTabActivity(
+       registration: {},
+       trackedAt: lastUsedAt,
+       lastUsedAt,
+-      ...(keepOpen ? { keepOpen } : {}),
+     });
+   }
+   sessions.set(sessionKey, tabs);
+@@ -257,54 +254,48 @@ describe("browser tab selection and ownership", () => {
+     });
+   });
+ 
+-  it.each([false, true])(
+-    "retains dashboard, new and requested follow-up tabs under the managed open cap (follow-up=%s)",
+-    async (followup) => {
+-      vi.spyOn(sessionTabStore, "readBrowserDashboardTabs").mockResolvedValue([
+-        retainedDashboardRecord("OLD1"),
+-      ]);
+-      if (followup) {
+-        seedVolatileTabActivity([{ targetId: "OLD8", lastUsedAt: 0, keepOpen: true }]);
++  it("retains dashboard and just-opened tabs when evicting excess managed tabs", async () => {
++    vi.spyOn(sessionTabStore, "readBrowserDashboardTabs").mockResolvedValue([
++      retainedDashboardRecord("OLD1"),
++    ]);
++    mockCreatedTarget("NEW", "http://127.0.0.1:3009");
++    const closed: string[] = [];
++    const cleanup = Promise.withResolvers<void>();
++    const { openclaw, runtime } = setup(async (url) => {
++      if (url.includes("/json/list")) {
++        return Response.json(makeManagedTabsWithNew({ newFirst: true }));
+       }
+-      mockCreatedTarget("NEW", "http://127.0.0.1:3009");
+-      const closed: string[] = [];
+-      const cleanup = Promise.withResolvers<void>();
+-      const { openclaw, runtime } = setup(async (url) => {
+-        if (url.includes("/json/list")) {
+-          return Response.json(makeManagedTabsWithNew({ newFirst: true }));
+-        }
+-        if (url.includes("/json/version")) {
+-          return Response.json({
+-            webSocketDebuggerUrl:
+-              "ws://127.0.0.1:18800/devtools/browser/MANAGED-BROWSER?auth=fixture-value",
+-          });
+-        }
+-        if (url.includes("/json/close/")) {
+-          closed.push(url);
+-          cleanup.resolve();
+-          return new Response();
+-        }
+-        throw new Error("unexpected fetch: " + url);
+-      });
+-      runtime.running = mockLaunchedChrome(vi.fn(), 1234);
+-      const opened = await openclaw.openTab("http://127.0.0.1:3009");
+-      expect(opened).toMatchObject({
+-        targetId: "NEW",
+-        ownership: {
+-          status: "durable",
+-          nativeTargetId: "NEW",
+-          profileFingerprint: expect.stringMatching(/^sha256:/),
+-          browserInstanceFingerprint: expect.stringMatching(/^sha256:/),
+-        },
+-      });
+-      expect(runtime.lastTargetId).toBe("NEW");
+-      await cleanup.promise;
+-      // Chrome lists targets most-recently-activated first, so the eviction
+-      // walks from the stale end: OLD1 is dashboard-retained, OLD8 is the
+-      // least recently used of the rest, and the fresh NEW tab is kept.
+-      expect(closed).toEqual([`http://127.0.0.1:18800/json/close/${followup ? "OLD7" : "OLD8"}`]);
+-    },
+-  );
++      if (url.includes("/json/version")) {
++        return Response.json({
++          webSocketDebuggerUrl:
++            "ws://127.0.0.1:18800/devtools/browser/MANAGED-BROWSER?auth=fixture-value",
++        });
++      }
++      if (url.includes("/json/close/")) {
++        closed.push(url);
++        cleanup.resolve();
++        return new Response();
++      }
++      throw new Error("unexpected fetch: " + url);
++    });
++    runtime.running = mockLaunchedChrome(vi.fn(), 1234);
++    const opened = await openclaw.openTab("http://127.0.0.1:3009");
++    expect(opened).toMatchObject({
++      targetId: "NEW",
++      ownership: {
++        status: "durable",
++        nativeTargetId: "NEW",
++        profileFingerprint: expect.stringMatching(/^sha256:/),
++        browserInstanceFingerprint: expect.stringMatching(/^sha256:/),
++      },
++    });
++    expect(runtime.lastTargetId).toBe("NEW");
++    await cleanup.promise;
++    // Chrome lists targets most-recently-activated first, so the eviction
++    // walks from the stale end: OLD1 is dashboard-retained, OLD8 is the
++    // least recently used of the rest, and the fresh NEW tab is kept.
++    expect(closed).toEqual(["http://127.0.0.1:18800/json/close/OLD8"]);
++  });
+ 
+   it("orders managed eviction by recorded activity, not CDP listing position", async () => {
+     vi.spyOn(sessionTabStore, "readBrowserDashboardTabs").mockResolvedValue([
+diff --git a/extensions/browser/src/browser/session-tab-cleanup-claim.ts b/extensions/browser/src/browser/session-tab-cleanup-claim.ts
+index fcf13fa9a03601f2d35d367c3fdcdd69af562960..448514854016e4177751687375d0fdece4ad1494 100644
+--- a/extensions/browser/src/browser/session-tab-cleanup-claim.ts
++++ b/extensions/browser/src/browser/session-tab-cleanup-claim.ts
+@@ -165,11 +165,7 @@ async function claimCleanup(
+     tab.storageKey,
+     (current) => {
+       const record = parseBrowserSessionTabRecord(current);
+-      if (
+-        !record ||
+-        !sameBrowserSessionTabRecord(record, tab) ||
+-        (cleanupKind === "sweep" && record.keepOpen)
+-      ) {
++      if (!record || !sameBrowserSessionTabRecord(record, tab)) {
+         return undefined;
+       }
+       return {
+@@ -332,7 +328,6 @@ export async function closeDurableTab(
+         const cutoff = params.completedBefore;
+         return (
+           matchesCleanupAttempt(record, tab, cutoff !== undefined) &&
+-          (tab.cleanupKind === "lifecycle" || !record.keepOpen) &&
+           (cutoff === undefined ||
+             Math.max(
+               record.lastUsedAt,
+diff --git a/extensions/browser/src/browser/session-tab-process-state.ts b/extensions/browser/src/browser/session-tab-process-state.ts
+index 24194ecf862d283ae1edb5ff844222bc7358989d..aa43bb7f391512a7ddfe49f5bb5c7a7e1afdd722 100644
+--- a/extensions/browser/src/browser/session-tab-process-state.ts
++++ b/extensions/browser/src/browser/session-tab-process-state.ts
+@@ -17,7 +17,6 @@ export type VolatileSessionTab = SessionTabInteractionIdentity & {
+   ownership?: BrowserTabOwnership;
+   trackedAt: number;
+   lastUsedAt: number;
+-  keepOpen?: true;
+ };
+ 
+ export function volatileSessionTabTargetKey(
+@@ -34,8 +33,7 @@ export function sameVolatileSessionTab(
+     volatileSessionTabTargetKey(left) === volatileSessionTabTargetKey(right) &&
+     left.sessionKey === right.sessionKey &&
+     left.trackedAt === right.trackedAt &&
+-    left.lastUsedAt === right.lastUsedAt &&
+-    left.keepOpen === right.keepOpen
++    left.lastUsedAt === right.lastUsedAt
+   );
+ }
+ 
+@@ -54,26 +52,6 @@ export function volatileTabsBySession(): Map<string, Map<string, VolatileSession
+   return resolveGlobalMap(volatileStateSymbol);
+ }
+ 
+-export function isVolatileBrowserTabKeptOpen(
+-  targetId: string | undefined,
+-  profile?: string,
+-): boolean {
+-  for (const tabs of volatileTabsBySession().values()) {
+-    for (const tab of tabs.values()) {
+-      if (
+-        tab.keepOpen &&
+-        tab.targetId === targetId &&
+-        tab.profile === profile &&
+-        tab.route.kind === "browser-control" &&
+-        !tab.route.baseUrl
+-      ) {
+-        return true;
+-      }
+-    }
+-  }
+-  return false;
+-}
+-
+ type VolatileTabCleanup = {
+   registrations: VolatileSessionTab[];
+   promise: Promise<number>;
+diff --git a/extensions/browser/src/browser/session-tab-record.ts b/extensions/browser/src/browser/session-tab-record.ts
+deleted file mode 100644
+index 6cf148c1b8d716ae28f817f1b01a95c88aea3350..0000000000000000000000000000000000000000
+--- a/extensions/browser/src/browser/session-tab-record.ts
++++ /dev/null
+@@ -1,108 +0,0 @@
+-import { z } from "zod";
+-
+-const browserSessionTimestampSchema = z.number().finite().nonnegative();
+-const browserProfileAliasSchema = z
+-  .string()
+-  .min(1)
+-  .refine((value) => value === value.trim().toLowerCase());
+-const browserSessionTabRecordSchema = z
+-  .looseObject({
+-    version: z.literal(1),
+-    sessionKey: z.string().min(1),
+-    nativeTargetId: z.string().min(1),
+-    profile: z.string().min(1),
+-    profileAliases: z.array(browserProfileAliasSchema).min(1).optional(),
+-    profileFingerprint: z.string().min(1),
+-    browserInstanceFingerprint: z.string().min(1),
+-    interactionTargetKind: z.enum(["native", "opaque"]),
+-    trackedAt: browserSessionTimestampSchema,
+-    lastUsedAt: browserSessionTimestampSchema,
+-    keepOpen: z.literal(true).optional(),
+-    dashboard: z
+-      .object({
+-        name: z.string().min(1).max(64),
+-        sessionKey: z.string().min(1),
+-        instanceId: z.string().min(1),
+-        agentId: z.string().min(1).optional(),
+-        url: z.string().min(1).max(4096),
+-        state: z.enum(["active", "stopping", "stopped", "released"]),
+-      })
+-      .optional(),
+-    cleanupRequestedAt: browserSessionTimestampSchema.optional(),
+-    cleanupAttemptToken: z.string().min(1).optional(),
+-    cleanupKind: z.enum(["lifecycle", "sweep"]).optional(),
+-  })
+-  .superRefine((record, context) => {
+-    if (record.profileAliases) {
+-      const canonical = [...new Set(record.profileAliases)].toSorted(
+-        compareBrowserSessionTabProfileAliases,
+-      );
+-      if (
+-        canonical.includes(record.profile) ||
+-        !canonical.every((entry, index) => entry === record.profileAliases?.[index])
+-      ) {
+-        context.addIssue({ code: "custom", message: "profile aliases must be canonical" });
+-      }
+-    }
+-    const cleanupFieldCount = [
+-      record.cleanupRequestedAt,
+-      record.cleanupAttemptToken,
+-      record.cleanupKind,
+-    ].filter((value) => value !== undefined).length;
+-    if (cleanupFieldCount !== 0 && cleanupFieldCount !== 3) {
+-      context.addIssue({ code: "custom", message: "cleanup fields must be all present or absent" });
+-    }
+-    if (Object.hasOwn(record, "baseUrl") || Object.hasOwn(record, "interactionTargetId")) {
+-      context.addIssue({ code: "custom", message: "retired browser tab fields are not allowed" });
+-    }
+-  });
+-
+-export type BrowserSessionTabRecord = z.infer<typeof browserSessionTabRecordSchema>;
+-
+-export function compareBrowserSessionTabProfileAliases(left: string, right: string): number {
+-  return left < right ? -1 : left > right ? 1 : 0;
+-}
+-
+-export function parseBrowserSessionTabRecord(value: unknown): BrowserSessionTabRecord | undefined {
+-  const parsed = browserSessionTabRecordSchema.safeParse(value);
+-  return parsed.success ? parsed.data : undefined;
+-}
+-
+-export function sameBrowserSessionTabRecord(
+-  left: BrowserSessionTabRecord,
+-  right: BrowserSessionTabRecord,
+-): boolean {
+-  return (
+-    left.version === right.version &&
+-    left.sessionKey === right.sessionKey &&
+-    left.nativeTargetId === right.nativeTargetId &&
+-    left.profile === right.profile &&
+-    (left.profileAliases?.length ?? 0) === (right.profileAliases?.length ?? 0) &&
+-    (left.profileAliases ?? []).every((alias, index) => alias === right.profileAliases?.[index]) &&
+-    left.profileFingerprint === right.profileFingerprint &&
+-    left.browserInstanceFingerprint === right.browserInstanceFingerprint &&
+-    left.interactionTargetKind === right.interactionTargetKind &&
+-    left.trackedAt === right.trackedAt &&
+-    left.lastUsedAt === right.lastUsedAt &&
+-    left.keepOpen === right.keepOpen &&
+-    left.dashboard?.name === right.dashboard?.name &&
+-    left.dashboard?.sessionKey === right.dashboard?.sessionKey &&
+-    left.dashboard?.instanceId === right.dashboard?.instanceId &&
+-    left.dashboard?.agentId === right.dashboard?.agentId &&
+-    left.dashboard?.url === right.dashboard?.url &&
+-    left.dashboard?.state === right.dashboard?.state &&
+-    left.cleanupRequestedAt === right.cleanupRequestedAt &&
+-    left.cleanupAttemptToken === right.cleanupAttemptToken &&
+-    left.cleanupKind === right.cleanupKind
+-  );
+-}
+-
+-export function withoutBrowserSessionTabCleanup(
+-  record: BrowserSessionTabRecord,
+-): BrowserSessionTabRecord {
+-  const active = { ...record };
+-  delete active.cleanupRequestedAt;
+-  delete active.cleanupAttemptToken;
+-  delete active.cleanupKind;
+-  return active;
+-}
+diff --git a/extensions/browser/src/browser/session-tab-registry.completion-cutoff.test.ts b/extensions/browser/src/browser/session-tab-registry.completion-cutoff.test.ts
+index e62a1dcebc7e16b12e8f64eb0448203b6901dbe4..89407e573d23a602dfa0dbacc324c4a3555bc4bb 100644
+--- a/extensions/browser/src/browser/session-tab-registry.completion-cutoff.test.ts
++++ b/extensions/browser/src/browser/session-tab-registry.completion-cutoff.test.ts
+@@ -1,207 +1,10 @@
+ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+ import { describe, expect, it, vi } from "vitest";
+-import {
+-  clearProcessLocalTabState,
+-  installSessionTabRegistrySqliteHarness,
+-} from "./session-tab-registry.sqlite.test-harness.js";
++import { installSessionTabRegistrySqliteHarness } from "./session-tab-registry.sqlite.test-harness.js";
+ import { durableOwnership } from "./session-tab-registry.sqlite.test-helpers.js";
+-import { dispatchBrowserTabClose } from "./session-tab-store.js";
+ 
+ describe("ordinary final cleanup uses the native durable tab owner", () => {
+-  const { freshRegistry, openStore, installRuntime } = installSessionTabRegistrySqliteHarness();
+-  it.each(["durable", "volatile"] as const)(
+-    "keeps an explicitly retained %s tab across ordinary completion, then closes it at session end",
+-    async (kind) => {
+-      const registry = await freshRegistry(`followup-${kind}`);
+-      const tab = {
+-        sessionKey: "agent:main:main",
+-        targetId: "followup",
+-        profile: "remote",
+-        keepOpen: true,
+-        ...(kind === "durable" ? { ownership: durableOwnership("followup") } : {}),
+-        now: 10,
+-      };
+-      await registry.trackSessionBrowserTab(tab);
+-      const close = vi.fn(async () => {});
+-      expect(
+-        await registry.closeTrackedBrowserTabsForSessions({
+-          sessionKeys: [tab.sessionKey],
+-          completedBefore: 20,
+-          closeTab: close,
+-        }),
+-      ).toBe(0);
+-      expect(close).not.toHaveBeenCalled();
+-      expect(
+-        await registry.closeTrackedBrowserTabsForSessions({
+-          sessionKeys: [tab.sessionKey],
+-          closeTab: close,
+-        }),
+-      ).toBe(1);
+-      expect(close).toHaveBeenCalledOnce();
+-    },
+-  );
+-  it.each(["durable", "volatile"] as const)(
+-    "retains a %s tab through idle and cap cleanup, and releases it without losing custody",
+-    async (kind) => {
+-      const registry = await freshRegistry(`sweep-followup-${kind}`);
+-      const tab = { sessionKey: "agent:main:main", targetId: "followup", profile: "remote" };
+-      await registry.trackSessionBrowserTab({
+-        ...tab,
+-        keepOpen: true,
+-        ...(kind === "durable" ? { ownership: durableOwnership(tab.targetId) } : {}),
+-        now: 10,
+-      });
+-      await registry.trackSessionBrowserTab({ ...tab, targetId: "ordinary", now: 20 });
+-      await registry.trackSessionBrowserTab({ ...tab, targetId: "ordinary2", now: 30 });
+-      const close = vi.fn(async () => {});
+-      expect(
+-        await registry.sweepTrackedBrowserTabs({ now: 40, maxTabsPerSession: 1, closeTab: close }),
+-      ).toBe(1);
+-      expect(close).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "ordinary" }));
+-      expect(
+-        await registry.sweepTrackedBrowserTabs({ now: 100, idleMs: 10, closeTab: close }),
+-      ).toBe(1);
+-      expect(close).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "ordinary2" }));
+-      await registry.setSessionBrowserTabKeepOpen({ ...tab, keepOpen: false });
+-      if (kind === "durable") {
+-        expect(openStore().entries()[0]?.value).not.toHaveProperty("keepOpen");
+-      }
+-      expect(
+-        await registry.closeTrackedBrowserTabsForSessions({
+-          sessionKeys: [tab.sessionKey],
+-          completedBefore: 100,
+-          closeTab: close,
+-        }),
+-      ).toBe(1);
+-      expect(close).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "followup" }));
+-    },
+-  );
+-
+-  it("keeps durable retention on reopen and still permits explicit close", async () => {
+-    const first = await freshRegistry("retained-before-restart");
+-    const tab = { sessionKey: "agent:main:main", targetId: "followup", profile: "remote" };
+-    await first.trackSessionBrowserTab({
+-      ...tab,
+-      ownership: durableOwnership(tab.targetId),
+-      now: 10,
+-    });
+-    await first.setSessionBrowserTabKeepOpen({ ...tab, keepOpen: true });
+-    clearProcessLocalTabState();
+-    await installRuntime();
+-    const resumed = await freshRegistry("retained-after-restart");
+-    const close = vi.fn(async () => {});
+-    expect(
+-      await resumed.closeTrackedBrowserTabsForSessions({
+-        sessionKeys: [tab.sessionKey],
+-        completedBefore: 20,
+-        closeTab: close,
+-      }),
+-    ).toBe(0);
+-    await dispatchBrowserTabClose(tab.targetId, tab.profile, close, { skipRetained: true });
+-    expect(close).not.toHaveBeenCalled();
+-    await dispatchBrowserTabClose(tab.targetId, tab.profile, close);
+-    expect(close).toHaveBeenCalledOnce();
+-    await resumed.untrackSessionBrowserTab(tab);
+-    expect(openStore().entries()).toEqual([]);
+-  });
+-
+-  it.each(["durable", "volatile"] as const)(
+-    "does not adopt foreign or unknown %s targets",
+-    async (kind) => {
+-      const registry = await freshRegistry(`retention-custody-${kind}`);
+-      const tab = { sessionKey: "agent:main:main", targetId: "followup", profile: "remote" };
+-      await registry.trackSessionBrowserTab({
+-        ...tab,
+-        ...(kind === "durable" ? { ownership: durableOwnership(tab.targetId) } : {}),
+-        now: 10,
+-      });
+-      for (const override of [
+-        { sessionKey: "agent:other:main" },
+-        { profile: "other" },
+-        { targetId: "user-tab" },
+-        { route: { kind: "browser-control", baseUrl: "http://127.0.0.1:9999" } as const },
+-      ]) {
+-        await expect(
+-          registry.setSessionBrowserTabKeepOpen({ ...tab, ...override, keepOpen: true }),
+-        ).rejects.toThrow("owned by this session and profile");
+-      }
+-      const close = vi.fn(async () => {});
+-      expect(
+-        await registry.closeTrackedBrowserTabsForSessions({
+-          sessionKeys: [tab.sessionKey],
+-          completedBefore: 20,
+-          closeTab: close,
+-        }),
+-      ).toBe(1);
+-    },
+-  );
+-
+-  it.each(["durable", "volatile"] as const)(
+-    "revokes stale %s cleanup selection when retention wins before admission",
+-    async (kind) => {
+-      const registry = await freshRegistry(`retention-race-${kind}`);
+-      const tab = { sessionKey: "agent:main:main", targetId: "followup", profile: "remote" };
+-      await registry.trackSessionBrowserTab({
+-        ...tab,
+-        ...(kind === "durable" ? { ownership: durableOwnership(tab.targetId) } : {}),
+-        now: 10,
+-      });
+-      const entered = createDeferred<void>();
+-      const release = createDeferred<void>();
+-      const close = vi.fn(async () => {});
+-      const pending = registry.closeTrackedBrowserTabsForSessions({
+-        sessionKeys: [tab.sessionKey],
+-        completedBefore: 20,
+-        closeTab: close,
+-        prepareCurrent: async () => {
+-          entered.resolve();
+-          await release.promise;
+-          return true;
+-        },
+-      });
+-      await entered.promise;
+-      try {
+-        await registry.setSessionBrowserTabKeepOpen({ ...tab, keepOpen: true });
+-      } finally {
+-        release.resolve();
+-      }
+-      expect(await pending).toBe(0);
+-      expect(close).not.toHaveBeenCalled();
+-    },
+-  );
+-
+-  it.each(["durable", "volatile"] as const)(
+-    "refuses late retention after %s cleanup has admitted the close",
+-    async (kind) => {
+-      const registry = await freshRegistry(`retention-too-late-${kind}`);
+-      const tab = { sessionKey: "agent:main:main", targetId: "followup", profile: "remote" };
+-      await registry.trackSessionBrowserTab({
+-        ...tab,
+-        ...(kind === "durable" ? { ownership: durableOwnership(tab.targetId) } : {}),
+-        now: 10,
+-      });
+-      const entered = createDeferred<void>();
+-      const release = createDeferred<void>();
+-      const pending = registry.closeTrackedBrowserTabsForSessions({
+-        sessionKeys: [tab.sessionKey],
+-        completedBefore: 20,
+-        closeTab: async () => {
+-          entered.resolve();
+-          await release.promise;
+-        },
+-      });
+-      await entered.promise;
+-      try {
+-        await expect(
+-          registry.setSessionBrowserTabKeepOpen({ ...tab, keepOpen: true }),
+-        ).rejects.toThrow(/cleanup/);
+-      } finally {
+-        release.resolve();
+-      }
+-      expect(await pending).toBe(1);
+-      expect(openStore().entries()).toEqual([]);
+-    },
+-  );
++  const { freshRegistry, openStore } = installSessionTabRegistrySqliteHarness();
+   it("selects only old unchanged registrations from the completed session", async () => {
+     const registry = await freshRegistry("completion-cutoff-native");
+     const track = (targetId: string, now = 10, sessionKey = "agent:main:main") =>
+diff --git a/extensions/browser/src/browser/session-tab-registry.sqlite.test-helpers.ts b/extensions/browser/src/browser/session-tab-registry.sqlite.test-helpers.ts
+index 0a120108b313c134bae4090256bd27789362ecd9..6a2c324e68a9413e281ed93b53366fa2a94c0ccb 100644
+--- a/extensions/browser/src/browser/session-tab-registry.sqlite.test-helpers.ts
++++ b/extensions/browser/src/browser/session-tab-registry.sqlite.test-helpers.ts
+@@ -16,7 +16,6 @@ type TabIdentity = {
+   profileAliases?: Array<string | undefined>;
+   ownership?: BrowserTabOwnership;
+   aliases?: Array<string | undefined>;
+-  keepOpen?: boolean;
+ };
+ 
+ export type DurableRecord = {
+@@ -30,7 +29,6 @@ export type DurableRecord = {
+   interactionTargetKind: "native" | "opaque";
+   trackedAt: number;
+   lastUsedAt: number;
+-  keepOpen?: true;
+   cleanupRequestedAt?: number;
+   cleanupAttemptToken?: string;
+   cleanupKind?: "lifecycle" | "sweep";
+@@ -75,7 +73,6 @@ export type RegistryModule = {
+   trackSessionBrowserTab(params: TabIdentity & { now?: number }): Promise<DurableTab | undefined>;
+   touchSessionBrowserTab(params: TabIdentity & { now?: number }): Promise<void>;
+   untrackSessionBrowserTab(params: TabIdentity): Promise<void>;
+-  setSessionBrowserTabKeepOpen(params: TabIdentity & { keepOpen: boolean }): Promise<void>;
+   closeTrackedBrowserTabsForSessions(
+     params: CleanupParams & { sessionKeys: Array<string | undefined>; now?: number },
+   ): Promise<number>;
+diff --git a/extensions/browser/src/browser/session-tab-registry.ts b/extensions/browser/src/browser/session-tab-registry.ts
+index be55e9c0cb571e2ab86a91eacf736c596d24be71..4fc0b49fbf7e005b31da4095ed5e2126f1ab7721 100644
+--- a/extensions/browser/src/browser/session-tab-registry.ts
++++ b/extensions/browser/src/browser/session-tab-registry.ts
+@@ -43,7 +43,6 @@ export {
+   filterTrackedSessionBrowserTabs,
+   trackSessionBrowserTab,
+   touchSessionBrowserTab,
+-  setSessionBrowserTabKeepOpen,
+   untrackSessionBrowserTab,
+ } from "./session-tab-tracking.js";
+ 
+@@ -71,7 +70,7 @@ async function performVolatileCleanup(
+   const resolveCurrent = () => {
+     const current = resolveVolatile(candidate)?.tab;
+     return current?.registration === candidate.registration &&
+-      (cleanupKind !== "sweep" || (!current.keepOpen && sameVolatileSessionTab(current, candidate)))
++      (cleanupKind !== "sweep" || sameVolatileSessionTab(current, candidate))
+       ? current
+       : undefined;
+   };
+@@ -350,7 +349,6 @@ export async function closeTrackedBrowserTabsForSessions(
+           : 0;
+       return (
+         !(tab.kind === "durable" && tab.dashboard) &&
+-        !tab.keepOpen &&
+         tab.trackedAt <= cutoff &&
+         Math.max(tab.lastUsedAt, nativeAt) <= cutoff
+       );
+diff --git a/extensions/browser/src/browser/session-tab-store.ts b/extensions/browser/src/browser/session-tab-store.ts
+index 263296bc7dc08ba3b4ea2ac9b4d60dfdf7598893..7c7e055dfd4fb8e29a37288005dd0ab408da87a6 100644
+--- a/extensions/browser/src/browser/session-tab-store.ts
++++ b/extensions/browser/src/browser/session-tab-store.ts
+@@ -22,24 +22,13 @@ import {
+   activeDurableStorageKeys,
+   forgetColdNativeActivity,
+   readColdNativeActivity,
+-  isVolatileBrowserTabKeptOpen,
+ } from "./session-tab-process-state.js";
+-import {
+-  parseBrowserSessionTabRecord,
+-  type BrowserSessionTabRecord,
+-} from "./session-tab-record.js";
+-export {
+-  compareBrowserSessionTabProfileAliases,
+-  parseBrowserSessionTabRecord,
+-  sameBrowserSessionTabRecord,
+-  withoutBrowserSessionTabCleanup,
+-  type BrowserSessionTabRecord,
+-} from "./session-tab-record.js";
+ 
+ const BROWSER_SESSION_TABS_NAMESPACE = "browser.session-tabs";
+ const BROWSER_SESSION_TABS_MAX_ENTRIES = 5_000;
+ const logger = createSubsystemLogger("browser");
+ 
++const browserSessionTimestampSchema = z.number().finite().nonnegative();
+ const browserDashboardStopIntentSchema = z.strictObject({
+   kind: z.literal("dashboard-stop"),
+   version: z.literal(1),
+@@ -51,6 +40,62 @@ const browserDashboardStopIntentSchema = z.strictObject({
+   url: z.string().min(1).max(4096),
+   profile: z.string().min(1),
+ });
++const browserProfileAliasSchema = z
++  .string()
++  .min(1)
++  .refine((value) => value === value.trim().toLowerCase());
++const browserSessionTabRecordSchema = z
++  .looseObject({
++    version: z.literal(1),
++    sessionKey: z.string().min(1),
++    nativeTargetId: z.string().min(1),
++    profile: z.string().min(1),
++    profileAliases: z.array(browserProfileAliasSchema).min(1).optional(),
++    profileFingerprint: z.string().min(1),
++    browserInstanceFingerprint: z.string().min(1),
++    interactionTargetKind: z.enum(["native", "opaque"]),
++    trackedAt: browserSessionTimestampSchema,
++    lastUsedAt: browserSessionTimestampSchema,
++    dashboard: z
++      .object({
++        name: z.string().min(1).max(64),
++        sessionKey: z.string().min(1),
++        instanceId: z.string().min(1),
++        agentId: z.string().min(1).optional(),
++        url: z.string().min(1).max(4096),
++        state: z.enum(["active", "stopping", "stopped", "released"]),
++      })
++      .optional(),
++    cleanupRequestedAt: browserSessionTimestampSchema.optional(),
++    cleanupAttemptToken: z.string().min(1).optional(),
++    cleanupKind: z.enum(["lifecycle", "sweep"]).optional(),
++  })
++  .superRefine((record, context) => {
++    if (record.profileAliases) {
++      const canonical = [...new Set(record.profileAliases)].toSorted(
++        compareBrowserSessionTabProfileAliases,
++      );
++      if (
++        canonical.includes(record.profile) ||
++        !canonical.every((entry, index) => entry === record.profileAliases?.[index])
++      ) {
++        context.addIssue({ code: "custom", message: "profile aliases must be canonical" });
++      }
++    }
++    const cleanupFieldCount = [
++      record.cleanupRequestedAt,
++      record.cleanupAttemptToken,
++      record.cleanupKind,
++    ].filter((value) => value !== undefined).length;
++    if (cleanupFieldCount !== 0 && cleanupFieldCount !== 3) {
++      context.addIssue({ code: "custom", message: "cleanup fields must be all present or absent" });
++    }
++    if (Object.hasOwn(record, "baseUrl") || Object.hasOwn(record, "interactionTargetId")) {
++      context.addIssue({ code: "custom", message: "retired browser tab fields are not allowed" });
++    }
++  });
++
++export type BrowserSessionTabRecord = z.infer<typeof browserSessionTabRecordSchema>;
+ export type BrowserDashboardStopIntent = z.infer<typeof browserDashboardStopIntentSchema>;
+ 
+ function browserDashboardStopIntentKey(
+@@ -367,9 +412,6 @@ export async function dispatchBrowserTabClose<T>(
+     if (assertion) {
+       await assertion;
+     }
+-    if (options.skipRetained && isVolatileBrowserTabKeptOpen(targetId, profile)) {
+-      return undefined;
+-    }
+     return await dispatch();
+   }
+   // Join earlier registration preparation before reserving any close lane;
+@@ -383,11 +425,11 @@ export async function dispatchBrowserTabClose<T>(
+     { runtime },
+     async (store) => {
+       const tabs = (await store.entries()).flatMap(({ key, value }) => {
+-        const tab = parseBrowserSessionTabRecord(value);
+-        return tab && browserSessionTabStorageKey(tab) === key ? [{ ...tab, storageKey: key }] : [];
++        const tab = parseBrowserDashboardTab(key, value);
++        return tab ? [tab] : [];
+       });
+       assertBrowserSessionTabAuthority({ runtime });
+-      if (!targetId && tabs.some((tab) => tab.dashboard)) {
++      if (!targetId && tabs.length > 0) {
+         throw new Error("Cannot verify that this page is not retained by a dashboard");
+       }
+       const retained = targetId
+@@ -396,14 +438,6 @@ export async function dispatchBrowserTabClose<T>(
+       if (retained && options.skipRetained) {
+         return undefined;
+       }
+-      if (
+-        options.skipRetained &&
+-        tabs.some(
+-          (tab) => tab.keepOpen && tab.nativeTargetId === targetId && tab.profile === profile,
+-        )
+-      ) {
+-        return undefined;
+-      }
+       if (retained) {
+         throw new Error(
+           `This tab belongs to dashboard ${retained.dashboard!.name}. Stop it from the dashboard or use browser action=close dashboard=${retained.dashboard!.name}.`,
+@@ -415,9 +449,6 @@ export async function dispatchBrowserTabClose<T>(
+       }
+       assertBrowserSessionTabAuthority({ runtime });
+       const pending = getPendingBrowserDashboardRegistrations(runtime, targetId, profile);
+-      if (options.skipRetained && isVolatileBrowserTabKeptOpen(targetId, profile)) {
+-        return undefined;
+-      }
+       for (const { registration } of pending) {
+         registration.closeDispatched = true;
+       }
+@@ -451,6 +482,53 @@ export function browserSessionTabNativeIdentity(
+   return `${record.sessionKey}\u0000${record.profile}\u0000${record.nativeTargetId}`;
+ }
+ 
++export function compareBrowserSessionTabProfileAliases(left: string, right: string): number {
++  return left < right ? -1 : left > right ? 1 : 0;
++}
++
++export function parseBrowserSessionTabRecord(value: unknown): BrowserSessionTabRecord | undefined {
++  const parsed = browserSessionTabRecordSchema.safeParse(value);
++  return parsed.success ? parsed.data : undefined;
++}
++
++export function sameBrowserSessionTabRecord(
++  left: BrowserSessionTabRecord,
++  right: BrowserSessionTabRecord,
++): boolean {
++  return (
++    left.version === right.version &&
++    left.sessionKey === right.sessionKey &&
++    left.nativeTargetId === right.nativeTargetId &&
++    left.profile === right.profile &&
++    (left.profileAliases?.length ?? 0) === (right.profileAliases?.length ?? 0) &&
++    (left.profileAliases ?? []).every((alias, index) => alias === right.profileAliases?.[index]) &&
++    left.profileFingerprint === right.profileFingerprint &&
++    left.browserInstanceFingerprint === right.browserInstanceFingerprint &&
++    left.interactionTargetKind === right.interactionTargetKind &&
++    left.trackedAt === right.trackedAt &&
++    left.lastUsedAt === right.lastUsedAt &&
++    left.dashboard?.name === right.dashboard?.name &&
++    left.dashboard?.sessionKey === right.dashboard?.sessionKey &&
++    left.dashboard?.instanceId === right.dashboard?.instanceId &&
++    left.dashboard?.agentId === right.dashboard?.agentId &&
++    left.dashboard?.url === right.dashboard?.url &&
++    left.dashboard?.state === right.dashboard?.state &&
++    left.cleanupRequestedAt === right.cleanupRequestedAt &&
++    left.cleanupAttemptToken === right.cleanupAttemptToken &&
++    left.cleanupKind === right.cleanupKind
++  );
++}
++
++export function withoutBrowserSessionTabCleanup(
++  record: BrowserSessionTabRecord,
++): BrowserSessionTabRecord {
++  const active = { ...record };
++  delete active.cleanupRequestedAt;
++  delete active.cleanupAttemptToken;
++  delete active.cleanupKind;
++  return active;
++}
++
+ async function retireColdNativeActivityIfUnowned(
+   store: ReturnType<typeof getBrowserSessionTabStore>,
+   identity: string | undefined,
+@@ -549,7 +627,7 @@ async function withBrowserSessionTabNativeIdentities<T>(
+   operation: () => Promise<T>,
+ ): Promise<T> {
+   const dashboardTargets = records.flatMap((record) =>
+-    record?.dashboard || record?.keepOpen ? [record.nativeTargetId] : [],
++    record?.dashboard ? [record.nativeTargetId] : [],
+   );
+   const runOperation = () =>
+     dashboardTargets.length > 0
+diff --git a/extensions/browser/src/browser/session-tab-sweep-selection.ts b/extensions/browser/src/browser/session-tab-sweep-selection.ts
+index e495bf3163b90bddc8490882608518fb63271959..b312368049598c2c9c51a32c56989d04bfb0e941 100644
+--- a/extensions/browser/src/browser/session-tab-sweep-selection.ts
++++ b/extensions/browser/src/browser/session-tab-sweep-selection.ts
+@@ -72,9 +72,6 @@ export function selectStaleTrackedTabs(params: {
+       tab.cleanupKind === "sweep" &&
+       observedAt !== undefined &&
+       observedAt >= (tab.cleanupRequestedAt ?? 0);
+-    if (tab.keepOpen && !(tab.kind === "durable" && tab.cleanupKind === "lifecycle")) {
+-      continue;
+-    }
+     // A prior lifecycle failure remains mandatory even when normal periodic
+     // sweeps exclude that terminated session.
+     if (tab.kind === "durable" && tab.cleanupAttemptToken && !activitySupersedesSweep) {
+diff --git a/extensions/browser/src/browser/session-tab-tracking.ts b/extensions/browser/src/browser/session-tab-tracking.ts
+index 86ce3df48751e3092781915a34caea8509f2de55..fe15a2cdc376332c0128cdc218dbb977e17bf6e2 100644
+--- a/extensions/browser/src/browser/session-tab-tracking.ts
++++ b/extensions/browser/src/browser/session-tab-tracking.ts
+@@ -30,7 +30,6 @@ import {
+   type SessionTabInteractionIdentity as InteractionIdentity,
+   type VolatileSessionTab as VolatileTab,
+   volatileSessionTabTargetKey,
+-  volatileTabCleanupByTarget,
+   volatileTabsBySession,
+ } from "./session-tab-process-state.js";
+ import type { BrowserSessionTabRoute } from "./session-tab-route.js";
+@@ -64,7 +63,6 @@ type SessionTabParams = {
+   ownership?: BrowserTabOwnership;
+   aliases?: Array<string | undefined>;
+   dashboard?: BrowserSessionTabRecord["dashboard"];
+-  keepOpen?: boolean;
+   authority?: BrowserSessionTabAuthority;
+ };
+ 
+@@ -277,7 +275,6 @@ function upsertVolatile(
+   profileAliases: Array<string | undefined>,
+   ownership: BrowserTabOwnership | undefined,
+   now: number,
+-  keepOpen?: boolean,
+ ): void {
+   const state = volatileTabsBySession();
+   const tabs = state.get(identity.sessionKey) ?? new Map<string, VolatileTab>();
+@@ -290,7 +287,6 @@ function upsertVolatile(
+     ...(ownership ? { ownership } : {}),
+     trackedAt: existing?.trackedAt ?? now,
+     lastUsedAt: now,
+-    ...((keepOpen ?? existing?.keepOpen) ? { keepOpen: true as const } : {}),
+   });
+   state.set(identity.sessionKey, tabs);
+   rememberVolatileTabAliases(identity, aliases, key, profileAliases);
+@@ -373,14 +369,7 @@ export async function trackSessionBrowserTab(
+   const profileAliases = normalizeProfileAliases(params.profileAliases);
+   const now = params.now ?? Date.now();
+   if (isVolatileRoute(identity.route)) {
+-    upsertVolatile(
+-      identity,
+-      params.aliases ?? [],
+-      profileAliases,
+-      params.ownership,
+-      now,
+-      params.keepOpen,
+-    );
++    upsertVolatile(identity, params.aliases ?? [], profileAliases, params.ownership, now);
+     return undefined;
+   }
+   const register = async (
+@@ -390,14 +379,7 @@ export async function trackSessionBrowserTab(
+     if (!ownership) {
+       if (
+         !(await clearDurableForVolatile(identity, authority, () => {
+-          upsertVolatile(
+-            identity,
+-            params.aliases ?? [],
+-            profileAliases,
+-            params.ownership,
+-            now,
+-            params.keepOpen,
+-          );
++          upsertVolatile(identity, params.aliases ?? [], profileAliases, params.ownership, now);
+         }))
+       ) {
+         throw new Error("durable browser tab changed during non-durable transition");
+@@ -435,7 +417,6 @@ export async function trackSessionBrowserTab(
+             identity.targetId === ownership.nativeTargetId ? "native" : "opaque",
+           trackedAt: existing?.trackedAt ?? now,
+           lastUsedAt: now,
+-          ...((params.keepOpen ?? existing?.keepOpen) ? { keepOpen: true as const } : {}),
+           ...(params.dashboard
+             ? { dashboard: params.dashboard }
+             : existing?.dashboard
+@@ -482,80 +463,6 @@ function canonicalStorageKey(
+     : resolveDurableTabAlias(identity);
+ }
+ 
+-/** Change cleanup preference only for an already-owned, unambiguous tab. */
+-export async function setSessionBrowserTabKeepOpen(
+-  input: SessionTabParams & { keepOpen: boolean },
+-): Promise<void> {
+-  const authority = captureBrowserSessionTabAuthority(input.authority);
+-  const identity = resolveInteractionIdentity(input);
+-  if (!identity) {
+-    throw new Error("Tab retention requires this session's target and profile");
+-  }
+-  await ensureBrowserSessionTabStoreReady(authority.runtime);
+-  const key = isVolatileRoute(identity.route) ? undefined : canonicalStorageKey(input, identity);
+-  const update = async (tab?: BrowserSessionTabSelection) => {
+-    const record = tab ? parseBrowserSessionTabRecord(await tab.lookup()) : undefined;
+-    if (authority.runtime) {
+-      assertBrowserSessionTabAuthority(authority);
+-    } else {
+-      authority.assertCurrent?.();
+-    }
+-    const volatile = resolveVolatile(identity);
+-    const selection = selectSessionTabToUntrack({
+-      volatileAvailable: Boolean(volatile),
+-      durableAvailable: Boolean(record),
+-      hasVolatileCandidate: Boolean(volatile) || hasVolatileTabAlias(identity),
+-      hasDurableCandidate: Boolean(record) || hasDurableTabAlias(identity),
+-      volatileIsExact: volatile?.isExact ?? false,
+-      durableIsExact: Boolean(record && resolveDurableTabExact(identity) === key),
+-      hasVolatileExactCandidate: hasVolatileTabExact(identity),
+-      hasDurableExactCandidate: hasDurableTabExact(identity),
+-    });
+-    if (selection === "volatile" && volatile) {
+-      if (volatileTabCleanupByTarget().has(volatileSessionTabTargetKey(volatile.tab))) {
+-        throw new Error("Tab cleanup has already started; retention was not changed");
+-      }
+-      const next = { ...volatile.tab };
+-      if (input.keepOpen) {
+-        next.keepOpen = true;
+-      } else {
+-        delete next.keepOpen;
+-      }
+-      volatileTabsBySession().get(identity.sessionKey)!.set(volatile.tabKey, next);
+-      return;
+-    }
+-    if (selection !== "durable" || !tab || !record) {
+-      throw new Error(
+-        "Tab retention requires an unambiguous tab owned by this session and profile",
+-      );
+-    }
+-    if (record.dashboard || record.cleanupAttemptToken) {
+-      throw new Error("The dashboard or an admitted cleanup owns this tab's lifetime");
+-    }
+-    const committed = await tab.update((current) => {
+-      const selected = parseBrowserSessionTabRecord(current);
+-      if (!selected || !sameBrowserSessionTabRecord(selected, record)) {
+-        return undefined;
+-      }
+-      const next = { ...selected };
+-      if (input.keepOpen) {
+-        next.keepOpen = true;
+-      } else {
+-        delete next.keepOpen;
+-      }
+-      return next;
+-    });
+-    if (!committed) {
+-      throw new Error("Tab ownership changed; retention was not changed");
+-    }
+-  };
+-  if (key) {
+-    await withBrowserSessionTabSelection(key, authority, update);
+-  } else {
+-    await update();
+-  }
+-}
+-
+ export async function touchSessionBrowserTab(
+   input: SessionTabParams & { now?: number },
+ ): Promise<void> {
 diff --git a/extensions/memory-core/index.ts b/extensions/memory-core/index.ts
 index 1e390bd25f89012e5e6b925fd85d7edce62602f3..fa1afb002e5759f1daad7ee10c46bc93bf5d71a8 100644
 --- a/extensions/memory-core/index.ts
@@ -3069,6 +4495,34 @@ index ef55dceddfb47837c29e50e1f3251858f7001ed5..00000000000000000000000000000000
 -    }
 -  },
 -);
+diff --git a/src/agents/system-prompt-messaging.ts b/src/agents/system-prompt-messaging.ts
+index c43e573199bb381a8d14165f2cd1d8ca225f1de1..16904c10a81c3be24185433cca91229211ab8b48 100644
+--- a/src/agents/system-prompt-messaging.ts
++++ b/src/agents/system-prompt-messaging.ts
+@@ -43,7 +43,7 @@ export function buildMessagingSection(params: {
+   const messageToolTargetInstruction = `- ${buildMessageToolTargetGuidance(params.requireExplicitMessageTarget === true)}`;
+   const routingGuidance = [
+     "- OpenClaw messaging: use available messaging tools, never shell commands, the CLI, curl, or direct RPC. Missing messaging tools are not permission to use another route.",
+-    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments back to a child merely to confirm its completion or repeat its completion report.",
++    "- Subagents return results through their accepted completion path; parents relay required coordination. Do not send acknowledgments or duplicate completion reports.",
+     "- Other services (e.g. email): user-authorized CLI/API use is allowed; normal tool permissions and approvals still apply.",
+   ];
+   if (params.isMinimal) {
+diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
+index 7f6ab3b73ed952bec8ef2d7fee221efaea21f3b6..83d1ea03c7d7766b63f87571479aeebf521fc23f 100644
+--- a/src/agents/system-prompt.ts
++++ b/src/agents/system-prompt.ts
+@@ -682,8 +682,8 @@ export function buildAgentSystemPrompt(params: {
+           ? [providerSectionOverrides.tool_call_style]
+           : [
+               "## Tool Call Style",
+-              "Before substantial multi-step tool work on an interactive user request, give a brief acknowledgment of the concrete work you are starting. Keep individual routine low-risk calls silent.",
+-              "Narrate individual steps only when complex, sensitive/destructive, or requested; task-level progress updates are separate.",
++              "Routine low-risk: call silently.",
++              "Narrate only complex, sensitive/destructive, or requested steps.",
+               "First-class tool exists: use it; never ask user for equivalent CLI/slash.",
+               "/approve is user command; never execute via shell/tool.",
+               "allow-once covers only that exact command; later commands need their own exec policy decision.",
 diff --git a/src/agents/tools/computer-tool-schema.ts b/src/agents/tools/computer-tool-schema.ts
 index fd5acd9feaf716f36b01e456513dd20a09d0fc0b..d1c4f58646862b3888c06395e7db942fd1451250 100644
 --- a/src/agents/tools/computer-tool-schema.ts
@@ -3103,6 +4557,159 @@ index fd5acd9feaf716f36b01e456513dd20a09d0fc0b..d1c4f58646862b3888c06395e7db942f
      url: Type.Optional(Type.String()),
      inputRoute: optionalStringEnum(["trusted", "dom_event"] as const),
      mode: optionalStringEnum(["insert_text", "keystrokes"] as const),
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
+index 90bf82ce7535c43164f7c5d8e5aadd42ed384ec0..9c2aa83b782523b81714be4f7af67c84af703e5f 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.direct.test.ts
+@@ -30,7 +30,6 @@ import * as gatewayWork from "../../process/gateway-work-admission.js";
+ import type { Deferred } from "../../shared/deferred.js";
+ import * as queueHelpers from "../../utils/queue-helpers.js";
+ import { scheduleFollowupDrainAfterAgentRun } from "./agent-runner-core.js";
+-import { resolveReplySteeringAuthority } from "./agent-runner-fallback-authority.js";
+ import { runActiveReplySteer, type ActiveReplySteerParams } from "./agent-runner-steer-adoption.js";
+ import { MessageInjectionAuthorityError } from "./message-injection-authority.js";
+ import { enqueueFollowupRun } from "./queue.js";
+@@ -69,7 +68,6 @@ async function withDirectRequester(
+     sessionKey,
+     runId,
+     agentId: "main",
+-    agentDir: "/tmp",
+     config: {},
+     sessionFile: "/tmp/direct-requester-session.jsonl",
+     workspaceDir: "/tmp/direct-requester-workspace",
+@@ -194,7 +192,7 @@ function correction(fingerprint: string, messageId: string): ActiveReplySteerPar
+     resolvedQueue: { mode: "steer", debounceMs: 0 },
+     restartRecoverySourceTurnId: "discord:" + messageId,
+     runFollowup: vi.fn(async () => {}),
+-    sessionCtx: { InboundEventKind: "user_request", Provider: "discord" },
++    sessionCtx: { InboundEventKind: "user_request" },
+     sessionKey,
+     touchActiveSessionEntry: vi.fn(async () => {}),
+     typing,
+@@ -203,20 +201,6 @@ function correction(fingerprint: string, messageId: string): ActiveReplySteerPar
+   };
+ }
+ 
+-function inboundCorrection(messageId: string, toolsAllow?: string[]): ActiveReplySteerParams {
+-  const input = correction("not-yet-prepared", messageId);
+-  input.followupRun.toolsAllow = toolsAllow;
+-  input.followupRun.run = {
+-    ...input.followupRun.run,
+-    sessionFile: "/tmp/direct-requester-session.jsonl",
+-    workspaceDir: "/tmp/direct-requester-workspace",
+-    // Discord owner ingress can request reply traces; the direct continuation
+-    // has no reply-dispatch trace surface. Derive both authorities independently.
+-    traceAuthorized: true,
+-  };
+-  return { ...input, ...resolveReplySteeringAuthority(input.followupRun, undefined) };
+-}
+-
+ describe("direct requester continuation steering", () => {
+   it("releases admission and typing when retained presentation capture rejects", async () => {
+     await withDirectRequester(async (owner) => {
+@@ -408,54 +392,45 @@ describe("direct requester continuation steering", () => {
+     }
+   });
+ 
+-  it.each([false, true])(
+-    "rejects a restrictive caller with pending target=%s",
+-    async (pendingTarget) => {
+-      await withDirectRequester(async (owner) => {
+-        const entry: ChatAbortControllerEntry = {
+-          kind: "agent",
+-          controller: new AbortController(),
+-          operationalRunInstance: owner.instance,
+-          lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-          sessionKey,
+-          sessionId,
+-          startedAtMs: 1,
+-          expiresAtMs: Number.MAX_SAFE_INTEGER,
+-        };
+-        const entries = new Map([[runId, entry]]);
+-        const input = inboundCorrection(`restricted-correction-${pendingTarget}`, ["read"]);
+-        const captured = capturePendingAgentMessageInjectionTarget({
+-          entries,
+-          sessionKey,
+-          sessionId,
+-        });
+-        expect(captured).toBeDefined();
+-        input.pendingAgentMessageInjectionTarget = pendingTarget ? captured : undefined;
+-        try {
+-          await expect(runActiveReplySteer(input)).resolves.toBe("handled");
+-          expect(owner.injected).not.toHaveBeenCalled();
+-          expect(input.replyOperationRunState?.admission).toEqual({
+-            status: "accepted",
+-            mode: "followup",
+-          });
+-          if (pendingTarget) {
+-            expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
+-            expect(input.runFollowup).not.toHaveBeenCalled();
+-          }
+-        } finally {
+-          clearFollowupQueueForTest(sessionKey);
+-          removeChatAbortControllerEntry(entries, runId, entry);
+-        }
++  it("keeps a restrictive caller queued instead of borrowing the direct owner's tools", async () => {
++    await withDirectRequester(async (owner) => {
++      const entry: ChatAbortControllerEntry = {
++        kind: "agent",
++        controller: new AbortController(),
++        operationalRunInstance: owner.instance,
++        lifecycleGeneration: getAgentEventLifecycleGeneration(),
++        sessionKey,
++        sessionId,
++        startedAtMs: 1,
++        expiresAtMs: Number.MAX_SAFE_INTEGER,
++      };
++      const entries = new Map([[runId, entry]]);
++      const input = correction(owner.fingerprint, "restricted-correction");
++      input.pendingAgentMessageInjectionTarget = capturePendingAgentMessageInjectionTarget({
++        entries,
++        sessionKey,
++        sessionId,
+       });
+-    },
+-  );
++      expect(input.pendingAgentMessageInjectionTarget).toBeDefined();
++      input.followupRun.toolsAllow = ["read"];
++      input.sessionCtx = { ...input.sessionCtx, Provider: "discord" };
++      try {
++        await expect(runActiveReplySteer(input)).resolves.toBe("handled");
++        expect(owner.injected).not.toHaveBeenCalled();
++        expect(getExistingFollowupQueue(sessionKey)?.items).toContain(input.followupRun);
++        expect(input.runFollowup).not.toHaveBeenCalled();
++      } finally {
++        clearFollowupQueueForTest(sessionKey);
++        removeChatAbortControllerEntry(entries, runId, entry);
++      }
++    });
++  });
+ 
+   it("adopts an owner correction through the live admitted target without a reply operation", async ({
+     signal,
+   }) => {
+     await withDirectRequester(async (owner) => {
+-      const input = inboundCorrection("owner-correction");
+-      expect(input.toolAuthorityFingerprint).not.toBe(owner.fingerprint);
++      const input = correction(owner.fingerprint, "owner-correction");
+       expect(replyRunRegistry.get(sessionKey)).toBeUndefined();
+       expect(replyRunRegistry.resolveCurrentMessageInjectionTarget(sessionKey)?.runId).toBe(runId);
+       const pending = runActiveReplySteer(input);
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+index d5c80ee9dd95e93b25beef0946513886333e38ad..c6b3b2b03352eb1d66db71acc1814a57db3c8f94 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+@@ -267,9 +267,7 @@ export async function runActiveReplySteer(
+           followupRun.run.inputProvenance.kind === "external_user"),
+       terminalReplyExpectation: followupRun.run.terminalReplyExpectation,
+       toolAuthorityFingerprint: params.toolAuthorityFingerprint,
+-      // Both direct-owner capture paths compare inbound caller policy against
+-      // the admitted attempt, which has no reply-dispatch trace surface.
+-      ...(params.pendingAgentMessageInjectionTarget || !activeReplyOperation
++      ...(params.pendingAgentMessageInjectionTarget
+         ? {
+             toolAuthorityOverlay: resolveInboundReplyToolAuthorityOverlay({
+               ctx: params.sessionCtx,
 diff --git a/src/config/zod-schema.agent-defaults-base.ts b/src/config/zod-schema.agent-defaults-base.ts
 index 21cc2c4e945e5b1c1e04232daad501b68e9f9d92..cf663ff28df65711aeca776e78f2200796f476ae 100644
 --- a/src/config/zod-schema.agent-defaults-base.ts
