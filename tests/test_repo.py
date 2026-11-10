@@ -116,6 +116,56 @@ class RepositoryTests(unittest.TestCase):
                 broken["nativeCompanion"]["delta"] = None
                 self.assertFalse(VALIDATOR.companion_uses_native_source(broken))
 
+    def test_normalized_identity_companion_reaches_full_tree_validation(self) -> None:
+        current = json.loads((ROOT / "runtime/manifest.json").read_text())
+        native = current["nativeDistribution"]
+        self.assertNotEqual(native["referenceTree"], native["normalizedTree"])
+        current["nativeCompanion"] = {
+            "platform": "darwin-arm64", "build": "fixture",
+            "sourceCommit": native["referenceCommit"], "sourceTree": native["referenceTree"],
+            "normalizedTree": native["normalizedTree"],
+            "normalization": copy.deepcopy(current["source"]["normalization"]),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "runtime").mkdir()
+            (root / "scripts").mkdir()
+            (root / "scripts/reconstruct_runtime.py").write_bytes(
+                (ROOT / "scripts/reconstruct_runtime.py").read_bytes())
+            for binding in (current["patch"], native["patch"]):
+                (root / "runtime" / binding["file"]).write_bytes(
+                    (ROOT / "runtime" / binding["file"]).read_bytes())
+            path = root / "runtime/manifest.json"
+            required = {"runtime/manifest.json", "scripts/reconstruct_runtime.py"}
+            with patch.object(VALIDATOR, "ROOT", root), \
+                    patch.object(VALIDATOR, "REQUIRED", required), \
+                    patch.object(VALIDATOR, "validate_native_provenance", return_value=[]):
+                path.write_text(json.dumps(current))
+                self.assertEqual([], VALIDATOR.validate_tree())
+                invalid = []
+                broken = copy.deepcopy(current)
+                del broken["nativeCompanion"]["normalization"]
+                invalid.append(broken)
+                broken = copy.deepcopy(current)
+                broken["nativeCompanion"]["normalization"]["paths"] = ["src/other.test.ts"]
+                invalid.append(broken)
+                for broken in invalid:
+                    with self.subTest(normalization=broken["nativeCompanion"].get("normalization")):
+                        path.write_text(json.dumps(broken))
+                        findings = VALIDATOR.validate_tree()
+                        self.assertTrue(any("invalid reconstruction package" in finding.label
+                                            for finding in findings), [finding.label for finding in findings])
+                path.write_text(json.dumps(current))
+                self.assertEqual([], VALIDATOR.validate_expected_reference(
+                    None, None, native["referenceCommit"]))
+                for field in ("sourceCommit", "sourceTree", "normalizedTree"):
+                    with self.subTest(identity=field):
+                        broken = copy.deepcopy(current)
+                        broken["nativeCompanion"][field] = "0" * 40
+                        path.write_text(json.dumps(broken))
+                        self.assertTrue(VALIDATOR.validate_expected_reference(
+                            None, None, native["referenceCommit"]))
+
     def test_readme_reaches_the_complete_documentation_index(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("](docs/README.md)", readme)

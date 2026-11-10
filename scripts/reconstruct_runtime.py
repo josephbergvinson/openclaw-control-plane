@@ -378,8 +378,8 @@ def validate_companion_normalization(companion: NativeCompanion) -> None:
             raise ReconstructionError("Companion normalization paths require a normalized tree")
         return
     require_digest(companion.normalized_tree, 40, "normalized companion tree SHA-1")
-    if companion.patch is None or companion.normalized_tree == companion.source_tree:
-        raise ReconstructionError("Companion normalization requires a distinct bound replay tree and delta")
+    if companion.normalized_tree == companion.source_tree:
+        raise ReconstructionError("Companion normalization requires a distinct bound replay tree")
     validate_companion_paths(companion.normalization_paths)
 
 
@@ -407,12 +407,13 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
         normalization_paths = frozenset(declared)
         validate_companion_paths(normalization_paths)
     if "delta" not in companion:
-        if normalized_tree is not None:
-            raise ReconstructionError("Companion normalization requires a bound delta")
         if (source_commit != native.reference_commit or source_tree != native.reference_tree
-                or source_tree != native.normalized_tree):
-            raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
-        return NativeCompanion(source_commit, source_tree, native.normalized_tree, None, None)
+                or (normalized_tree or source_tree) != native.normalized_tree):
+            raise ReconstructionError("Companion without a delta must exactly match the native distribution commit, raw tree and normalized tree")
+        result = NativeCompanion(source_commit, source_tree, native.normalized_tree, None, None,
+                                 normalized_tree=normalized_tree, normalization_paths=normalization_paths)
+        validate_companion_normalization(result)
+        return result
     delta = companion["delta"]
     if not isinstance(delta, dict) or set(delta) not in ({"distributionTree", "patch"},
                                                        {"distributionTree", "patch", "paths"}):
@@ -661,8 +662,8 @@ def reconstruct(checkout: Path, package: SourcePackage, *, apply: bool = False) 
             if (companion.patch_sha256 is not None
                     or companion.source_commit != package.native.reference_commit
                     or companion.source_tree != package.native.reference_tree
-                    or companion.source_tree != package.native.normalized_tree):
-                raise ReconstructionError("Companion without a delta must exactly match the native distribution commit and tree")
+                    or (companion.normalized_tree or companion.source_tree) != package.native.normalized_tree):
+                raise ReconstructionError("Companion without a delta must exactly match the native distribution commit, raw tree and normalized tree")
         else:
             if not companion.patch or hashlib.sha256(companion.patch).hexdigest() != companion.patch_sha256:
                 raise ReconstructionError("Companion delta does not match its native distribution or SHA-256")

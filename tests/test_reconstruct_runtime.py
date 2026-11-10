@@ -298,6 +298,30 @@ class RuntimeReconstructionTests(unittest.TestCase):
         )
         return replace(package, native=native, companion=companion), contents
 
+    def normalized_identity_companion_package(self):
+        fixture = "src/example.test.ts"
+        RUNTIME.reconstruct(self.checkout, self.package, apply=True)
+        path = self.checkout / fixture
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("// normalized synthetic label\n")
+        self.run_git("add", fixture)
+        raw = self.run_git_bytes("diff", "--cached", "--binary", "--full-index")
+        self.package = replace(self.package, normalized_tree=self.run_git("write-tree"),
+                               patch=raw, patch_sha256=hashlib.sha256(raw).hexdigest())
+        self.run_git("restore", "--staged", "--worktree", "--source=HEAD", "--", ".")
+        package, contents = self.identity_companion_package()
+        with patch.object(RUNTIME, "provision_native_artifact", return_value={"verified": True}):
+            RUNTIME.reconstruct(self.checkout, package, apply=True)
+        path.write_text("// original synthetic label\n")
+        self.run_git("add", fixture)
+        raw_tree = self.run_git("write-tree")
+        self.run_git("restore", "--staged", "--worktree", "--source=HEAD", "--", ".")
+        native = replace(package.native, reference_tree=raw_tree)
+        companion = replace(package.companion, source_tree=raw_tree,
+                            normalized_tree=native.normalized_tree,
+                            normalization_paths=frozenset({fixture}))
+        return replace(package, native=native, companion=companion), contents
+
     def test_identity_companion_verifies_full_native_tree_without_an_empty_patch(self) -> None:
         package, contents = self.identity_companion_package()
         opener = Mock()
@@ -488,8 +512,7 @@ class RuntimeReconstructionTests(unittest.TestCase):
         with self.assertRaisesRegex(RUNTIME.ReconstructionError, "regular package file"):
             RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
 
-    def test_identity_companion_loader_requires_exact_commit_and_both_tree_bindings(self) -> None:
-        package, _ = self.identity_companion_package()
+    def write_identity_companion_package(self, package):
         directory = Path(self.temporary.name) / "identity-package"
         directory.mkdir()
         (directory / "source.patch").write_bytes(package.patch)
@@ -509,8 +532,21 @@ class RuntimeReconstructionTests(unittest.TestCase):
             "nativeCompanion": {"platform": "darwin-arm64", "build": "fixture",
                                 "sourceCommit": package.companion.source_commit, "sourceTree": package.companion.source_tree},
         }
+        if package.companion.normalized_tree is not None:
+            normalization = {"scope": "Synthetic fixture labels only",
+                             "paths": sorted(package.companion.normalization_paths)}
+            manifest["source"]["normalization"] = normalization
+            manifest["nativeCompanion"].update({
+                "normalizedTree": package.companion.normalized_tree,
+                "normalization": dict(normalization),
+            })
         path = directory / "manifest.json"
         path.write_text(json.dumps(manifest))
+        return directory, path, manifest
+
+    def test_identity_companion_loader_requires_exact_commit_and_both_tree_bindings(self) -> None:
+        package, _ = self.identity_companion_package()
+        directory, path, manifest = self.write_identity_companion_package(package)
         self.assertEqual(package, RUNTIME.load_package(directory, native_distribution=True, native_companion=True))
         self.assertEqual(replace(package, companion=None), RUNTIME.load_package(directory, native_distribution=True))
         self.assertEqual({"manifest.json", "source.patch", "native.patch"}, {item.name for item in directory.iterdir()})
@@ -540,6 +576,71 @@ class RuntimeReconstructionTests(unittest.TestCase):
             with self.assertRaises(RUNTIME.ReconstructionError):
                 RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
             self.assertEqual(self.package, RUNTIME.load_package(directory))
+
+    def test_normalized_identity_companion_loads_and_replays_without_a_delta(self) -> None:
+        package, contents = self.normalized_identity_companion_package()
+        directory, _, _ = self.write_identity_companion_package(package)
+        loaded = RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
+        self.assertEqual(package, loaded)
+        self.assertNotEqual(loaded.companion.source_tree, loaded.companion.normalized_tree)
+        self.assertEqual({"manifest.json", "source.patch", "native.patch"},
+                         {item.name for item in directory.iterdir()})
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(contents)
+        with patch.object(RUNTIME, "build_opener", return_value=opener):
+            result = RUNTIME.reconstruct(self.checkout, loaded, apply=True)
+        self.assertEqual(package.native.normalized_tree, self.run_git("write-tree"))
+        self.assertEqual(package.base_commit, self.run_git("rev-parse", "HEAD"))
+        self.assertEqual("// normalized synthetic label\n",
+                         (self.checkout / "src/example.test.ts").read_text())
+        self.assertEqual(package.native.reference_tree, result["nativeCompanion"]["sourceTree"])
+        self.assertEqual(package.native.normalized_tree, result["nativeCompanion"]["normalizedTree"])
+        self.assertEqual(["src/example.test.ts"], result["nativeCompanion"]["normalizationPaths"])
+        self.assertTrue(result["nativeCompanion"]["normalizedTreeVerified"])
+        self.assertNotIn("patchSha256", result["nativeCompanion"])
+        opener.open.assert_called_once()
+        self.assertEqual(contents, (self.checkout / result["nativeDistribution"]["artifact"]["path"]).read_bytes())
+
+    def test_normalized_identity_loader_rejects_identity_and_path_tampering(self) -> None:
+        package, _ = self.normalized_identity_companion_package()
+        directory, path, manifest = self.write_identity_companion_package(package)
+        invalid = []
+        for field in ("sourceCommit", "sourceTree", "normalizedTree"):
+            broken = json.loads(json.dumps(manifest))
+            broken["nativeCompanion"][field] = "6" * 40
+            invalid.append(broken)
+        for field in ("normalizedTree", "normalization"):
+            broken = json.loads(json.dumps(manifest))
+            del broken["nativeCompanion"][field]
+            invalid.append(broken)
+        broken = json.loads(json.dumps(manifest))
+        broken["nativeCompanion"]["normalization"]["paths"] = ["src/other.test.ts"]
+        invalid.append(broken)
+        broken = json.loads(json.dumps(manifest))
+        for section in ("source", "nativeCompanion"):
+            broken[section]["normalization"]["paths"] = ["pnpm-lock.yaml"]
+        invalid.append(broken)
+        for broken in invalid:
+            with self.subTest(companion=broken["nativeCompanion"]):
+                path.write_text(json.dumps(broken))
+                with self.assertRaises(RUNTIME.ReconstructionError):
+                    RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
+        self.assertEqual("", self.run_git("status", "--porcelain"))
+        self.assertEqual(package.base_tree, self.run_git("write-tree"))
+
+    def test_normalized_identity_replay_rejects_forged_tree_before_changes(self) -> None:
+        package, _ = self.normalized_identity_companion_package()
+        invalid = [replace(package.companion, normalized_tree="6" * 40),
+                   replace(package.companion, normalization_paths=frozenset())]
+        with patch.object(RUNTIME, "build_opener") as opener:
+            for companion in invalid:
+                with self.subTest(companion=companion):
+                    with self.assertRaises(RUNTIME.ReconstructionError):
+                        RUNTIME.reconstruct(self.checkout, replace(package, companion=companion), apply=True)
+                    self.assertEqual("", self.run_git("status", "--porcelain"))
+                    self.assertEqual(package.base_tree, self.run_git("write-tree"))
+            opener.assert_not_called()
+        self.assertFalse((self.checkout / "native-package-artifacts").exists())
 
     def test_companion_cli_requires_both_explicit_native_flags(self) -> None:
         for flags in (("--native-companion",), ("--apply", "--native-companion"),
