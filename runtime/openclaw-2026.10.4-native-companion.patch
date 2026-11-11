@@ -1,0 +1,1653 @@
+diff --git a/docs/tools/subagents/tool-reference.md b/docs/tools/subagents/tool-reference.md
+index 95a2172ae477068eb447e5577c80ccd3b0e87cfa..829d34c2d9e84279c9793b0725a9e7130dbbec9f 100644
+--- a/docs/tools/subagents/tool-reference.md
++++ b/docs/tools/subagents/tool-reference.md
+@@ -445,12 +445,7 @@ For an external wait, its controlling parent can send a continuation with
+ 
+ Use `action: "cancel"` with a returned `runId` to stop that native run and its
+ descendants. Cancellation requires current controller authority; read access to
+-history or completion results does not grant control. When the caller is also
+-the selected run's completion requester, cancellation retires its pending
+-completion even if the child already finished. Captured outcomes and results
+-remain available, and other children retain their completion delivery. A
+-controller acting for another requester does not retire that requester's result.
+-ACP session controls,
++history or completion results does not grant control. ACP session controls,
+ not this tool, own ACP cancellation.
+ 
+ Messages and control have distinct effects. `sessions_send` with
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
+index 46f50b19f3ccb45fd252ff78e742a13338557173..fde0c93e6be48f5e6d5ff1f5ce0e67d9fb8db322 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-cancel.test.ts
+@@ -10,7 +10,6 @@ import {
+   invokeChatAbortHandler,
+ } from "../../../gateway/server-methods/chat.abort.test-helpers.js";
+ import { coreGatewayHandlers } from "../../../gateway/server-methods/core-handlers.js";
+-import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
+ import { resetSystemEventsForTest } from "../../../infra/system-events.js";
+ import { createDeferredCore } from "../../../shared/deferred.js";
+ import {
+@@ -18,7 +17,6 @@ import {
+   resolveAdmittedRunActiveAssertion,
+ } from "../../admitted-run-context.js";
+ import { isSubagentRegistryWriteCommand } from "../../subagent-test-fixtures.test-helpers.js";
+-import { createSubagentsTool } from "../../tools/subagents-tool.js";
+ import { killSessionSubagentRuns } from "../registry/subagent-control-kill.js";
+ import { subagentRuns } from "../registry/subagent-registry-memory.js";
+ import { mutateSubagentRuns } from "../registry/subagent-registry-persistence.js";
+@@ -36,11 +34,6 @@ import { loadSubagentRegistryFromSqlite } from "../registry/subagent-registry.st
+ import { testing as registryTesting } from "../registry/subagent-registry.test-helpers.js";
+ import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+ import { resolveSubagentSessionStatus } from "../registry/subagent-session-metrics.js";
+-import {
+-  consumeRequesterFinalAttachment,
+-  promoteRequesterFinalAttachment,
+-  registerRequesterFinalAttachment,
+-} from "../requester-final-attachment.js";
+ import {
+   setSubagentAnnounceDeliveryDepsForTest,
+   type SubagentAnnounceDeliveryTestDeps,
+@@ -77,190 +70,6 @@ afterEach(() => {
+   resetSystemEventsForTest();
+ });
+ 
+-it.each(["selected child", "mixed cohort", "active mixed cohort", "different requester"] as const)(
+-  "native cancel preserves completion ownership for %s",
+-  async (scope) => {
+-    const requesterKey = "agent:main:native-cancel-requester";
+-    const controllerKey =
+-      scope === "different requester" ? "agent:main:native-cancel-controller" : requesterKey;
+-    const mixed = scope === "mixed cohort" || scope === "active mixed cohort";
+-    const active = scope === "active mixed cohort";
+-    const runIds = mixed ? ["selected-review", "kept-review"] : ["selected-review"];
+-    const childKeys = runIds.map((id) => `agent:main:subagent:${id}`);
+-    for (const sessionKey of new Set([requesterKey, controllerKey, ...childKeys])) {
+-      await writeSubagentSessionEntry({
+-        stateDir: fixture.stateDir,
+-        agentId: "main",
+-        sessionKey,
+-        defaultSessionId:
+-          sessionKey === requesterKey ? "native-requester-session" : `${sessionKey}-session`,
+-      });
+-    }
+-    for (const [index, runId] of runIds.entries()) {
+-      await registerSubagentRun({
+-        runId,
+-        childSessionKey: childKeys[index]!,
+-        controllerSessionKey: controllerKey,
+-        requesterSessionKey: requesterKey,
+-        requesterAgentId: "main",
+-        requesterDisplayKey: requesterKey,
+-        task: runId,
+-        cleanup: "keep",
+-        expectsCompletionMessage: true,
+-      });
+-    }
+-    const endedAt = Date.now();
+-    // Completion wins before the model's cancellation reaches the native owner.
+-    // Persist the real completed outcome; cancellation must retire delivery only.
+-    await mutateSubagentRuns(runIds, (rows) => ({
+-      value: undefined,
+-      postimages: new Map(
+-        runIds.map((runId) => {
+-          const entry = structuredClone(rows.get(runId)!);
+-          if (!(active && runId === runIds[0])) {
+-            entry.execution = { status: "terminal", endedAt, outcome: { status: "ok" } };
+-            entry.completion = {
+-              required: true,
+-              resultText: `Result for ${runId}.`,
+-              capturedAt: endedAt,
+-            };
+-            entry.cleanupHandled = true;
+-            entry.cleanupCompletedAt = endedAt;
+-          }
+-          entry.delivery = { status: "pending" };
+-          entry.requesterSettleWake = {
+-            status: "pending",
+-            attemptCount: 0,
+-            batchRunIds: runIds,
+-            requesterYieldBatch: true,
+-            afterRequesterYield: true,
+-            rearmGeneration: 1,
+-          };
+-          return [runId, entry];
+-        }),
+-      ),
+-    }));
+-    const originalAppend = vi.fn(() => true);
+-    const freshAppend = vi.fn(() => true);
+-    const owner = {
+-      requesterAgentId: "main",
+-      requesterSessionKey: requesterKey,
+-      requesterSessionId: "native-requester-session",
+-    };
+-    const attachments: ReturnType<typeof registerRequesterFinalAttachment>[] = [];
+-    const prompts: string[] = [];
+-    const finalText = mixed ? "The uncancelled review is complete." : "Review complete.";
+-    type Dispatch = SubagentAnnounceDeliveryTestDeps["dispatchGatewayMethodInProcess"];
+-    const completion = { dispatch: dispatchGatewayMethodInProcess };
+-    vi.spyOn(completion, "dispatch").mockResolvedValue({
+-      status: "ok",
+-      inputProcessingCompleted: true,
+-      result: { payloads: [{ text: finalText }], meta: { finalAssistantVisibleText: finalText } },
+-    });
+-    const dispatch: Dispatch = async <T>(...args: Parameters<Dispatch>): Promise<T> => {
+-      prompts.push(String(args[1]?.message));
+-      args[2]?.onExecutionStarted?.();
+-      return await completion.dispatch<T>(...args);
+-    };
+-    setSubagentAnnounceDeliveryDepsForTest({ dispatchGatewayMethodInProcess: dispatch });
+-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+-    try {
+-      for (const [requesterTurnRunId, batchRunIds, rearmGeneration, append] of [
+-        ["original-requester-turn", runIds, 1, originalAppend],
+-        ["fresh-human-turn", ["fresh-child"], 2, freshAppend],
+-      ] as const) {
+-        attachments.push(
+-          registerRequesterFinalAttachment({
+-            ...owner,
+-            requesterTurnRunId,
+-            lifecycleGeneration: getAgentEventLifecycleGeneration(),
+-            timeoutMs: 600_000,
+-            append,
+-          }),
+-        );
+-        expect(
+-          promoteRequesterFinalAttachment({
+-            ...owner,
+-            requesterTurnRunId,
+-            batchRunIds,
+-            rearmGeneration,
+-          }),
+-        ).toBe(true);
+-      }
+-      const tool = createSubagentsTool({
+-        config: getRuntimeConfig(),
+-        agentId: "main",
+-        agentSessionKey: controllerKey,
+-      });
+-      for (const callId of ["cancel-review", "cancel-review-again"]) {
+-        const result = await tool.execute(callId, { action: "cancel", runId: runIds[0] });
+-        expect(result.details).toMatchObject({
+-          found: true,
+-          runId: runIds[0],
+-          targetState: {
+-            state: "terminal",
+-            task: active ? { status: "cancelled" } : { status: "succeeded", endedAt },
+-          },
+-          ...(active ? {} : { killed: false }),
+-        });
+-      }
+-      const selected = loadSubagentRegistryFromSqlite().get(runIds[0]!);
+-      expect(selected?.execution).toMatchObject({
+-        status: "terminal",
+-        ...(active
+-          ? { outcome: { status: "error", error: "killed" } }
+-          : { endedAt, outcome: { status: "ok" } }),
+-      });
+-      if (!active) {
+-        expect(selected?.completion?.resultText).toBe(`Result for ${runIds[0]}.`);
+-      }
+-      expect(selected?.killReconciliation?.suppressTaskDelivery).not.toBe(true);
+-      if (scope === "different requester") {
+-        expect(selected?.requesterSettleWake).toBeDefined();
+-        expect(selected?.suppressCompletionDelivery).not.toBe(true);
+-      } else {
+-        expect.soft(selected?.requesterSettleWake).toBeUndefined();
+-        expect.soft(selected?.suppressCompletionDelivery).toBe(true);
+-      }
+-      for (const elapsed of [0, 30_000, 120_000]) {
+-        await vi.advanceTimersByTimeAsync(elapsed);
+-        await registryTesting.sweepOnceForTests();
+-        await fixture.settle();
+-      }
+-      if (scope === "selected child") {
+-        expect(prompts).toEqual([]);
+-        expect(originalAppend).not.toHaveBeenCalled();
+-      } else {
+-        expect(prompts).toHaveLength(1);
+-        expect(prompts[0]).toContain(`Result for ${mixed ? "kept-review" : "selected-review"}.`);
+-        if (mixed) {
+-          expect(prompts[0]).not.toContain("Result for selected-review.");
+-        }
+-        expect(originalAppend).toHaveBeenCalledExactlyOnceWith(finalText);
+-      }
+-      expect(freshAppend).not.toHaveBeenCalled();
+-      expect(
+-        consumeRequesterFinalAttachment({
+-          ...owner,
+-          batchRunIds: ["fresh-child"],
+-          rearmGeneration: 2,
+-          text: "Independent fresh result.",
+-        }),
+-      ).toBe("appended");
+-      expect(freshAppend).toHaveBeenCalledExactlyOnceWith("Independent fresh result.");
+-      const persisted = loadSubagentRegistryFromSqlite().get(runIds[0]!);
+-      expect(persisted?.execution.outcome).toEqual(selected?.execution.outcome);
+-      expect(persisted?.completion?.resultText).toBe(selected?.completion?.resultText);
+-    } finally {
+-      for (const attachment of attachments) {
+-        attachment.revoke();
+-      }
+-      vi.useRealTimers();
+-      await fixture.settle();
+-    }
+-  },
+-);
+-
+ it.each([
+   "pending",
+   "exact private retry",
+@@ -464,7 +273,7 @@ it.each([
+       if (phase === "failed persistence") {
+         expect(result?.status).toBe("error");
+       } else if (phase !== "unrelated turn") {
+-        expect(result).toMatchObject({ status: "ok" });
++        expect(result?.status).toBe("ok");
+       }
+     }
+     execute.resolve();
+diff --git a/src/agents/subagents/completion/session-followup-completion.test.ts b/src/agents/subagents/completion/session-followup-completion.test.ts
+index 7ca005c614b5c22d6c6a343dd526a78a43612b2b..94df27f3d2a38106617f1fd2b9cdf610a94c078c 100644
+--- a/src/agents/subagents/completion/session-followup-completion.test.ts
++++ b/src/agents/subagents/completion/session-followup-completion.test.ts
+@@ -9,7 +9,6 @@ import {
+   SessionFollowupCompletion,
+   getFollowupForCohort,
+   promoteFollowupYield,
+-  reconcileFollowupCompletionBatch,
+ } from "./session-followup-completion.js";
+ 
+ const opened: SessionFollowupCompletion[] = [];
+@@ -66,24 +65,6 @@ function child(generation = 1): SubagentRunRecord {
+   };
+ }
+ 
+-function publishCancellation(batch: readonly SubagentRunRecord[], selected: string[]) {
+-  const remainingIds = batch
+-    .filter((entry) => !selected.includes(entry.runId))
+-    .map((entry) => entry.runId)
+-    .toSorted();
+-  const published = batch.map((entry) => {
+-    const next = copySubagentRunRuntimeOwner(entry, {
+-      ...entry,
+-      ...(selected.includes(entry.runId)
+-        ? { requesterSettleWake: undefined, suppressCompletionDelivery: true }
+-        : { requesterSettleWake: { ...entry.requesterSettleWake!, batchRunIds: remainingIds } }),
+-    });
+-    transferFollowupCohort(entry, next);
+-    return next;
+-  });
+-  return published.filter((entry) => !selected.includes(entry.runId));
+-}
+-
+ async function settleExecution(
+   owner: SessionFollowupCompletion,
+   runId: string,
+@@ -104,144 +85,6 @@ const final = {
+ };
+ 
+ describe("session followup completion", () => {
+-  it.each([false, true])(
+-    "preserves the original followup after selected cohort cancellation (in-place: %s)",
+-    async (inPlace) => {
+-      const f = fixture(inPlace);
+-      const batch = ["C", "D", "E"].map((runId) => {
+-        const entry = child();
+-        entry.runId = runId;
+-        entry.childSessionKey = `${runId}-session`;
+-        entry.requesterSettleWake!.batchRunIds = ["C", "D", "E"];
+-        return entry;
+-      });
+-      f.owner.promoteYield("first", batch, 1);
+-      await settleExecution(f.owner, "first", { status: "ok", yielded: true });
+-      const originalResult = f.owner.take();
+-      let remaining: SubagentRunRecord[] = batch;
+-      const nextInPlace = inPlace ? f.owner.nextInPlace() : undefined;
+-      for (const selected of ["C", "D"]) {
+-        const previous = remaining;
+-        const oldSuccessor = f.owner.successor(previous, inPlace ? "first" : "second", () => {});
+-        const oldReceipt = inPlace
+-          ? f.owner.offerInPlace({ successor: oldSuccessor, prompt: `includes ${selected}` })
+-          : undefined;
+-        remaining = publishCancellation(previous, [selected]);
+-        reconcileFollowupCompletionBatch({
+-          previousBatch: previous,
+-          remainingBatch: remaining,
+-          rearmGeneration: 1,
+-        });
+-        reconcileFollowupCompletionBatch({
+-          previousBatch: previous,
+-          remainingBatch: remaining,
+-          rearmGeneration: 1,
+-        });
+-        expect(() => oldSuccessor.assertCurrent()).toThrow("cohort");
+-        expect(getFollowupForCohort(previous)).toBe(f.owner);
+-        expect(f.release).not.toHaveBeenCalled();
+-        if (oldReceipt) {
+-          await expect(oldReceipt.result).resolves.toMatchObject({ status: "error" });
+-          oldReceipt.joined();
+-        }
+-      }
+-      const nextRunId = inPlace ? "first" : "second";
+-      let successor = f.owner.successor(remaining, nextRunId, () => {});
+-      const receipt = inPlace
+-        ? f.owner.offerInPlace({ successor, prompt: "surviving E result" })
+-        : undefined;
+-      if (nextInPlace) {
+-        const next = await nextInPlace;
+-        expect(next.prompt).toBe("surviving E result");
+-        successor = next.successor;
+-      }
+-      await f.owner.prepareSuccessor(successor);
+-      f.owner.adopt(successor);
+-      f.owner.markAccepted(nextRunId);
+-      await settleExecution(f.owner, nextRunId, final);
+-      await expect(originalResult).resolves.toEqual(final);
+-      await expect(f.owner.take()).rejects.toThrow("consumer");
+-      if (receipt) {
+-        const finished = f.owner.finishInPlace({ status: "ok" });
+-        await expect(receipt.result).resolves.toEqual({ status: "ok" });
+-        receipt.joined();
+-        await finished;
+-      }
+-    },
+-  );
+-
+-  it.each([false, true])(
+-    "settles original waiters when the entire pending cohort is cancelled (in-place: %s)",
+-    async (inPlace) => {
+-      const f = fixture(inPlace);
+-      const c = child();
+-      f.owner.promoteYield("first", [c], 1);
+-      await settleExecution(f.owner, "first", { status: "ok", yielded: true });
+-      const taken = expect(f.owner.take()).rejects.toThrow("cancelled by its requester");
+-      const receipt = inPlace
+-        ? f.owner.offerInPlace({
+-            successor: f.owner.successor([c], "first", () => {}),
+-            prompt: "cancelled result",
+-          })
+-        : undefined;
+-      const next = inPlace
+-        ? expect(f.owner.nextInPlace()).rejects.toThrow("cancelled by its requester")
+-        : undefined;
+-      const remaining = publishCancellation([c], [c.runId]);
+-      reconcileFollowupCompletionBatch({
+-        previousBatch: [c],
+-        remainingBatch: remaining,
+-        rearmGeneration: 1,
+-      });
+-      await taken;
+-      await next;
+-      expect(f.release).toHaveBeenCalledOnce();
+-      expect(getFollowupForCohort([c])).toBe(f.owner);
+-      if (receipt) {
+-        await expect(receipt.result).resolves.toMatchObject({ status: "error" });
+-        receipt.joined();
+-        await f.owner.finishInPlace({ status: "error" });
+-      }
+-    },
+-  );
+-
+-  it("ignores uncommitted, stale, and reconstructed cohort cancellation", async () => {
+-    const f = fixture();
+-    const c = child();
+-    f.owner.promoteYield("first", [c], 1);
+-    await settleExecution(f.owner, "first", { status: "ok", yielded: true });
+-    const successor = f.owner.successor([c], "second", () => {});
+-    for (const params of [
+-      { previousBatch: [c], remainingBatch: [], rearmGeneration: 2 },
+-      { previousBatch: structuredClone([c]), remainingBatch: [], rearmGeneration: 1 },
+-      { previousBatch: [c], remainingBatch: [], rearmGeneration: 1 },
+-    ]) {
+-      reconcileFollowupCompletionBatch(params);
+-      expect(() => successor.assertCurrent()).not.toThrow();
+-    }
+-    expect(f.release).not.toHaveBeenCalled();
+-  });
+-
+-  it("settles a stale original waiter without throwing from acknowledged publication", async () => {
+-    const f = fixture();
+-    const c = child();
+-    f.owner.promoteYield("first", [c], 1);
+-    await settleExecution(f.owner, "first", { status: "ok", yielded: true });
+-    const taken = expect(f.owner.take()).rejects.toThrow();
+-    const remaining = publishCancellation([c], [c.runId]);
+-    rotateAgentRunRegistryLifecycleGeneration();
+-    expect(() =>
+-      reconcileFollowupCompletionBatch({
+-        previousBatch: [c],
+-        remainingBatch: remaining,
+-        rearmGeneration: 1,
+-      }),
+-    ).not.toThrow();
+-    await taken;
+-    expect(f.release).toHaveBeenCalledOnce();
+-    expect(getFollowupForCohort([c])).toBe(f.owner);
+-  });
+-
+   it("resumes two committed cohorts in the original host and joins both native handoffs", async () => {
+     const f = fixture(true);
+     const receipts = [];
+diff --git a/src/agents/subagents/completion/session-followup-completion.ts b/src/agents/subagents/completion/session-followup-completion.ts
+index edf90207159449c38bcd784fec95546fbccf85bb..f0138ae31116ef4656b5ce7fcdecd936c041985b 100644
+--- a/src/agents/subagents/completion/session-followup-completion.ts
++++ b/src/agents/subagents/completion/session-followup-completion.ts
+@@ -10,15 +10,10 @@ import { createDeferredCore, type Deferred } from "../../../shared/deferred.js";
+ import { resolveGlobalSingleton } from "../../../shared/global-singleton.js";
+ import { buildAgentRunTerminalOutcomeFromWaitResult } from "../../agent-run-terminal-outcome.js";
+ import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+-import {
+-  isRequesterYieldCohortMember,
+-  sameRequesterSettleBatch,
+-} from "../registry/subagent-requester-settle-identity.js";
+ import { isSameSubagentRunOwner } from "../registry/subagent-run-generation.js";
+ import { getFollowupCohortOwner, bindFollowupCohortOwner } from "./session-followup-cohort.js";
+ import type {
+   FollowupCohort as Cohort,
+-  FollowupCohortReconciliation,
+   FollowupSettlement,
+   FollowupCompletionOwner,
+   FollowupReply,
+@@ -58,10 +53,6 @@ export function getFollowupForCohort(entries: readonly SubagentRunRecord[]) {
+     ? owner
+     : undefined;
+ }
+-/** The native registry calls this after all cancellation postimages are installed. */
+-export function reconcileFollowupCompletionBatch(params: FollowupCohortReconciliation): void {
+-  getFollowupForCohort(params.previousBatch)?.reconcileCohort(params);
+-}
+ export function promoteFollowupYield(params: {
+   requesterTurnRunId: string;
+   entries: readonly SubagentRunRecord[];
+@@ -102,7 +93,6 @@ export class SessionFollowupCompletion implements FollowupCompletionOwner {
+     offer: FollowupInPlaceOffer;
+     result: Deferred<FollowupInPlaceOutcome>;
+     joined: Deferred;
+-    taken?: true;
+   }> = [];
+ 
+   private constructor(request: FollowupRequest) {
+@@ -342,77 +332,17 @@ export class SessionFollowupCompletion implements FollowupCompletionOwner {
+     if (this.request.continuationMode !== "in-place") {
+       throw new Error("Followup is not in-place");
+     }
+-    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+-    for (;;) {
+-      const next = this.inPlaceNext;
+-      const offer =
+-        deadline === undefined
+-          ? await next.promise
+-          : await raceWithTimeout(next.promise, Math.max(0, deadline - Date.now()), () => {
+-              throw new Error("Original followup deadline expired");
+-            });
+-      this.assertCurrent();
+-      // An acknowledged partial cancellation can replace an already offered
+-      // cohort before the original host resumes. Wait on its surviving offer.
+-      if (next !== this.inPlaceNext) {
+-        continue;
+-      }
+-      offer.successor.assertCurrent();
+-      const pending = this.inPlaceOffers.find((entry) => entry.offer === offer);
+-      if (pending) {
+-        pending.taken = true;
+-      }
+-      this.inPlaceNext = createDeferredCore();
+-      void this.inPlaceNext.promise.catch(() => {});
+-      return offer;
+-    }
+-  }
+-  /** Adopt the current offer in the original host, including cancellation during handoff. */
+-  async resumeInPlace(
+-    timeoutMs: number | undefined,
+-    assertHostCurrent: () => Promise<void>,
+-  ): Promise<FollowupInPlaceOffer> {
+-    const execution = this.execution;
+-    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+-    const wasReduced = (successor: FollowupSuccessor) => {
+-      this.assertCurrent();
+-      const current = this.cohort;
+-      return Boolean(
+-        this.execution === execution &&
+-        execution.yielded &&
+-        !this.terminal &&
+-        successor.owner === this &&
+-        current &&
+-        current !== successor.cohort &&
+-        current.generation === successor.cohort.generation &&
+-        current.entries.length < successor.cohort.entries.length &&
+-        current.entries.every((entry) =>
+-          successor.cohort.entries.some((previous) => isSameSubagentRunOwner(previous, entry)),
+-        ),
+-      );
+-    };
+-    for (;;) {
+-      const remaining = deadline === undefined ? undefined : deadline - Date.now();
+-      if (remaining !== undefined && remaining <= 0) {
+-        throw new Error("Original followup deadline expired");
+-      }
+-      const offered = await this.nextInPlace(remaining);
+-      await assertHostCurrent();
+-      try {
+-        await this.prepareSuccessor(offered.successor);
+-      } catch (error) {
+-        if (wasReduced(offered.successor)) {
+-          continue;
+-        }
+-        throw error;
+-      }
+-      await assertHostCurrent();
+-      if (wasReduced(offered.successor)) {
+-        continue;
+-      }
+-      this.adopt(offered.successor);
+-      return offered;
+-    }
++    const offer =
++      timeoutMs === undefined
++        ? await this.inPlaceNext.promise
++        : await raceWithTimeout(this.inPlaceNext.promise, timeoutMs, () => {
++            throw new Error("Original followup deadline expired");
++          });
++    this.assertCurrent();
++    offer.successor.assertCurrent();
++    this.inPlaceNext = createDeferredCore();
++    void this.inPlaceNext.promise.catch(() => {});
++    return offer;
+   }
+   /** Join native cohort persistence before returning to the original finalizer. */
+   async finishInPlace(outcome: FollowupInPlaceOutcome): Promise<void> {
+@@ -442,61 +372,6 @@ export class SessionFollowupCompletion implements FollowupCompletionOwner {
+       );
+     }
+   }
+-  reconcileCohort({
+-    previousBatch,
+-    remainingBatch,
+-    rearmGeneration,
+-  }: FollowupCohortReconciliation): void {
+-    const cohort = this.cohort;
+-    if (
+-      this.signal.aborted ||
+-      this.terminal ||
+-      !cohort ||
+-      cohort.generation !== rearmGeneration ||
+-      !sameRequesterSettleBatch(cohort.entries, previousBatch) ||
+-      remainingBatch.length >= previousBatch.length ||
+-      new Set(remainingBatch.map((entry) => entry.runId)).size !== remainingBatch.length
+-    ) {
+-      return;
+-    }
+-    const previousIds = previousBatch.map((entry) => entry.runId).toSorted();
+-    const remainingIds = remainingBatch.map((entry) => entry.runId).toSorted();
+-    if (
+-      previousBatch.some(
+-        (entry) => !isRequesterYieldCohortMember(entry, previousIds, rearmGeneration),
+-      ) ||
+-      remainingBatch.some((entry) => !cohort.entries.includes(entry)) ||
+-      cohort.entries.some((entry) =>
+-        remainingBatch.includes(entry)
+-          ? entry.suppressCompletionDelivery === true ||
+-            !isRequesterYieldCohortMember(entry, remainingIds, rearmGeneration)
+-          : entry.suppressCompletionDelivery !== true || entry.requesterSettleWake !== undefined,
+-      )
+-    ) {
+-      return;
+-    }
+-    try {
+-      this.assertCurrent();
+-    } catch (error) {
+-      this.close(error);
+-      return;
+-    }
+-    if (!remainingBatch.length) {
+-      this.close(new Error("Followup completion cohort was cancelled by its requester."));
+-      return;
+-    }
+-    this.cohort = { entries: [...remainingBatch], generation: rearmGeneration };
+-    for (const entry of this.inPlaceOffers) {
+-      if (entry.offer.successor.cohort !== cohort) {
+-        continue;
+-      }
+-      entry.result.resolve({ status: "error", error: "Followup completion cohort was replaced." });
+-      if (!entry.taken) {
+-        this.inPlaceNext = createDeferredCore();
+-        void this.inPlaceNext.promise.catch(() => {});
+-      }
+-    }
+-  }
+   close(error?: unknown) {
+     if (this.signal.aborted) {
+       return;
+diff --git a/src/agents/subagents/completion/session-followup-completion.types.ts b/src/agents/subagents/completion/session-followup-completion.types.ts
+index e0cfff6e0ea8b43e6898823df0a93dccb9481445..8f60282d90075b4bb36f6c74807da54992173980 100644
+--- a/src/agents/subagents/completion/session-followup-completion.types.ts
++++ b/src/agents/subagents/completion/session-followup-completion.types.ts
+@@ -29,11 +29,6 @@ export type FollowupRequest = {
+   completion?: FollowupCompletionOwner;
+ };
+ export type FollowupCohort = { entries: readonly SubagentRunRecord[]; generation: number };
+-export type FollowupCohortReconciliation = {
+-  previousBatch: readonly SubagentRunRecord[];
+-  remainingBatch: readonly SubagentRunRecord[];
+-  rearmGeneration: number;
+-};
+ export type FollowupSuccessor = {
+   owner: FollowupCompletionOwner;
+   cohort: FollowupCohort;
+@@ -76,7 +71,6 @@ export interface FollowupCompletionOwner {
+   ): Promise<FollowupSettlement>;
+   take(timeoutMs?: number): Promise<FollowupReply | undefined>;
+   replaceCohortEntry(previous: SubagentRunRecord, next: SubagentRunRecord): void;
+-  reconcileCohort(params: FollowupCohortReconciliation): void;
+   close(error?: unknown): void;
+   offerInPlace?(offer: FollowupInPlaceOffer): FollowupInPlaceReceipt;
+ }
+diff --git a/src/agents/subagents/registry/subagent-control-kill.ts b/src/agents/subagents/registry/subagent-control-kill.ts
+index ed238459621d05953ee61513ffd325dbe3df606e..7e271f6fa18c6302cb274487c12840a90f14f00e 100644
+--- a/src/agents/subagents/registry/subagent-control-kill.ts
++++ b/src/agents/subagents/registry/subagent-control-kill.ts
+@@ -35,7 +35,6 @@ import {
+   listSubagentRunsForController,
+   listSubagentRunsForRequester,
+ } from "./subagent-registry-read.js";
+-import { cancelSubagentRequesterSettleWake } from "./subagent-registry.js";
+ import type { SubagentRunRecord } from "./subagent-registry.types.js";
+ 
+ async function killSubagentRun(
+@@ -459,8 +458,6 @@ export async function killSubagentRunAdmin(
+     prepareRead?: () => Promise<void> | undefined;
+     beforeSessionKill?: () => boolean;
+     preparePublication?: KillPublicationPreparation<SubagentAdminKillResult>;
+-    /** Only the admitted requester can retire its selected completion obligation. */
+-    cancelRequesterCompletion?: { agentId: string; sessionKey: string };
+   },
+ ): Promise<SubagentAdminKillResult> {
+   const publish = (result: SubagentAdminKillResult): SubagentAdminKillResult => {
+@@ -515,28 +512,6 @@ export async function killSubagentRunAdmin(
+       });
+       const { result: stopResult, cascade } = stopped;
+       rootStopSuperseded = stopResult.superseded === true;
+-      const requester = control?.cancelRequesterCompletion;
+-      if (
+-        requester &&
+-        !rootStopSuperseded &&
+-        !stopResult.declined &&
+-        collectKillErrors([tree]).errors.length === 0 &&
+-        tree.entry.requesterSessionKey === requester.sessionKey &&
+-        resolveSubagentRequesterAgentId(params.cfg, tree.entry) === requester.agentId
+-      ) {
+-        // Execution may have finished before cancellation arrived. Retire only
+-        // this requester's pending result, preserving the actual child outcome.
+-        await cancelSubagentRequesterSettleWake(
+-          tree.entry,
+-          () => {
+-            scope.cancellationControl.assertCurrent();
+-            if (!tree.isCurrent(tree.entry)) {
+-              throw new Error("Subagent completion owner changed during cancellation; retry.");
+-            }
+-          },
+-          "selected-run",
+-        );
+-      }
+       // Descendant cleanup can yield long enough for the target run to finish.
+       // Return the freshest registry state so task cancellation cannot make a stale kill sticky.
+       const targetState = resolveSubagentKillTargetState(tree.entry) ?? stopResult.targetState;
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
+index 04768db6ab2956678819a48e444135762a924cd7..0670b53d64cb78a9c667f42b1c4b0485bf90c962 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle-wake.ts
+@@ -6,15 +6,8 @@ import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state
+ import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
+ import { resolveSubagentRequesterAgentId } from "../../subagent-requester-owner.js";
+ import type { SubagentAnnounceDeliveryResult } from "../announce/subagent-announce-dispatch.js";
+-import { reconcileFollowupCompletionBatch } from "../completion/session-followup-completion.js";
+-import {
+-  reconcileRequesterCronAuthorityBatch,
+-  revokeRequesterCronAuthorityBatch,
+-} from "../requester-cron-authority.js";
+-import {
+-  removeRequesterFinalAttachmentRun,
+-  revokeRequesterFinalAttachment,
+-} from "../requester-final-attachment.js";
++import { revokeRequesterCronAuthorityBatch } from "../requester-cron-authority.js";
++import { revokeRequesterFinalAttachment } from "../requester-final-attachment.js";
+ import { isCompletedRequesterDeliveryBlocked } from "./subagent-delivery-state.js";
+ import { retireSubagentGatewayBinding } from "./subagent-registry-execution-cleanup.js";
+ import type {
+@@ -149,7 +142,6 @@ export async function cancelRequesterSettleWake(
+   context: SubagentLifecycleWakeContext,
+   entry: SubagentRunRecord,
+   assertCurrent: () => void,
+-  scope: "requester-task" | "selected-run" = "requester-task",
+ ): Promise<void> {
+   const wake = entry.requesterSettleWake;
+   if (!wake || entry.execution.status !== "terminal" || entry.pauseReason === "sessions_yield") {
+@@ -158,14 +150,10 @@ export async function cancelRequesterSettleWake(
+   assertCurrent();
+   const workerContext = captureOpenClawStateWorkerContext();
+   const key = getSubagentRunRuntimeKey(entry);
+-  const batchRunIds = wake.batchRunIds ?? [entry.runId];
+-  const cfg = context.options.getRuntimeConfig();
+-  const requesterAgentId = resolveSubagentRequesterAgentId(cfg, entry);
+-  const preservesSiblings = scope === "selected-run";
+   context.cancelledRequesterSettleWakeRuns.add(key);
+   try {
+     await mutateSubagentRuns(
+-      preservesSiblings ? [...new Set([entry.runId, ...batchRunIds])] : [entry.runId],
++      [entry.runId],
+       (rows) => {
+         const current = rows.get(entry.runId);
+         if (
+@@ -183,65 +171,24 @@ export async function cancelRequesterSettleWake(
+         const next = structuredClone(current);
+         next.suppressCompletionDelivery = true;
+         next.requesterSettleWake = undefined;
+-        const previousBatch = (preservesSiblings ? batchRunIds : []).flatMap((runId) => {
+-          const member = rows.get(runId);
+-          return member &&
+-            member.requesterSessionKey === current.requesterSessionKey &&
+-            member.requesterStorePath === current.requesterStorePath &&
+-            resolveSubagentRequesterAgentId(cfg, member) === requesterAgentId &&
+-            member.requesterSettleWake?.rearmGeneration === wake.rearmGeneration &&
+-            isDeepStrictEqual(member.requesterSettleWake?.batchRunIds, wake.batchRunIds)
+-            ? [member]
+-            : [];
+-        });
+-        const remaining = previousBatch.filter((member) => member.runId !== current.runId);
+-        const remainingIds = remaining.map((member) => member.runId).toSorted();
+-        const remainingBatch = remaining.map((member) =>
+-          Object.assign({}, member, {
+-            requesterSettleWake: member.requesterSettleWake && {
+-              ...member.requesterSettleWake,
+-              batchRunIds: remainingIds,
+-            },
+-          }),
+-        );
+-        // Change the cohort in the same native write as the cancellation. Old
+-        // dispatches retain the original membership and cannot adopt this final.
+-        return {
+-          value: { cancelled: next, previousBatch, remainingBatch },
+-          postimages: new Map([next, ...remainingBatch].map((member) => [member.runId, member])),
+-        };
++        return { value: next, postimages: new Map([[next.runId, next]]) };
+       },
+       {
+         runs: context.options.runs,
+         context: workerContext,
+         assertCurrent,
+-        onPublished: (_postimages, { cancelled, previousBatch, remainingBatch }) => {
+-          const published = currentSubagentRunOrObserved(context.options.runs, cancelled);
+-          if (preservesSiblings && wake.rearmGeneration !== undefined) {
+-            const cohort = {
+-              previousBatch,
+-              remainingBatch: remainingBatch.map((member) =>
+-                currentSubagentRunOrObserved(context.options.runs, member),
+-              ),
+-              rearmGeneration: wake.rearmGeneration,
+-            };
+-            reconcileRequesterCronAuthorityBatch(cohort);
+-            reconcileFollowupCompletionBatch(cohort);
+-          }
++        onPublished: (_postimages, published) => {
++          const requesterAgentId = resolveSubagentRequesterAgentId(
++            context.options.getRuntimeConfig(),
++            published,
++          );
+           if (requesterAgentId && wake.requesterYieldBatch && wake.rearmGeneration !== undefined) {
+-            const attachment = {
++            revokeRequesterFinalAttachment({
+               requesterAgentId,
+               requesterSessionKey: published.requesterSessionKey,
+-              requesterSessionId: published.completionRequesterSessionId,
+               batchRunIds: wake.batchRunIds ?? [published.runId],
+               rearmGeneration: wake.rearmGeneration,
+-              runId: published.runId,
+-            };
+-            if (preservesSiblings) {
+-              removeRequesterFinalAttachmentRun(attachment);
+-            } else {
+-              revokeRequesterFinalAttachment(attachment);
+-            }
++            });
+           }
+           releaseRequesterSettleWakeBatch(
+             context,
+diff --git a/src/agents/subagents/registry/subagent-registry-lifecycle.ts b/src/agents/subagents/registry/subagent-registry-lifecycle.ts
+index ffbbd8f06d57bfbf4a57021801da2909d555dbbc..3f1f619dd969c55dc505cde9d11b23b6c075ecb4 100644
+--- a/src/agents/subagents/registry/subagent-registry-lifecycle.ts
++++ b/src/agents/subagents/registry/subagent-registry-lifecycle.ts
+@@ -571,11 +571,8 @@ export class SubagentLifecycleController {
+     scheduleRequesterSettleWake(this, runId, entry);
+   };
+ 
+-  cancelRequesterSettleWake = (
+-    entry: SubagentRunRecord,
+-    assertCurrent: () => void,
+-    scope: "requester-task" | "selected-run" = "requester-task",
+-  ) => cancelRequesterSettleWake(this, entry, assertCurrent, scope);
++  cancelRequesterSettleWake = (entry: SubagentRunRecord, assertCurrent: () => void) =>
++    cancelRequesterSettleWake(this, entry, assertCurrent);
+ 
+   adoptSubagentRunForRequesterTurn = (
+     params: Omit<Parameters<typeof adoptSubagentRunForRequesterTurnInRuns>[0], "runs">,
+diff --git a/src/agents/subagents/requester-cron-authority.test.ts b/src/agents/subagents/requester-cron-authority.test.ts
+index 89efc4cd5c4ddcf8ae2fc73645bf6dd309adfdd5..765c7116977080da2f3605f2131aba7c2433ef9f 100644
+--- a/src/agents/subagents/requester-cron-authority.test.ts
++++ b/src/agents/subagents/requester-cron-authority.test.ts
+@@ -37,7 +37,6 @@ import { isSameSubagentRunOwner } from "./registry/subagent-run-generation.js";
+ import {
+   consumeRequesterCronAuthorityAdmission,
+   prepareRequesterCronAuthority,
+-  reconcileRequesterCronAuthorityBatch,
+   replaceRequesterCronAuthorityEntry,
+   revokeRequesterCronAuthority,
+   revokeRequesterCronAuthorityBatch,
+@@ -198,7 +197,6 @@ function ownBatchTransfer(
+ async function updateBatch(
+   batch: SubagentRunRecord[],
+   update: (drafts: SubagentRunRecord[]) => void,
+-  afterPublished?: () => void,
+ ): Promise<void> {
+   const observed = [...batch];
+   await mutateSubagentRuns(
+@@ -222,7 +220,6 @@ async function updateBatch(
+             expectDefined(postimages.get(entry.runId), "acknowledged fixture batch member"),
+           ),
+         );
+-        afterPublished?.();
+       },
+     },
+   );
+@@ -304,147 +301,6 @@ function consume(
+ }
+ 
+ describe("requester cron authority lifetime", () => {
+-  it.each(["channel-owner", "control-ui-admin"] as const)(
+-    "retains %s entitlement only for the acknowledged surviving cohort",
+-    async (source) => {
+-      const entitlement =
+-        source === "channel-owner" ? { source, isCurrent: () => true } : { source };
+-      const batch = createBatch("cancel-owner", 3);
+-      await inAdminRun(
+-        "cancel-owner",
+-        async () => expect(await mark(batch)).toBe(3),
+-        undefined,
+-        entitlement,
+-      );
+-      expect(await settle(batch)).toBe(true);
+-      const fresh = await capture("fresh-owner");
+-      let remaining = [...batch];
+-      const retiredAdmissions: Array<NonNullable<ReturnType<typeof consume>>> = [];
+-      for (const index of [0, 1]) {
+-        const previous = [...remaining];
+-        const selected = previous[0]!;
+-        const rearmGeneration = selected.requesterSettleWake!.rearmGeneration!;
+-        const remainingIds = previous
+-          .slice(1)
+-          .map((entry) => entry.runId)
+-          .toSorted();
+-        await dispatch(previous, async () => {
+-          const admitted = consume(previous)!;
+-          retiredAdmissions.push(admitted);
+-          expect(admitted.isCurrent()).toBe(true);
+-          await updateBatch(
+-            remaining,
+-            (drafts) => {
+-              for (const entry of drafts) {
+-                if (entry.runId === selected.runId) {
+-                  entry.requesterSettleWake = undefined;
+-                  entry.suppressCompletionDelivery = true;
+-                } else {
+-                  entry.requesterSettleWake!.batchRunIds = remainingIds;
+-                }
+-              }
+-            },
+-            () => {
+-              remaining = remaining.filter((entry) => entry.runId !== selected.runId);
+-              reconcileRequesterCronAuthorityBatch({
+-                previousBatch: previous,
+-                remainingBatch: remaining,
+-                rearmGeneration,
+-              });
+-            },
+-          );
+-          expect(admitted.isCurrent()).toBe(false);
+-          const scope = createCronCreatorAuthorityCapability(
+-            "continuation",
+-            { kind: "unknown" },
+-            admitted.managementEntitlement,
+-            admitted.isCurrent,
+-          )!;
+-          expect(() => admitted.bindRunScope(scope)).toThrow("no longer owns");
+-        });
+-        // Cleanup and a repeated cancellation cannot release the survivor's entitlement.
+-        revokeRequesterCronAuthorityBatch([runs.get(selected.runId)!], rearmGeneration);
+-        reconcileRequesterCronAuthorityBatch({
+-          previousBatch: previous,
+-          remainingBatch: remaining,
+-          rearmGeneration,
+-        });
+-        await dispatch(previous, async () => expect(consume(previous)).toBeUndefined());
+-        expect(remaining).toHaveLength(2 - index);
+-      }
+-      await dispatch(remaining, async () => {
+-        const admitted = consume(remaining)!;
+-        expect(admitted.managementEntitlement).toBe(entitlement);
+-        expect(admitted.isCurrent()).toBe(true);
+-        const scope = createCronCreatorAuthorityCapability(
+-          "continuation",
+-          { kind: "unknown" },
+-          admitted.managementEntitlement,
+-          admitted.isCurrent,
+-        )!;
+-        admitted.bindRunScope(scope);
+-        await runWithCronCreatorAuthorityCapability(scope, async () => {
+-          expect(admitted.isCurrent()).toBe(true);
+-          for (const retired of retiredAdmissions) {
+-            expect(retired.isCurrent()).toBe(false);
+-          }
+-        });
+-      });
+-      await dispatch(fresh, async () => {
+-        expect(consume(fresh)?.managementEntitlement.source).toBe("control-ui-admin");
+-      });
+-    },
+-  );
+-
+-  it("does not reconcile stale, reconstructed, or uncommitted cancellation claims", async () => {
+-    const batch = await capture("cancel-invalid", 2);
+-    const generation = batch[0]!.requesterSettleWake!.rearmGeneration!;
+-    await dispatch(batch, async () => {
+-      const admitted = consume(batch)!;
+-      for (const params of [
+-        { previousBatch: batch, remainingBatch: batch.slice(1), rearmGeneration: generation + 1 },
+-        { previousBatch: structuredClone(batch), remainingBatch: [], rearmGeneration: generation },
+-        { previousBatch: batch, remainingBatch: batch.slice(1), rearmGeneration: generation },
+-        {
+-          previousBatch: batch,
+-          remainingBatch: structuredClone(batch.slice(1)),
+-          rearmGeneration: generation,
+-        },
+-      ]) {
+-        reconcileRequesterCronAuthorityBatch(params);
+-        expect(admitted.isCurrent()).toBe(true);
+-      }
+-    });
+-  });
+-
+-  it("retires an empty cancelled cohort without affecting another captured turn", async () => {
+-    const batch = await capture("cancel-all", 2);
+-    const fresh = await capture("cancel-unrelated");
+-    const previous = [...batch];
+-    const rearmGeneration = batch[0]!.requesterSettleWake!.rearmGeneration!;
+-    await dispatch(previous, async () => {
+-      const admitted = consume(previous)!;
+-      await updateBatch(
+-        batch,
+-        (drafts) => {
+-          for (const entry of drafts) {
+-            entry.requesterSettleWake = undefined;
+-            entry.suppressCompletionDelivery = true;
+-          }
+-        },
+-        () =>
+-          reconcileRequesterCronAuthorityBatch({
+-            previousBatch: previous,
+-            remainingBatch: [],
+-            rearmGeneration,
+-          }),
+-      );
+-      expect(admitted.isCurrent()).toBe(false);
+-    });
+-    await dispatch(previous, async () => expect(consume(previous)).toBeUndefined());
+-    await dispatch(fresh, async () => expect(consume(fresh)?.isCurrent()).toBe(true));
+-  });
+-
+   it.each(["completion", "scope ended", "reset"] as const)(
+     "retains the full cohort's authority across a scoped child pause until %s",
+     async (outcome) => {
+diff --git a/src/agents/subagents/requester-cron-authority.ts b/src/agents/subagents/requester-cron-authority.ts
+index ffc577cb91e25c0ce77ac7aa44a3c663398d89b8..6804c2d70c1ed2d0e6e379f9536cdc505fe80f64 100644
+--- a/src/agents/subagents/requester-cron-authority.ts
++++ b/src/agents/subagents/requester-cron-authority.ts
+@@ -34,7 +34,7 @@ type RequesterCronAuthority = {
+   lifecycleGeneration: string;
+   sessionLifecycleRevision?: string;
+   admittedRunId?: string;
+-  runScopeBound?: RequesterCronAuthorityDispatch;
++  runScopeBound?: true;
+   active: boolean;
+ } & (
+   | {
+@@ -336,61 +336,6 @@ export function replaceRequesterCronAuthorityEntry(params: {
+   }
+ }
+ 
+-/** Reconcile only the acknowledged cancellation of members of this captured cohort. */
+-export function reconcileRequesterCronAuthorityBatch(params: {
+-  previousBatch: readonly SubagentRunRecord[];
+-  remainingBatch: readonly SubagentRunRecord[];
+-  rearmGeneration: number;
+-}): void {
+-  const { previousBatch, remainingBatch, rearmGeneration } = params;
+-  const authority =
+-    previousBatch[0] && state.byEntry.get(getSubagentRunRuntimeKey(previousBatch[0]));
+-  if (
+-    !authority ||
+-    authority.kind !== "yield" ||
+-    !authority.active ||
+-    authority.runScopeBound ||
+-    authority.rearmGeneration !== rearmGeneration ||
+-    !sameRequesterSettleBatch(authority.batch, previousBatch) ||
+-    remainingBatch.length >= previousBatch.length ||
+-    new Set(remainingBatch.map((entry) => entry.runId)).size !== remainingBatch.length
+-  ) {
+-    return;
+-  }
+-  const previousIds = previousBatch.map((entry) => entry.runId).toSorted();
+-  const remainingIds = remainingBatch.map((entry) => entry.runId).toSorted();
+-  const published = resolveCurrentRequesterSettleBatch(previousBatch, authority.runs);
+-  if (
+-    !published ||
+-    previousBatch.some(
+-      (entry) =>
+-        state.byEntry.get(getSubagentRunRuntimeKey(entry)) !== authority ||
+-        !isRequesterYieldCohortMember(entry, previousIds, rearmGeneration),
+-    ) ||
+-    remainingBatch.some((entry) => !published.includes(entry)) ||
+-    published.some((entry) =>
+-      remainingBatch.includes(entry)
+-        ? entry.suppressCompletionDelivery === true ||
+-          !isRequesterYieldCohortMember(entry, remainingIds, rearmGeneration)
+-        : entry.suppressCompletionDelivery !== true || entry.requesterSettleWake !== undefined,
+-    )
+-  ) {
+-    return;
+-  }
+-  for (const entry of previousBatch) {
+-    if (!remainingBatch.some((remaining) => isSameSubagentRunOwner(remaining, entry))) {
+-      state.byEntry.delete(getSubagentRunRuntimeKey(entry));
+-    }
+-  }
+-  // A pending admission belongs to the old exact cohort. Its dispatch assertion
+-  // is fenced by this replacement; only a new survivor dispatch may admit again.
+-  authority.batch = [...remainingBatch];
+-  authority.admittedRunId = undefined;
+-  if (!remainingBatch.length || !isCurrent(authority)) {
+-    discard(authority);
+-  }
+-}
+-
+ /** A new direct user turn cannot lend its identity to an older pending batch. */
+ export function revokeRequesterCronAuthority(sessionKey: string): void {
+   for (const authority of state.bySession.get(sessionKey) ?? []) {
+@@ -463,14 +408,10 @@ export async function withRequesterCronAuthority<T>(
+   ) {
+     return await run();
+   }
+-  const admittedBatch = authority.batch;
+   const current = () => {
+     const pausedEntry = pause && authority.runs.get(pause.entry.runId);
+     return (
+       isCurrent(authority) &&
+-      (authority.runScopeBound
+-        ? authority.runScopeBound === dispatch
+-        : authority.batch === admittedBatch) &&
+       (pause
+         ? !pause.released &&
+           (pause.scope
+@@ -479,9 +420,13 @@ export async function withRequesterCronAuthority<T>(
+               pausedEntry?.pauseReason === "sessions_yield" &&
+               Boolean(pausedEntry.requesterSettleWake?.pauseNotice) &&
+               params.isCurrent())
+-        : authority.runScopeBound === dispatch || params.isCurrent())
++        : authority.runScopeBound === true || params.isCurrent())
+     );
+   };
++  if (!current()) {
++    discard(authority);
++    return await run();
++  }
+   const dispatch: RequesterCronAuthorityDispatch = {
+     authority,
+     runId: params.runId,
+@@ -489,10 +434,6 @@ export async function withRequesterCronAuthority<T>(
+     consumed: false,
+     pause,
+   };
+-  if (!current()) {
+-    discard(authority);
+-    return await run();
+-  }
+   try {
+     return await activeDispatch.run(dispatch, run);
+   } finally {
+@@ -667,7 +608,7 @@ export function consumeRequesterCronAuthorityAdmission(params: RequesterAdmissio
+       }
+       // Queue acceptance can retire the child outbox before the parent finishes.
+       // Its fresh run scope now owns the entitlement and all per-operation grants.
+-      dispatch.authority.runScopeBound = dispatch;
++      dispatch.authority.runScopeBound = true;
+       if (dispatch.authority.kind === "yield") {
+         for (const entry of dispatch.authority.batch) {
+           if (state.byEntry.get(getSubagentRunRuntimeKey(entry)) === dispatch.authority) {
+diff --git a/src/agents/subagents/requester-final-attachment.test.ts b/src/agents/subagents/requester-final-attachment.test.ts
+index f18ba847486e0ba870b3b7a1395ff34ec6da43f9..5d3a7e173f20142fc11532f4513186baeaf6c6f8 100644
+--- a/src/agents/subagents/requester-final-attachment.test.ts
++++ b/src/agents/subagents/requester-final-attachment.test.ts
+@@ -21,8 +21,6 @@ import {
+   transferRequesterFinalAttachment,
+   promoteRequesterFinalAttachment,
+   registerRequesterFinalAttachment,
+-  removeRequesterFinalAttachmentRun,
+-  prepareRequesterFinalAttachmentDelivery,
+ } from "./requester-final-attachment.js";
+ 
+ const base = {
+@@ -157,81 +155,6 @@ describe("requester final attachment", () => {
+     expect(append).toHaveBeenCalledExactlyOnceWith("final");
+   });
+ 
+-  it("keeps a surviving child's sink while rejecting the previously captured full-batch delivery", () => {
+-    const append = vi.fn(() => true);
+-    const settled = vi.fn();
+-    const batch = { ...base, batchRunIds: ["child-a", "child-b"], rearmGeneration: 1 };
+-    registerRequesterFinalAttachment({ ...base, append, onSettled: settled });
+-    promoteRequesterFinalAttachment(batch);
+-    const staleDelivery = prepareRequesterFinalAttachmentDelivery(batch);
+-    expect(staleDelivery).toBeDefined();
+-
+-    expect(removeRequesterFinalAttachmentRun({ ...batch, runId: "child-a" })).toBe(true);
+-    expect(removeRequesterFinalAttachmentRun({ ...batch, runId: "child-a" })).toBe(false);
+-    expect(staleDelivery?.("obsolete combined final")).toBe("missing");
+-    expect(settled).not.toHaveBeenCalled();
+-    expect(append).not.toHaveBeenCalled();
+-    expect(
+-      consumeRequesterFinalAttachment({
+-        ...batch,
+-        batchRunIds: ["child-b"],
+-        text: "sibling final",
+-      }),
+-    ).toBe("appended");
+-    expect(append).toHaveBeenCalledExactlyOnceWith("sibling final");
+-    expect(settled).toHaveBeenCalledOnce();
+-  });
+-
+-  it("retires the sink after sequential member cancellations without affecting a fresh cohort", () => {
+-    const append = vi.fn(() => true);
+-    const settled = vi.fn();
+-    const batch = { ...base, batchRunIds: ["child-a", "child-b"], rearmGeneration: 1 };
+-    registerRequesterFinalAttachment({ ...base, append, onSettled: settled });
+-    promoteRequesterFinalAttachment(batch);
+-    const next = {
+-      ...base,
+-      requesterTurnRunId: "next-turn",
+-      batchRunIds: ["child-c"],
+-      rearmGeneration: 2,
+-    };
+-    const nextAppend = vi.fn(() => true);
+-    registerRequesterFinalAttachment({ ...next, append: nextAppend });
+-    promoteRequesterFinalAttachment(next);
+-
+-    expect(removeRequesterFinalAttachmentRun({ ...batch, runId: "child-a" })).toBe(true);
+-    expect(settled).not.toHaveBeenCalled();
+-    expect(removeRequesterFinalAttachmentRun({ ...batch, runId: "child-b" })).toBe(false);
+-    expect(
+-      removeRequesterFinalAttachmentRun({ ...batch, batchRunIds: ["child-b"], runId: "child-b" }),
+-    ).toBe(true);
+-    expect(settled).toHaveBeenCalledOnce();
+-    expect(append).not.toHaveBeenCalled();
+-    expect(
+-      consumeRequesterFinalAttachment({ ...batch, batchRunIds: ["child-b"], text: "late" }),
+-    ).toBe("missing");
+-    expect(consumeRequesterFinalAttachment({ ...next, text: "fresh final" })).toBe("appended");
+-    expect(nextAppend).toHaveBeenCalledExactlyOnceWith("fresh final");
+-  });
+-
+-  it.each([
+-    { requesterAgentId: "other" },
+-    { requesterSessionKey: "other-session-key" },
+-    { requesterSessionId: "other-session-id" },
+-    { rearmGeneration: 2 },
+-    { batchRunIds: ["child-a", "unrelated"] },
+-    { runId: "not-in-batch" },
+-  ])("rejects member cancellation outside the captured cohort: %j", (mismatch) => {
+-    const append = vi.fn(() => true);
+-    const batch = { ...base, batchRunIds: ["child-a", "child-b"], rearmGeneration: 1 };
+-    registerRequesterFinalAttachment({ ...base, append });
+-    promoteRequesterFinalAttachment(batch);
+-    expect(removeRequesterFinalAttachmentRun({ ...batch, runId: "child-a", ...mismatch })).toBe(
+-      false,
+-    );
+-    expect(consumeRequesterFinalAttachment({ ...batch, text: "original final" })).toBe("appended");
+-    expect(append).toHaveBeenCalledExactlyOnceWith("original final");
+-  });
+-
+   it("rejects the wrong session or batch without consuming the owner", () => {
+     const append = vi.fn(() => true);
+     registerRequesterFinalAttachment({ ...base, append });
+diff --git a/src/agents/subagents/requester-final-attachment.ts b/src/agents/subagents/requester-final-attachment.ts
+index a58003dc347f8992c49af0b23ba3de9a5ccda510..1b5cfbc67956c2ddbac013f59bc2601c3fe6c758 100644
+--- a/src/agents/subagents/requester-final-attachment.ts
++++ b/src/agents/subagents/requester-final-attachment.ts
+@@ -240,32 +240,6 @@ export function revokeRequesterFinalAttachment(params: {
+   return true;
+ }
+ 
+-/** A cancelled member cannot discard the original final sink owed to its siblings. */
+-export function removeRequesterFinalAttachmentRun(params: {
+-  requesterAgentId: string;
+-  requesterSessionKey: string;
+-  requesterSessionId?: string;
+-  batchRunIds: readonly string[];
+-  rearmGeneration: number;
+-  runId: string;
+-}): boolean {
+-  const key = ownerKey(params.requesterAgentId, params.requesterSessionKey);
+-  if (!params.batchRunIds.includes(params.runId)) {
+-    return false;
+-  }
+-  const attachment = getCurrentAttachment(params);
+-  if (!attachment?.batch) {
+-    return false;
+-  }
+-  const remaining = attachment.batch.batchRunIds.filter((runId) => runId !== params.runId);
+-  if (remaining.length === 0) {
+-    removeAttachment(key, attachment);
+-  } else {
+-    attachment.batch = { ...attachment.batch, batchRunIds: remaining };
+-  }
+-  return true;
+-}
+-
+ export function consumeRequesterFinalAttachment(params: {
+   requesterAgentId: string;
+   requesterSessionKey: string;
+diff --git a/src/agents/tools/sessions-send-followup.test.ts b/src/agents/tools/sessions-send-followup.test.ts
+index ca2b94b081054a6c2349c6e27495291013213823..abb4c6e9160f6f4cbe530301802f61c7766db433 100644
+--- a/src/agents/tools/sessions-send-followup.test.ts
++++ b/src/agents/tools/sessions-send-followup.test.ts
+@@ -144,7 +144,6 @@ describe("followup retained session authorization", () => {
+       settle: unexpected,
+       take: unexpected,
+       replaceCohortEntry: unexpected,
+-      reconcileCohort: unexpected,
+       close,
+     };
+     const callGateway = vi.fn(async () => {
+diff --git a/src/agents/tools/subagents-tool.ts b/src/agents/tools/subagents-tool.ts
+index d22164ca57e0bad5717bffca913c71d95dcaa05e..57c13bd96f1809f69766b52b7628d11009e8d75c 100644
+--- a/src/agents/tools/subagents-tool.ts
++++ b/src/agents/tools/subagents-tool.ts
+@@ -283,7 +283,7 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
+     name: "subagents",
+     parameters: SubagentsToolSchema,
+     description:
+-      "List native subagents, wait for selected runIds, or cancel a runId and its descendants. Cancellation also retires that run's pending completion when this session is its requester; captured results remain available. A wait timeout never cancels execution or consumes completion delivery.",
++      "List native subagents, wait for selected runIds, or cancel a runId and its descendants. A wait timeout never cancels execution or consumes completion delivery.",
+     execute: async (_toolCallId, args, signal) => {
+       const params = args as Record<string, unknown>;
+       const action = readToolStringParam(params, "action") ?? "list";
+@@ -423,12 +423,6 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
+             },
+             {
+               prepareRead,
+-              cancelRequesterCompletion: controller.controllerAgentId
+-                ? {
+-                    agentId: controller.controllerAgentId,
+-                    sessionKey: controller.callerSessionKey,
+-                  }
+-                : undefined,
+               assertCurrent: () => {
+                 signal?.throwIfAborted();
+                 const current = readCurrentScope();
+diff --git a/src/cron/isolated-agent/run-prompt-continuation.ts b/src/cron/isolated-agent/run-prompt-continuation.ts
+index 97e00a8b3ecf33bdf1f463934cb8fb675fee7b01..7f5560e47a35253ff8eab98c1da531fb03941f18 100644
+--- a/src/cron/isolated-agent/run-prompt-continuation.ts
++++ b/src/cron/isolated-agent/run-prompt-continuation.ts
+@@ -119,10 +119,13 @@ export async function executeCronRunWithContinuation(
+           decision.reply.error ?? "Original cron has no committed continuation cohort",
+         );
+       }
+-      const offered = await continuation.owner.resumeInPlace(
++      const offered = await continuation.owner.nextInPlace(
+         continuation.remainingTimeoutMs() || undefined,
+-        () => continuation.assertCurrent(),
+       );
++      await continuation.assertCurrent();
++      await continuation.owner.prepareSuccessor(offered.successor);
++      await continuation.assertCurrent();
++      continuation.owner.adopt(offered.successor);
+       current = await runPromptWithLiveSelectionRetry(offered.prompt, Date.now());
+     }
+     return current;
+diff --git a/src/cron/isolated-agent/run.yielded-continuation.test.ts b/src/cron/isolated-agent/run.yielded-continuation.test.ts
+index 9bf7bf51b93c8a4f13bdbc0dc8cc629e705b8627..436036ce54922bb7323764f987313dc4539b2261 100644
+--- a/src/cron/isolated-agent/run.yielded-continuation.test.ts
++++ b/src/cron/isolated-agent/run.yielded-continuation.test.ts
+@@ -1,21 +1,16 @@
+ import fs from "node:fs/promises";
+ import path from "node:path";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+-import { awaitGateBeforeSettlement, withinTest } from "../../../test/helpers/promise.js";
+ import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+ import { resolveBootstrapContextForRun } from "../../agents/bootstrap-files.js";
+ import type { RunCliAgentParams } from "../../agents/cli-runner/types.js";
+ import type { RunEmbeddedAgentParams } from "../../agents/embedded-agent-runner/run/params.js";
+ import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-error.js";
+-import { transferFollowupCohort } from "../../agents/subagents/completion/session-followup-cohort.js";
+ import {
+   getFollowupForCohort,
+   promoteFollowupYield,
+-  reconcileFollowupCompletionBatch,
+-  SessionFollowupCompletion,
+ } from "../../agents/subagents/completion/session-followup-completion.js";
+ import type { SubagentRunRecord } from "../../agents/subagents/registry/subagent-registry.types.js";
+-import { copySubagentRunRuntimeOwner } from "../../agents/subagents/registry/subagent-run-generation.js";
+ import { createDeferredCore } from "../../shared/deferred.js";
+ import { makeIsolatedAgentJobFixture, makeIsolatedAgentParamsFixture } from "./job-fixtures.js";
+ import { setupRunCronIsolatedAgentTurnSuite } from "./run.suite-helpers.js";
+@@ -77,179 +72,6 @@ function offerNativeCohort(request: ModelRequest, generation: number) {
+ }
+ 
+ describe("original cron parent continuation", () => {
+-  it.for(["offered", "prepared"] as const)(
+-    "resumes only surviving findings after cancellation of a %s in-place handoff",
+-    async (boundary, { signal }) => {
+-      mockRunCronFallbackPassthrough();
+-      pickLastNonEmptyTextFromPayloadsMock.mockImplementation(
+-        (payloads?: Array<{ text?: string }>) => payloads?.at(-1)?.text ?? "",
+-      );
+-      const requests: ModelRequest[] = [];
+-      const boundaryReached = createDeferredCore();
+-      const boundaryReleased = createDeferredCore();
+-      const controller = new AbortController();
+-      const joins: Array<Promise<unknown>> = [];
+-      const restore: Array<() => void> = [];
+-      let stage: "offered" | "prepared" | undefined;
+-      let intercepted = false;
+-      let original: { owner: SessionFollowupCompletion; batch: SubagentRunRecord[] } | undefined;
+-      runEmbeddedAgentMock.mockImplementation(async (request: ModelRequest) => {
+-        if (!request.preparedRunAdmission) {
+-          throw new Error("Missing real native cron admission");
+-        }
+-        await request.preparedRunAdmission.admit("gateway");
+-        requests.push(request);
+-        if (requests.length > 1) {
+-          expect(request.prompt).toBe("Only the surviving result. Complete the original task.");
+-          return {
+-            payloads: [{ text: "Completed with the surviving result." }],
+-            meta: { agentMeta: {} },
+-          };
+-        }
+-        const batch = ["cancelled", "surviving"].map((runId): SubagentRunRecord => ({
+-          runId,
+-          childSessionKey: `agent:main:subagent:${runId}`,
+-          requesterSessionKey: request.sessionKey!,
+-          requesterAgentId: "main",
+-          requesterDisplayKey: "original cron",
+-          task: "read delegated records",
+-          cleanup: "keep",
+-          createdAt: 1,
+-          execution: { status: "terminal", endedAt: 2, outcome: { status: "ok" } },
+-          completion: { required: true, resultText: `${runId} result` },
+-          requesterSettleWake: {
+-            status: "pending",
+-            attemptCount: 0,
+-            requesterYieldBatch: true,
+-            rearmGeneration: 1,
+-            batchRunIds: ["cancelled", "surviving"],
+-          },
+-        }));
+-        promoteFollowupYield({
+-          requesterTurnRunId: request.runId!,
+-          entries: batch,
+-          rearmGeneration: 1,
+-        });
+-        const owner = getFollowupForCohort(batch);
+-        if (!(owner instanceof SessionFollowupCompletion)) {
+-          throw new Error("Missing real native logical completion owner");
+-        }
+-        original = { owner, batch };
+-        const nextInPlace = owner.nextInPlace.bind(owner);
+-        const nextSpy = vi.spyOn(owner, "nextInPlace").mockImplementation(async (timeoutMs) => {
+-          const offered = await nextInPlace(timeoutMs);
+-          stage = "offered";
+-          return offered;
+-        });
+-        const prepareSuccessor = owner.prepareSuccessor.bind(owner);
+-        const prepareSpy = vi
+-          .spyOn(owner, "prepareSuccessor")
+-          .mockImplementation(async (successor) => {
+-            await prepareSuccessor(successor);
+-            stage = "prepared";
+-          });
+-        restore.push(
+-          () => nextSpy.mockRestore(),
+-          () => prepareSpy.mockRestore(),
+-        );
+-        const receipt = owner.offerInPlace({
+-          successor: owner.successor(batch, request.runId!, () => {}),
+-          prompt: "Cancelled and surviving results.",
+-        });
+-        joins.push(
+-          receipt.result.then((outcome) => {
+-            receipt.joined();
+-            return outcome;
+-          }),
+-        );
+-        return {
+-          payloads: [{ text: "Waiting for delegated findings." }],
+-          meta: { yielded: true, agentMeta: {} },
+-        };
+-      });
+-      const running = runCronIsolatedAgentTurn(
+-        makeIsolatedAgentParamsFixture({
+-          abortSignal: controller.signal,
+-          assertRunCurrent: async () => {
+-            if (!intercepted && stage === boundary) {
+-              intercepted = true;
+-              boundaryReached.resolve();
+-              await boundaryReleased.promise;
+-            }
+-          },
+-          job: makeIsolatedAgentJobFixture({
+-            payload: {
+-              kind: "agentTurn",
+-              message: "Complete the original delegated task",
+-              timeoutSeconds: 60,
+-            },
+-            delivery: { mode: "none" },
+-          }),
+-        }),
+-      );
+-      try {
+-        await withinTest(
+-          awaitGateBeforeSettlement(
+-            boundaryReached.promise,
+-            running,
+-            "Cron missed the pending adoption boundary",
+-          ),
+-          signal,
+-        );
+-        const { owner, batch } = original!;
+-        const published = batch.map((entry) => {
+-          const next = copySubagentRunRuntimeOwner(entry, {
+-            ...entry,
+-            ...(entry.runId === "cancelled"
+-              ? { requesterSettleWake: undefined, suppressCompletionDelivery: true }
+-              : {
+-                  requesterSettleWake: {
+-                    ...entry.requesterSettleWake!,
+-                    batchRunIds: ["surviving"],
+-                  },
+-                }),
+-          });
+-          transferFollowupCohort(entry, next);
+-          return next;
+-        });
+-        const remaining = published.filter((entry) => entry.runId === "surviving");
+-        reconcileFollowupCompletionBatch({
+-          previousBatch: batch,
+-          remainingBatch: remaining,
+-          rearmGeneration: 1,
+-        });
+-        const receipt = owner.offerInPlace({
+-          successor: owner.successor(remaining, owner.request.runId, () => {}),
+-          prompt: "Only the surviving result. Complete the original task.",
+-        });
+-        joins.push(
+-          receipt.result.then((outcome) => {
+-            receipt.joined();
+-            return outcome;
+-          }),
+-        );
+-        boundaryReleased.resolve();
+-        const result = await withinTest(running, signal);
+-        expect(result.status, result.error).toBe("ok");
+-        expect(requests).toHaveLength(2);
+-        expect(new Set(requests.map((request) => request.runId)).size).toBe(1);
+-        expect(new Set(requests.map((request) => request.sessionId)).size).toBe(1);
+-        expect(await Promise.all(joins)).toEqual([
+-          { status: "error", error: "Followup completion cohort was replaced." },
+-          { status: "ok" },
+-        ]);
+-        expect(dispatchCronDeliveryMock).toHaveBeenCalledOnce();
+-      } finally {
+-        boundaryReleased.resolve();
+-        controller.abort(new Error("Cancellation handoff test finished"));
+-        await Promise.allSettled([running]);
+-        for (const undo of restore) {
+-          undo();
+-        }
+-      }
+-    },
+-  );
+-
+   it.each(["embedded", "cli"] as const)(
+     "resumes two native cohorts through the same %s context and one finalizer",
+     async (runner) => {
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
+index 37a902144f2b31b5aadeef68ebbd20f0965adb2f..189bcf32dc2408b8a3ec8a24e2cca06faf1ea690 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/codex-dynamic-tools.telegram-direct.json
+@@ -1421,7 +1421,7 @@
+       },
+       {
+         "deferLoading": true,
+-        "description": "List native subagents, wait for selected runIds, or cancel a runId and its descendants. Cancellation also retires that run's pending completion when this session is its requester; captured results remain available. A wait timeout never cancels execution or consumes completion delivery.",
++        "description": "List native subagents, wait for selected runIds, or cancel a runId and its descendants. A wait timeout never cancels execution or consumes completion delivery.",
+         "inputSchema": {
+           "properties": {
+             "action": {
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
+index 322ddd1561382858ecc8c16e2614866a143718e1..6894e3ebc9b9b443f9ef7fac7083ec201e842963 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/discord-group-codex-message-tool.md.diff
+@@ -1,5 +1,5 @@
+---- telegram-direct-codex-message-tool.md	sha256=a3b11d7209e4fd161c95193ddb93af7e593926d8de956bc46ea811e06ffe4c08
+-+++ discord-group-codex-message-tool.md	sha256=6166918b12c3ca30c627427ed4b7a9bd100458c10f36274694cb3641af051e60
++--- telegram-direct-codex-message-tool.md	sha256=f17b3fa4de48a6c25022659a7e29b0b6e76cddb5428b34544a85f17208239e94
+++++ discord-group-codex-message-tool.md	sha256=184ae9633b4cd0307cda00022de00ac34a970381b8119f466e3d4fa85178f375
+ @@ -1,1 +1,1 @@
+ -# Telegram Direct Codex Message Tool Turn
+ +# Discord Group Codex Message Tool Turn
+@@ -32,10 +32,10 @@
+ -    "chars": 1348,
+ +    "chars": 1347,
+ @@ -259,2 +259,2 @@
+--    "chars": 74338,
+--    "roughTokens": 18585
+-+    "chars": 74936,
+-+    "roughTokens": 18734
++-    "chars": 74211,
++-    "roughTokens": 18553
+++    "chars": 74809,
+++    "roughTokens": 18703
+ @@ -263,2 +263,2 @@
+ -    "chars": 2992,
+ -    "roughTokens": 748
+@@ -47,10 +47,10 @@
+ +    "chars": 28695,
+ +    "roughTokens": 7174
+ @@ -275,2 +275,2 @@
+--    "chars": 101718,
+--    "roughTokens": 25430
+-+    "chars": 103633,
+-+    "roughTokens": 25909
++-    "chars": 101591,
++-    "roughTokens": 25398
+++    "chars": 103506,
+++    "roughTokens": 25877
+ @@ -279,2 +279,2 @@
+ -    "chars": 879,
+ -    "roughTokens": 220
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
+index 67e491d410dd64e064434ec350264ea98a7e2d5c..665e35820341ea793f69dd350916950480ab2466 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-direct-codex-message-tool.md
+@@ -256,8 +256,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the
+     "roughTokens": 0
+   },
+   "dynamicToolsJson": {
+-    "chars": 74338,
+-    "roughTokens": 18585
++    "chars": 74211,
++    "roughTokens": 18553
+   },
+   "openClawDeveloperInstructions": {
+     "chars": 2992,
+@@ -272,8 +272,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the
+     "roughTokens": 6845
+   },
+   "totalWithDynamicToolsJson": {
+-    "chars": 101718,
+-    "roughTokens": 25430
++    "chars": 101591,
++    "roughTokens": 25398
+   },
+   "userInputText": {
+     "chars": 879,
+diff --git a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
+index 04f3f7a31f85628ffdea372e8ba929b2cb24a32b..e2d34ce9906120b7342d38788c9b8643d5cb074d 100644
+--- a/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
++++ b/test/fixtures/agents/prompt-snapshots/codex-runtime-happy-path/telegram-heartbeat-codex-tool.md.diff
+@@ -1,5 +1,5 @@
+---- telegram-direct-codex-message-tool.md	sha256=a3b11d7209e4fd161c95193ddb93af7e593926d8de956bc46ea811e06ffe4c08
+-+++ telegram-heartbeat-codex-tool.md	sha256=a4471274cd293983dc8574180515d7a6cf96c9da96b5924c10caf2f0375d32d4
++--- telegram-direct-codex-message-tool.md	sha256=f17b3fa4de48a6c25022659a7e29b0b6e76cddb5428b34544a85f17208239e94
+++++ telegram-heartbeat-codex-tool.md	sha256=10f92034c8156b33344915a29ed34bd88ca37ffd64bf5d386e64838c64f74f32
+ @@ -1,1 +1,1 @@
+ -# Telegram Direct Codex Message Tool Turn
+ +# Telegram Direct Codex Heartbeat Tool Turn
+@@ -37,20 +37,20 @@
+ +    "chars": 1218,
+ +    "roughTokens": 305
+ @@ -259,2 +256,2 @@
+--    "chars": 74338,
+--    "roughTokens": 18585
+-+    "chars": 75831,
+-+    "roughTokens": 18958
++-    "chars": 74211,
++-    "roughTokens": 18553
+++    "chars": 75704,
+++    "roughTokens": 18926
+ @@ -271,2 +268,2 @@
+ -    "chars": 27378,
+ -    "roughTokens": 6845
+ +    "chars": 27715,
+ +    "roughTokens": 6929
+ @@ -275,2 +272,2 @@
+--    "chars": 101718,
+--    "roughTokens": 25430
+-+    "chars": 103548,
+-+    "roughTokens": 25887
++-    "chars": 101591,
++-    "roughTokens": 25398
+++    "chars": 103421,
+++    "roughTokens": 25856
+ @@ -279,2 +276,2 @@
+ -    "chars": 879,
+ -    "roughTokens": 220
