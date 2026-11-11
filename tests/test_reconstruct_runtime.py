@@ -157,6 +157,7 @@ class RuntimeReconstructionTests(unittest.TestCase):
                    replace(package.companion, normalization_paths=frozenset({"src/../outside"})),
                    replace(package.companion, normalization_paths=frozenset({"pnpm-lock.yaml"})),
                    replace(package.companion, normalization_paths=frozenset({"pnpm-workspace.yaml"})),
+                   replace(package.companion, normalization_paths=frozenset({"config/assertion-safety-baseline.txt"})),
                    replace(package.companion, normalized_tree=package.companion.source_tree)]
         with patch.object(RUNTIME, "build_opener") as opener:
             for companion in invalid:

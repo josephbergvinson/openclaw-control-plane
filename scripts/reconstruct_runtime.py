@@ -366,8 +366,8 @@ def validate_companion_paths(paths: frozenset[str], *, allow_native_dependencies
     for name in paths:
         if (not isinstance(name, str)
                 or not (name.startswith(("apps/", "src/", "extensions/", "test/", "docs/", "scripts/", "packages/", "skills/"))
-                        or name == "config/assertion-safety-baseline.txt"
-                        or (allow_native_dependencies and name in NATIVE_DELTA_PATHS))
+                        or (allow_native_dependencies and (name in NATIVE_DELTA_PATHS
+                            or name == "config/assertion-safety-baseline.txt")))
                 or "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name)
                 or any(part in ("", ".", "..", ".git", "node_modules") for part in name.split("/"))):
             raise ReconstructionError("Companion delta contains an unsupported source path")
