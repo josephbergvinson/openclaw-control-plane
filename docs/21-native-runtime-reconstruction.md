@@ -64,7 +64,9 @@ of exact relative source paths under `apps/`, `src/`, `extensions/`, `test/`,
 `docs/`, `scripts/`, `packages/` or `skills/`. A companion delta may also declare
 the root files `pnpm-lock.yaml` and `pnpm-workspace.yaml`, allowing the
 companion to restore its own dependency declarations after the distribution
-overlay. Other root files are refused. Traversal, control characters, Git metadata
+overlay. The exact file `config/assertion-safety-baseline.txt` is also allowed to
+restore that source tree's assertion baseline; other `config/` paths remain
+refused. Other root files are refused. Traversal, control characters, Git metadata
 and dependency-store paths are refused. Extra or omitted patch paths fail before
 source application or archive retrieval. A target-tree mismatch still fails after
 application and leaves
@@ -91,8 +93,9 @@ including modes, must equal the declared companion replay tree.
 For deliberate fixture normalization, `sourceCommit` and `sourceTree` retain the
 authentic component identity. The optional `normalizedTree` binds the public
 replay separately; `normalization.paths` must be a sorted, unique list matching
-the source normalization declaration. The two root dependency files are permitted
-only in source deltas, never as normalization targets. Both normalization fields
+the source normalization declaration. The two root dependency files and the
+assertion baseline are permitted only in source deltas, never as normalization
+targets. Both normalization fields
 must be declared together. They are valid for either case above: an identical
 distribution and companion need no extra delta when their normalized trees match.
 Without normalization, the replay target remains
