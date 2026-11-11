@@ -27,12 +27,12 @@ deployment or user acceptance.
 
 ## Optional companion source
 
-The optional companion target reproduces a separately retained complete source
-tree. Its exact finite patch includes every difference from the declared native
-distribution, including native credential-form and Computer-tool changes and
-inverse gateway-only changes needed to reach that component. Reversing those
-changes for the companion does not roll back the selected external gateway or
-claim newer gateway behavior in the app. Source and deployment remain independently bound.
+The optional companion target reproduces the complete source tree declared in
+the manifest. When it matches the native distribution, no additional patch is
+needed. A distinct retained target declares every difference, including any
+native credential-form, Computer-tool and inverse gateway-only changes needed
+to reach that tree. Neither case changes the selected external gateway or proves
+an installed app. Source and deployment remain independently bound.
 
 Read the exact companion commit, full tree and build label from
 `nativeCompanion`; source reconstruction and build labels are not installed-app
@@ -56,7 +56,7 @@ companion source. The helper accepts either of these finite cases:
 
 | Case | Required binding and verification |
 | --- | --- |
-| Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals both `nativeDistribution.referenceTree` and `nativeDistribution.normalizedTree`. No extra patch is needed or accepted as a substitute for equality. |
+| Exact distribution identity | `delta` is absent; `sourceCommit` equals `nativeDistribution.referenceCommit`, and `sourceTree` equals `nativeDistribution.referenceTree`. The companion replay tree must equal `nativeDistribution.normalizedTree`, with any fixture normalization declared as described below. No extra patch is needed or accepted as a substitute for equality. |
 | Separate retained-companion delta | `delta.distributionTree` equals `nativeDistribution.normalizedTree`; `delta.patch` binds one nonempty regular patch by `file`, `bytes` and `sha256`. Its ordinary text changes must match the complete finite path set exactly. |
 
 A new finite declaration supplies `delta.paths`: a nonempty, sorted, unique list
@@ -93,7 +93,9 @@ authentic component identity. The optional `normalizedTree` binds the public
 replay separately; `normalization.paths` must be a sorted, unique list matching
 the source normalization declaration. The two root dependency files are permitted
 only in source deltas, never as normalization targets. Both normalization fields
-and a bound delta are required together. Without normalization, the replay target remains
+must be declared together. They are valid for either case above: an identical
+distribution and companion need no extra delta when their normalized trees match.
+Without normalization, the replay target remains
 `sourceTree`. This preserves the distinction between anonymized test labels and
 the original source without changing production code.
 
