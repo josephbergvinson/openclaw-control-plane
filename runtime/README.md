@@ -18,9 +18,10 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R90, verified on 7 November
-2026. The manifest records the canonical source and native distribution for that
-release alongside the separately retained Mac companion source.
+The selected and loaded external gateway reference is R91, activated on 10 November
+2026. Mac companion build 507 was installed on 11 November from the same native
+distribution source. The manifest records those source identities; private
+installation records separately establish the installed bundles.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
@@ -35,13 +36,15 @@ The earlier objective-parsing repair remains included: an objective supplied
 without an explicit action is literal text, including one that begins with
 “Complete” or “Pause.” The native Codex archive is unchanged.
 
-The Mac companion build 506 source resolves local dashboard credential
+The Mac companion source resolves local dashboard credential
 references through the existing endpoint owner. Primary and auxiliary dashboard
 connections refresh those credentials when their own connection retires; unrelated
 remote connections do not invalidate them. The previous native credential-entry
-behavior is retained. The companion source packet is separate from the installed
-gateway reference: reconstruction does not install the app or establish live
-dashboard acceptance.
+behavior is retained. Build 507 also carries the matching browser extension. An
+authenticated extension connection and a page read were verified in an existing
+Chrome profile after installation. This is one integration check, not a claim of
+sustained browser reliability. Reconstruction does not install the app or
+establish acceptance on another host.
 
 The bounded comparison did not establish an overall performance advantage over
 native Codex. These targeted repairs do not establish consistently fast responses
@@ -49,124 +52,32 @@ or superiority over other harnesses.
 
 ## Source identities
 
-Read canonical source and native distribution identities from the manifest. The
-current source includes these targeted reliability repairs:
+The manifest separates the official base, customized source, native distribution,
+companion source and installed reference. Read its exact identities before
+building or comparing releases. The [source map](../docs/20-runtime-source-changes.md)
+explains the retained context, compaction, continuation, delivery, account and
+browser mechanisms and their code locations.
 
-- Follow-up work sent to a child keeps the original requester and completion
-  obligation. Acknowledgment, progress and the final answer retain separate roles;
-  a late completion cannot reopen already finished work or consume a newer task's
-  pending reply. Existing recovery and retry records remain authoritative.
-- Shell execution no longer rejects valid compound commands using a speculative
-  Python syntax check. Direct Python-file checks remain scoped to the file that
-  will execute; authorization and sandbox boundaries are unchanged.
-- Optional file reads distinguish a missing parent directory from a permission or
-  I/O failure, including BusyBox shell behavior. A failed read is not silently
-  converted into an empty file.
-- The Mac replacement watcher accepts the installed app's valid signing
-  requirement, including an Apple Development signature. This removes repeated
-  whole-bundle validation caused by applying a Developer ID-only requirement to
-  that installation. The watcher and signature validation remain enabled.
-- Core-only sessions avoid starting MCP and language-server connectors they cannot
-  use. Session archival retires the existing MCP runtime after admitted work
-  settles, preserving active leases and normal reconnect on restoration. Native
-  idle expiry handles unused sessions without a second process-cleanup service.
-- Current valid MCP OAuth bearers use a fresh canonical state read without taking
-  the exclusive renewal or consent lease. Expired or rejected bearers and pending
-  consent retain that leased path.
-- Local gateway probes reuse compatible Mac client metadata for the same paired
-  device key and current, unrevoked operator issuance. Explicit shared authentication
-  does not require a matching cached device token; a cached token is reused only
-  after native issuance verification. Remote targets and identity mismatches retain
-  normal pairing checks.
-- Stable identity and preference facts already explicit in trusted loaded profile
-  context can be answered directly. Source and audience constraints still apply;
-  missing, conflicting, historical and volatile facts require the appropriate source.
-- Facts supplied in the current request or trusted provider context can be used
-  directly. A search for one missing fact starts with one candidate and expands
-  when the evidence is ambiguous or conflicting; configured score thresholds stay
-  unchanged. Unstated personal preferences still require relevant memory.
-- Updates from an authenticated owner can change a known memory record directly.
-  The agent reads existing contents when needed to preserve them and searches for
-  missing records, missing facts or conflicting information.
-- Runbooks and reference documents are consulted only when relevant and
-  permitted by the task's source scope.
-- Memory helpers return evidence from completed work and identify incomplete
-  results. Skipping deeper recall does not establish that prior context is irrelevant.
-- Corrections target the original running task. If it has ended, they wait in
-  order instead of reaching a replacement task. With progress cards enabled, an
-  acknowledgment of the same pending work can update its existing card without
-  another message when no separate reply has begun. Other queued work keeps its
-  own updates and answer. The original task still owes a separate final result.
-- A background result intended only for its parent task stays private through
-  handoffs and restart recovery. If a scheduled parent chooses not to send a
-  reply, its child's internal report is not sent in its place.
-- A successful explicit yield with accepted completion children retains the same
-  requester continuation and progress-card handoff. Internal prompt cleanup does
-  not close the owed reply. Final delivery remains separately owned.
-- An already confirmed progress card can pass to accepted background work even
-  when the turn returns no new message. The handoff preserves its delivery
-  association without sending another preview.
-- A confirmed progress card keeps its role through the existing durable handoff
-  and restart recovery. Explicit final delivery uses a separate message;
-  corrections to completed answers remain supported.
-- Discord edits return the provider's actual message ID through the shared action
-  result. Continuation can recognize a successful progress edit without posting
-  another interim reply; missing or mismatched IDs remain unconfirmed.
-- Corrections arriving after the parent yields reuse the same pending worker
-  progress card through the existing continuation owner. A sole confirmed terminal
-  acknowledgment avoids a redundant reply; mixed tool batches, independent answers
-  and errors retain normal delivery. Queued and direct turns use the same checks.
-- Session recovery honors a successfully started, current native invocation
-  with no execution deadline. A quiet command stays owned while it runs; its actual exit starts
-  the existing bounded result-collection allowance. Cancellation, expired
-  deadlines and orphaned work retain their recovery paths.
-- Compaction retries carry earlier confirmed delivery facts forward once.
-  Progress stays distinct from a final answer, preserving pending child completion.
-- Repeated projections of an accepted child retain its original completion
-  obligation once per run identity. Real repeated message sends remain separate
-  effects.
-- Initial session context can refresh once if a prior command appends a terminal
-  record while its unsent snapshot is being read. Rewrites, selection changes,
-  cancellation and another append during the refreshed read remain errors.
-- Read-only lifecycle artifact planning runs in the existing worker without
-  reserving the transcript writer. Reclamation still rechecks selected state and
-  native deletion authority before committing.
-- Gateway start notification waits for both runner entry and live admission, so
-  fast child completion can reach the final reply owed to its requester.
-- Command cleanup and Gateway settlement still await required terminal saves.
-  Deferred start observers inherit their owning execution context, so normal
-  model-attempt completion cannot cancel a still-authorized final handoff.
-  A later save failure cannot replace the original execution error or change its
-  cancellation classification; a save-only failure is still reported.
+The latest reliability changes use existing execution paths:
 
-- Scheduled agents are instructed to report a failed required outcome. A
-  recovered error or a limitation the job permits does not by itself require a
-  failure report. Coverage gaps stay explicit; scheduler retries and alerts keep
-  their existing rules.
+- Memory events enter the synchronization queue before the pending-event list is
+  cleared. Failures and concurrent arrivals remain represented in that queue.
+- Local worker timeouts retain their module, phase and local origin through error
+  handling. They are not automatically treated as provider failures or replayed.
+- Computer guidance includes already-discovered host names, IDs and discovery
+  state. Discovery alone does not prove permission or reachability.
+- Browser profile discovery distinguishes an unknown tab inventory from a
+  confirmed empty inventory.
+- An authenticated replacement makes the superseded browser relay yield across
+  reconnects and worker revival. Explicit pairing can reclaim it. Existing
+  network recovery and pending-command cleanup remain in place.
 
-- Managed Chrome opens task pages without an extra unused tab and reuses the
-  selected profile's running browser. After configured task-tab cleanup, it can
-  close an idle browser it started while keeping profile data and sign-ins. Other
-  pages, unrecognized background targets, unfinished downloads, concurrent work
-  or incomplete activity tracking keep the browser open. Recognized extension
-  background-only targets do not by themselves keep it open. Externally managed
-  browsers remain under their owner's control.
-  Completion cleanup covers ordinary and already-delivered replies. It waits
-  for the final-delivery record to finish updating and retains its own tracked
-  lifetime, so foreground request teardown does not cancel it. Current task,
-  unfinished-delivery and cancellation checks remain binding. Existing lifecycle
-  cleanup also retires an idle managed browser when the task already closed its
-  last tracked tab; the same foreign-tab, download and ownership checks apply.
-
-- Nested tool results use compact JSON formatting without changing their
-  decoded contents. This reduces formatting overhead in retained tool history;
-  it does not change the compaction policy or establish a latency improvement.
-
-- Trajectory export credential masking preserves JSON and JSONL syntax and
-  leaves retained transcripts unchanged.
-
-The regression tests cover these behaviors in source. Verify delivery and memory
-quality on the installed runtime before treating a deployment as accepted.
+The relay change requires matching runtime and extension components for its full
+behavior. Older borrowed transports retain legacy closure behavior. A yielded
+client can remain yielded after the replacement leaves; explicit pairing restores
+it. A lost tab-creation handoff remains a separate limitation. These source changes
+do not establish that every browser failure is fixed or that response latency has
+improved. Verify the installed runtime through ordinary workflows.
 
 Trajectory retention aggregates group and byte totals through the canonical
 covering index rather than materializing and sorting the runtime event table.
@@ -178,16 +89,14 @@ progress. Its 60-second sweep, tool safe boundaries, model/provider work and
 transport can add delay. This is checkpoint eligibility, not a fixed delivery
 interval or response-time guarantee.
 
-The managed Codex 0.160.0 archive and the selected external gateway retain their
-separate manifest bindings. The optional Mac companion target reproduces its
-separately declared complete source tree. Its finite patch includes dashboard
-credential resolution, retained native credential-entry behavior and the exact
-dependency declarations of that component. The selected external gateway remains
-unchanged. New finite declarations list their exact paths; legacy packets retain
-their original eight-path contract. The existing native owner still
-verifies the Apple process, current host and local principal, exact form, focused
-secure field and single-use entry scope. Its source commit, full tree and build
-label are recorded in `nativeCompanion`.
+The managed Codex 0.160.0 archive and the external gateway retain separate
+manifest bindings. A companion may use the distribution's exact source identity
+or a declared finite delta to a distinct complete tree. A distinct target includes
+all required source and dependency changes; legacy packets retain their original
+eight-path contract. The native credential-entry implementation still verifies
+the Apple process, current host and local principal, exact form, focused secure
+field and single-use entry scope. `nativeCompanion` records its source commit,
+full tree and build label. Reconstructing it does not change the external gateway.
 
 In the recorded service-hosted configuration, the selected external gateway
 constructs text/voice agent prompts and resolves MCP tokens; the companion
@@ -330,8 +239,8 @@ for the artifact and failure contracts, and
 
 ## Optional Mac companion source
 
-The current manifest supplies a separate companion source delta and supports
-`--native-companion`. Read its exact source, build and scope from `nativeCompanion`,
+The manifest supports `--native-companion` for a matching distribution source
+or an explicitly declared finite delta. Read the exact source, build and scope from `nativeCompanion`,
 including the retained Bun payload limitation under [source identities](#source-identities).
 Use a new clean official-tag clone to reconstruct that declared source target:
 
@@ -354,9 +263,10 @@ companion cases:
 
 - **Same source:** omit `nativeCompanion.delta` only when the companion's
   `sourceCommit` equals `nativeDistribution.referenceCommit` and its `sourceTree`
-  equals both `nativeDistribution.referenceTree` and
-  `nativeDistribution.normalizedTree`. No empty extra patch stands in for this
-  equality.
+  equals `nativeDistribution.referenceTree`. Its replay tree must equal
+  `nativeDistribution.normalizedTree`: use the declared `normalizedTree` when
+  fixture normalization is present, otherwise `sourceTree`. No empty extra
+  patch stands in for this equality.
 - **Finite source delta:** bind the distribution tree and an exact nonempty patch
   in `nativeCompanion.delta`. The patch must change exactly the allowed paths
   enforced by the helper. The [source contract](../docs/21-native-runtime-reconstruction.md#optional-companion-source)
@@ -367,7 +277,8 @@ companion cases:
 The source commit and `sourceTree` retain the authentic component identity.
 When fixture labels are normalized, a separate `normalizedTree` and exact
 `normalization.paths` describe the public replay; those paths must match the
-source normalization declaration. The helper verifies the complete replay tree
+source normalization declaration. This also supports the same-source case without
+an additional delta. The helper verifies the complete replay tree
 before retrieving the same declared native archive. The archive's verified
 presence does not establish that the companion lockfile selects it; dependency
 installation follows the reconstructed lockfile. Dependency files cannot be

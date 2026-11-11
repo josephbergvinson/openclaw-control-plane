@@ -346,7 +346,8 @@ def companion_uses_native_source(manifest: dict) -> bool:
     values = (companion.get("sourceCommit"), companion.get("sourceTree"),
               native.get("referenceCommit"), native.get("referenceTree"), native.get("normalizedTree"))
     return (all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) for value in values)
-            and values[0] == values[2] and values[1] == values[3] == values[4])
+            and values[0] == values[2] and values[1] == values[3]
+            and companion.get("normalizedTree", values[1]) == values[4])
 
 
 def candidate_files() -> list[Path]:

@@ -46,6 +46,7 @@ supported shells. These changes preserve tool authorization and failure reportin
 | Mechanism | Implementation area and behavior |
 | --- | --- |
 | Request admission | `src/auto-reply/reply` and channel ingress retain authenticated source/account/session context. Fetched text, a quoted message and a worker result do not create new requester authority. |
+| Local worker deadlines | `packages/worker-runtime` records the worker module and phase when a local deadline expires. Existing error handling retains that local origin rather than attributing it to the model provider. Provider HTTP facts, explicit terminal stops and cancellation checks still apply; the change does not replay work. |
 | Tool access | `src/agents` and gateway tool resolution carry the admitted permission mode and tool policy into execution. Authenticated-owner defaults do not become permissions for unrelated senders. |
 | Visible workers | Native session/subagent tools and the retained run registry represent delegated work and bind registered projects to their authorized source root/worktree. The caller supplies the task scope; workers retain its constraints. |
 | Verified file writes | The native file-write tool reports its existing saved-content verification in the result. The agent can use that confirmation without another read solely to check that the same write succeeded; existing conflict, cancellation and verification handling remains unchanged. |
@@ -77,6 +78,7 @@ See [continuation](06-execution-and-durable-lanes.md) and
 | Tool-result formatting | Nested tool calls use the existing compact JSON serializer. Decoded values, result metadata, error handling and credential masking retain their contracts. Reduced formatting overhead is distinct from measured model latency or compaction gains. |
 | Compaction | The model-backed path in `src/agents/agent-hooks/compaction-safeguard.ts` combines older history and the split-turn prefix in one summary. Bounded recent-turn excerpts, required facts, chunking and the existing quality guard remain part of that path. Same-request retries carry earlier confirmed delivery facts forward once, and accepted-child receipts keep their original completion obligation once per run identity. Real repeated message effects remain separate, and progress does not settle an owed child final. Genuine lifecycle updates use the existing presenter, including the same status card when enabled. A later model request has its own outcome. |
 | Optional recall | `extensions/active-memory` can defer protected transcript recall to an explicit Memory Core sessions search in `escalate` mode. Preparation and retrieval share the existing deadline and current invocation/provider/audience checks; an admission failure does not put a healthy provider into cooldown. See [recall behavior](08-memory-and-context.md#recall-starts-with-the-claim). Fallback evidence comes from completed helper output; incomplete evidence remains unknown. Main and helper guidance starts a single unambiguous missing fact with one candidate and expands only when needed, preserving tool arguments and configured score thresholds. Current provider snapshots, explicitly supplied task assumptions and trusted loaded facts remain distinct from unstated personal preferences. Unavailable semantic search does not disable exact source lookup or justify claiming all context is missing. |
+| Memory event synchronization | `extensions/memory-core/src/memory` transfers pending event targets to its existing synchronization queue before clearing them. Failures and concurrent arrivals remain queued; foreground waits and explicit synchronization reasons keep their existing semantics. |
 | Known-record updates | The memory tool contract directs authenticated owner updates to known records without redundant semantic search. Exact reads preserve existing contents; search is used for missing facts or record locations and unresolved observed conflicts. Source and audience rules still apply. |
 | Prompt application observations | The existing hook runner and prompt-submission recorder retain host-only dispatch, handler-result and applied-projection observations tied to the admitted input. Bounded lengths and hashes separate offered context from the projection present at foreground dispatch. They do not add model instructions, and missing or ambiguous capture remains unknown. |
 | Trajectory context accounting | `src/trajectory/metadata.ts` places the existing run identity and current prompt report before large configuration, plugin and skill inventories in diagnostic projection. Their inventory size can no longer consume the shared object budget before those fields are visited. Existing field-size limits, truncation and credential masking remain; capture is evidence about the request, not proof of model comprehension. |
@@ -125,10 +127,11 @@ reconstruction target without a supported binding. The optional companion delta
 supports retained native credential forms and Computer tools. Credential forms use
 the existing `NativeCredentialBinding` and `NativeCredentialPromptContext` owners. Verified Apple process identity, current host/local principal, native
 form and focused secure-field checks, and single-use entry/revalidation remain
-binding. The finite source replay includes every inverse gateway-only difference
-needed to reproduce the separately retained complete companion tree. Its exact
-path set is declared for review; legacy packets retain their eight-path scope. This does not roll back the selected external
-gateway or claim newer gateway behavior in the separately retained companion. The external
+binding. When a companion uses a distinct retained source, its replay includes every
+declared inverse gateway-only difference needed to reproduce that complete tree.
+The manifest lists the exact paths; legacy packets retain their eight-path scope.
+A companion matching the distribution needs no inverse patch. Neither case
+changes the selected external gateway or implies behavior from another source. The external
 gateway and native distribution retain their own source identities. The installed
 companion's separately retained Bun security payload is
 not reconstructed by this packet; see the
@@ -167,6 +170,20 @@ rules remain the same whichever route performs the action. A denied OS permissio
 should identify the observed capability; it does not prove the whole app or account
 is inaccessible. Computer RPC deadlines follow the action budget while preserving
 explicit shorter timeout caps.
+
+Computer guidance includes host names, IDs and discovery state already available
+in the existing capability cache. Discovery does not prove reachability or
+permission. Browser profile discovery distinguishes an unknown tab inventory
+from a confirmed empty inventory.
+
+An authenticated relay replacement makes the superseded connection yield,
+including across worker revival. Explicit pairing can reclaim the profile;
+automatic status checks cannot. The existing borrowed transport carries close
+metadata when supported and retains legacy closure otherwise. Matching runtime
+and extension versions are required for the full behavior. A superseded client
+can remain yielded after its replacement leaves; explicit pairing restores it.
+A connection failure during tab creation can still leave ownership unrecorded;
+this change does not claim to repair that separate handoff.
 
 Computer window listings expose the owning process ID so the agent can distinguish
 otherwise identical windows. Actions still use the returned window reference;
