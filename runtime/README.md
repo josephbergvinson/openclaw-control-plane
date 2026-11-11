@@ -18,10 +18,10 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R91, activated on 10 November
-2026. Mac companion build 507 was installed on 11 November from the same native
-distribution source. The manifest records those source identities; private
-installation records separately establish the installed bundles.
+The selected and loaded external gateway reference is R92, activated on 11 November
+2026. Mac companion build 507 retains its R91 source. The companion delta restores
+that complete tree from the R92 distribution. The manifest records both source
+identities; installation records separately establish the installed bundles.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
@@ -60,6 +60,10 @@ browser mechanisms and their code locations.
 
 The latest reliability changes use existing execution paths:
 
+- Cancelling a completed child retires its pending completion for the requesting
+  parent without changing the child's recorded outcome or another parent's work.
+  Remaining child results retain their continuation authority and final destination;
+  a previously admitted continuation cannot deliver the cancelled result.
 - Memory events enter the synchronization queue before the pending-event list is
   cleared. Failures and concurrent arrivals remain represented in that queue.
 - Local worker timeouts retain their module, phase and local origin through error
