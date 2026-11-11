@@ -18,10 +18,11 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R92, activated on 11 November
-2026. Mac companion build 507 retains its R91 source. The companion delta restores
-that complete tree from the R92 distribution. The manifest records both source
-identities; installation records separately establish the installed bundles.
+The selected and loaded external gateway reference is R93, activated on 11 November
+2026. The declared Mac companion source matches the native distribution exactly,
+so reconstruction needs no inverse companion patch. The manifest's companion
+build label identifies the intended source reference; separate signing,
+installation and startup records establish the actual app bundles and behavior.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
@@ -40,11 +41,12 @@ The Mac companion source resolves local dashboard credential
 references through the existing endpoint owner. Primary and auxiliary dashboard
 connections refresh those credentials when their own connection retires; unrelated
 remote connections do not invalidate them. The previous native credential-entry
-behavior is retained. Build 507 also carries the matching browser extension. An
-authenticated extension connection and a page read were verified in an existing
-Chrome profile after installation. This is one integration check, not a claim of
-sustained browser reliability. Reconstruction does not install the app or
-establish acceptance on another host.
+behavior is retained. Companion startup can install its bundled browser
+extension, so the companion and external runtime must use matching extension
+source. Updating only the stable extension directory is insufficient when a
+retained app can replace it on its next launch. Reconstructing the matching source
+does not sign or install the app, verify startup, or establish sustained browser
+reliability on another host.
 
 The bounded comparison did not establish an overall performance advantage over
 native Codex. These targeted repairs do not establish consistently fast responses
@@ -75,11 +77,15 @@ The latest reliability changes use existing execution paths:
 - An authenticated replacement makes the superseded browser relay yield across
   reconnects and worker revival. Explicit pairing can reclaim it. Existing
   network recovery and pending-command cleanup remain in place.
+- Tab creation stays owned by the extension until its target reaches the
+  requester. Failed delivery reclaims only unchanged, unclaimed tabs; delivered
+  or user-modified tabs remain open even if the acknowledgment is lost.
 
 The relay change requires matching runtime and extension components for its full
 behavior. Older borrowed transports retain legacy closure behavior. A yielded
 client can remain yielded after the replacement leaves; explicit pairing restores
-it. A lost tab-creation handoff remains a separate limitation. These source changes
+it. Worker termination, older extensions or uncertain delivery can still leave
+tabs requiring manual cleanup. These source changes
 do not establish that every browser failure is fixed or that response latency has
 improved. Verify the installed runtime through ordinary workflows.
 

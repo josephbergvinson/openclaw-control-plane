@@ -10198,7 +10198,7 @@ index 0000000000000000000000000000000000000000..a89bedd637c9569a0e652b360f8eaa6c
 +}
 +#endif
 diff --git a/config/assertion-safety-baseline.txt b/config/assertion-safety-baseline.txt
-index 36f52efb740e10cd2d2ac0151e0ef2a999623134..5a60172eab2c14a12ffeedbdf5df0a890f40179b 100644
+index 36f52efb740e10cd2d2ac0151e0ef2a999623134..bb843f1d1541765ca6d9b25ac6d2fdad3013ec44 100644
 --- a/config/assertion-safety-baseline.txt
 +++ b/config/assertion-safety-baseline.txt
 @@ -54,7 +54,7 @@ extensions/browser/src/browser/client-fetch.ts	2
@@ -10206,7 +10206,7 @@ index 36f52efb740e10cd2d2ac0151e0ef2a999623134..5a60172eab2c14a12ffeedbdf5df0a89
  extensions/browser/src/browser/extension-install-layout.ts	4
  extensions/browser/src/browser/extension-relay/auth-v2.ts	4
 -extensions/browser/src/browser/extension-relay/relay-bridge.ts	8
-+extensions/browser/src/browser/extension-relay/relay-bridge.ts	7
++extensions/browser/src/browser/extension-relay/relay-bridge.ts	4
  extensions/browser/src/browser/extension-relay/relay-protocol.ts	1
  extensions/browser/src/browser/output-files.ts	1
  extensions/browser/src/browser/paths.ts	1
@@ -11336,10 +11336,30 @@ index 2cf19a6881947485f0edc27a7c1d9359a75d6432..1430e92a3d0ef701bf3688e9b3023db7
  
  The Browser panel follows the current session's latest successful browser tab,
 diff --git a/docs/tools/chrome-extension.md b/docs/tools/chrome-extension.md
-index 3ab9c37ec4efad0fa2f9493070a6035d7d27a031..d884c8e49dfe8170a013a5affac8624bf72693fd 100644
+index 3ab9c37ec4efad0fa2f9493070a6035d7d27a031..8401a01798958ba304fe1b964a9c87a183f0579c 100644
 --- a/docs/tools/chrome-extension.md
 +++ b/docs/tools/chrome-extension.md
-@@ -695,6 +695,12 @@ openclaw doctor
+@@ -355,10 +355,15 @@ unavailable. Navigating away, replacing the tab, or restarting or reconnecting
+ the extension ends the initial blank admission. Returning to `about:blank`
+ does not restore it.
+ 
+-If creation fails before the extension returns the target, it attempts to close
+-the tab only while it still owns it. Tabs you paused, moved, or navigated during
+-creation are left alone. A redirect, lost connection, or worker shutdown can
+-leave a tab behind. Close it manually if needed.
++With matching current extension and relay versions, creation remains owned by
++the extension until a client receives the target. If the client disconnects or
++the initial response times out before delivery, the extension attempts to close
++only its unchanged, unclaimed tab. Tabs you paused, moved, or navigated during
++creation are left alone. Once a target has been delivered, losing its
++acknowledgment does not authorize closing the tab.
++
++Older extensions cannot confirm this handoff. A worker shutdown or uncertain
++delivery can also leave a tab behind. Close it manually if needed.
+ 
+ An explicitly commanded main-frame navigation of an authorized tab can also
+ use exact `about:blank`, for example during a performance trace reset. Chrome
+@@ -695,6 +700,12 @@ openclaw doctor
    and that the paired port still belongs to an extension profile. Allow for the
    one-minute wake-up throttle, then run browser doctor. No local Gateway is
    required for the standalone path.
@@ -13049,8 +13069,681 @@ index efac5b67d60b552ad5707e3627f5422ec221ccc7..1a2c7755c333475a75a7d9c99df3bf0d
  
  /** Route lifecycle cleanup through the currently running Browser runtime when available. */
  export async function closeTrackedBrowserTabsForSessions(
+diff --git a/extensions/browser/chrome-extension/background.creation-handoff.test.ts b/extensions/browser/chrome-extension/background.creation-handoff.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d18a1c8316f7c83ac0b672ee182e6cb024dac659
+--- /dev/null
++++ b/extensions/browser/chrome-extension/background.creation-handoff.test.ts
+@@ -0,0 +1,667 @@
++import assert from "node:assert/strict";
++import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { ExtensionRelayBridge } from "../src/browser/extension-relay/relay-bridge.js";
++import { FakeSocket } from "../src/browser/extension-relay/relay-bridge.test-support.js";
++import { resolveExtensionRelayCommandTimeoutMs } from "../src/browser/extension-relay/relay-command-timeout.js";
++import {
++  cleanupBackgroundHarnesses,
++  loadBackground,
++  sendRuntimeMessage,
++  TEST_RELAY_KEY,
++} from "./background.test-harness.js";
++
++const cleanups: Array<() => Promise<void>> = [];
++
++beforeEach(() => {
++  vi.resetModules();
++  vi.useFakeTimers();
++});
++
++afterEach(async () => {
++  for (const cleanup of cleanups.splice(0)) {
++    await cleanup();
++  }
++  await cleanupBackgroundHarnesses();
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++  vi.restoreAllMocks();
++});
++
++async function setup(
++  accessMode: "all" | "selected" = "all",
++  options: {
++    delayNativeCreate?: boolean;
++    holdAdoptionAck?: boolean;
++    url?: string;
++  } = {},
++) {
++  const h = await loadBackground({
++    storedConfig: {
++      relayUrl: "ws://127.0.0.1:18797/extension",
++      token: TEST_RELAY_KEY,
++      authVersion: 2,
++      accessMode,
++    },
++    emitTabEvents: true,
++    initialTabs: [
++      { id: 99, url: "about:blank", groupId: 7 },
++      { id: 100, url: "https://example.com/unrelated", groupId: 7 },
++    ],
++  });
++  const originalTabs = await h.tabsQuery();
++  const nativeCreated = createDeferred<void>();
++  const releaseNativeCreate = createDeferred<void>();
++  const nativeCreate = h.tabsCreate.getMockImplementation();
++  assert(nativeCreate);
++  h.tabsCreate.mockImplementation(async (params) => {
++    const tab = await nativeCreate(params);
++    nativeCreated.resolve();
++    if (options.delayNativeCreate) {
++      await releaseNativeCreate.promise;
++    }
++    return tab;
++  });
++  const removed = createDeferred<void>();
++  const nativeRemove = h.tabsRemove.getMockImplementation();
++  assert(nativeRemove);
++  h.tabsRemove.mockImplementation(async (tabId) => {
++    await nativeRemove(tabId);
++    removed.resolve();
++  });
++  const socket = h.relaySockets[0];
++  assert(socket);
++  await h.authenticate(socket);
++  const bridge = new ExtensionRelayBridge();
++  const commands: Array<Record<string, unknown>> = [];
++  const offered = createDeferred<Record<string, unknown>>();
++  const delivered = createDeferred<Record<string, unknown>>();
++  const adoptionAck = createDeferred<Record<string, unknown>>();
++  let creationSeq: number | undefined;
++  let adoptionSeq: number | undefined;
++  let heldAdoptionAck: string | undefined;
++  let heldResult: string | undefined;
++  let holdResult = true;
++  const extension = bridge.attachExtensionSocket({
++    send: (raw) => {
++      const command = JSON.parse(raw) as Record<string, unknown>;
++      commands.push(command);
++      if (command.type === "createTab") {
++        assert(typeof command.seq === "number");
++        creationSeq = command.seq;
++      }
++      if (command.type === "settleCreateTab" && command.disposition === "adopt") {
++        assert(typeof command.seq === "number");
++        adoptionSeq = command.seq;
++      }
++      socket.receive(command);
++    },
++    close: (code, reason) => socket.finishClose(code, reason),
++  });
++  const retireConnection = () => {
++    socket.finishClose();
++    extension.onClose();
++  };
++  const hello = socket.send.mock.calls.find(([raw]) => JSON.parse(raw).type === "hello")?.[0];
++  assert(hello, "Expected the actual authenticated background hello");
++  socket.send.mockImplementation((raw: string) => {
++    const frame = JSON.parse(raw) as Record<string, unknown>;
++    if (
++      options.holdAdoptionAck &&
++      adoptionSeq !== undefined &&
++      frame.seq === adoptionSeq &&
++      (frame.type === "result" || frame.type === "error")
++    ) {
++      heldAdoptionAck = raw;
++      adoptionAck.resolve(frame);
++      return;
++    }
++    // Hold the native handoff at the transport boundary, after Chrome creation,
++    // grouping and attachment have all completed. No policy helper is mocked.
++    if (
++      holdResult &&
++      creationSeq !== undefined &&
++      frame.seq === creationSeq &&
++      (frame.type === "result" || frame.type === "error")
++    ) {
++      heldResult = raw;
++      offered.resolve(frame);
++      return;
++    }
++    extension.onMessage(raw);
++  });
++  extension.onMessage(hello);
++  const clientSocket = new FakeSocket();
++  const send = clientSocket.send.bind(clientSocket);
++  clientSocket.send = (raw) => {
++    send(raw);
++    const frame = JSON.parse(raw) as Record<string, unknown>;
++    if (frame.id === 1) {
++      delivered.resolve(frame);
++    }
++  };
++  const client = bridge.attachCdpClientSocket(clientSocket);
++  const releaseResult = (
++    transform?: (frame: Record<string, unknown>) => Record<string, unknown>,
++  ) => {
++    holdResult = false;
++    if (heldResult !== undefined) {
++      const raw = heldResult;
++      heldResult = undefined;
++      extension.onMessage(transform ? JSON.stringify(transform(JSON.parse(raw))) : raw);
++    }
++  };
++  const releaseAdoptionAck = () => {
++    if (heldAdoptionAck !== undefined) {
++      const raw = heldAdoptionAck;
++      heldAdoptionAck = undefined;
++      extension.onMessage(raw);
++    }
++  };
++  cleanups.push(async () => {
++    releaseNativeCreate.resolve();
++    bridge.dispose();
++    releaseResult();
++    releaseAdoptionAck();
++    await client.onClose();
++  });
++  client.onMessage(
++    JSON.stringify({
++      id: 1,
++      method: "Target.createTarget",
++      params: { url: options.url ?? "about:blank" },
++    }),
++  );
++  return {
++    ...h,
++    originalTabs,
++    commands,
++    offered,
++    delivered,
++    adoptionAck,
++    client,
++    clientSocket,
++    releaseResult,
++    releaseAdoptionAck,
++    nativeCreated,
++    releaseNativeCreate,
++    removed,
++    bridge,
++    nativeSocket: socket,
++    retireConnection,
++  };
++}
++
++describe("native creation handoff through the relay bridge", () => {
++  it("rolls back its physical tab when the creator disconnects before receiving the native result", async () => {
++    const h = await setup();
++    expect(await h.offered.promise).toMatchObject({
++      type: "result",
++      result: { tabId: 101, targetId: "tab-101" },
++    });
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    const closing = h.client.onClose();
++    h.releaseResult();
++    await closing;
++
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++    expect(h.clientSocket.frames().some((frame) => frame.id === 1)).toBe(false);
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("adopts a delivered creation and does not reclaim it when that client later disconnects", async () => {
++    const h = await setup();
++    const offer = await h.offered.promise;
++    expect(offer).toMatchObject({ type: "result", result: { tabId: 101 } });
++    h.releaseResult();
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      result: { targetId: "tab-101" },
++    });
++    await h.client.onClose();
++
++    expect(h.commands).toContainEqual(
++      expect.objectContaining({
++        type: "settleCreateTab",
++        creationSeq: offer.seq,
++        disposition: "adopt",
++      }),
++    );
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toEqual([
++      ...h.originalTabs,
++      expect.objectContaining({ id: 101, url: "about:blank", groupId: 7 }),
++    ]);
++  });
++
++  it("does not send a second CDP response or abandon an adopted tab when the adoption acknowledgement is lost", async () => {
++    const h = await setup("all", { holdAdoptionAck: true });
++    const offer = await h.offered.promise;
++    h.releaseResult();
++    const response = await h.delivered.promise;
++    expect(response).toMatchObject({ id: 1, result: { targetId: "tab-101" } });
++    expect(await h.adoptionAck.promise).toMatchObject({ type: "result", result: {} });
++    await vi.advanceTimersByTimeAsync(
++      resolveExtensionRelayCommandTimeoutMs({
++        type: "settleCreateTab",
++        creationSeq: offer.seq as number,
++        disposition: "adopt",
++      }),
++    );
++    h.releaseAdoptionAck();
++    await h.client.onClose();
++
++    expect(h.clientSocket.frames().filter((frame) => frame.id === 1)).toEqual([response]);
++    expect(h.commands).not.toContainEqual(
++      expect.objectContaining({ type: "settleCreateTab", disposition: "abandon" }),
++    );
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toEqual([
++      ...h.originalTabs,
++      expect.objectContaining({ id: 101, url: "about:blank", groupId: 7 }),
++    ]);
++  });
++
++  it("preserves a delivered tab when the connection retires before adoption can reach the native owner", async () => {
++    const h = await setup();
++    await h.offered.promise;
++    const send = h.clientSocket.send.bind(h.clientSocket);
++    h.clientSocket.send = (raw) => {
++      send(raw);
++      const frame = JSON.parse(raw);
++      if (frame.id === 1 && frame.result?.targetId === "tab-101") {
++        h.retireConnection();
++      }
++    };
++    h.releaseResult();
++    const response = await h.delivered.promise;
++    expect(response).toMatchObject({ id: 1, result: { targetId: "tab-101" } });
++    await h.client.onClose();
++    // Drain the native retirement continuation, whose public socket close callback
++    // is synchronous and does not expose its asynchronous cleanup promise.
++    await vi.advanceTimersByTimeAsync(0);
++
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toEqual([
++      ...h.originalTabs,
++      expect.objectContaining({ id: 101, url: "about:blank", groupId: 7 }),
++    ]);
++    expect(h.clientSocket.frames().filter((frame) => frame.id === 1)).toEqual([response]);
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "settleCreateTab" }));
++  });
++
++  it("adopts for a peer that received the target when the original creator disconnects during announcement", async () => {
++    const h = await setup();
++    const offer = await h.offered.promise;
++    const peerSocket = new FakeSocket();
++    const peerReady = createDeferred<void>();
++    const peerAttached = createDeferred<void>();
++    let creatorClosing: Promise<void> | undefined;
++    const send = peerSocket.send.bind(peerSocket);
++    peerSocket.send = (raw) => {
++      send(raw);
++      const frame = JSON.parse(raw);
++      if (frame.id === 2) {
++        peerReady.resolve();
++      }
++      if (
++        frame.method === "Target.attachedToTarget" &&
++        frame.params?.targetInfo?.targetId === "tab-101"
++      ) {
++        creatorClosing = h.client.onClose();
++        peerAttached.resolve();
++      }
++    };
++    const peer = h.bridge.attachCdpClientSocket(peerSocket);
++    cleanups.push(() => peer.onClose());
++    peer.onMessage(
++      JSON.stringify({ id: 2, method: "Target.setAutoAttach", params: { autoAttach: true } }),
++    );
++    await peerReady.promise;
++    h.releaseResult();
++    await peerAttached.promise;
++    assert(creatorClosing);
++    await creatorClosing;
++
++    expect(h.clientSocket.frames().some((frame) => frame.id === 1)).toBe(false);
++    expect(h.commands).toContainEqual(
++      expect.objectContaining({
++        type: "settleCreateTab",
++        creationSeq: offer.seq,
++        disposition: "adopt",
++      }),
++    );
++    expect(h.commands).not.toContainEqual(
++      expect.objectContaining({ type: "settleCreateTab", disposition: "abandon" }),
++    );
++    await peer.onClose();
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toEqual([
++      ...h.originalTabs,
++      expect.objectContaining({ id: 101, url: "about:blank", groupId: 7 }),
++    ]);
++  });
++
++  it.for(["missing tabId", "mismatched creationSeq"] as const)(
++    "rejects an invalid creation receipt with %s and rolls back the original native operation",
++    async (invalid) => {
++      const h = await setup();
++      const offer = await h.offered.promise;
++      h.releaseResult((frame) => ({
++        ...frame,
++        result: {
++          ...(frame.result as Record<string, unknown>),
++          ...(invalid === "missing tabId"
++            ? { tabId: undefined }
++            : { creationSeq: (offer.seq as number) + 1 }),
++        },
++      }));
++      const response = await h.delivered.promise;
++      await h.client.onClose();
++
++      expect(response).toMatchObject({ id: 1, error: { message: expect.any(String) } });
++      expect(response).not.toHaveProperty("result");
++      expect(h.clientSocket.frames().filter((frame) => frame.id === 1)).toHaveLength(1);
++      expect(h.commands).toContainEqual(
++        expect.objectContaining({
++          type: "settleCreateTab",
++          creationSeq: offer.seq,
++          disposition: "abandon",
++        }),
++      );
++      expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++      expect(await h.tabsQuery()).toEqual(h.originalTabs);
++      expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++    },
++  );
++
++  it("rolls back after the native create callback arrives for a disconnected creator", async () => {
++    const h = await setup("all", { delayNativeCreate: true });
++    await h.nativeCreated.promise;
++    expect(await h.tabsQuery()).toContainEqual(expect.objectContaining({ id: 101 }));
++    const closing = h.client.onClose();
++    h.releaseNativeCreate.resolve();
++    expect(await h.offered.promise).toMatchObject({ type: "result", result: { tabId: 101 } });
++    h.releaseResult();
++    await closing;
++
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("rolls back an unoffered tab after its native callback arrives on a retired connection", async () => {
++    const h = await setup("all", { delayNativeCreate: true });
++    await h.nativeCreated.promise;
++    h.retireConnection();
++    h.releaseNativeCreate.resolve();
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension disconnected" },
++    });
++    await h.removed.promise;
++    await h.client.onClose();
++
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++    expect(h.clientSocket.frames()).not.toContainEqual(
++      expect.objectContaining({ id: 1, result: expect.anything() }),
++    );
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("preserves an offered tab when connection retirement makes its delivery unknowable", async () => {
++    const h = await setup();
++    expect(await h.offered.promise).toMatchObject({ type: "result", result: { tabId: 101 } });
++    h.retireConnection();
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension disconnected" },
++    });
++    h.releaseResult();
++    await h.client.onClose();
++    // The native owner sees the same retirement whether this offer was still in
++    // transport or already delivered. Preserve the tab in both cases: speculative
++    // cleanup here could otherwise delete a successfully delivered client target.
++    await vi.advanceTimersByTimeAsync(0);
++
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toEqual([
++      ...h.originalTabs,
++      expect.objectContaining({ id: 101, url: "about:blank", groupId: 7 }),
++    ]);
++    expect(h.bridge.accessibleTabs()).not.toContainEqual(expect.objectContaining({ tabId: 101 }));
++    expect(h.clientSocket.frames()).not.toContainEqual(
++      expect.objectContaining({ id: 1, result: expect.anything() }),
++    );
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("abandons the original native creation when its initial result times out and ignores a late offer", async () => {
++    const h = await setup();
++    const offer = await h.offered.promise;
++    expect(offer).toMatchObject({ type: "result", result: { tabId: 101 } });
++    await vi.advanceTimersByTimeAsync(
++      resolveExtensionRelayCommandTimeoutMs({ type: "createTab", url: "about:blank" }),
++    );
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension relay command timed out: createTab" },
++    });
++    h.releaseResult();
++    await h.client.onClose();
++
++    expect(h.commands).toContainEqual(
++      expect.objectContaining({
++        type: "settleCreateTab",
++        creationSeq: offer.seq,
++        disposition: "abandon",
++      }),
++    );
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++    expect(h.bridge.accessibleTabs()).not.toContainEqual(expect.objectContaining({ tabId: 101 }));
++    expect(h.clientSocket.frames().filter((frame) => frame.id === 1)).toHaveLength(1);
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("preserves an explicit abandonment when the connection retires before its acknowledgement", async () => {
++    const h = await setup();
++    const offer = await h.offered.promise;
++    const nativeGet = h.tabsGet.getMockImplementation();
++    assert(nativeGet);
++    let retired = false;
++    h.tabsGet.mockImplementation(async (tabId) => {
++      const tab = await nativeGet(tabId);
++      if (
++        tabId === 101 &&
++        !retired &&
++        h.commands.some(
++          (command) => command.type === "settleCreateTab" && command.disposition === "abandon",
++        )
++      ) {
++        // Retirement occurs inside native rollback after abandonment was admitted,
++        // not merely after an unactioned frame reached the asynchronous transport.
++        retired = true;
++        h.retireConnection();
++      }
++      return tab;
++    });
++    await vi.advanceTimersByTimeAsync(
++      resolveExtensionRelayCommandTimeoutMs({ type: "createTab", url: "about:blank" }),
++    );
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension relay command timed out: createTab" },
++    });
++    await h.removed.promise;
++    h.releaseResult();
++    await h.client.onClose();
++
++    expect(retired).toBe(true);
++    expect(h.commands).toContainEqual(
++      expect.objectContaining({
++        type: "settleCreateTab",
++        creationSeq: offer.seq,
++        disposition: "abandon",
++      }),
++    );
++    expect(h.commands).not.toContainEqual(
++      expect.objectContaining({ type: "settleCreateTab", disposition: "adopt" }),
++    );
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++    expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++  });
++
++  it("preserves a peer-acquired HTTP tab when the original native callback arrives after creation timeout", async () => {
++    const url = "https://example.com/created";
++    const h = await setup("all", { delayNativeCreate: true, url });
++    await h.nativeCreated.promise;
++    const peerSocket = new FakeSocket();
++    const peerReady = createDeferred<void>();
++    const peerAttached = createDeferred<string>();
++    const peerCommand = createDeferred<Record<string, unknown>>();
++    const send = peerSocket.send.bind(peerSocket);
++    peerSocket.send = (raw) => {
++      send(raw);
++      const frame = JSON.parse(raw);
++      if (frame.id === 2) {
++        peerReady.resolve();
++      }
++      if (frame.id === 3) {
++        peerCommand.resolve(frame);
++      }
++      if (
++        frame.method === "Target.attachedToTarget" &&
++        frame.params?.targetInfo?.targetId === "tab-101"
++      ) {
++        peerAttached.resolve(frame.params.sessionId);
++      }
++    };
++    const peer = h.bridge.attachCdpClientSocket(peerSocket);
++    cleanups.push(() => peer.onClose());
++    peer.onMessage(
++      JSON.stringify({ id: 2, method: "Target.setAutoAttach", params: { autoAttach: true } }),
++    );
++    await peerReady.promise;
++    h.updateTab(101, { url });
++    // Execute the existing native inventory debounce, rather than fabricate tabs.
++    await vi.advanceTimersByTimeAsync(150);
++    const sessionId = await peerAttached.promise;
++    await vi.advanceTimersByTimeAsync(
++      resolveExtensionRelayCommandTimeoutMs({ type: "createTab", url }) - 150,
++    );
++    expect(h.commands).toContainEqual(
++      expect.objectContaining({ type: "settleCreateTab", disposition: "abandon" }),
++    );
++    h.releaseNativeCreate.resolve();
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension relay command timed out: createTab" },
++    });
++    await h.client.onClose();
++
++    expect(h.tabsRemove).not.toHaveBeenCalled();
++    expect(await h.tabsQuery()).toContainEqual(expect.objectContaining({ id: 101, url }));
++    peer.onMessage(
++      JSON.stringify({
++        id: 3,
++        sessionId,
++        method: "Runtime.evaluate",
++        params: { expression: "1" },
++      }),
++    );
++    expect(await peerCommand.promise).toMatchObject({ id: 3, result: {} });
++    expect(h.debuggerSendCommand).toHaveBeenCalledWith(
++      expect.objectContaining({ tabId: 101 }),
++      "Runtime.evaluate",
++      { expression: "1" },
++    );
++    expect((await h.tabsQuery()).filter((tab) => tab.id !== 101)).toEqual(h.originalTabs);
++  });
++
++  it("rejects a new ordinary native attachment once rollback has entered tab removal", async () => {
++    const h = await setup();
++    await h.offered.promise;
++    const removalStarted = createDeferred<void>();
++    const releaseRemoval = createDeferred<void>();
++    const nativeRemove = h.tabsRemove.getMockImplementation();
++    assert(nativeRemove);
++    h.tabsRemove.mockImplementation(async (tabId) => {
++      removalStarted.resolve();
++      await releaseRemoval.promise;
++      await nativeRemove(tabId);
++    });
++    const lateReply = createDeferred<Record<string, unknown>>();
++    const forward = h.nativeSocket.send.getMockImplementation();
++    assert(forward);
++    h.nativeSocket.send.mockImplementation((raw: string) => {
++      const frame = JSON.parse(raw);
++      if (frame.seq === 77 && (frame.type === "result" || frame.type === "error")) {
++        lateReply.resolve(frame);
++      }
++      forward(raw);
++    });
++    try {
++      await vi.advanceTimersByTimeAsync(
++        resolveExtensionRelayCommandTimeoutMs({ type: "createTab", url: "about:blank" }),
++      );
++      await removalStarted.promise;
++      const attachmentsBefore = h.debuggerAttach.mock.calls.length;
++      // Exercise the authenticated native command boundary. Public discovery hides
++      // the pending creation, so a CDP target lookup alone would not reach this guard.
++      h.nativeSocket.receive({ type: "attach", seq: 77, tabId: 101 });
++      expect(await lateReply.promise).toMatchObject({
++        type: "error",
++        seq: 77,
++        message: expect.any(String),
++      });
++      expect(h.debuggerAttach).toHaveBeenCalledTimes(attachmentsBefore);
++    } finally {
++      releaseRemoval.resolve();
++    }
++    expect(await h.delivered.promise).toMatchObject({
++      id: 1,
++      error: { message: "extension relay command timed out: createTab" },
++    });
++    await h.client.onClose();
++    expect(h.tabsRemove).toHaveBeenCalledExactlyOnceWith(101);
++    expect(await h.tabsQuery()).toEqual(h.originalTabs);
++  });
++
++  it.for(["navigation", "pause", "selected revocation"] as const)(
++    "does not reclaim a native tab after %s invalidates the pending creation",
++    async (change) => {
++      const h = await setup(change === "selected revocation" ? "selected" : "all");
++      expect(await h.offered.promise).toMatchObject({
++        type: "result",
++        result: { tabId: 101 },
++      });
++      if (change === "navigation") {
++        h.updateTab(101, { url: "https://example.com/user-navigation" });
++      } else if (change === "pause") {
++        expect(
++          await sendRuntimeMessage(h, {
++            type: "toggleTabAccess",
++            accessMode: "all",
++            tabId: 101,
++            grant: false,
++          }),
++        ).toMatchObject({ ok: true });
++      } else {
++        h.updateTab(101, { groupId: -1 });
++      }
++      const closing = h.client.onClose();
++      h.releaseResult();
++      await closing;
++
++      expect(h.tabsRemove).not.toHaveBeenCalled();
++      const tabs = await h.tabsQuery();
++      expect(tabs.filter((tab) => tab.id !== 101)).toEqual(h.originalTabs);
++      expect(tabs).toContainEqual(expect.objectContaining({ id: 101 }));
++      expect(h.commands).not.toContainEqual(expect.objectContaining({ type: "closeTab" }));
++    },
++  );
++});
 diff --git a/extensions/browser/chrome-extension/background.js b/extensions/browser/chrome-extension/background.js
-index 2fb865ddd39e908bea719636d26cda2566bf8515..fdc644ebe94eb49e09ec915e029345e3c3709a31 100644
+index 2fb865ddd39e908bea719636d26cda2566bf8515..84bf6db32db0eac6af44ef3413e12b62966419f1 100644
 --- a/extensions/browser/chrome-extension/background.js
 +++ b/extensions/browser/chrome-extension/background.js
 @@ -33,6 +33,9 @@ const RELAY_ENSURE_MIN_INTERVAL_MS = 60_000;
@@ -13153,7 +13846,16 @@ index 2fb865ddd39e908bea719636d26cda2566bf8515..fdc644ebe94eb49e09ec915e029345e3
    if (!connectionIsCurrent()) {
      return;
    }
-@@ -439,7 +476,7 @@ async function connectRelay(isConnectionAllowed = () => true) {
+@@ -404,6 +441,8 @@ async function connectRelay(isConnectionAllowed = () => true) {
+     attachDebugger: owner.attach,
+     detachDebugger: owner.detach,
+     createTab: (message, operation) => tabAccessPolicy.createTab(message, operation),
++    settleCreateTab: (seq, disposition, isCurrent) =>
++      tabAccessPolicy.settleCreateTab(seq, disposition, isCurrent),
+     focusWindowForTab,
+     scheduleTabsSync,
+     captureDebugger: owner.capture,
+@@ -439,7 +478,7 @@ async function connectRelay(isConnectionAllowed = () => true) {
          void handleRelayCommand(msg);
        },
        onAuthenticationFailure: failRelayAuthentication,
@@ -13162,7 +13864,7 @@ index 2fb865ddd39e908bea719636d26cda2566bf8515..fdc644ebe94eb49e09ec915e029345e3
          retireRelayOwner(owner);
          if (relayWs !== socket) {
            return;
-@@ -454,6 +491,29 @@ async function connectRelay(isConnectionAllowed = () => true) {
+@@ -454,6 +493,29 @@ async function connectRelay(isConnectionAllowed = () => true) {
              "Relay authentication v2 failed. Update OpenClaw, or re-pair after a relay key rotation.";
          }
          setBadge("error");
@@ -13194,10 +13896,10 @@ index 2fb865ddd39e908bea719636d26cda2566bf8515..fdc644ebe94eb49e09ec915e029345e3
      });
 diff --git a/extensions/browser/chrome-extension/background.native-policy-enumeration.test.ts b/extensions/browser/chrome-extension/background.native-policy-enumeration.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a4a853d6fdd34a812ab05af1db7f3b24a07eab0f
+index 0000000000000000000000000000000000000000..42fd376575693cb6e8c1d342a3eb3d582fe24a90
 --- /dev/null
 +++ b/extensions/browser/chrome-extension/background.native-policy-enumeration.test.ts
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,78 @@
 +import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { createRelayDebugger, NativeAttachPolicyDeniedError } from "./modules/relay-debugger.js";
@@ -13215,6 +13917,8 @@ index 0000000000000000000000000000000000000000..a4a853d6fdd34a812ab05af1db7f3b24
 +      capture: () => epoch,
 +      epochIsCurrent: () => current,
 +      retireTabDocument: vi.fn(),
++      retireCreations: vi.fn(async () => {}),
++      noteTabClaim: vi.fn(),
 +      requireTab: async () => ({ id: 7 }),
 +    },
 +    requireAutomationAllowed: async () => {},
@@ -13274,6 +13978,55 @@ index 0000000000000000000000000000000000000000..a4a853d6fdd34a812ab05af1db7f3b24
 +    await f.owner.retire();
 +  });
 +});
+diff --git a/extensions/browser/chrome-extension/background.relay-lifecycle.test.ts b/extensions/browser/chrome-extension/background.relay-lifecycle.test.ts
+index a6d6b92cc204c99ac1eb49809468ed5c4e5e74b2..91eeb2d30ceb4212fbc1d7823fd7446a0c7d83c7 100644
+--- a/extensions/browser/chrome-extension/background.relay-lifecycle.test.ts
++++ b/extensions/browser/chrome-extension/background.relay-lifecycle.test.ts
+@@ -616,7 +616,7 @@ it("cancels attach admission when a same-socket detach arrives before native dis
+ });
+ 
+ it.each(["socket close", "native replacement"])(
+-  "rolls back only its created tab after %s during focus",
++  "settles its created tab after %s during focus",
+   async (ending) => {
+     const f = await fixture();
+     const gate = createDeferred<void>();
+@@ -636,8 +636,33 @@ it.each(["socket close", "native replacement"])(
+         });
+       }
+       gate.resolve();
+-      await vi.waitFor(() => expect(f.h.tabsRemove).toHaveBeenCalledExactlyOnceWith(tabId + 1));
+-      expect(await f.h.tabsQuery()).toEqual([expect.objectContaining({ id: tabId })]);
++      if (ending === "socket close") {
++        await vi.waitFor(() => expect(f.h.tabsRemove).toHaveBeenCalledExactlyOnceWith(tabId + 1));
++        expect(await f.h.tabsQuery()).toEqual([expect.objectContaining({ id: tabId })]);
++      } else {
++        // The new native acquisition owns the tab even without navigation;
++        // failure of its retired creator cannot roll that acquisition back.
++        await vi.waitFor(() =>
++          expect(frames(f.old).find((frame) => frame.seq === 80)).toMatchObject({
++            type: "error",
++            message: "Debugger attachment retired",
++          }),
++        );
++        expect(f.h.tabsRemove).not.toHaveBeenCalled();
++        expect(await f.h.tabsQuery()).toEqual([
++          expect.objectContaining({ id: tabId }),
++          expect.objectContaining({ id: tabId + 1, url: "https://example.com/new" }),
++        ]);
++        expect(
++          await reply(f.old, 83, { type: "cdp", tabId: tabId + 1, method: "Runtime.enable" }),
++        ).toMatchObject({ type: "result" });
++        expect(
++          frames(f.old).filter(
++            (frame) =>
++              frame.method === "Runtime.executionContextCreated" && frame.tabId === tabId + 1,
++          ),
++        ).toHaveLength(1);
++      }
+       expect(frames(f.old).some((frame) => frame.seq === 80 && frame.type === "result")).toBe(
+         false,
+       );
 diff --git a/extensions/browser/chrome-extension/background.supersession.test.ts b/extensions/browser/chrome-extension/background.supersession.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..afe3fbbd236719d7b84a19b93ee52248c8ea7d96
@@ -13623,8 +14376,20 @@ index 07d1b63b4295fa34364e8e3ee3eb636797c697e2..f9c3ca4f791c092b78703178d5489ee8
          await connectRelay(pairingIsCurrent);
          if (!pairingIsCurrent()) {
            closeRelaySocket();
+diff --git a/extensions/browser/chrome-extension/modules/relay-command-handler.d.ts b/extensions/browser/chrome-extension/modules/relay-command-handler.d.ts
+index 2cdc6e900e1f09ed088d39d71420733c9dd7e0c3..c51c576ce939b068adea9b9be7f4bec12080cbdd 100644
+--- a/extensions/browser/chrome-extension/modules/relay-command-handler.d.ts
++++ b/extensions/browser/chrome-extension/modules/relay-command-handler.d.ts
+@@ -12,6 +12,7 @@ export function createRelayCommandHandler(params: {
+   attachDebugger: CreatedTabOperation["attachDebugger"];
+   detachDebugger: (tabId: number) => Promise<void>;
+   createTab: (message: Record<string, unknown>, operation: CreatedTabOperation) => Promise<void>;
++  settleCreateTab: TabAccessPolicy["settleCreateTab"];
+   focusWindowForTab: (tab: BrowserTabSnapshot) => Promise<void>;
+   scheduleTabsSync: () => void;
+   captureDebugger: (tabId: number) => () => void;
 diff --git a/extensions/browser/chrome-extension/modules/relay-command-handler.js b/extensions/browser/chrome-extension/modules/relay-command-handler.js
-index 7813798bd0c94dae89bef824b9ce99fcc9547731..d6a3ad73673ae535f7e653554c29cd794ad87947 100644
+index 7813798bd0c94dae89bef824b9ce99fcc9547731..f5d2232c41713479ef9b296af705ec31fdd56bed 100644
 --- a/extensions/browser/chrome-extension/modules/relay-command-handler.js
 +++ b/extensions/browser/chrome-extension/modules/relay-command-handler.js
 @@ -1,3 +1,5 @@
@@ -13633,7 +14398,26 @@ index 7813798bd0c94dae89bef824b9ce99fcc9547731..d6a3ad73673ae535f7e653554c29cd79
  /** Build the authenticated application-command dispatcher for the relay socket. */
  export function createRelayCommandHandler({
    send,
-@@ -138,6 +140,14 @@ export function createRelayCommandHandler({
+@@ -5,6 +7,7 @@ export function createRelayCommandHandler({
+   attachDebugger,
+   detachDebugger,
+   createTab,
++  settleCreateTab,
+   focusWindowForTab,
+   scheduleTabsSync,
+   captureDebugger,
+@@ -108,6 +111,10 @@ export function createRelayCommandHandler({
+           scheduleTabsSync();
+           return;
+         }
++        case "settleCreateTab":
++          await settleCreateTab(message.creationSeq, message.disposition, isCurrent);
++          reply({ type: "result", seq, result: {} });
++          return;
+         case "closeTab": {
+           const epoch = captureAccess(message.tabId);
+           await requireTab(message.tabId, epoch);
+@@ -138,6 +145,14 @@ export function createRelayCommandHandler({
            type: "error",
            seq,
            message: error instanceof Error ? error.message : String(error),
@@ -13648,6 +14432,18 @@ index 7813798bd0c94dae89bef824b9ce99fcc9547731..d6a3ad73673ae535f7e653554c29cd79
          });
        }
      } finally {
+diff --git a/extensions/browser/chrome-extension/modules/relay-command-handler.test.ts b/extensions/browser/chrome-extension/modules/relay-command-handler.test.ts
+index c349dc4f54aef4646111b9608c2dcdd3076c8e7a..ebb49041009c2f3fee2391a4b402353b30d6eee2 100644
+--- a/extensions/browser/chrome-extension/modules/relay-command-handler.test.ts
++++ b/extensions/browser/chrome-extension/modules/relay-command-handler.test.ts
+@@ -26,6 +26,7 @@ function createHarness() {
+     captureDebugger: vi.fn(() => () => {}),
+     detachDebugger,
+     createTab: vi.fn(),
++    settleCreateTab: vi.fn(),
+     scheduleTabsSync: vi.fn(),
+     focusWindowForTab,
+     captureAccess: vi.fn(() => epoch),
 diff --git a/extensions/browser/chrome-extension/modules/relay-connection.d.ts b/extensions/browser/chrome-extension/modules/relay-connection.d.ts
 index 7a78f7e8f10d23fab671c0851cdc177f4c06238f..01f84eb1ab09af1a32c211d57d6ca5e458332b35 100644
 --- a/extensions/browser/chrome-extension/modules/relay-connection.d.ts
@@ -13673,10 +14469,10 @@ index 7b42e0d2da5174e6d6a47fe58989e8ea73a5067b..303c75e745856d3282b62c6fff557fcd
  }
 diff --git a/extensions/browser/chrome-extension/modules/relay-debugger.d.ts b/extensions/browser/chrome-extension/modules/relay-debugger.d.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..60dda23ec0596fab7ba9b6e33e55f91f96e51e4b
+index 0000000000000000000000000000000000000000..0d2d7d27440ab1a962c8814409e46a8a26c7efe7
 --- /dev/null
 +++ b/extensions/browser/chrome-extension/modules/relay-debugger.d.ts
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,38 @@
 +import type { CreatedTabOperation, TabAccessEpoch, TabAccessPolicy } from "./tab-access.js";
 +
 +type RelayDebuggerAttachment = {
@@ -13698,7 +14494,15 @@ index 0000000000000000000000000000000000000000..60dda23ec0596fab7ba9b6e33e55f91f
 +export class NativeAttachPolicyDeniedError extends Error {}
 +
 +export function createRelayDebugger(params: {
-+  policy: Pick<TabAccessPolicy, "capture" | "epochIsCurrent" | "retireTabDocument" | "requireTab">;
++  policy: Pick<
++    TabAccessPolicy,
++    | "capture"
++    | "epochIsCurrent"
++    | "retireTabDocument"
++    | "requireTab"
++    | "retireCreations"
++    | "noteTabClaim"
++  >;
 +  requireAutomationAllowed: () => void | Promise<void>;
 +}): {
 +  readonly attachments: ReadonlyMap<number, RelayDebuggerAttachment>;
@@ -13708,7 +14512,7 @@ index 0000000000000000000000000000000000000000..60dda23ec0596fab7ba9b6e33e55f91f
 +  detachAll(inherited?: boolean): Promise<void>;
 +};
 diff --git a/extensions/browser/chrome-extension/modules/relay-debugger.js b/extensions/browser/chrome-extension/modules/relay-debugger.js
-index a12af1e018e965d7ce8399f01b98b247b6bb097e..52b5f8ca35d02e254e03e206f2d65df79d7f6110 100644
+index a12af1e018e965d7ce8399f01b98b247b6bb097e..1da49abc5b4e627c9c191674bad3d6468775ab03 100644
 --- a/extensions/browser/chrome-extension/modules/relay-debugger.js
 +++ b/extensions/browser/chrome-extension/modules/relay-debugger.js
 @@ -1,3 +1,6 @@
@@ -13718,7 +14522,17 @@ index a12af1e018e965d7ce8399f01b98b247b6bb097e..52b5f8ca35d02e254e03e206f2d65df7
  /** Physical debugger attachments and cleanup debt belong to exact native acquisitions. */
  export function createRelayDebugger({ policy, requireAutomationAllowed }) {
    const attachments = new Map();
-@@ -163,7 +166,21 @@ export function createRelayDebugger({ policy, requireAutomationAllowed }) {
+@@ -120,6 +123,9 @@ export function createRelayDebugger({ policy, requireAutomationAllowed }) {
+         }
+       };
+       assertAccess();
++      if (creationEpoch === undefined) {
++        policy.noteTabClaim(tabId);
++      }
+       const previous = attachments.get(tabId);
+       if (previous && !previous.retired && previous.owner === isCurrent) {
+         const result = previous.pending
+@@ -163,7 +169,21 @@ export function createRelayDebugger({ policy, requireAutomationAllowed }) {
          assertAcquisition();
          await policy.requireTab(tabId, epoch);
          assertAcquisition();
@@ -13741,11 +14555,23 @@ index a12af1e018e965d7ce8399f01b98b247b6bb097e..52b5f8ca35d02e254e03e206f2d65df7
          // Mint only on native success. Identity discovery is cleanup authority
          // even when access/socket closure overtakes the native callback.
          record.native = {};
+@@ -219,7 +239,10 @@ export function createRelayDebugger({ policy, requireAutomationAllowed }) {
+       },
+       retire: async () => {
+         active = false;
+-        const results = await Promise.allSettled([...owned].map(cleanup));
++        const results = await Promise.allSettled([
++          policy.retireCreations(isCurrent),
++          ...[...owned].map(cleanup),
++        ]);
+         if (owned.size === 0) {
+           owners.delete(owner);
+         }
 diff --git a/extensions/browser/chrome-extension/modules/tab-access.d.ts b/extensions/browser/chrome-extension/modules/tab-access.d.ts
-index f7ee5e42d577780a6e34273a496d365f20d2389b..1cf9159f7d48244a1be5d5783fd3555e591a29d0 100644
+index f7ee5e42d577780a6e34273a496d365f20d2389b..a2389102d6142d65501814cbbdf3678f3d340339 100644
 --- a/extensions/browser/chrome-extension/modules/tab-access.d.ts
 +++ b/extensions/browser/chrome-extension/modules/tab-access.d.ts
-@@ -9,6 +9,7 @@ export type TabAccessMode = "all" | "selected";
+@@ -9,11 +9,12 @@ export type TabAccessMode = "all" | "selected";
  export type CreatedTabOperation = {
    isCurrent(): boolean;
    attachDebugger(
@@ -13753,14 +14579,484 @@ index f7ee5e42d577780a6e34273a496d365f20d2389b..1cf9159f7d48244a1be5d5783fd3555e
      tabId: number,
      assertCurrent: () => void,
      creationEpoch?: TabAccessEpoch,
-@@ -99,6 +100,7 @@ export type TabAccessPolicy = {
+   ): Promise<{ targetId: string; assertCurrent(): void }>;
+-  handoff(result: { tabId: number; targetId: string }): void;
++  handoff(result: { tabId: number; targetId: string; creationSeq?: number }): void;
+ };
+ 
+ type TabGroupSnapshot = { id: number; title?: string };
+@@ -94,11 +95,25 @@ export type TabAccessPolicy = {
+   ): boolean;
+   addTabToGroup(tabId: number): Promise<void>;
+   createTab(
+-    message: { url: string; background?: boolean; focus?: boolean },
++    message: {
++      url: string;
++      background?: boolean;
++      focus?: boolean;
++      seq?: number;
++      awaitAdoption?: boolean;
++    },
+     operation: CreatedTabOperation,
    ): Promise<void>;
++  noteTabClaim(tabId: number): void;
++  settleCreateTab(
++    creationSeq: number,
++    disposition: "adopt" | "abandon",
++    isCurrent: () => boolean,
++  ): Promise<void>;
++  retireCreations(isCurrent: () => boolean): Promise<void>;
    inspectTab(tabId: number, epoch?: TabAccessEpoch): Promise<TabAccessState>;
    requireTab(
 +    this: void,
      tabId: number,
      epoch?: TabAccessEpoch,
      afterNavigation?: boolean,
+diff --git a/extensions/browser/chrome-extension/modules/tab-access.js b/extensions/browser/chrome-extension/modules/tab-access.js
+index fb8b840c6fc234158d55deea7951a3511b05ff62..634887bf863fe5f40d7b5ce3d6c32fe1ed5fcce5 100644
+--- a/extensions/browser/chrome-extension/modules/tab-access.js
++++ b/extensions/browser/chrome-extension/modules/tab-access.js
+@@ -1,16 +1,13 @@
+ import { ACCESS_MODE_ALL, ACCESS_MODE_SELECTED } from "./relay-core.js";
+ import { addTabToOpenClawGroup } from "./relay-tab-groups.js";
+ import { TAB_SCOPED_COMMANDS } from "./tab-access-command-scope.js";
++import { createOwnedTab, initialBlankDocument } from "./tab-creation.js";
+ import { createTabDocumentProvenance } from "./tab-document-provenance.js";
+ import { effectiveTabUrl, isValidTabId, tabEligibility } from "./tab-eligibility.js";
+ import { createTabGroupRevocations } from "./tab-group-revocations.js";
+ 
+ const DENIED_TAB_IDS_KEY = "deniedTabIdsV1";
+ 
+-function initialBlankDocument(tab) {
+-  return tab.url === "about:blank" || (!tab.url && tab.pendingUrl === "about:blank");
+-}
+-
+ /**
+  * Owns access mode, durable browser-session pauses, and revocation epochs.
+  * Every authority-bearing caller captures an epoch and checks through here.
+@@ -69,6 +66,22 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab, getGr
+     reviseDiscovery: () => (discoveryRevision += 1),
+   });
+ 
++  const creationPolicy = {
++    chromeApi,
++    createdTabs,
++    tabRevisions,
++    groupRevocations,
++    epochIsCurrent,
++    epochMatches,
++    deniedTabIds,
++    addTabToGroup,
++    requireTab,
++    invalidateTab,
++    reviseDiscovery: () => {
++      discoveryRevision += 1;
++    },
++  };
++
+   async function readTabDocument(tabId) {
+     // A native root commit can overtake Chrome's snapshot callback. Discard it
+     // before consuming provenance, without recapturing the admitted epoch.
+@@ -249,118 +262,106 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab, getGr
+     return accessChanged;
+   }
+ 
+-  async function createTab(message, { isCurrent, attachDebugger, handoff }) {
++  async function createTab(message, operation) {
++    const { isCurrent } = operation;
+     const operationRevision = revision;
+     const started = discoveryRevision;
+     if (!enabled || transitioning || !isCurrent()) {
+       throw new Error("tab creation access was revoked");
+     }
+-    const pending = { started, blankRevisions: new Map(), changedDocuments: new Set() };
+-    pendingCreations.add(pending);
+-    let tab;
+-    try {
+-      tab = await chromeApi.tabs.create({ url: message.url, active: message.background !== true });
+-    } finally {
+-      pendingCreations.delete(pending);
+-    }
+-    let assertAttachment;
+-    const created = {
+-      tab,
+-      // Creation owns a tab, not its first HTTP document (which may redirect).
+-      epoch: groupRevocations.captureEpoch(
+-        operationRevision,
+-        tabRevisions.get(tab.id)?.access ?? 0,
+-      ),
++    const pending = {
++      started,
++      blankRevisions: new Map(),
++      changedDocuments: new Set(),
++      claimedTabs: new Set(),
+       isCurrent,
+-      initialBlank: message.url === "about:blank" && initialBlankDocument(tab),
+-      handedOff: false,
+-      groupId: tab.groupId,
+-      grouping: false,
+-      expectedGroupId: undefined,
+-      namingGroup: undefined,
+-      initialGroup: false,
+-      assertCurrent: () => {
+-        assertAttachment?.();
+-        if (createdTabs.get(tab.id) !== created || !epochIsCurrent(tab.id, created.epoch)) {
+-          throw new Error(`tab ${tab.id} creation access was revoked`);
+-        }
+-      },
++      seq: message.seq,
++      offered: false,
++      disposition: undefined,
++      abandoned: new Error("tab creation was abandoned before adoption"),
+     };
+-    // A removal/replacement observed before the create callback invalidates it.
+-    if (
+-      !isValidTabId(tab.id) ||
+-      (message.url === "about:blank" && pending.changedDocuments.has(tab.id)) ||
+-      ((tabRevisions.get(tab.id)?.access ?? 0) > started &&
+-        pending.blankRevisions.get(tab.id) !== tabRevisions.get(tab.id)?.access)
+-    ) {
+-      throw new Error("created tab is no longer available");
++    if (message.awaitAdoption === true) {
++      if (!Number.isSafeInteger(message.seq) || message.seq < 0) {
++        throw new Error("tab creation requires its original command sequence");
++      }
++      pending.decision = new Promise((resolve) => {
++        pending.decide = resolve;
++      });
+     }
+-    createdTabs.set(tab.id, created);
+-    try {
+-      created.assertCurrent();
+-      await addTabToGroup(tab.id, created);
+-      created.assertCurrent();
+-      await requireTab(tab.id, created.epoch);
+-      created.assertCurrent();
+-      const attached = await attachDebugger(tab.id, created.assertCurrent, created.epoch);
+-      assertAttachment = attached.assertCurrent;
+-      created.assertCurrent();
+-      if (message.focus === true && typeof tab.windowId === "number") {
+-        await chromeApi.windows.update(tab.windowId, { focused: true });
+-        created.assertCurrent();
++    pendingCreations.add(pending);
++    pending.completed = createOwnedTab(
++      creationPolicy,
++      message,
++      operation,
++      pending,
++      operationRevision,
++    );
++    void pending.completed.finally(() => pendingCreations.delete(pending)).catch(() => {});
++    return pending.completed;
++  }
++
++  function noteTabClaim(tabId) {
++    // An ordinary acquisition can overtake Chrome's create callback. Keep its
++    // exact identity until creation settles, even if that peer later detaches.
++    for (const pending of pendingCreations) {
++      if (
++        pending.tabId === tabId &&
++        pending.disposition === "abandon" &&
++        !pending.claimedTabs.has(tabId)
++      ) {
++        throw new Error("tab creation is being abandoned");
+       }
+-      await requireTab(tab.id, created.epoch);
+-      created.assertCurrent();
+-      handoff({ tabId: tab.id, targetId: attached.targetId });
++    }
++    for (const pending of pendingCreations) {
++      pending.claimedTabs.add(tabId);
++    }
++    const created = createdTabs.get(tabId);
++    if (created) {
++      // Preserve initial-blank provenance while relinquishing exclusive rollback.
+       created.handedOff = true;
+-      // Earlier inventory reads must not retract the target just handed to a
+-      // client. Group events advance the same revision without renewing access.
+-      discoveryRevision += 1;
+-    } catch (error) {
+-      // Rollback belongs to the creator, before any id is handed to the relay.
+-      // Never use ordinary close as a privileged bypass or close a user-revoked tab.
+-      // Socket/native closure ends handoff authority, but not ownership of this
+-      // unhanded tab. Rollback uses the creator epoch and unchanged tab identity.
+-      const ownsRollback = () =>
+-        createdTabs.get(tab.id) === created &&
+-        !deniedTabIds.has(tab.id) &&
+-        groupRevocations.isCreationCurrent(created) &&
+-        epochMatches(tab.id, created.epoch);
+-      try {
+-        if (ownsRollback()) {
+-          const current = await chromeApi.tabs.get(tab.id);
+-          if (
+-            ownsRollback() &&
+-            current.id === tab.id &&
+-            current.windowId === tab.windowId &&
+-            ((created.initialBlank &&
+-              initialBlankDocument(current) &&
+-              (!current.pendingUrl || current.pendingUrl === "about:blank")) ||
+-              (effectiveTabUrl(current) === effectiveTabUrl(created.tab) &&
+-                (!current.url || current.url === effectiveTabUrl(created.tab)))) &&
+-            current.groupId === created.groupId &&
+-            current.incognito === tab.incognito
+-          ) {
+-            await chromeApi.tabs.remove(tab.id);
+-          }
+-        }
+-      } catch {
+-        console.warn(`Cleanup failed for created tab ${tab.id}; close it manually.`);
+-        throw new Error(
+-          `${error instanceof Error ? error.message : String(error)}; cleanup failed for created tab ${tab.id}; close it manually.`,
+-          { cause: error },
+-        );
+-      }
+-      throw error;
+-    } finally {
+-      if (!created.handedOff || !created.initialBlank) {
+-        if (createdTabs.get(tab.id) === created) {
+-          createdTabs.delete(tab.id);
+-          if (!created.handedOff) {
+-            invalidateTab(tab.id);
+-          }
+-        }
+-      }
++    }
++  }
++
++  async function settleCreateTab(creationSeq, disposition, isCurrent) {
++    if (disposition !== "adopt" && disposition !== "abandon") {
++      throw new Error("invalid tab creation disposition");
++    }
++    const pending = [...pendingCreations].find(
++      (creation) =>
++        creation.decision && creation.seq === creationSeq && creation.isCurrent === isCurrent,
++    );
++    if (!pending || !isCurrent()) {
++      throw new Error("tab creation is no longer pending on this connection");
++    }
++    if (disposition === "adopt" && !pending.offered) {
++      throw new Error("tab creation has not offered a target");
++    }
++    if (pending.disposition && pending.disposition !== disposition) {
++      throw new Error("tab creation already has a different disposition");
++    }
++    pending.disposition = disposition;
++    pending.decide(disposition);
++    await pending.completed;
++  }
++
++  async function retireCreations(isCurrent) {
++    const retiring = [...pendingCreations].filter(
++      (pending) =>
++        pending.decision && pending.isCurrent === isCurrent && pending.disposition !== "adopt",
++    );
++    for (const pending of retiring) {
++      // An offered target may already have reached a client. Transport loss
++      // cannot revoke that delivery; relinquish rollback unless abandonment
++      // was explicitly received. Before an offer, rollback is still ours.
++      pending.disposition ??= pending.offered ? "adopt" : "abandon";
++      pending.decide(pending.disposition);
++    }
++    const results = await Promise.allSettled(retiring.map((pending) => pending.completed));
++    const errors = results.flatMap((result) =>
++      result.status === "rejected" ? [result.reason] : [],
++    );
++    if (errors.length) {
++      throw new AggregateError(errors, "Unadopted tab cleanup incomplete");
+     }
+   }
+ 
+@@ -751,6 +752,9 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab, getGr
+     invalidateAll,
+     observeTabUpdate,
+     createTab,
++    noteTabClaim,
++    settleCreateTab,
++    retireCreations,
+     addTabToGroup,
+     inspectTab,
+     requireTab,
+diff --git a/extensions/browser/chrome-extension/modules/tab-creation.js b/extensions/browser/chrome-extension/modules/tab-creation.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..1a34c004789a53ef46f3a0c58a5084c69a73d95c
+--- /dev/null
++++ b/extensions/browser/chrome-extension/modules/tab-creation.js
+@@ -0,0 +1,175 @@
++import { effectiveTabUrl, isValidTabId } from "./tab-eligibility.js";
++
++export function initialBlankDocument(tab) {
++  return tab.url === "about:blank" || (!tab.url && tab.pendingUrl === "about:blank");
++}
++
++// The access policy owns every map, epoch and adoption decision. This operation
++// performs native creation and compensation using those live capabilities only.
++export async function createOwnedTab(
++  {
++    chromeApi,
++    createdTabs,
++    tabRevisions,
++    groupRevocations,
++    epochIsCurrent,
++    epochMatches,
++    deniedTabIds,
++    addTabToGroup,
++    requireTab,
++    invalidateTab,
++    reviseDiscovery,
++  },
++  message,
++  { isCurrent, attachDebugger, handoff },
++  pending,
++  operationRevision,
++) {
++  const started = pending.started;
++  const tab = await chromeApi.tabs.create({
++    url: message.url,
++    active: message.background !== true,
++  });
++  pending.tabId = tab.id;
++  if (pending.claimedTabs.has(tab.id)) {
++    // Inventory may have exposed an HTTP tab before Chrome returned its id.
++    // Reuse that acquisition without installing a second creator or changing
++    // its group, access epoch, or cleanup authority.
++    if (pending.disposition === "abandon") {
++      return;
++    }
++    const assertCurrent = () => {
++      if (!isCurrent() || pending.disposition === "abandon") {
++        throw new Error("tab creation caller retired");
++      }
++    };
++    const attached = await attachDebugger(tab.id, assertCurrent);
++    attached.assertCurrent();
++    assertCurrent();
++    pending.offered = true;
++    handoff({
++      tabId: tab.id,
++      targetId: attached.targetId,
++      ...(pending.decision ? { creationSeq: pending.seq } : {}),
++    });
++    await pending.decision;
++    return;
++  }
++  let assertAttachment;
++  const created = {
++    tab,
++    // Creation owns a tab, not its first HTTP document (which may redirect).
++    epoch: groupRevocations.captureEpoch(operationRevision, tabRevisions.get(tab.id)?.access ?? 0),
++    isCurrent,
++    initialBlank: message.url === "about:blank" && initialBlankDocument(tab),
++    handedOff: false,
++    groupId: tab.groupId,
++    grouping: false,
++    expectedGroupId: undefined,
++    namingGroup: undefined,
++    initialGroup: false,
++    assertCurrent: () => {
++      if (pending.disposition === "abandon") {
++        throw pending.abandoned;
++      }
++      assertAttachment?.();
++      if (createdTabs.get(tab.id) !== created || !epochIsCurrent(tab.id, created.epoch)) {
++        throw new Error(`tab ${tab.id} creation access was revoked`);
++      }
++    },
++  };
++  // A removal/replacement observed before the create callback invalidates it.
++  if (
++    !isValidTabId(tab.id) ||
++    (message.url === "about:blank" && pending.changedDocuments.has(tab.id)) ||
++    ((tabRevisions.get(tab.id)?.access ?? 0) > started &&
++      pending.blankRevisions.get(tab.id) !== tabRevisions.get(tab.id)?.access)
++  ) {
++    throw new Error("created tab is no longer available");
++  }
++  createdTabs.set(tab.id, created);
++  try {
++    created.assertCurrent();
++    await addTabToGroup(tab.id, created);
++    created.assertCurrent();
++    await requireTab(tab.id, created.epoch);
++    created.assertCurrent();
++    const attached = await attachDebugger(tab.id, created.assertCurrent, created.epoch);
++    assertAttachment = attached.assertCurrent;
++    created.assertCurrent();
++    if (message.focus === true && typeof tab.windowId === "number") {
++      await chromeApi.windows.update(tab.windowId, { focused: true });
++      created.assertCurrent();
++    }
++    await requireTab(tab.id, created.epoch);
++    created.assertCurrent();
++    pending.offered = true;
++    handoff({
++      tabId: tab.id,
++      targetId: attached.targetId,
++      ...(pending.decision ? { creationSeq: pending.seq } : {}),
++    });
++    if (pending.decision) {
++      if ((await pending.decision) === "abandon") {
++        throw pending.abandoned;
++      }
++    }
++    created.handedOff = true;
++    // Earlier inventory reads must not retract the target just handed to a
++    // client. Group events advance the same revision without renewing access.
++    reviseDiscovery();
++  } catch (error) {
++    // Offering an id is not adoption. Until adoption, only the original
++    // creator can roll back its still-owned tab, including after caller loss.
++    // Never use ordinary close as a privileged bypass or close a user-revoked tab.
++    // Socket/native closure ends handoff authority, but not ownership of this
++    // unhanded tab. Rollback uses the creator epoch and unchanged tab identity.
++    const ownsRollback = () =>
++      !created.handedOff &&
++      pending.disposition !== "adopt" &&
++      createdTabs.get(tab.id) === created &&
++      !deniedTabIds.has(tab.id) &&
++      groupRevocations.isCreationCurrent(created) &&
++      epochMatches(tab.id, created.epoch);
++    try {
++      if (ownsRollback()) {
++        // Reserve rollback before the native read/removal awaits. A later
++        // ordinary acquisition cannot claim a tab already being removed.
++        pending.disposition = "abandon";
++        const current = await chromeApi.tabs.get(tab.id);
++        if (
++          ownsRollback() &&
++          current.id === tab.id &&
++          current.windowId === tab.windowId &&
++          ((created.initialBlank &&
++            initialBlankDocument(current) &&
++            (!current.pendingUrl || current.pendingUrl === "about:blank")) ||
++            (effectiveTabUrl(current) === effectiveTabUrl(created.tab) &&
++              (!current.url || current.url === effectiveTabUrl(created.tab)))) &&
++          current.groupId === created.groupId &&
++          current.incognito === tab.incognito
++        ) {
++          await chromeApi.tabs.remove(tab.id);
++        }
++      }
++    } catch {
++      console.warn(`Cleanup failed for created tab ${tab.id}; close it manually.`);
++      throw new Error(
++        `${error instanceof Error ? error.message : String(error)}; cleanup failed for created tab ${tab.id}; close it manually.`,
++        { cause: error },
++      );
++    }
++    if (error !== pending.abandoned) {
++      throw error;
++    }
++  } finally {
++    if (!created.handedOff || !created.initialBlank) {
++      if (createdTabs.get(tab.id) === created) {
++        createdTabs.delete(tab.id);
++        if (!created.handedOff) {
++          invalidateTab(tab.id);
++        }
++      }
++    }
++  }
++}
 diff --git a/extensions/browser/index.test.ts b/extensions/browser/index.test.ts
 index 43af27bd1b742fb32af3f4fca1079f45405a156c..6337ed7a605f20642f499bcf57374b777114c71b 100644
 --- a/extensions/browser/index.test.ts
@@ -20178,6 +21474,67 @@ index 7e6fb362c69a34f94dc727a573927a2b1e48eac0..b8034f9e4c10064d5c87e6d61c4f01a3
              },
            };
            if (req.op === "cdp.open") {
+diff --git a/extensions/browser/src/browser/extension-relay/relay-bootstrap.integration.test.ts b/extensions/browser/src/browser/extension-relay/relay-bootstrap.integration.test.ts
+index a4a94aaed1657c4277aa33a6a38051876d929543..5122ac9c09a530b9f03ebf493a291e4ff8a94cf2 100644
+--- a/extensions/browser/src/browser/extension-relay/relay-bootstrap.integration.test.ts
++++ b/extensions/browser/src/browser/extension-relay/relay-bootstrap.integration.test.ts
+@@ -104,6 +104,9 @@ it.each(["owned", "borrowed"] as const)(
+       attachDebugger: async () => ({ targetId: "fixture-target", assertCurrent: () => {} }),
+       detachDebugger: async () => {},
+       createTab: async () => {},
++      settleCreateTab: async () => {
++        throw new Error("This fixture bootstraps existing tabs without creating them");
++      },
+       focusWindowForTab: async () => {},
+       scheduleTabsSync: () => {},
+       captureDebugger: () => () => {},
+diff --git a/extensions/browser/src/browser/extension-relay/relay-bridge-types.ts b/extensions/browser/src/browser/extension-relay/relay-bridge-types.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b7b2b11db333ca9cc9df05a269444caf8e02adb
+--- /dev/null
++++ b/extensions/browser/src/browser/extension-relay/relay-bridge-types.ts
+@@ -0,0 +1,41 @@
++import type { RelayTabInfo } from "./relay-protocol.js";
++import type { RelaySessionClient } from "./relay-session-owner.js";
++
++export type BridgeSocket = {
++  send: (data: string) => void;
++  close: (code?: number, reason?: string) => void;
++};
++
++export type PendingExtensionCommand = {
++  nativeAttach: boolean;
++  resolve: (result: unknown) => void;
++  reject: (err: Error) => void;
++  timer: NodeJS.Timeout;
++};
++
++export type TabState = {
++  info: RelayTabInfo;
++  /** An offered native creation is private until a client adopts it. */
++  creationSeq?: number;
++  claimants: Set<{ client: CdpClientState }>;
++  /** Target identity lasts until access/extension loss; only the session ends on detach. */
++  target?: { id: string; sessionId?: string };
++  attaching?: Promise<{ targetId: string; sessionId: string }>;
++  retiring?: Promise<void>;
++  /** Native or extension loss invalidated attachment work that auto-attach clients expect restored. */
++  restoreAttachment: boolean;
++};
++
++export type CdpClientState = RelaySessionClient & {
++  socket: BridgeSocket;
++  autoAttach: boolean;
++  /** Root auto-attach tabs this client explicitly detached while discovery stays enabled. */
++  detachedTabs: Set<number>;
++  creating: Set<Promise<void>>;
++};
++
++export type ExtensionIdentity = {
++  userAgent: string;
++  browserVersion: string;
++  extensionVersion: string;
++};
 diff --git a/extensions/browser/src/browser/extension-relay/relay-bridge.enumeration.test.ts b/extensions/browser/src/browser/extension-relay/relay-bridge.enumeration.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..955ea5eba457a1652c2a71a487f8aca63475dd12
@@ -20795,43 +22152,107 @@ index 538bf08cb3adb43460ae5e2fd9fc1920ec3c54d8..1611221beb1243c7031df807c4f83238
  
  it.each(["attach", "createTab"])(
 diff --git a/extensions/browser/src/browser/extension-relay/relay-bridge.ts b/extensions/browser/src/browser/extension-relay/relay-bridge.ts
-index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e55915e03 100644
+index 4d8ab3329e153c2313e52ebfe502318a5c106649..fb627fcb9982b0b5c959d0f33b56bb1c49b53260 100644
 --- a/extensions/browser/src/browser/extension-relay/relay-bridge.ts
 +++ b/extensions/browser/src/browser/extension-relay/relay-bridge.ts
-@@ -6,15 +6,26 @@ import { addAbortListener, once } from "node:events";
+@@ -5,16 +5,36 @@
+ import { addAbortListener, once } from "node:events";
  import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
  import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
- import { resolveCreateTargetParams } from "./create-target-params.js";
+-import { resolveCreateTargetParams } from "./create-target-params.js";
+-import { resolveExtensionRelayCommandTimeoutMs } from "./relay-command-timeout.js";
++import type {
++  BridgeSocket,
++  CdpClientState,
++  ExtensionIdentity,
++  PendingExtensionCommand,
++  TabState,
++} from "./relay-bridge-types.js";
 +import {
 +  nativeFailureCategory,
++  relayBrowserVersion,
++  reportNativeFailure,
 +  targetInfoForTab,
 +  toDevtoolsTargetDescriptor,
 +  toErrorPayload,
 +} from "./relay-cdp-presentation.js";
- import { resolveExtensionRelayCommandTimeoutMs } from "./relay-command-timeout.js";
++import {
++  ExtensionCommandTimeoutError,
++  resolveExtensionRelayCommandTimeoutMs,
++} from "./relay-command-timeout.js";
++import { requestRelayTabCreation, settleRelayTabCreation } from "./relay-creation.js";
  import {
    type ExtensionToRelayMessage,
    parseExtensionMessage,
++  parseRelayCdpRequest,
 +  RelayNativeAttachPolicyDeniedError,
    type RelayCommandBody,
    type RelayTabInfo,
    type RelayToExtensionMessage,
  } from "./relay-protocol.js";
 -import { RelaySessionOwner, type RelaySessionClient } from "./relay-session-owner.js";
-+import {
-+  RelaySessionOwner,
-+  type RelayCdpRequest as CdpRequest,
-+  type RelaySessionClient,
-+} from "./relay-session-owner.js";
++import { RelaySessionOwner, type RelayCdpRequest as CdpRequest } from "./relay-session-owner.js";
  
  const log = createSubsystemLogger("browser").child("extension-relay");
  
-@@ -22,22 +33,32 @@ const log = createSubsystemLogger("browser").child("extension-relay");
+@@ -22,60 +42,16 @@ const log = createSubsystemLogger("browser").child("extension-relay");
  const EXTENSION_PING_INTERVAL_MS = 20_000;
  
  const BROWSER_TARGET_ID = "openclaw-extension-relay";
 -/** Playwright requires every attached page target to identify its browser context. */
 -const BROWSER_CONTEXT_ID = "openclaw-extension-context";
+-
+-type BridgeSocket = {
+-  send: (data: string) => void;
+-  close: (code?: number, reason?: string) => void;
+-};
+-
+-type CdpRequest = {
+-  id: number;
+-  method: string;
+-  params?: Record<string, unknown>;
+-  sessionId?: string;
+-};
+-
+-type PendingExtensionCommand = {
+-  resolve: (result: unknown) => void;
+-  reject: (err: Error) => void;
+-  timer: NodeJS.Timeout;
+-};
+-
+-type TabState = {
+-  info: RelayTabInfo;
+-  claimants: Set<{ client: CdpClientState }>;
+-  /** Target identity lasts until access/extension loss; only the session ends on detach. */
+-  target?: { id: string; sessionId?: string };
+-  attaching?: Promise<{ targetId: string; sessionId: string }>;
+-  retiring?: Promise<void>;
+-  /** Native or extension loss invalidated attachment work that auto-attach clients expect restored. */
+-  restoreAttachment: boolean;
+-};
+-
+-type CdpClientState = RelaySessionClient & {
+-  socket: BridgeSocket;
+-  autoAttach: boolean;
+-  /** Root auto-attach tabs this client explicitly detached while discovery stays enabled. */
+-  detachedTabs: Set<number>;
+-  creating: Set<Promise<void>>;
+-};
+-
+-type ExtensionIdentity = {
+-  userAgent: string;
+-  browserVersion: string;
+-  extensionVersion: string;
+-};
+-
+-function toErrorPayload(
+-  id: number | null,
+-  sessionId: string | undefined,
+-  message: string,
+-  code = -32000,
+-): string {
+-  return JSON.stringify({ id, ...(sessionId ? { sessionId } : {}), error: { code, message } });
+-}
 +const PAGE_INITIALIZATION_METHODS = new Set([
 +  "Page.enable",
 +  "Page.getFrameTree",
@@ -20842,49 +22263,21 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
 +  "Target.setAutoAttach",
 +  "Runtime.runIfWaitingForDebugger",
 +]);
-+
-+function reportNativeFailure(message: string, diagnostic: Record<string, string | number>): void {
-+  try {
-+    log.warn(message, diagnostic);
-+  } catch {
-+    /* Diagnostics must preserve the actual native rejection. */
-+  }
-+}
  
- type BridgeSocket = {
-   send: (data: string) => void;
-   close: (code?: number, reason?: string) => void;
- };
- 
--type CdpRequest = {
--  id: number;
--  method: string;
--  params?: Record<string, unknown>;
--  sessionId?: string;
--};
--
- type PendingExtensionCommand = {
-+  nativeAttach: boolean;
-   resolve: (result: unknown) => void;
-   reject: (err: Error) => void;
-   timer: NodeJS.Timeout;
-@@ -68,15 +89,6 @@ type ExtensionIdentity = {
-   extensionVersion: string;
- };
- 
--function toErrorPayload(
--  id: number | null,
--  sessionId: string | undefined,
--  message: string,
--  code = -32000,
--): string {
--  return JSON.stringify({ id, ...(sessionId ? { sessionId } : {}), error: { code, message } });
--}
--
  /**
   * One relay bridge per extension-driver profile. Accepts at most one extension
-  * connection (a newer one replaces the old — MV3 workers restart freely) and
-@@ -178,14 +190,7 @@ export class ExtensionRelayBridge {
+@@ -147,7 +123,9 @@ export class ExtensionRelayBridge {
+   }
+ 
+   accessibleTabs(): RelayTabInfo[] {
+-    return [...this.tabs.values()].map((tab) => tab.info);
++    return [...this.tabs.values()]
++      .filter((tab) => tab.creationSeq === undefined)
++      .map((tab) => tab.info);
+   }
+ 
+   /** Capture the exact extension connection and tab instance for one browser operation. */
+@@ -178,14 +156,9 @@ export class ExtensionRelayBridge {
     * single browser endpoint (`/cdp`).
     */
    devtoolsTargetDescriptors(): Array<RelayTabInfo & { id: string; type: string }> {
@@ -20896,11 +22289,13 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
 -      id: tab.target?.id ?? `tab-${tab.info.tabId}`,
 -      type: "page",
 -    }));
-+    return [...this.tabs.values()].map(toDevtoolsTargetDescriptor);
++    return [...this.tabs.values()]
++      .filter((tab) => tab.creationSeq === undefined)
++      .map(toDevtoolsTargetDescriptor);
    }
  
    get cdpClientCount(): number {
-@@ -277,7 +282,11 @@ export class ExtensionRelayBridge {
+@@ -277,7 +250,11 @@ export class ExtensionRelayBridge {
            if (msg.type === "result") {
              pending.resolve(msg.result);
            } else {
@@ -20913,8 +22308,14 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
            }
          }
          return;
-@@ -382,7 +391,12 @@ export class ExtensionRelayBridge {
-         reject(new Error(`extension relay command timed out: ${command.type}`));
+@@ -379,10 +356,17 @@ export class ExtensionRelayBridge {
+     const result = new Promise<unknown>((resolve, reject) => {
+       const timer = setTimeout(() => {
+         this.pendingExtension.delete(seq);
+-        reject(new Error(`extension relay command timed out: ${command.type}`));
++        reject(
++          new ExtensionCommandTimeoutError(`extension relay command timed out: ${command.type}`),
++        );
        }, resolveExtensionRelayCommandTimeoutMs(command));
        timer.unref?.();
 -      this.pendingExtension.set(seq, { resolve, reject, timer });
@@ -20927,7 +22328,38 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
        if (signal) {
          abortListener = addAbortListener(signal, () => {
            this.pendingExtension.delete(seq);
-@@ -521,6 +535,7 @@ export class ExtensionRelayBridge {
+@@ -403,8 +387,8 @@ export class ExtensionRelayBridge {
+ 
+   private syncTabs(tabs: RelayTabInfo[]): void {
+     const nextIds = new Set(tabs.map((tab) => tab.tabId));
+-    for (const tabId of this.tabs.keys()) {
+-      if (!nextIds.has(tabId)) {
++    for (const [tabId, tab] of this.tabs) {
++      if (!nextIds.has(tabId) && tab.creationSeq === undefined) {
+         this.sessions.retireTab(tabId);
+         this.tabs.delete(tabId);
+         for (const client of this.clients) {
+@@ -427,6 +411,9 @@ export class ExtensionRelayBridge {
+   }
+ 
+   private autoAttachTab(tabId: number): void {
++    if (this.tabs.get(tabId)?.creationSeq !== undefined) {
++      return;
++    }
+     for (const client of this.autoAttachRecipients(tabId)) {
+       void this.withAttachedTab(client, tabId, (attached) => {
+         this.announceAttachedTab(
+@@ -451,6 +438,9 @@ export class ExtensionRelayBridge {
+     if (!tab) {
+       throw new Error(`tab ${tabId} is not available to OpenClaw`);
+     }
++    if (tab.creationSeq !== undefined && createdTargetId === undefined) {
++      throw new Error(`tab ${tabId} creation is awaiting adoption`);
++    }
+     // A pending claimant keeps the physical acquisition alive through announcement.
+     // Use a distinct token even for concurrent acquisitions by the same client.
+     const claimant = { client };
+@@ -521,6 +511,7 @@ export class ExtensionRelayBridge {
          throw new Error(`tab ${tabId} closed during attach`);
        }
        current.target = { id: targetId, sessionId };
@@ -20935,7 +22367,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
        this.sessions.registerRoot(
          tabId,
          targetId,
-@@ -533,16 +548,37 @@ export class ExtensionRelayBridge {
+@@ -533,16 +524,37 @@ export class ExtensionRelayBridge {
              }
            };
            assertCurrent();
@@ -20983,7 +22415,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
            assertCurrent();
            return commandResult;
          },
-@@ -561,20 +597,6 @@ export class ExtensionRelayBridge {
+@@ -561,20 +573,6 @@ export class ExtensionRelayBridge {
      }
    }
  
@@ -21004,7 +22436,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
    private autoAttachRecipients(tabId: number, sessionId?: string): CdpClientState[] {
      return [...this.clients].filter(
        (candidate) =>
-@@ -594,11 +616,25 @@ export class ExtensionRelayBridge {
+@@ -594,12 +592,28 @@ export class ExtensionRelayBridge {
      if (!this.extensionConnected) {
        return { status: "unavailable", reason: "extension-disconnected" };
      }
@@ -21015,6 +22447,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
      const identities = new Map<TabState, string | undefined>();
 -    const skipped = new Map<TabState, { url: string; reason: string }>();
 -    while (this.extensionConnected) {
+-      const pending = [...this.tabs].filter(([, tab]) => !identities.has(tab));
 +    const skipped = new Map<
 +      TabState,
 +      { url: string; reason: string; extension: typeof requestExtension }
@@ -21029,10 +22462,13 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
 +      }
 +    >();
 +    while (this.extensionConnected && this.extension === requestExtension) {
-       const pending = [...this.tabs].filter(([, tab]) => !identities.has(tab));
++      const pending = [...this.tabs].filter(
++        ([, tab]) => tab.creationSeq === undefined && !identities.has(tab),
++      );
        if (pending.length === 0) {
          break;
-@@ -609,6 +645,8 @@ export class ExtensionRelayBridge {
+       }
+@@ -609,6 +623,8 @@ export class ExtensionRelayBridge {
        await Promise.allSettled(
          pending.map(async ([tabId, tab]) => {
            const url = tab.info.url;
@@ -21041,7 +22477,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
            try {
              await this.withAttachedTab(client, tabId, (attached) => {
                this.announceAttachedTab(
-@@ -619,15 +657,17 @@ export class ExtensionRelayBridge {
+@@ -619,15 +635,17 @@ export class ExtensionRelayBridge {
                identities.set(tab, attached.targetId);
              });
            } catch (error) {
@@ -21066,7 +22502,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
              }
            }
          }),
-@@ -636,18 +676,55 @@ export class ExtensionRelayBridge {
+@@ -636,18 +654,58 @@ export class ExtensionRelayBridge {
      if (!this.extensionConnected) {
        return { status: "unavailable", reason: "extension-disconnected" };
      }
@@ -21083,6 +22519,9 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
 +    }
      const targetInfos: Record<string, unknown>[] = [];
      for (const [tabId, tab] of this.tabs) {
++      if (tab.creationSeq !== undefined) {
++        continue;
++      }
        const refusal = skipped.get(tab);
 -      if (refusal && refusal.url === tab.info.url) {
 -        log.warn(`Skipping tab ${tabId} during target enumeration: ${refusal.reason}`);
@@ -21125,7 +22564,7 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
      }
      return { status: "available", targetInfos };
    }
-@@ -664,7 +741,7 @@ export class ExtensionRelayBridge {
+@@ -664,7 +722,7 @@ export class ExtensionRelayBridge {
      }
      const params = {
        sessionId,
@@ -21134,7 +22573,162 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
        waitingForDebugger: false,
      };
      for (const client of recipients) {
-@@ -908,109 +985,12 @@ export class ExtensionRelayBridge {
+@@ -688,26 +746,13 @@ export class ExtensionRelayBridge {
+       if (!this.clients.has(client)) {
+         return;
+       }
+-      let parsed: unknown;
+-      try {
+-        parsed = JSON.parse(raw);
+-      } catch {
+-        client.socket.send(toErrorPayload(null, undefined, "Parse error", -32700));
+-        return;
+-      }
+-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+-        client.socket.send(toErrorPayload(null, undefined, "Invalid request", -32600));
+-        return;
+-      }
+-      const request = parsed as Record<string, unknown>;
+-      if (typeof request.id !== "number" || typeof request.method !== "string") {
+-        const id = typeof request.id === "number" ? request.id : null;
+-        const sessionId = typeof request.sessionId === "string" ? request.sessionId : undefined;
+-        // Flat CDP routes responses by sessionId before matching the request id.
+-        client.socket.send(toErrorPayload(id, sessionId, "Invalid request", -32600));
++      const parsed = parseRelayCdpRequest(raw);
++      if (parsed.error) {
++        const { id, sessionId, message, code } = parsed.error;
++        client.socket.send(toErrorPayload(id, sessionId, message, code));
+         return;
+       }
+-      void this.handleCdpRequest(client, request as CdpRequest);
++      void this.handleCdpRequest(client, parsed.request);
+     };
+     const onClose = async () => {
+       this.clients.delete(client);
+@@ -837,52 +882,80 @@ export class ExtensionRelayBridge {
+ 
+   private async createTarget(client: CdpClientState, request: CdpRequest): Promise<void> {
+     const extension = this.extension;
+-    const url =
+-      typeof request.params?.url === "string" && request.params.url
+-        ? request.params.url
+-        : "about:blank";
+-    const createParams = resolveCreateTargetParams(request.params);
+-    const command = { type: "createTab", url, ...createParams } as const;
+-    const created = (await this.callExtension(command)) as {
+-      tabId?: unknown;
+-      targetId?: unknown;
+-    } | null;
+-    if (this.extension !== extension) {
+-      return;
+-    }
+-    if (typeof created?.tabId !== "number") {
+-      this.respondError(client, request, "extension did not return a tabId for createTab");
++    const transport = {
++      call: (command: RelayCommandBody) => this.callExtension(command),
++      isCurrent: () => this.extension === extension,
++    };
++    const created = await requestRelayTabCreation(transport, this.nextSeq, request.params);
++    if (!created || this.extension !== extension) {
+       return;
+     }
+-    const tabId = created.tabId;
+-    if (!this.clients.has(client) && !this.tabs.has(tabId)) {
+-      // An abandoned creator never publishes an invented inventory entry.
+-      // No tab record means no pending/delivered peer can own this handoff.
+-      if (typeof created.targetId === "string") {
+-        await this.callExtension({ type: "detach", tabId });
++    const { tabId, url, creationSeq } = created;
++    const hasCustody = creationSeq !== undefined;
++    let delivered = false;
++    try {
++      if (!this.clients.has(client) && !this.tabs.has(tabId)) {
++        // Older workers did not retain creation custody. Detach is their only
++        // supported retirement; ordinary close must never substitute for rollback.
++        if (!hasCustody && typeof created.targetId === "string") {
++          await this.callExtension({ type: "detach", tabId });
++        }
++        return;
++      }
++      if (!this.tabs.has(tabId)) {
++        this.tabs.set(tabId, {
++          info: { tabId, url, title: "", active: false },
++          claimants: new Set(),
++          restoreAttachment: false,
++          ...(hasCustody ? { creationSeq } : {}),
++        });
++      }
++      // Store 2.2.0 returns only tabId and still needs the separate attach.
++      // Receipt-bearing workers retain the original creator's rollback authority.
++      await this.withAttachedTab(
++        client,
++        tabId,
++        (attached) => {
++          const recipients = [...this.clients].filter((recipient) => recipient.autoAttach);
++          this.announceAttachedTab(tabId, attached, recipients);
++          this.announceAttachedTab(tabId, attached, [client]);
++          if (this.clients.has(client)) {
++            this.respond(client, request, { targetId: attached.targetId });
++            delivered = true;
++          }
++        },
++        typeof created.targetId === "string" ? created.targetId : undefined,
++      );
++    } finally {
++      if (hasCustody && this.extension === extension) {
++        const tab = this.tabs.get(tabId);
++        const adopted =
++          delivered ||
++          Boolean(
++            tab &&
++            ([...tab.claimants].some((claim) => this.clients.has(claim.client)) ||
++              (tab.target?.sessionId && this.sessions.hasRootSessions(tab.target.sessionId))),
++          );
++        const settling = settleRelayTabCreation(transport, creationSeq, adopted, delivered);
++        if (tab && !adopted) {
++          // Exclude fresh acquisition while the original native creator rolls back.
++          tab.retiring = settling;
++        }
++        try {
++          await settling;
++        } finally {
++          if (this.extension === extension && this.tabs.get(tabId) === tab && tab) {
++            delete tab.creationSeq;
++            if (!adopted) {
++              this.sessions.retireTab(tabId);
++              this.tabs.delete(tabId);
++            }
++          }
++          // An adopt acknowledgement can be lost after native commit. Never turn
++          // that uncertainty into a new abandonment or an ordinary close.
++        }
+       }
+-      return;
+-    }
+-    if (!this.tabs.has(tabId)) {
+-      this.tabs.set(tabId, {
+-        info: { tabId, url, title: "", active: false },
+-        claimants: new Set(),
+-        restoreAttachment: false,
+-      });
+     }
+-    // Store 2.2.0 returns only tabId and still needs the separate attach.
+-    // New workers own create/group/attach/rollback and return the attachment.
+-    await this.withAttachedTab(
+-      client,
+-      tabId,
+-      (attached) => {
+-        const recipients = [...this.clients].filter((recipient) => recipient.autoAttach);
+-        this.announceAttachedTab(tabId, attached, recipients);
+-        this.announceAttachedTab(tabId, attached, [client]);
+-        this.respond(client, request, { targetId: attached.targetId });
+-      },
+-      typeof created.targetId === "string" ? created.targetId : undefined,
+-    );
+   }
+ 
+   private handleCdpRequest(client: CdpClientState, request: CdpRequest): Promise<void> {
+@@ -908,109 +981,12 @@ export class ExtensionRelayBridge {
      return completed;
    }
  
@@ -21250,7 +22844,23 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
    }
  
    private async handleBrowserScopedRequest(
-@@ -1063,7 +1043,7 @@ export class ExtensionRelayBridge {
+@@ -1019,14 +995,7 @@ export class ExtensionRelayBridge {
+   ): Promise<void> {
+     switch (request.method) {
+       case "Browser.getVersion": {
+-        const identity = this.extension?.identity;
+-        this.respond(client, request, {
+-          protocolVersion: "1.3",
+-          product: identity?.browserVersion ?? "Chrome/unknown",
+-          revision: "openclaw-extension-relay",
+-          userAgent: identity?.userAgent ?? "unknown",
+-          jsVersion: "",
+-        });
++        this.respond(client, request, relayBrowserVersion(this.extension?.identity));
+         return;
+       }
+       case "Browser.close": {
+@@ -1063,7 +1032,7 @@ export class ExtensionRelayBridge {
            return;
          }
          this.respond(client, request, {
@@ -21259,7 +22869,34 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
          });
          return;
        }
-@@ -1139,7 +1119,7 @@ export class ExtensionRelayBridge {
+@@ -1092,15 +1061,17 @@ export class ExtensionRelayBridge {
+         if (autoAttach) {
+           client.detachedTabs.clear();
+           const attachResults = await Promise.allSettled(
+-            [...this.tabs.keys()].map((tabId) =>
+-              this.withAttachedTab(client, tabId, (attached) => {
+-                this.announceAttachedTab(
+-                  tabId,
+-                  attached,
+-                  this.autoAttachRecipients(tabId, attached.sessionId),
+-                );
+-              }),
+-            ),
++            [...this.tabs.keys()]
++              .filter((tabId) => this.tabs.get(tabId)?.creationSeq === undefined)
++              .map((tabId) =>
++                this.withAttachedTab(client, tabId, (attached) => {
++                  this.announceAttachedTab(
++                    tabId,
++                    attached,
++                    this.autoAttachRecipients(tabId, attached.sessionId),
++                  );
++                }),
++              ),
+           );
+           for (const settled of attachResults) {
+             if (settled.status === "rejected") {
+@@ -1139,7 +1110,7 @@ export class ExtensionRelayBridge {
              attached.sessionId,
              {
                sessionId,
@@ -21270,10 +22907,12 @@ index 4d8ab3329e153c2313e52ebfe502318a5c106649..c97fd18c4be322be96c75b852bee053e
              request.sessionId,
 diff --git a/extensions/browser/src/browser/extension-relay/relay-cdp-presentation.ts b/extensions/browser/src/browser/extension-relay/relay-cdp-presentation.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e94185bf2584306f57d2c687e6c27513de890a57
+index 0000000000000000000000000000000000000000..22cbd00573be334a07702f8472e17782f52f5e09
 --- /dev/null
 +++ b/extensions/browser/src/browser/extension-relay/relay-cdp-presentation.ts
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,97 @@
++import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
++import type { ExtensionIdentity } from "./relay-bridge-types.js";
 +import type { RelayTabInfo } from "./relay-protocol.js";
 +
 +type RelayTargetProjection = {
@@ -21346,6 +22985,143 @@ index 0000000000000000000000000000000000000000..e94185bf2584306f57d2c687e6c27513
 +    type: "page",
 +  };
 +}
++
++const log = createSubsystemLogger("browser").child("extension-relay");
++
++export function reportNativeFailure(
++  message: string,
++  diagnostic: Record<string, string | number>,
++): void {
++  try {
++    log.warn(message, diagnostic);
++  } catch {
++    /* Diagnostics must preserve the actual native rejection. */
++  }
++}
++
++export function relayBrowserVersion(identity: ExtensionIdentity | undefined) {
++  return {
++    protocolVersion: "1.3",
++    product: identity?.browserVersion ?? "Chrome/unknown",
++    revision: "openclaw-extension-relay",
++    userAgent: identity?.userAgent ?? "unknown",
++    jsVersion: "",
++  };
++}
+diff --git a/extensions/browser/src/browser/extension-relay/relay-command-timeout.ts b/extensions/browser/src/browser/extension-relay/relay-command-timeout.ts
+index d2401864c374b6a511ddf858cbd316f3581dc182..e10bfa05cd26e230252003e0e868e77d9121a4d2 100644
+--- a/extensions/browser/src/browser/extension-relay/relay-command-timeout.ts
++++ b/extensions/browser/src/browser/extension-relay/relay-command-timeout.ts
+@@ -2,6 +2,8 @@ import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+ import { BROWSER_ACTION_TRANSPORT_SLACK_MS, resolveActWaitTimeoutMs } from "../act-policy.js";
+ import type { RelayCommandBody } from "./relay-protocol.js";
+ 
++export class ExtensionCommandTimeoutError extends Error {}
++
+ const EXTENSION_COMMAND_TIMEOUT_MS = 15_000;
+ // Promise-returning Runtime commands carry Playwright waits, whose public budget
+ // exceeds ordinary CDP round trips. Attachment abort and heartbeat still fence them.
+diff --git a/extensions/browser/src/browser/extension-relay/relay-creation.ts b/extensions/browser/src/browser/extension-relay/relay-creation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9fc8a5cf83876aefb1bdfa62bd6d9784b11dbb65
+--- /dev/null
++++ b/extensions/browser/src/browser/extension-relay/relay-creation.ts
+@@ -0,0 +1,95 @@
++import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
++import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
++import { resolveCreateTargetParams } from "./create-target-params.js";
++import { ExtensionCommandTimeoutError } from "./relay-command-timeout.js";
++import type { RelayCommandBody } from "./relay-protocol.js";
++
++const log = createSubsystemLogger("browser").child("extension-relay");
++
++type CreationTransport = {
++  call: (command: RelayCommandBody) => Promise<unknown>;
++  isCurrent: () => boolean;
++};
++
++type CreatedRelayTab = {
++  tabId: number;
++  url: string;
++  targetId?: string;
++  /** Absent only for shipped workers predating creation custody. */
++  creationSeq?: number;
++};
++
++/** Validate the native offer without acquiring any tab or client state. */
++export async function requestRelayTabCreation(
++  transport: CreationTransport,
++  creationSeq: number,
++  params: Record<string, unknown> | undefined,
++): Promise<CreatedRelayTab | undefined> {
++  const url = typeof params?.url === "string" && params.url ? params.url : "about:blank";
++  const createParams = resolveCreateTargetParams(params);
++  let hasCustody = false;
++  try {
++    const created = asOptionalRecord(
++      await transport.call({ type: "createTab", url, ...createParams, awaitAdoption: true }),
++    );
++    if (!transport.isCurrent()) {
++      return undefined;
++    }
++    hasCustody = created !== undefined && Object.hasOwn(created, "creationSeq");
++    if (hasCustody && created?.creationSeq !== creationSeq) {
++      throw new Error("extension returned a mismatched tab creation receipt");
++    }
++    if (
++      typeof created?.tabId !== "number" ||
++      !Number.isSafeInteger(created.tabId) ||
++      created.tabId < 0
++    ) {
++      throw new Error("extension did not return a valid tabId for createTab");
++    }
++    if (hasCustody && (typeof created.targetId !== "string" || !created.targetId)) {
++      throw new Error("extension did not return a native target identity for createTab");
++    }
++    return {
++      tabId: created.tabId,
++      url,
++      ...(typeof created.targetId === "string" ? { targetId: created.targetId } : {}),
++      ...(hasCustody ? { creationSeq } : {}),
++    };
++  } catch (error) {
++    if ((hasCustody || error instanceof ExtensionCommandTimeoutError) && transport.isCurrent()) {
++      // An invalid or late offer still belongs to the original native create.
++      // Never trust its returned tab id or receipt when abandoning that operation.
++      try {
++        await transport.call({ type: "settleCreateTab", creationSeq, disposition: "abandon" });
++      } catch (cleanupError) {
++        log.warn(`Failed tab creation cleanup is unconfirmed: ${String(cleanupError)}`);
++      }
++    }
++    throw error;
++  }
++}
++
++/** Exchange the bridge's disposition; this transport never decides who owns a tab. */
++export async function settleRelayTabCreation(
++  transport: CreationTransport,
++  creationSeq: number,
++  adopted: boolean,
++  delivered: boolean,
++): Promise<void> {
++  try {
++    // Defer the send until the bridge has installed its retirement promise.
++    await Promise.resolve();
++    await transport.call({
++      type: "settleCreateTab",
++      creationSeq,
++      disposition: adopted ? "adopt" : "abandon",
++    });
++  } catch (error) {
++    if (!delivered) {
++      throw error;
++    }
++    // Delivery is irreversible. A lost native acknowledgment must not produce
++    // a second CDP reply or revoke a target already delivered to a client.
++    log.warn(`Delivered tab creation settlement is unconfirmed: ${String(error)}`);
++  }
++}
 diff --git a/extensions/browser/src/browser/extension-relay/relay-protocol.test.ts b/extensions/browser/src/browser/extension-relay/relay-protocol.test.ts
 index 34002ea28466bf54bb93d2a9270aeef9bae51900..2f1907e65e99ac6408abb95410c0fc3676d0678e 100644
 --- a/extensions/browser/src/browser/extension-relay/relay-protocol.test.ts
@@ -21368,10 +23144,16 @@ index 34002ea28466bf54bb93d2a9270aeef9bae51900..2f1907e65e99ac6408abb95410c0fc36
      expect(parseExtensionMessage(JSON.stringify({ type: "pong" }))).toEqual({ type: "pong" });
      expect(
 diff --git a/extensions/browser/src/browser/extension-relay/relay-protocol.ts b/extensions/browser/src/browser/extension-relay/relay-protocol.ts
-index 8877a1e355e3172707b91a9e7264ac74ca6b042b..496bd14f05e5891729f2184c8dc65e3191e6e5b6 100644
+index 8877a1e355e3172707b91a9e7264ac74ca6b042b..c560de9418f97d59c345027915ce7aba06a36819 100644
 --- a/extensions/browser/src/browser/extension-relay/relay-protocol.ts
 +++ b/extensions/browser/src/browser/extension-relay/relay-protocol.ts
-@@ -38,12 +38,20 @@ export type ExtensionToRelayMessage =
+@@ -1,4 +1,5 @@
+ import { hasExactKeys } from "../../../chrome-extension/modules/strict-json.js";
++import type { RelayCdpRequest } from "./relay-session-owner.js";
+ 
+ /**
+  * Wire protocol between the extension relay server and the OpenClaw Chrome
+@@ -38,12 +39,20 @@ export type ExtensionToRelayMessage =
    /** Successful response to a relay command (cdp/attach/createTab/...). */
    | { type: "result"; seq: number; result?: unknown }
    /** Failed response to a relay command. */
@@ -21393,7 +23175,24 @@ index 8877a1e355e3172707b91a9e7264ac74ca6b042b..496bd14f05e5891729f2184c8dc65e31
  /**
   * Command bodies sent to the extension. The bridge assigns the `seq` used to
   * correlate the extension's result/error reply.
-@@ -125,7 +133,13 @@ function isExtensionMessage(value: unknown): value is ExtensionToRelayMessage {
+@@ -56,7 +65,15 @@ export type RelayCommandBody =
+   /** Detach chrome.debugger from a tab (access revoked or client detached). */
+   | { type: "detach"; tabId: number }
+   /** Create and attach a grouped tab. Result: { tabId, targetId }; Store 2.2.0 returns tabId only. */
+-  | { type: "createTab"; url: string; background?: boolean; focus?: boolean }
++  | {
++      type: "createTab";
++      url: string;
++      background?: boolean;
++      focus?: boolean;
++      awaitAdoption?: boolean;
++    }
++  /** Resolve the original native creation; never reacquire ordinary close authority. */
++  | { type: "settleCreateTab"; creationSeq: number; disposition: "adopt" | "abandon" }
+   /** Close an accessible tab. Result: {}. */
+   | { type: "closeTab"; tabId: number }
+   /** Focus an accessible tab (window + tab activation). Result: {}. */
+@@ -125,7 +142,13 @@ function isExtensionMessage(value: unknown): value is ExtensionToRelayMessage {
      case "result":
        return isNonNegativeSafeInteger(msg.seq);
      case "error":
@@ -21408,6 +23207,44 @@ index 8877a1e355e3172707b91a9e7264ac74ca6b042b..496bd14f05e5891729f2184c8dc65e31
      case "detached":
        return isNonNegativeSafeInteger(msg.tabId) && typeof msg.reason === "string";
      case "pong":
+@@ -145,3 +168,37 @@ export function parseExtensionMessage(raw: string): ExtensionToRelayMessage | nu
+   }
+   return isExtensionMessage(parsed) ? parsed : null;
+ }
++
++/** Parse CDP envelopes while preserving error response routing. */
++export function parseRelayCdpRequest(raw: string):
++  | { request: RelayCdpRequest; error?: never }
++  | {
++      request?: never;
++      error: { id: number | null; sessionId?: string; message: string; code: number };
++    } {
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch {
++    return { error: { id: null, message: "Parse error", code: -32700 } };
++  }
++  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
++    return { error: { id: null, message: "Invalid request", code: -32600 } };
++  }
++  // SAFETY: JSON parsing and the preceding guard establish a non-array object.
++  const request = parsed as Record<string, unknown>;
++  if (typeof request.id !== "number" || typeof request.method !== "string") {
++    // Flat CDP routes responses by sessionId before matching the request id.
++    return {
++      error: {
++        id: typeof request.id === "number" ? request.id : null,
++        sessionId: typeof request.sessionId === "string" ? request.sessionId : undefined,
++        message: "Invalid request",
++        code: -32600,
++      },
++    };
++  }
++  // Method dispatch, not framing, retains params and session validation.
++  // SAFETY: Preserve the existing envelope after validating its id and method.
++  return { request: request as RelayCdpRequest };
++}
 diff --git a/extensions/browser/src/browser/extension-relay/relay-server.ts b/extensions/browser/src/browser/extension-relay/relay-server.ts
 index 7f20819fa3f9d5ba422bf7a86d1b369a1ee73b19..a451cf60b0d30bb91174b6271e6122a2bbedc37c 100644
 --- a/extensions/browser/src/browser/extension-relay/relay-server.ts

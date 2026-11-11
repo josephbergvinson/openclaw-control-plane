@@ -182,8 +182,16 @@ automatic status checks cannot. The existing borrowed transport carries close
 metadata when supported and retains legacy closure otherwise. Matching runtime
 and extension versions are required for the full behavior. A superseded client
 can remain yielded after its replacement leaves; explicit pairing restores it.
-A connection failure during tab creation can still leave ownership unrecorded;
-this change does not claim to repair that separate handoff.
+
+Tab creation retains its owner in the extension until the requesting client
+receives the target. The existing relay settles that handoff with adoption or
+abandonment. If delivery fails or the requester retires, cleanup reclaims only an
+unchanged, unclaimed tab. Delivered tabs and tabs moved, navigated or paused by
+the user remain open; a lost acknowledgment after delivery does not close the tab
+or duplicate the result. The creation helper shares the existing access policy's
+state rather than maintaining a second owner. This requires matching runtime
+and extension components. Worker termination, older extensions or uncertain
+delivery can still leave a tab requiring manual cleanup.
 
 Computer window listings expose the owning process ID so the agent can distinguish
 otherwise identical windows. Actions still use the returned window reference;
