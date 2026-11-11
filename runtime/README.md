@@ -19,9 +19,10 @@ installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
 The selected and loaded external gateway reference is R93, activated on 11 November
-2026. Mac companion build 507 retains its R91 source. The companion delta restores
-that complete tree from the R93 distribution. The manifest records both source
-identities; installation records separately establish the installed bundles.
+2026. The declared Mac companion source matches the native distribution exactly,
+so reconstruction needs no inverse companion patch. The manifest's companion
+build label identifies the intended source reference; separate signing,
+installation and startup records establish the actual app bundles and behavior.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
@@ -40,12 +41,12 @@ The Mac companion source resolves local dashboard credential
 references through the existing endpoint owner. Primary and auxiliary dashboard
 connections refresh those credentials when their own connection retires; unrelated
 remote connections do not invalidate them. The previous native credential-entry
-behavior is retained. The browser extension is deployed separately from the
-retained companion and must match the selected runtime. An authenticated
-extension connection and a page read were verified in an existing Chrome profile
-after the earlier companion installation. That observation does not qualify the
-new tab-creation handoff or sustained browser reliability. Reconstruction does not install the app or
-establish acceptance on another host.
+behavior is retained. Companion startup can install its bundled browser
+extension, so the companion and external runtime must use matching extension
+source. Updating only the stable extension directory is insufficient when a
+retained app can replace it on its next launch. Reconstructing the matching source
+does not sign or install the app, verify startup, or establish sustained browser
+reliability on another host.
 
 The bounded comparison did not establish an overall performance advantage over
 native Codex. These targeted repairs do not establish consistently fast responses

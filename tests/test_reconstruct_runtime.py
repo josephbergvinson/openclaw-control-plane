@@ -157,7 +157,6 @@ class RuntimeReconstructionTests(unittest.TestCase):
                    replace(package.companion, normalization_paths=frozenset({"src/../outside"})),
                    replace(package.companion, normalization_paths=frozenset({"pnpm-lock.yaml"})),
                    replace(package.companion, normalization_paths=frozenset({"pnpm-workspace.yaml"})),
-                   replace(package.companion, normalization_paths=frozenset({"config/assertion-safety-baseline.txt"})),
                    replace(package.companion, normalized_tree=package.companion.source_tree)]
         with patch.object(RUNTIME, "build_opener") as opener:
             for companion in invalid:
@@ -171,7 +170,6 @@ class RuntimeReconstructionTests(unittest.TestCase):
     def test_declared_companion_scope_reconstructs_the_complete_retained_tree(self) -> None:
         extra = ("src/auto-reply/reply/session.ts", "docs/concepts/session.md",
                  "scripts/check-changed.mts", "test/scripts/changed-lanes.test.ts",
-                 "config/assertion-safety-baseline.txt",
                  "packages/ai/src/providers/openai-responses-terminal-usage.ts",
                  "packages/ai/src/providers/openai-responses-terminal-usage.test.ts")
         package, contents = self.companion_package(extra)
@@ -205,13 +203,6 @@ class RuntimeReconstructionTests(unittest.TestCase):
                     self.assertEqual("", self.run_git("status", "--porcelain"))
                     self.assertEqual(package.base_tree, self.run_git("write-tree"))
             opener.assert_not_called()
-
-    def test_companion_scope_rejects_neighboring_config_paths(self) -> None:
-        for name in ("config/operator.json", "config/assertion-safety-baseline.txt.bak",
-                     "config/../assertion-safety-baseline.txt"):
-            with self.subTest(path=name):
-                with self.assertRaisesRegex(RUNTIME.ReconstructionError, "unsupported source path"):
-                    RUNTIME.validate_companion_paths(frozenset({name}), allow_native_dependencies=True)
 
     def test_companion_dependency_delta_loads_and_restores_its_complete_source_tree(self) -> None:
         skill = "skills/control-ui/references/dashboards.md"
