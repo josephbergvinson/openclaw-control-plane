@@ -27,6 +27,17 @@ workspace, initialize one native state directory, connect the intended accounts,
 install a sealed release and test the actual interface. Optional maintenance and
 backup services are staged after the first working installation.
 
+## On this page
+
+- [1. Reconstruct and check the runtime](#1-reconstruct-and-check-the-runtime)
+- [2. Install a separate workspace](#2-install-a-separate-workspace)
+- [3. Initialize native state and connect a model](#3-initialize-native-state-and-connect-a-model)
+- [4. Enroll accounts and bind preservation state](#4-enroll-accounts-and-bind-preservation-state)
+- [5. Bind integrations and device capabilities](#5-bind-integrations-and-device-capabilities)
+- [6. Establish the first installed runtime](#6-establish-the-first-installed-runtime)
+- [7. Test the experience](#7-test-the-experience)
+- [Installation acceptance](#installation-acceptance)
+
 ## 1. Reconstruct and check the runtime
 
 Follow [the runtime package](../runtime/README.md) to obtain the manifest's official

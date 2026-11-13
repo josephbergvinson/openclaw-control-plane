@@ -1,101 +1,73 @@
 # OpenClaw Control Plane
 
-A reproducible reference for operating a persistent **OpenClaw** assistant:
-custom runtime source, agent instructions, integration routing and host helpers.
-It connects ordinary chat requests to work that can continue across workers,
-context changes and interruptions, then checks the result at its destination.
+Build a persistent OpenClaw assistant that carries work from a chat request to a
+verified result. This repository combines a reconstructable custom runtime,
+operating instructions, account-aware tool routing and host maintenance helpers.
 
-Use it to understand the design or build a separate installation with your own
-accounts and policies. It is intended for an engineer comfortable with Git,
-Python and Node.js. Host-service examples target macOS; the runtime source and
-repository checks also have a Linux reconstruction path.
+It is a reference for engineers comfortable with Git, Python and Node.js.
+Runtime reconstruction supports Linux and macOS; the host-service examples target
+macOS. Supply your own accounts, permissions and private configuration.
 
 ## How it works
 
 ```mermaid
-flowchart TD
-    Operator[Operator in chat or app] --> Gateway[OpenClaw gateway]
-    Gateway --> Runtime[Model and tool harness]
-    Runtime --> Runs[Native sessions, retained runs and goals]
-    Runtime --> Workspace[Policy, memory and capability routing]
-    Workspace --> Tools[APIs, browser and device tools]
-    Tools --> Effects[Files and provider records]
-    Effects --> Verify[Readback and completion]
-    Verify --> Operator
-    Host[Host services and maintenance] --> Gateway
-    Host --> Releases[Sealed releases and recovery]
+flowchart LR
+    User[Request in chat or app] --> Gateway[OpenClaw gateway]
+    Gateway --> Agent[Model and tools]
+    Context[Instructions, memory and account routes] --> Agent
+    Agent --> Work[Direct work or delegated tasks]
+    Work --> Result[Verify the result]
+    Result --> Reply[Progress and final answer]
+    Reply --> User
+    Host[Host maintenance and recovery] --> Gateway
 ```
 
-| Component | Responsibility |
-| --- | --- |
-| Runtime | Authenticated requests, model/tool execution, delegation, continuation, text and voice delivery. |
-| Workspace | Operating instructions, bounded memory, account/source routes and operational helpers. |
-| Provider and device tools | Account operations, browser interaction and permitted native capabilities. |
-| Host services | Maintenance, health checks and release selection outside a model turn. |
-| Verification | Establishes the requested effect instead of equating an answer or build with completion. |
-
-The [architecture](docs/04-system-architecture.md) explains these boundaries. The
-[worked example](docs/07-worked-example.md) follows a calendar request from source
-retrieval through destination readback.
-
-## What is included
-
-- **Runtime source:** a complete patch from a pinned official OpenClaw release,
-  regression tests and a separately verified native distribution input.
-- **Working policy:** a concise AGENTS core, separate style/preferences and
-  deliberately read mechanics for source selection, long tasks and verification.
-- **Workspace implementation:** account-aware routing, release activation,
-  maintenance and recovery helpers with their contracts and tests.
-- **Adoption guidance:** configuration, account enrollment, context loading,
-  text/voice behavior, scheduling and installation acceptance.
-
-Company Alpha, Company Beta and the Personal Data Project are fictional examples.
-The adopter supplies accounts, credentials, paths and permissions. Exported
-readiness rows start unverified; copying them does not connect an account.
+The runtime owns sessions, delegation, compaction and delivery. The workspace
+supplies identity, preferences, project knowledge and operating procedures.
+Tools act on the selected account; the agent reads back the result before
+reporting completion. [Architecture](docs/04-system-architecture.md) explains the
+boundaries, and the [calendar example](docs/07-worked-example.md) follows one task.
 
 ## Start here
 
-1. Read the [introduction](docs/00-start-here.md) and
-   [adoption guide](docs/17-adoption-guide.md).
-2. Follow [runtime reconstruction](runtime/README.md) in a clean, separate checkout
-   using the exact Node.js and pnpm versions in [the manifest](runtime/manifest.json).
-3. Install a new workspace, adapt the private operator configuration and enroll
-   the integrations you intend to use.
-4. Build and install a sealed release, then verify a small real workflow through
-   your chosen interface. Add maintenance and backup schedules separately.
-
-The manifest is the authority for the official base, current custom source,
-public reconstructed tree, patch digests, toolchain and native archive. Public
-reconstruction does not require a private source repository or an existing
-operator's machine. Reconstruction, build, installation and actual user
-acceptance are separate steps.
-
-This reference targets the official OpenClaw **v2026.10.4** base and the
-managed **Codex 0.160.0** native package. The manifest binds the complete custom source,
-native distribution and companion source. The source map explains task
-continuation, progress/final delivery, profile context, scoped credential entry and
-retention-query behavior. Template edits and source reconstruction do not by
-themselves establish a faster or more capable installed assistant. The optional Mac companion has a separate
-source target; its reconstruction does not reproduce the reference installation's
-local Bun security payload or establish identical installed app bytes.
-Read the [current source boundaries](runtime/README.md#source-identities)
-before choosing a reconstruction target. The installed-reference record does not
-establish deployment or account access for a new adopter.
-
-## Find the details
-
-| Task | Read |
+| Your goal | Read |
 | --- | --- |
-| Understand the system and terminology | [Documentation index](docs/README.md), [glossary](docs/01-glossary.md), [architecture](docs/04-system-architecture.md) |
-| Adapt policy and context | [Authority](docs/05-policy-and-authority.md), [memory and context](docs/08-memory-and-context.md) |
-| Connect accounts and tools | [Capability routing](docs/11-integrations-and-capability-routing.md), [configuration](config/README.md) |
-| Understand long tasks and chat/voice behavior | [Continuation](docs/06-execution-and-durable-lanes.md), [delivery](docs/13-delivery-and-control-surface.md) |
-| Operate releases and scheduled work | [Releases](docs/10-runtime-releases-and-promotion.md), [scheduling](docs/12-scheduling-and-background-work.md), [host operations](docs/19-host-operations-and-backups.md) |
-| Inspect the runtime delta or its history | [Source map](docs/20-runtime-source-changes.md), [public history](docs/history/README.md) |
+| Understand the design in a few minutes | [Introduction](docs/00-start-here.md) and [architecture](docs/04-system-architecture.md) |
+| Build your own installation | [Adoption guide](docs/17-adoption-guide.md) and [runtime reconstruction](runtime/README.md) |
+| Adapt instructions, memory and account routing | [Policy](docs/05-policy-and-authority.md), [context](docs/08-memory-and-context.md) and [integrations](docs/11-integrations-and-capability-routing.md) |
+| Operate long tasks, voice and scheduled work | [Continuation](docs/06-execution-and-durable-lanes.md), [delivery](docs/13-delivery-and-control-surface.md) and [scheduling](docs/12-scheduling-and-background-work.md) |
+| Review measured results and possible improvements | [Evaluation and future work](docs/22-evaluation-and-future-work.md) |
+| Find a specific component or procedure | [Documentation index](docs/README.md) and [runtime source map](docs/20-runtime-source-changes.md) |
+
+## What you can reproduce
+
+- **Runtime:** a complete patch from official OpenClaw **v2026.10.4**, regression
+  tests and the managed **Codex 0.160.0** native package.
+- **Workspace:** operating instructions, source/account routing, release
+  activation, maintenance and recovery helpers.
+- **Integration patterns:** configuration and fictional company examples for
+  connecting your own services and devices.
+- **Operating workflow:** build, install, verify and recover a selected release.
+
+The [manifest](runtime/manifest.json) pins source, patches, toolchain and native
+artifacts. The optional Mac companion has its own source target; its local Bun
+security payload is outside this reconstruction package. See
+[source identities](runtime/README.md#source-identities) for the exact boundaries.
+
+Company Alpha, Company Beta and the Personal Data Project are fictional. Example
+readiness records start unverified. Enrollment and a real workflow check complete
+an installation.
+
+## Results and direction
+
+The reference includes tested improvements to compaction, usage accounting,
+browser ownership and task delivery. Its bounded comparison found similar task
+quality on most qualified pairs, while native Codex usually finished faster.
+[Results and lessons](docs/22-evaluation-and-future-work.md#measured-results)
+explain the measurements and the next experiments: simpler execution, focused
+context and fewer unnecessary model calls.
 
 ## Verify and contribute
-
-Repository checks use Python's standard library and Node.js:
 
 ```bash
 python3 scripts/validate_repo.py
@@ -103,27 +75,13 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 node --test tests/native-reference-checks.test.mjs
 ```
 
-Run the exported Workspace behavioral fixtures separately with
-`python3 workspace/tests/run_periphery_tests.py`. They use pytest and the declared
-Python dependencies; [CONTRIBUTING](CONTRIBUTING.md#workspace-behavioral-fixtures)
-shows an isolated environment setup. The runner supplies disposable bindings and
-service/provider stubs, so private accounts and installed host services are not
-test prerequisites.
-
-These checks cover repository and helper contracts. The
+[CONTRIBUTING](CONTRIBUTING.md) covers workspace fixtures, runtime checks,
+confidentiality review and publication. The
 [reference workflow](https://github.com/josephbergvinson/openclaw-control-plane/actions/workflows/verify-reference.yml)
-also reconstructs the pinned runtime and runs its native checks and build.
-Inspect results on the exact commit you adopt; an earlier green commit does not
-qualify a new head. See [CONTRIBUTING](CONTRIBUTING.md).
+reconstructs and builds the pinned runtime. Use the checks attached to the commit
+you adopt, then verify your installation through an ordinary task.
 
-## Scope and license
-
-This design favors one trusted operator. Team participation and voice sessions
-retain the authenticated speaker, audience and provider-role boundaries.
-Accounts can expire or be revoked; recovery support is not permanent access.
-A successful build does not establish account refresh, device permissions,
-message delivery or recoverable backups on another host.
-
-MIT licensed. Retain [LICENSE](LICENSE), the runtime's
-[third-party notices](runtime/THIRD_PARTY_NOTICES.md) and the
-[native resource notices](runtime/native160/README.md).
+Designed for one trusted operator, with explicit audience and account boundaries
+for shared conversations. See the [security model](docs/16-security-and-trust-model.md).
+MIT licensed; retain [LICENSE](LICENSE), [runtime notices](runtime/THIRD_PARTY_NOTICES.md)
+and [native resource notices](runtime/native160/README.md).

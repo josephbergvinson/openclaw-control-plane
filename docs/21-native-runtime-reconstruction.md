@@ -25,6 +25,13 @@ then use the [single activation owner](10-runtime-releases-and-promotion.md) for
 the installed release transition. Reconstruction does not establish an installed
 deployment or user acceptance.
 
+## On this page
+
+- [Optional companion source](#optional-companion-source)
+- [Native distribution fields](#native-distribution-fields)
+- [Archive provisioning](#archive-provisioning)
+- [Provision an explicitly unselected candidate dependency](#provision-an-explicitly-unselected-candidate-dependency)
+
 ## Optional companion source
 
 The optional companion target reproduces the complete source tree declared in

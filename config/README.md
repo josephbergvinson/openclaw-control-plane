@@ -16,9 +16,10 @@ It is not a complete authenticated gateway configuration. Use the native
 
 ## Model and context preferences
 
-The checked-in profile is an example configuration. It does not describe the
-settings of every installation. The running configuration and supported user,
-session and task overrides determine the effective selection.
+The checked-in profile gives exact example model identifiers and preferences.
+Choose identifiers available through your authenticated provider catalog. The
+running configuration and supported user, session and task overrides determine
+the effective selection.
 
 | Setting | Value and purpose |
 |---|---|
@@ -48,9 +49,10 @@ session override when the intended behavior is to inherit configuration. Its plu
 entries preserve the reference's enabled capability set; enabling a plugin does not
 enroll a service.
 
-Large bootstrap and retention settings have real context and latency costs. Verify
-the compiled prompt and compaction behavior using the exact model and channel path.
-Do not label a configured reasoning level or a copied memory file as runtime proof.
+Large bootstrap and retention settings affect context and latency. Measure the
+compiled prompt and compaction behavior on the selected model/channel path. See
+[evaluation and future work](../docs/22-evaluation-and-future-work.md) for measured
+results and proposed effort/context experiments.
 
 ## Background model and existing overrides
 

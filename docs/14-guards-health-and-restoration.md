@@ -4,6 +4,17 @@ A guard checks a specific precondition and controls the operation that depends o
 
 The reference uses small host helpers around native OpenClaw facilities. They should expose what they checked, what they allowed or refused, and where the result was recorded.
 
+## On this page
+
+- [Guard families](#guard-families)
+- [Availability without a shadow state tree](#availability-without-a-shadow-state-tree)
+- [Narrow repair and explicit ownership](#narrow-repair-and-explicit-ownership)
+- [Health and task state](#health-and-task-state)
+- [Registered Google account checks](#registered-google-account-checks)
+- [Containment and restoration](#containment-and-restoration)
+- [Backup-conditioned deletion](#backup-conditioned-deletion)
+- [A bounded incident workflow](#a-bounded-incident-workflow)
+
 ## Guard families
 
 | Family | Checked boundary | Allowed consequence |

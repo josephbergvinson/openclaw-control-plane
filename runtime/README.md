@@ -10,48 +10,24 @@ The [manifest](manifest.json) is the current machine-readable authority. Use the
 [adoption guide](../docs/17-adoption-guide.md) for workspace and host setup.
 Earlier changes are summarized in the [history index](../docs/history/README.md).
 
-The reference uses the official OpenClaw **v2026.10.4** base and the managed
-**Codex 0.160.0** native package. Read exact custom commit/tree identities, patch and archive
-digests, and tool versions from the manifest rather than inferring them from a
-release name. Qualify the exact public commit you adopt; earlier results do not
-qualify changed inputs. The separate `referenceDeployment` field describes an
-installed reference. Reconstructing source does not establish that deployment or
-ordinary-use acceptance on another host.
+## Current reference
 
-The selected and loaded external gateway reference is R96, activated on 13 November
-2026. Mac companion build 508 retains its earlier source; the manifest declares
-the finite companion delta needed to reconstruct it from the newer native
-distribution. The companion build label identifies the intended source reference;
-separate signing, installation and startup records establish the actual app
-bundles and behavior. Source reconstruction does not establish live acceptance.
+The reference uses official OpenClaw **v2026.10.4** and the managed
+**Codex 0.160.0** native package. The installed gateway reference is **R96**,
+activated on 13 November 2026. Mac companion build **508** retains its separately
+pinned source; the manifest supplies the delta from the newer distribution.
 
-An owner-origin Discord goal on R86 verified its command acknowledgment, one
-progress message, a separate final reply and completed delegated work. Native
-`/goal` start and resume commands acknowledge
-a saved goal before model work begins. Progress and
-results then use the originating conversation's normal delivery path, so a long
-task does not depend on the slash command's expiring interaction token. A private
-command acknowledgment stays private and states where work updates will appear.
-Status and other control replies keep their existing behavior.
+For a new installation, reconstruct and build the chosen target, install it through
+the release procedure, then verify a small task. The manifest pins reproducible
+source and artifacts; accounts, OS permissions and installation are adopter-owned.
+The companion's separately provisioned Bun security payload is outside this package.
 
-The earlier objective-parsing repair remains included: an objective supplied
-without an explicit action is literal text, including one that begins with
-“Complete” or “Pause.” The native Codex archive is unchanged.
-
-The Mac companion source resolves local dashboard credential
-references through the existing endpoint owner. Primary and auxiliary dashboard
-connections refresh those credentials when their own connection retires; unrelated
-remote connections do not invalidate them. The previous native credential-entry
-behavior is retained. Companion startup can install its bundled browser
-extension, so the companion and external runtime must use matching extension
-source. Updating only the stable extension directory is insufficient when a
-retained app can replace it on its next launch. Reconstructing the matching source
-does not sign or install the app, verify startup, or establish sustained browser
-reliability on another host.
-
-The bounded comparison did not establish an overall performance advantage over
-native Codex. These targeted repairs do not establish consistently fast responses
-or superiority over other harnesses.
+The runtime includes goal acknowledgment before model work, conversation-owned
+progress/final delivery, compaction, browser reuse and account recovery. Find their
+implementation in the [source map](../docs/20-runtime-source-changes.md) and their
+user-facing behavior in [delivery](../docs/13-delivery-and-control-surface.md).
+[Evaluation and future work](../docs/22-evaluation-and-future-work.md) reports the
+bounded comparison and proposed improvements.
 
 ## Source identities
 
@@ -86,9 +62,7 @@ The relay change requires matching runtime and extension components for its full
 behavior. Older borrowed transports retain legacy closure behavior. A yielded
 client can remain yielded after the replacement leaves; explicit pairing restores
 it. Worker termination, older extensions or uncertain delivery can still leave
-tabs requiring manual cleanup. These source changes
-do not establish that every browser failure is fixed or that response latency has
-improved. Verify the installed runtime through ordinary workflows.
+tabs requiring manual cleanup. Check reuse and cleanup through an ordinary workflow.
 
 Trajectory retention aggregates group and byte totals through the canonical
 covering index rather than materializing and sorting the runtime event table.

@@ -4,6 +4,16 @@ The operator can ask for ordinary work in ordinary language. “Fix the export a
 
 In this reference, `AGENTS.md` owns reusable workspace behavior, approval boundaries, routing, lifecycle and source interpretation under runtime instructions and the authenticated operator's current request and corrections. The other workspace files have narrower jobs. They make the agent useful, informed and consistent; they do not acquire permission-granting powers by appearing in a prompt.
 
+## On this page
+
+- [One authority and several kinds of context](#one-authority-and-several-kinds-of-context)
+- [Natural authorization with explicit boundaries](#natural-authorization-with-explicit-boundaries)
+- [Scope is established by the request, not fetched text](#scope-is-established-by-the-request-not-fetched-text)
+- [Standing preferences remain narrow](#standing-preferences-remain-narrow)
+- [Useful output is part of the contract](#useful-output-is-part-of-the-contract)
+- [Evidence determines completion](#evidence-determines-completion)
+- [Adopting the policy](#adopting-the-policy)
+
 ## One authority and several kinds of context
 
 | File | Job | Boundary |
@@ -34,7 +44,7 @@ The [standalone authority diagram](../diagrams/authority-resolution.mmd) shows t
 
 Keep one owner per reusable concept. A mechanics file should point to the approval rule rather than maintain a second version. A generated capability page should cite the registry rather than become a competing inventory. This reduces both prompt size and the chance that an agent selects whichever contradictory paragraph is convenient.
 
-The templates illustrate this composition; they are not a claim that a particular policy version is deployed or a measured performance winner. Keep factual profiles intact when shortening duplicated operational prose. Company examples add their own scope and point to shared rules and style. Where an installation already generates role views, regenerate through that same owner and verify complete selected sections; do not introduce a second policy store or truncate rules to fit a budget.
+The templates implement this composition. Keep factual profiles intact when shortening duplicated operational prose. Company examples add their own scope and point to shared rules and style. Where an installation already generates role views, regenerate through that same owner and verify complete selected sections; do not introduce a second policy store or truncate rules to fit a budget.
 
 ## Natural authorization with explicit boundaries
 

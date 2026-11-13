@@ -12,6 +12,16 @@ to adopt that service separately from runtime installation. A release can use a
 matching stopped-state snapshot for rollback without introducing a recurring
 backup service; full host recovery has its own requirements.
 
+## On this page
+
+- [Maintenance classes](#maintenance-classes)
+- [Guarded storage cleanup](#guarded-storage-cleanup)
+- [Local recovery and an optional offsite layer](#local-recovery-and-an-optional-offsite-layer)
+- [Optional backup admission and supervision](#optional-backup-admission-and-supervision)
+- [OrbStack, Docker and developer tools](#orbstack-docker-and-developer-tools)
+- [Adoption example: build, cleanup and backup](#adoption-example-build-cleanup-and-backup)
+- [Reproducing the helpers](#reproducing-the-helpers)
+
 ## Maintenance classes
 
 Routine host maintenance uses native OpenClaw command jobs, with checked helpers and a stored reporting route. A representative daily order leaves room between storage cleanup and later checks; choose actual times and timezone for the adopter's workload.
@@ -39,9 +49,11 @@ The host cleaner checks both process references and open-file state, captures el
 
 For Node compile caches, namespace/version and on-disk format matter. A directory named “cache” is insufficient evidence. Recognized running Node versions protect their namespaces, and a changed or unrecognized layout remains preserved until the classifier supports it. Keep these rules close to the implementation rather than reproducing a stale binary-format checklist in prose.
 
-When cleanup pins its helper and evidence files, a legitimate helper update must carry its reviewed pin update as well. A mismatched pin should stop that branch and retain the original partial-effect receipt. Validate all pinned inputs through the existing read-only admission owner after repair, preserving held exclusions; that readiness check does not discover or delete candidates and does not establish that the next scheduled cleanup completed.
-
-Retained cleanup manifests can outlive a volume remount; a saved filesystem device number is not a durable volume identity. Derive a current device binding only after the existing owner verifies the originally pinned volume UUID and filesystem policy, retains the recorded inode and fixture hashes, and holds the current mount anchor throughout the operation. Keep immutable manifests and prior failure receipts unchanged. A different volume or replaced mount or inode must still fail closed, and current ownership, flags, reference and activity checks continue to govern each target. The repair does not prove cleanup completion without actual effect and delivery evidence.
+Cleanup requires matching helper versions and verified target identity. Refresh
+reviewed helper pins together; after a remount, verify the original volume and
+retained target before reusing saved cleanup state. Preserve partial results and
+stop on changed targets. The [host-maintenance runbook](../workspace/runbooks/host-maintenance.md)
+and existing cleanup helpers own the detailed admission and custody checks.
 
 A retention or storage check can pass with no eligible removal. Report the actual
 effect and measured capacity, not an invented reclaimed-space total. A forced
