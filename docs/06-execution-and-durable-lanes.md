@@ -38,6 +38,11 @@ sequenceDiagram
 
 The [durable work diagram](../diagrams/durable-lane.mmd) shows this ownership path. Use the native run IDs returned by spawn/list for `subagents` list, wait or cancel. A wait observes those runs; it does not create a second worker or assume delivery ownership. Requester continuation remains bound through native command settlement.
 
+An accepted correction keeps its message identity through durable submission and
+handoff. A later transport or persistence error must not enqueue the same correction
+again. Unconfirmed input stays with its original admission owner until an explicit
+withdrawal or a verified handoff establishes who should continue it.
+
 This does not excuse silence throughout a long task. Visible progress is a separate requirement: report material milestones and a real dependency when work cannot advance.
 
 ## Timeouts, cancellation and interruption

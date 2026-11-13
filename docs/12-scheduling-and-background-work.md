@@ -117,6 +117,12 @@ Interpret three facts separately:
 
 A wrapper propagates child errors and treats missing or malformed required output as unknown. A job whose contract permits silence may succeed without a message; a required report with no delivery remains incomplete. Use each job's declared result contract instead of a universal rule that all empty output is success or failure.
 
+An unchanged trigger can finish successfully without dispatching a payload or
+sending a report. Record that as a trigger outcome, not a completed agent task.
+For child callbacks, the current owning batch supplies the completion obligation.
+Intentional silence is accepted only when that trusted contract permits it; model
+text alone cannot waive a required report or redirect its destination.
+
 The command wrapper saves private process evidence and emits concise human-readable output. The maintenance wrapper checks its child receipts before claiming overall success, even when an earlier child already changed files. For data jobs, inspect the authoritative record or artifact; a summary saying the run succeeded is insufficient.
 
 ## Source-change announcements

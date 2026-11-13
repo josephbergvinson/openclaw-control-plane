@@ -18,11 +18,12 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R93, activated on 11 November
-2026. The declared Mac companion source matches the native distribution exactly,
-so reconstruction needs no inverse companion patch. The manifest's companion
-build label identifies the intended source reference; separate signing,
-installation and startup records establish the actual app bundles and behavior.
+The selected and loaded external gateway reference is R96, activated on 13 November
+2026. Mac companion build 508 retains its earlier source; the manifest declares
+the finite companion delta needed to reconstruct it from the newer native
+distribution. The companion build label identifies the intended source reference;
+separate signing, installation and startup records establish the actual app
+bundles and behavior. Source reconstruction does not establish live acceptance.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
