@@ -18,11 +18,12 @@ qualify changed inputs. The separate `referenceDeployment` field describes an
 installed reference. Reconstructing source does not establish that deployment or
 ordinary-use acceptance on another host.
 
-The selected and loaded external gateway reference is R93, activated on 11 November
-2026. The declared Mac companion source matches the native distribution exactly,
-so reconstruction needs no inverse companion patch. The manifest's companion
-build label identifies the intended source reference; separate signing,
-installation and startup records establish the actual app bundles and behavior.
+The selected and loaded external gateway reference is R96, activated on 13 November
+2026. Mac companion build 508 retains its earlier source; the manifest declares
+the finite companion delta needed to reconstruct it from the newer native
+distribution. The companion build label identifies the intended source reference;
+separate signing, installation and startup records establish the actual app
+bundles and behavior. Source reconstruction does not establish live acceptance.
 
 An owner-origin Discord goal on R86 verified its command acknowledgment, one
 progress message, a separate final reply and completed delegated work. Native
@@ -144,8 +145,10 @@ recorded companion tree from the updated distribution reference.
 The custom commit identifies source lineage; it need not exist in the public
 upstream repository. Reconstruction uses the official tag plus the public patch.
 The manifest declares deliberate fixture normalization. The current export replaces
-identifying labels in two synthetic tests across all three source targets;
-production code is unchanged. The resulting Git tree,
+identifying labels in two synthetic tests across all three source targets. It
+also supplies missing channel, destination and payload fields in one gateway
+delivery integration-test fixture. That typing correction is source-only;
+production code and the installed runtime are unchanged. The resulting Git tree,
 including file modes, is the comparison point; an adopter's commit ID will depend
 on their own author and timestamp.
 
@@ -286,9 +289,10 @@ companion cases:
 
 The source commit and `sourceTree` retain the authentic component identity.
 When fixture labels are normalized, a separate `normalizedTree` and exact
-`normalization.paths` describe the public replay; those paths must match the
-source normalization declaration. This also supports the same-source case without
-an additional delta. The helper verifies the complete replay tree
+`normalization.paths` describe the public replay. A retained companion may use a
+subset of the source's normalization paths when an explicit delta accounts for
+every source-only path. Without a delta the paths must match exactly. The helper
+verifies the complete replay tree
 before retrieving the same declared native archive. The archive's verified
 presence does not establish that the companion lockfile selects it; dependency
 installation follows the reconstructed lockfile. Dependency files cannot be

@@ -90,8 +90,10 @@ including modes, must equal the declared companion replay tree.
 
 For deliberate fixture normalization, `sourceCommit` and `sourceTree` retain the
 authentic component identity. The optional `normalizedTree` binds the public
-replay separately; `normalization.paths` must be a sorted, unique list matching
-the source normalization declaration. The two root dependency files are permitted
+replay separately; `normalization.paths` must be a sorted, unique list declared in
+the source normalization. With an explicit companion delta, the companion may
+omit source-only normalization paths that are covered by that delta. Without a
+delta, both path lists must match exactly. The two root dependency files are permitted
 only in source deltas, never as normalization targets. Both normalization fields
 must be declared together. They are valid for either case above: an identical
 distribution and companion need no extra delta when their normalized trees match.

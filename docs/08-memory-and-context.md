@@ -160,6 +160,13 @@ required by policy and the latest request, with any unresolved request given
 priority. It can request a correction within the configured retry allowance and
 preserves the history if required facts cannot fit or the checks still fail.
 
+Inline images use separate context and resource accounting. Context pressure uses
+image-aware token estimates rather than treating base64 payloads as ordinary text.
+Model materialization still has a finite byte limit, and a required newest input
+that exceeds it remains an explicit error. Truncating tool results without changing
+anything is not successful recovery; the existing path can compact instead while
+preserving the newest request and the original failure when recovery cannot finish.
+
 Memory flushing is a separate maintenance step. The selected `memory-core` plugin
 uses its native 4,000-token soft margin because
 `agents.defaults.compaction.memoryFlush.softThresholdTokens` is unset. The explicit

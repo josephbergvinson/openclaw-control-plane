@@ -1,0 +1,3905 @@
+diff --git a/docs/automation/cron-jobs/delivery.md b/docs/automation/cron-jobs/delivery.md
+index 48af92cab06edfcbed355f8b773bff243c0bb253..e073e560731ca7c5e0d6e6588c6524263b0ea43e 100644
+--- a/docs/automation/cron-jobs/delivery.md
++++ b/docs/automation/cron-jobs/delivery.md
+@@ -83,8 +83,6 @@ When announce delivery uses `channel: "last"` or omits `channel`, a provider-pre
+ 
+ For isolated jobs, chat delivery is shared: if a chat route is available, the agent can use the `message` tool even with `--no-deliver`. If the agent sends to the configured/current target, OpenClaw skips the fallback announce. Otherwise `announce`, `webhook`, and `none` only control what the runner does with the final reply after the agent turn.
+ 
+-For a scheduled agent turn with a verified owner and a bound tool policy, automatic report delivery is separate from outbound work explicitly authorized in the job. The job still needs a permitted tool and the applicable account to perform that work. External hook content cannot authorize an outbound action.
+-
+ Scheduled `message` actions use the Gateway that owns the live run. Keep the
+ job's account, channel, target, and configured delivery route, but do not supply
+ per-call `gatewayUrl` or `gatewayToken` fields. Ordinary and standalone message
+diff --git a/docs/concepts/agent-loop.md b/docs/concepts/agent-loop.md
+index 51fb9c55de1735c0f2a91fc4e83ccc9f03afaf13..b3711feb47891fca71e3d1c1b40f5f1c74d0c296 100644
+--- a/docs/concepts/agent-loop.md
++++ b/docs/concepts/agent-loop.md
+@@ -134,8 +134,6 @@ If a required-reply turn ends after a fully settled tool batch without a compose
+ 
+ An optional turn that explicitly finishes with `NO_REPLY` does not need a finalization pass, even after a settled tool failure. The failure remains recorded; a rejected Skill Workshop review still fails without making extra model requests to compose a reply.
+ 
+-A yielded private child-result batch carries its completion owner's optional-reply expectation through the trusted internal Gateway handoff. The requester can consume those findings quietly under its normal reply rules; the channel's general silence setting does not turn that internal input into a second mandatory answer. Public completion batches and parent-only internal results retain their required-reply contract. The frozen source cohort and requester incarnation remain checked at admission and execution.
+-
+ A confirmed delivery prevents duplicate generation. Pending delivery or continuation work retains completion ownership without being marked delivered; rejected sends, unflushed deferred text, and missing delivery callbacks are not delivery proof. `NO_REPLY` does not retract text already delivered. Pending tools, accepted child runs, and yielded work keep their existing owners, and assistant errors and aborts are not intentional silence.
+ 
+ Prompt-segment diagnostics attribute attachment/context blocks and generated inbound metadata separately from user text. A prompt containing only those blocks does not need trailing user text for reply processing to complete.
+diff --git a/docs/concepts/compaction.md b/docs/concepts/compaction.md
+index 0b300d2d6b19694c2ce2b1d4399cc56f43e56ea3..10a5fbda2abe6cf5a94dd311015ff7a332c6df70 100644
+--- a/docs/concepts/compaction.md
++++ b/docs/concepts/compaction.md
+@@ -20,8 +20,6 @@ The built-in summarizer accounts for Chinese, Japanese, and Korean (CJK) charact
+ 
+ The full conversation history stays on disk. Compaction only changes what the model sees on the next turn.
+ 
+-If a tool loop exceeds its context budget and tool-result truncation cannot reduce it, OpenClaw uses the existing compaction path before continuing from the saved transcript. An unchanged transcript is not treated as successful recovery, and completed tool actions are not replayed.
+-
+ Built-in summarization receives text, not image pixels. Omitted images and other non-text input receive markers such as `[image data omitted from summary input]`, without claiming that a model processed the data. The first eight affected messages receive at most two fixed markers each; further omissions receive one aggregate statement. These additions, including newly retained role labels and separators, total at most 847 UTF-8 bytes per summarizer request and count toward token estimates. Existing text is not capped by this omission budget. Custom compaction providers still receive the original message content.
+ 
+ <Note>
+@@ -44,8 +42,6 @@ If the provider rejects a request after tool calls have completed, the built-in
+ 
+ Overflow recovery trims tool results within the current model-context window. Older messages and reset boundaries remain in retained history without being copied into new transcript entries.
+ 
+-Conversation reloads budget inline images by their estimated context cost, separately from the exact byte limit on loaded history. Encoded image data is preserved; its base64 length is not treated as ordinary text-token pressure. The history reader still enforces a finite memory bound and keeps tool calls paired with their results.
+-
+ Stopping or timing out a run also stops its overflow or timeout recovery. The built-in OpenClaw runtime does not start further recovery hooks, maintenance, transcript truncation, or retries after cancellation. Cancellation is not rollback: a compaction that already completed remains in the transcript and is still counted, without sending a late reply. The context estimate follows the latest model or compaction observation; billing totals remain separate.
+ 
+ The built-in OpenClaw runtime performs required checkpointing and compaction before inference. In persistent Gateway sessions, optional memory flushing and compaction wait until reply delivery has settled and its foreground owner has closed. That work uses a separate session owner and the turn's remaining time. A new message cancels and settles optional work before reading the session for its own inference.
+diff --git a/packages/agent-core/src/harness/compaction/compaction.ts b/packages/agent-core/src/harness/compaction/compaction.ts
+index 36f662cc790aa42ffd6bd6a2bb9e3a75e21d725b..6a87a2408e6805b31ef5227559c3984c2a707d67 100644
+--- a/packages/agent-core/src/harness/compaction/compaction.ts
++++ b/packages/agent-core/src/harness/compaction/compaction.ts
+@@ -11,7 +11,6 @@ import { isRuntimeContextCarrier } from "../messages.js";
+ import { buildSessionContext, projectSessionEntryMessage } from "../session/session.js";
+ import { selectResetKeptEntries } from "../session/tool-result-pairing.js";
+ import { CompactionError, err, ok, type Result, type SessionTreeEntry } from "../types.js";
+-import { estimateTokens } from "./message-token-estimates.js";
+ import { runSummarizationCompletion } from "./summarization-completion.js";
+ import {
+   computeFileLists,
+@@ -19,8 +18,10 @@ import {
+   extractFileOpsFromMessage,
+   type FileOperations,
+   formatFileOperations,
++  formatPersistedSenderSuffix,
+   getCompactionContent,
+   mergeSummaryFileOperations,
++  stringifyCompactionValue,
+ } from "./utils.js";
+ 
+ /** File-operation details stored on generated compaction entries. */
+@@ -311,9 +312,67 @@ export function shouldCompact(
+   return contextTokens > contextWindow - settings.reserveTokens;
+ }
+ 
+-export { estimateTokens } from "./message-token-estimates.js";
+-export { IMAGE_BLOCK_TOKENS } from "./token-estimates.js";
++export const IMAGE_BLOCK_TOKENS = 2_000;
++const IMAGE_BLOCK_CHARS = IMAGE_BLOCK_TOKENS * CHARS_PER_TOKEN_ESTIMATE;
+ 
++function countContentChars(
++  content: string | Array<{ type: string; content?: unknown; text?: string }>,
++): number {
++  const { text, omissionText } = getCompactionContent(content);
++  const images =
++    typeof content === "string" ? 0 : content.filter((block) => block.type === "image").length;
++  // Charge the largest role/separator even for mixed text. Any suppressed message's
++  // minimum 56-character charge also covers the serializer's single 55-character overflow.
++  const omissionChars = omissionText ? omissionText.length + "\n\n[Tool result]: ".length : 0;
++  return estimateStringChars(text) + images * IMAGE_BLOCK_CHARS + omissionChars;
++}
++
++/** Estimate token count for one message using a conservative character heuristic. */
++export function estimateTokens(message: AgentMessage): number {
++  if ("excludeFromContext" in message && message.excludeFromContext === true) {
++    return 0;
++  }
++  let chars = 0;
++
++  switch (message.role) {
++    case "assistant": {
++      for (const block of message.content) {
++        if (block.type === "text") {
++          chars += estimateStringChars(block.text);
++        } else if (block.type === "thinking") {
++          chars += estimateStringChars(block.thinking);
++        } else if (block.type === "toolCall") {
++          chars +=
++            estimateStringChars(block.name) +
++            estimateStringChars(stringifyCompactionValue(block.arguments));
++        }
++      }
++      break;
++    }
++    case "user": {
++      chars = countContentChars(message.content);
++      // serializeConversation projects this exact persisted-sender suffix.
++      chars += estimateStringChars(formatPersistedSenderSuffix(message));
++      break;
++    }
++    case "custom":
++    case "toolResult": {
++      chars = countContentChars(message.content);
++      break;
++    }
++    case "bashExecution": {
++      chars = estimateStringChars(message.command) + estimateStringChars(message.output);
++      break;
++    }
++    case "branchSummary":
++    case "compactionSummary": {
++      chars = estimateStringChars(message.summary);
++      break;
++    }
++  }
++
++  return Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE);
++}
+ function isCutPointMessage(message: AgentMessage): boolean {
+   return message.role === "assistant" || isTurnStartMessage(message);
+ }
+diff --git a/packages/agent-core/src/harness/compaction/message-token-estimates.ts b/packages/agent-core/src/harness/compaction/message-token-estimates.ts
+deleted file mode 100644
+index c879022e91404c24cf647cc50bd7172cb5eed63e..0000000000000000000000000000000000000000
+--- a/packages/agent-core/src/harness/compaction/message-token-estimates.ts
++++ /dev/null
+@@ -1,72 +0,0 @@
+-import {
+-  CHARS_PER_TOKEN_ESTIMATE,
+-  estimateStringChars,
+-} from "@openclaw/normalization-core/cjk-chars";
+-import type { AgentMessage } from "../../types.js";
+-import { IMAGE_BLOCK_TOKENS } from "./token-estimates.js";
+-import {
+-  formatPersistedSenderSuffix,
+-  getCompactionContent,
+-  stringifyCompactionValue,
+-} from "./utils.js";
+-
+-const IMAGE_BLOCK_CHARS = IMAGE_BLOCK_TOKENS * CHARS_PER_TOKEN_ESTIMATE;
+-
+-function countContentChars(
+-  content: string | Array<{ type: string; content?: unknown; text?: string }>,
+-): number {
+-  const { text, omissionText } = getCompactionContent(content);
+-  const images =
+-    typeof content === "string" ? 0 : content.filter((block) => block.type === "image").length;
+-  // Charge the largest role/separator even for mixed text. Any suppressed message's
+-  // minimum 56-character charge also covers the serializer's single 55-character overflow.
+-  const omissionChars = omissionText ? omissionText.length + "\n\n[Tool result]: ".length : 0;
+-  return estimateStringChars(text) + images * IMAGE_BLOCK_CHARS + omissionChars;
+-}
+-
+-/** Estimate token count for one message using a conservative character heuristic. */
+-export function estimateTokens(message: AgentMessage): number {
+-  if ("excludeFromContext" in message && message.excludeFromContext === true) {
+-    return 0;
+-  }
+-  let chars = 0;
+-
+-  switch (message.role) {
+-    case "assistant": {
+-      for (const block of message.content) {
+-        if (block.type === "text") {
+-          chars += estimateStringChars(block.text);
+-        } else if (block.type === "thinking") {
+-          chars += estimateStringChars(block.thinking);
+-        } else if (block.type === "toolCall") {
+-          chars +=
+-            estimateStringChars(block.name) +
+-            estimateStringChars(stringifyCompactionValue(block.arguments));
+-        }
+-      }
+-      break;
+-    }
+-    case "user": {
+-      chars = countContentChars(message.content);
+-      // serializeConversation projects this exact persisted-sender suffix.
+-      chars += estimateStringChars(formatPersistedSenderSuffix(message));
+-      break;
+-    }
+-    case "custom":
+-    case "toolResult": {
+-      chars = countContentChars(message.content);
+-      break;
+-    }
+-    case "bashExecution": {
+-      chars = estimateStringChars(message.command) + estimateStringChars(message.output);
+-      break;
+-    }
+-    case "branchSummary":
+-    case "compactionSummary": {
+-      chars = estimateStringChars(message.summary);
+-      break;
+-    }
+-  }
+-
+-  return Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE);
+-}
+diff --git a/packages/agent-core/src/harness/compaction/token-estimates.ts b/packages/agent-core/src/harness/compaction/token-estimates.ts
+deleted file mode 100644
+index 27c98ff39a0864312c1da9e355b4ed438caa8262..0000000000000000000000000000000000000000
+--- a/packages/agent-core/src/harness/compaction/token-estimates.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-/** Conservative per-image cost; encoded media bytes are not text tokens. */
+-export const IMAGE_BLOCK_TOKENS = 2_000;
+diff --git a/src/agents/auth-profiles/usage.test.ts b/src/agents/auth-profiles/usage.test.ts
+index 900dce0f27c3493a1ae1bdaca3e2cf3cb78d679f..92661ecfa0c8254f6d2d30adbd067a91f89acbe3 100644
+--- a/src/agents/auth-profiles/usage.test.ts
++++ b/src/agents/auth-profiles/usage.test.ts
+@@ -578,272 +578,6 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
+     expect(storeMocks.updateAuthProfileStoreWithLock).toHaveBeenCalledTimes(2);
+   });
+ 
+-  it.each([true, false])(
+-    "refreshes one pre-expiry WHAM 401 before rechecking quota (available: %s)",
+-    async (available) => {
+-      const now = Date.now();
+-      const blockedUntil = now + 86_400_000;
+-      const profileId = "openai:default";
+-      const store = makeStore({
+-        [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-      });
+-      const profile = store.profiles[profileId];
+-      if (profile?.type !== "oauth") {
+-        throw new Error("expected OAuth fixture");
+-      }
+-      const refreshed = { ...profile, access: "renewed-access", expires: now + 3_600_000 };
+-      const entered = createDeferredCore();
+-      const release = createDeferredCore();
+-      resolveApiKeyForProfileMock.mockImplementation(async () => {
+-        entered.resolve();
+-        await release.promise;
+-        store.profiles[profileId] = refreshed;
+-        return {
+-          apiKey: refreshed.access,
+-          provider: "openai",
+-          profileId,
+-          profileType: "oauth",
+-          credential: refreshed,
+-        };
+-      });
+-      mockLockedUpdatesForStore(store);
+-      mockWhamResponse(401);
+-      mockWhamResponse(200, {
+-        rate_limit: available
+-          ? { limit_reached: false }
+-          : {
+-              limit_reached: true,
+-              primary_window: { used_percent: 100, reset_after_seconds: 3600 },
+-            },
+-      });
+-      const params = {
+-        store,
+-        profileIds: [profileId],
+-        agentDir: "/tmp/quota-owner",
+-        cfg: {},
+-        now,
+-      };
+-      const probes = [
+-        maybeReprobeWhamBlockedProfiles(params),
+-        maybeReprobeWhamBlockedProfiles(params),
+-      ];
+-      try {
+-        await Promise.race([entered.promise, Promise.all(probes)]);
+-        expect(resolveApiKeyForProfileMock).toHaveBeenCalledOnce();
+-        expect(resolveApiKeyForProfileMock).toHaveBeenCalledWith(
+-          expect.objectContaining({
+-            profileId,
+-            agentDir: params.agentDir,
+-            cfg: params.cfg,
+-            forceRefresh: true,
+-            allowProfileFallback: false,
+-          }),
+-        );
+-        expect(fetchMock).toHaveBeenCalledOnce();
+-        expect(store.usageStats?.[profileId]?.blockedUntil).toBe(blockedUntil);
+-      } finally {
+-        release.resolve();
+-        await Promise.all(probes);
+-      }
+-      expect(fetchMock).toHaveBeenCalledTimes(2);
+-      expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toBe("Bearer codex-access-token");
+-      expect(fetchMock.mock.calls[1]?.[1].headers.Authorization).toBe("Bearer renewed-access");
+-      expect(store.profiles[profileId]).toEqual(refreshed);
+-      if (available) {
+-        expect(store.usageStats?.[profileId]?.blockedUntil).toBeUndefined();
+-      } else {
+-        expect(store.usageStats?.[profileId]?.blockedReason).toBe("subscription_limit");
+-        expect(store.usageStats?.[profileId]?.blockedUntil).toBeGreaterThan(now);
+-        expect(store.usageStats?.[profileId]?.blockedUntil).toBeLessThan(blockedUntil);
+-      }
+-    },
+-  );
+-
+-  it.each([401, 403, 503])(
+-    "bounds half-open HTTP %s recovery without treating auth failures as available quota",
+-    async (status) => {
+-      const now = Date.now();
+-      const profileId = "openai:default";
+-      const blockedUntil = now + 86_400_000;
+-      const store = makeStore({
+-        [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-      });
+-      const profile = store.profiles[profileId];
+-      if (profile?.type !== "oauth") {
+-        throw new Error("expected OAuth fixture");
+-      }
+-      const refreshed = { ...profile, access: "renewed-access" };
+-      resolveApiKeyForProfileMock.mockImplementation(async () => {
+-        store.profiles[profileId] = refreshed;
+-        return {
+-          apiKey: refreshed.access,
+-          provider: "openai",
+-          profileId,
+-          profileType: "oauth",
+-          credential: refreshed,
+-        };
+-      });
+-      mockLockedUpdatesForStore(store);
+-      mockWhamResponse(status);
+-      if (status === 401) {
+-        mockWhamResponse(401);
+-      }
+-      const result = await maybeReprobeWhamBlockedProfiles({ store, profileIds: [profileId], now });
+-      expect(resolveApiKeyForProfileMock).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+-      expect(fetchMock).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
+-      expect(result).toEqual(status === 401 ? { requiresAuthPreparation: true } : undefined);
+-      expect(store.usageStats?.[profileId]?.blockedUntil).toBe(blockedUntil);
+-    },
+-  );
+-
+-  it("does not refresh twice when expired-credential recovery receives WHAM 401", async () => {
+-    const now = Date.now();
+-    const profileId = "openai:default";
+-    const blockedUntil = now + 86_400_000;
+-    const store = makeStore({
+-      [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-    });
+-    const profile = store.profiles[profileId];
+-    if (profile?.type !== "oauth") {
+-      throw new Error("expected OAuth fixture");
+-    }
+-    profile.expires = now - 1;
+-    const refreshed = { ...profile, access: "renewed-access", expires: now + 3_600_000 };
+-    resolveApiKeyForProfileMock.mockImplementation(async () => {
+-      store.profiles[profileId] = refreshed;
+-      return {
+-        apiKey: refreshed.access,
+-        provider: "openai",
+-        profileId,
+-        profileType: "oauth",
+-        credential: refreshed,
+-      };
+-    });
+-    mockLockedUpdatesForStore(store);
+-    mockWhamResponse(401);
+-
+-    const result = await maybeReprobeWhamBlockedProfiles({ store, profileIds: [profileId], now });
+-
+-    expect(resolveApiKeyForProfileMock).toHaveBeenCalledOnce();
+-    expect(resolveApiKeyForProfileMock).toHaveBeenCalledWith(
+-      expect.objectContaining({ profileId, allowProfileFallback: false }),
+-    );
+-    expect(fetchMock).toHaveBeenCalledOnce();
+-    expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toBe("Bearer renewed-access");
+-    expect(result).toEqual({ requiresAuthPreparation: true });
+-    expect(store.usageStats?.[profileId]?.blockedUntil).toBe(blockedUntil);
+-    expect(store.profiles[profileId]).toEqual(refreshed);
+-  });
+-
+-  it.each(["new block", "replaced credential", "removed credential"] as const)(
+-    "does not re-probe after pre-expiry refresh sees a %s",
+-    async (change) => {
+-      const now = Date.now();
+-      const profileId = "openai:default";
+-      const blockedUntil = now + 86_400_000;
+-      const store = makeStore({
+-        [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-      });
+-      const profile = store.profiles[profileId];
+-      if (profile?.type !== "oauth") {
+-        throw new Error("expected OAuth fixture");
+-      }
+-      const refreshed = { ...profile, access: "renewed-access" };
+-      resolveApiKeyForProfileMock.mockImplementation(async () => {
+-        if (change === "removed credential") {
+-          delete store.profiles[profileId];
+-        } else {
+-          store.profiles[profileId] =
+-            change === "replaced credential"
+-              ? { ...refreshed, access: "replacement-access", accountId: "different-account" }
+-              : refreshed;
+-        }
+-        if (change === "new block") {
+-          store.usageStats![profileId]!.lastFailureAt = now + 1;
+-          store.usageStats![profileId]!.blockedUntil = blockedUntil + 1;
+-        }
+-        return {
+-          apiKey: refreshed.access,
+-          provider: "openai",
+-          profileId,
+-          profileType: "oauth",
+-          credential: refreshed,
+-        };
+-      });
+-      mockLockedUpdatesForStore(store);
+-      mockWhamResponse(401);
+-      await maybeReprobeWhamBlockedProfiles({ store, profileIds: [profileId], now });
+-      expect(resolveApiKeyForProfileMock).toHaveBeenCalledOnce();
+-      expect(fetchMock).toHaveBeenCalledOnce();
+-      expect(store.usageStats?.[profileId]?.blockedUntil).toBe(
+-        change === "new block" ? blockedUntil + 1 : blockedUntil,
+-      );
+-      if (change === "replaced credential") {
+-        expect(store.profiles[profileId]).toMatchObject({ accountId: "different-account" });
+-      }
+-      if (change === "removed credential") {
+-        expect(store.profiles[profileId]).toBeUndefined();
+-      }
+-    },
+-  );
+-
+-  it("rejects a different OAuth principal before the recovery credential can be persisted", async () => {
+-    const now = Date.now();
+-    const profileId = "openai:default";
+-    const blockedUntil = now + 86_400_000;
+-    const store = makeStore({
+-      [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-    });
+-    const profile = store.profiles[profileId];
+-    if (profile?.type !== "oauth") {
+-      throw new Error("expected OAuth fixture");
+-    }
+-    resolveApiKeyForProfileMock.mockImplementation(async (params) => {
+-      params.validateOAuthCredential?.({ ...profile, accountId: "different-account" });
+-      throw new Error("identity validation must reject first");
+-    });
+-    mockLockedUpdatesForStore(store);
+-    mockWhamResponse(401);
+-    await expect(
+-      maybeReprobeWhamBlockedProfiles({ store, profileIds: [profileId], now }),
+-    ).rejects.toThrow("Quota recovery credential identity changed");
+-    expect(fetchMock).toHaveBeenCalledOnce();
+-    expect(store.profiles[profileId]).toEqual(profile);
+-    expect(store.usageStats?.[profileId]?.blockedUntil).toBe(blockedUntil);
+-  });
+-
+-  it.each(["settled", "unclassified"] as const)(
+-    "keeps a %s pre-expiry refresh failure under its existing auth owner",
+-    async (kind) => {
+-      const now = Date.now();
+-      const profileId = "openai:default";
+-      const blockedUntil = now + 86_400_000;
+-      const store = makeStore({
+-        [profileId]: { blockedUntil, blockedReason: "subscription_limit", blockedSource: "wham" },
+-      });
+-      const failure = new OAuthRefreshFailureError({
+-        provider: "openai",
+-        profileId,
+-        message: "refresh rejected",
+-      });
+-      if (kind === "settled") {
+-        markOAuthRefreshFailureSettled(failure);
+-      }
+-      resolveApiKeyForProfileMock.mockRejectedValueOnce(failure);
+-      mockLockedUpdatesForStore(store);
+-      mockWhamResponse(401);
+-      const probe = maybeReprobeWhamBlockedProfiles({ store, profileIds: [profileId], now });
+-      if (kind === "settled") {
+-        await expect(probe).resolves.toEqual({ requiresAuthPreparation: true });
+-      } else {
+-        await expect(probe).rejects.toBe(failure);
+-      }
+-      expect(fetchMock).toHaveBeenCalledOnce();
+-      expect(resolveApiKeyForProfileMock).toHaveBeenCalledOnce();
+-      expect(store.usageStats?.[profileId]?.blockedUntil).toBe(blockedUntil);
+-    },
+-  );
+-
+   it.each([true, false])(
+     "shares expired-credential recovery and waits for quota capacity (available: %s)",
+     async (available) => {
+diff --git a/src/agents/auth-profiles/usage.ts b/src/agents/auth-profiles/usage.ts
+index 007b873af3a868e41cdf7ca46d0e085b92355a0f..c252a0ff09ceb4b35167bea83eaf250c8d4093fc 100644
+--- a/src/agents/auth-profiles/usage.ts
++++ b/src/agents/auth-profiles/usage.ts
+@@ -22,7 +22,6 @@ import { readProviderJsonResponse } from "../provider-http-errors.js";
+ import { resolveProviderRequestHeaders } from "../provider-request-config.js";
+ import { persistInlineAuthFailure } from "./inline-usage.js";
+ import { isSettledOAuthRefreshFailure } from "./oauth-refresh-failure.js";
+-import { isSafeOAuthOwnerRefreshResult } from "./oauth-shared.js";
+ import { resolveAuthProfileOrder } from "./order.js";
+ import { resolveSharedAuthStorePath } from "./path-resolve.js";
+ import { preparePersonalAuthProfileUsage } from "./personal-usage.js";
+@@ -352,8 +351,7 @@ async function runWhamHalfOpenReprobe(params: {
+ }): Promise<WhamReprobeResult> {
+   const expectedGeneration = structuredClone(params.store.usageStats?.[params.profileId]);
+   let expectedProfile = params.expectedProfile;
+-  const neededAuthPreparation = !isFutureDateTimestampMs(expectedProfile.expires);
+-  if (neededAuthPreparation) {
++  if (!isFutureDateTimestampMs(expectedProfile.expires)) {
+     // A due quota check may outlive its bearer. The credential owner renews it;
+     // only a fresh usage observation can release the unchanged subscription block.
+     const { resolveApiKeyForProfile } = await import("./oauth.js");
+@@ -402,73 +400,21 @@ async function runWhamHalfOpenReprobe(params: {
+     return undefined;
+   }
+   const blockGeneration = structuredClone(claimedStats);
+-  const readClaimedStats = (freshStore: AuthProfileStore) => {
+-    const currentStats = freshStore.usageStats?.[params.profileId];
+-    return currentStats?.blockedReason === "subscription_limit" &&
+-      matchesWhamBlockGeneration(currentStats, blockGeneration) &&
+-      isSameWhamCredential(expectedProfile, freshStore.profiles[params.profileId])
+-      ? currentStats
+-      : undefined;
+-  };
+-  let result = await probeWhamForCooldown(expectedProfile, params.profileId);
+-  if (result.cooldownClassification === "wham_token_expired") {
+-    if (neededAuthPreparation) {
+-      return { requiresAuthPreparation: true };
+-    }
+-    // A rejected bearer can precede its advertised expiry. Renew it once through
+-    // its credential owner; only fresh quota evidence can release this claim.
+-    const { resolveApiKeyForProfile } = await import("./oauth.js");
+-    if (
+-      !readClaimedStats(
+-        loadAuthProfileStoreWithoutExternalProfiles(params.agentDir, {
+-          profileId: params.profileId,
+-        }),
+-      )
+-    ) {
+-      return undefined;
+-    }
+-    const rejectedProfile = expectedProfile;
+-    const resolved = await resolveApiKeyForProfile({
+-      store: params.store,
+-      profileId: params.profileId,
+-      agentDir: params.agentDir,
+-      cfg: params.cfg,
+-      forceRefresh: true,
+-      allowProfileFallback: false,
+-      validateOAuthCredential: (credential) => {
+-        if (!isSafeOAuthOwnerRefreshResult(rejectedProfile, credential)) {
+-          throw new Error("Quota recovery credential identity changed");
+-        }
+-      },
+-    });
+-    if (!shouldProbeWhamForFailure(resolved?.credential, "rate_limit")) {
+-      return { requiresAuthPreparation: true };
+-    }
+-    expectedProfile = resolved.credential;
+-    let ownsRefreshedClaim = false;
+-    await updateOwnedAuthProfileUsage(params.store, params.profileId, {
+-      agentDir: params.agentDir,
+-      updater: (freshStore) => {
+-        ownsRefreshedClaim = Boolean(readClaimedStats(freshStore));
+-        return false;
+-      },
+-    });
+-    if (!ownsRefreshedClaim) {
+-      return undefined;
+-    }
+-    result = await probeWhamForCooldown(expectedProfile, params.profileId);
+-    if (result.cooldownClassification === "wham_token_expired") {
+-      return { requiresAuthPreparation: true };
+-    }
+-  }
++  const result = await probeWhamForCooldown(expectedProfile, params.profileId);
+   if (!result.available && !result.blockedUntil) {
+     return undefined;
+   }
+   const updated = await updateOwnedAuthProfileUsage(params.store, params.profileId, {
+     agentDir: params.agentDir,
+     updater: (freshStore) => {
+-      const currentStats = readClaimedStats(freshStore);
+-      if (!currentStats) {
++      const currentProfile = freshStore.profiles[params.profileId];
++      const currentStats = freshStore.usageStats?.[params.profileId];
++      if (
++        !currentStats ||
++        currentStats.blockedReason !== "subscription_limit" ||
++        !matchesWhamBlockGeneration(currentStats, blockGeneration) ||
++        !isSameWhamCredential(expectedProfile, currentProfile)
++      ) {
+         return false;
+       }
+       Object.assign(currentStats, reconcileWhamBlock(currentStats, result, params.startedAt));
+diff --git a/src/agents/command/attempt-execution.cli.test.ts b/src/agents/command/attempt-execution.cli.test.ts
+index a33b595ad2711caa5cd0ec6a0882a2c55a47fa2a..7c4d98eb600f0e7b4277a6a5fde36be40dfb57b1 100644
+--- a/src/agents/command/attempt-execution.cli.test.ts
++++ b/src/agents/command/attempt-execution.cli.test.ts
+@@ -2210,8 +2210,6 @@ describe("CLI attempt execution", () => {
+         privateCompletion,
+         allowSilence,
+         sourceTool = "subagent_settle",
+-        settleWakeReplyExpectation,
+-        lane,
+       ] of [
+         ["agent:main:subagent:reply-required", "discord"],
+         ["agent:main:direct:reply-required", "webchat"],
+@@ -2220,55 +2218,6 @@ describe("CLI attempt execution", () => {
+         ["agent:main:telegram:group:optional", "telegram", undefined, true],
+         ["agent:main:telegram:direct:delegated", "telegram", undefined, false, "sessions_send"],
+         ["agent:main:telegram:group:delegated", "telegram", undefined, true, "sessions_send"],
+-        [
+-          "agent:main:telegram:direct:private-yield",
+-          "telegram",
+-          undefined,
+-          true,
+-          "subagent_settle",
+-          "optional",
+-        ],
+-        [
+-          "agent:main:telegram:group:public-yield",
+-          "telegram",
+-          undefined,
+-          false,
+-          "subagent_settle",
+-          "required",
+-        ],
+-        [
+-          "agent:main:telegram:direct:private-required",
+-          "telegram",
+-          true,
+-          false,
+-          "subagent_settle",
+-          "optional",
+-        ],
+-        [
+-          "agent:main:subagent:settle-required",
+-          "discord",
+-          undefined,
+-          false,
+-          "subagent_settle",
+-          "optional",
+-        ],
+-        [
+-          "agent:main:direct:internal-required",
+-          "webchat",
+-          undefined,
+-          false,
+-          "subagent_settle",
+-          "optional",
+-        ],
+-        [
+-          "agent:main:telegram:direct:subagent-lane-required",
+-          "telegram",
+-          undefined,
+-          false,
+-          "subagent_settle",
+-          "optional",
+-          "subagent",
+-        ],
+       ] as const) {
+         const sessionEntry = makeSessionEntry(`session-${messageChannel}`);
+         const sessionStore = await seedSessionStore(sessionKey, sessionEntry);
+@@ -2284,8 +2233,6 @@ describe("CLI attempt execution", () => {
+           cfg: { surfaces: { telegram: { silentReply: { group: "allow" } } } },
+           opts: {
+             privateCompletion,
+-            settleWakeReplyExpectation,
+-            lane,
+             inputProvenance: { kind: "inter_session", sourceTool },
+           },
+         });
+diff --git a/src/agents/command/attempt-execution.helpers.ts b/src/agents/command/attempt-execution.helpers.ts
+index ac99d94f87cb0e54fcb78791ef0964e78d2a48c5..1675242e4f5e99069da1664dd3447c03800a8ae7 100644
+--- a/src/agents/command/attempt-execution.helpers.ts
++++ b/src/agents/command/attempt-execution.helpers.ts
+@@ -49,12 +49,7 @@ export function resolveCommandReplyExpectation(params: {
+   sessionKey?: string;
+   sessionEntry?: Pick<SessionEntry, "chatType">;
+   messageChannel?: string;
+-  opts: {
+-    lane?: string;
+-    privateCompletion?: true;
+-    inputProvenance?: InputProvenance;
+-    settleWakeReplyExpectation?: ReplyExpectation;
+-  };
++  opts: { lane?: string; privateCompletion?: true; inputProvenance?: InputProvenance };
+ }): ReplyExpectation | undefined {
+   if (
+     params.opts.privateCompletion ||
+@@ -64,9 +59,6 @@ export function resolveCommandReplyExpectation(params: {
+   ) {
+     return "required";
+   }
+-  if (params.opts.settleWakeReplyExpectation) {
+-    return params.opts.settleWakeReplyExpectation;
+-  }
+   if (params.opts.inputProvenance?.kind !== "inter_session") {
+     return undefined;
+   }
+diff --git a/src/agents/command/types.ts b/src/agents/command/types.ts
+index bcd53a48523ed7758f907f6ee2bdc2bcee0bc558..c6baf60b7cf157ada1d7e90ba03b5db508a0f414 100644
+--- a/src/agents/command/types.ts
++++ b/src/agents/command/types.ts
+@@ -39,7 +39,6 @@ import type { RuntimeContextFragment } from "../internal-runtime-context.js";
+ import type { MainSessionRecoveryOwnerLease } from "../main-session-recovery/main-session-recovery-store.js";
+ import type { McpRequesterScopeContext } from "../mcp-requester-scope.js";
+ import type { PreparedModelRuntimePluginGeneration } from "../prepared-model-runtime.types.js";
+-import type { ReplyExpectation } from "../reply-completion.js";
+ import type { AgentMessage } from "../runtime/index.js";
+ import type { ScheduledToolPolicyContext } from "../scheduled-tool-policy.js";
+ import type { TrustedSubagentCompletionHandoff } from "../subagents/announce/subagent-announce-handoff.js";
+@@ -199,8 +198,6 @@ export type AgentCommandOpts = {
+   preserveUserFacingSessionModelState?: boolean;
+   /** Admitted private completion owes an internal result regardless of its channel origin. */
+   privateCompletion?: true;
+-  /** Frozen settle owner policy carried only by the trusted internal Gateway handoff. */
+-  settleWakeReplyExpectation?: ReplyExpectation;
+   /** Visible source replies must be sent through the message tool when set. */
+   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
+   /** Internal runs can omit the channel message tool entirely. */
+@@ -302,7 +299,6 @@ type AgentCommandGatewayOnlyKey =
+   | "operationalRunInstance"
+   | "operatorAuthority"
+   | "privateCompletion"
+-  | "settleWakeReplyExpectation"
+   | "assertSourceCurrent"
+   | "skillLibraryAuthoring"
+   | "cronCreatorAuthorityCapability"
+diff --git a/src/agents/embedded-agent-runner/run-state.ts b/src/agents/embedded-agent-runner/run-state.ts
+index cd72a165609f2c43c4072fd77f697afda7ea76e8..77a91f25a660cabca1affb37053fa78c38ec41b6 100644
+--- a/src/agents/embedded-agent-runner/run-state.ts
++++ b/src/agents/embedded-agent-runner/run-state.ts
+@@ -5,7 +5,6 @@ import type {
+ } from "../../auto-reply/get-reply-options.types.js";
+ import type {
+   ReplyBackendQueueMessageOptions,
+-  ReplyBackendHandle,
+   ReplyToolAuthorityOverlay,
+   ReplyTurnParticipants,
+   ReplyOperation,
+@@ -184,7 +183,6 @@ export type EmbeddedRunWaiter = {
+     sessionKey: string;
+     lifecycleGeneration: string;
+     owner: EmbeddedRunPublicationOwner;
+-    afterBackend?: ReplyBackendHandle;
+     registration?: EmbeddedRunRegistration;
+     messageInjectionTarget?: ReplyMessageInjectionTarget;
+   };
+diff --git a/src/agents/embedded-agent-runner/run.attempt-normalization.direct.test.ts b/src/agents/embedded-agent-runner/run.attempt-normalization.direct.test.ts
+index 319123460e9ae040e71ff1297b63048eac6b4b16..d61d5d9a88116244781da6971ea74cc7bca90c6c 100644
+--- a/src/agents/embedded-agent-runner/run.attempt-normalization.direct.test.ts
++++ b/src/agents/embedded-agent-runner/run.attempt-normalization.direct.test.ts
+@@ -226,14 +226,28 @@ describe("normalizeEmbeddedRunAttempt", () => {
+     });
+   });
+ 
+-  it("passes an unhandled mid-turn overflow to recovery without retrying unchanged history", async () => {
++  it.each([false, true])("budgets a no-op mid-turn retry (tool failed: %s)", async (isError) => {
+     const state = makePromptState();
+-    const attempt = makeAttempt({ route: "compact_only", source: "mid-turn" });
+-    attempt.toolMetas = [{ toolName: "read", isError: false }];
+-    const result = await normalizeEmbeddedRunAttempt(makeNormalizationInput(attempt, state));
+-    expect(result.action).toBe("proceed");
++    const attempt = makeAttempt({
++      route: "truncate_tool_results_only",
++      source: "mid-turn",
++      handled: true,
++      truncatedCount: 0,
++    });
++    attempt.toolMetas = [{ toolName: "read", isError }];
++    const input = makeNormalizationInput(attempt, state);
++    input.lastRunPromptUsage = { input: 42_000, output: 1_000, total: 43_000 };
++    const result = await normalizeEmbeddedRunAttempt(input);
++    expect(result).toMatchObject({
++      action: "retry",
++      retryKind: isError ? "recovery" : "progress_continuation",
++    });
++    if (result.action !== "retry") {
++      throw new Error(`expected retry, got ${result.action}`);
++    }
++    expect(result.lastRunPromptUsage).toEqual(input.lastRunPromptUsage);
+     expect(state.markOwnedTranscriptRetry).not.toHaveBeenCalled();
+-    expect(state.continueFromCurrentTranscript).not.toHaveBeenCalled();
++    expect(state.continueFromCurrentTranscript).toHaveBeenCalledOnce();
+   });
+ 
+   it("keeps replay state unsafe after a later clean attempt", async () => {
+diff --git a/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts b/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts
+index 1d4d0ad70bfd91b9116fcf26fe4518529128d3ff..54746935d83b06ca67a2a6dbe4697ee45fb62e41 100644
+--- a/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts
++++ b/src/agents/embedded-agent-runner/run.midturn-precheck-retry.test-support.ts
+@@ -1,7 +1,6 @@
+ // Full-entry coverage for retrying an already-capped mid-turn transcript.
+ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+ import { makeTextToolResult } from "../../../test/helpers/text-tool-result.js";
+-import { normalizeAgentRunAttemptTerminal } from "../agent-run-terminal-outcome.js";
+ import { buildEmbeddedRunnerAssistant } from "../test-helpers/embedded-agent-runner-e2e-fixtures.js";
+ import { makeCompactionSuccess, makeOverflowError } from "./run.overflow-compaction.fixture.js";
+ import {
+@@ -198,102 +197,70 @@ describe("runEmbeddedAgent mid-turn precheck retry", () => {
+     },
+   );
+ 
+-  it("compacts an unshrinkable mid-turn context before continuing completed work", async () => {
+-    const { handleEmbeddedAttemptMidTurnPrecheck } =
+-      await import("./run/attempt-prompt-preflight.js");
+-    const { SessionManager } = await import("../sessions/session-manager.js");
+-    const { createToolResultPromptProjectionState } = await import("./session-prompt-state.js");
+-    const { truncateOversizedToolResultsInSessionManager } =
+-      await import("./tool-result-truncation.js");
+-    const actualTruncation = await vi.importActual<typeof import("./tool-result-truncation.js")>(
+-      "./tool-result-truncation.js",
+-    );
+-    const truncate = vi.mocked(truncateOversizedToolResultsInSessionManager);
+-    const previousTruncate = truncate.getMockImplementation();
+-    if (!previousTruncate) {
+-      throw new Error("expected the shared harness truncation implementation");
+-    }
+-    truncate.mockImplementation(actualTruncation.truncateOversizedToolResultsInSessionManager);
+-    const first = makeSteeredMidTurnOverflow();
+-    const manager = SessionManager.inMemory();
+-    for (const message of first.messagesSnapshot) {
+-      if (
+-        message.role !== "user" &&
+-        message.role !== "assistant" &&
+-        message.role !== "toolResult"
+-      ) {
+-        throw new Error(`unexpected fixture message role: ${message.role}`);
+-      }
+-      await manager.appendMessageAsync(message);
+-    }
+-    const original = manager.buildSessionContext().messages;
+-    let outcome: Awaited<ReturnType<typeof handleEmbeddedAttemptMidTurnPrecheck>>;
+-    try {
+-      outcome = await handleEmbeddedAttemptMidTurnPrecheck({
+-        attempt: {
+-          provider: "synthetic-provider",
+-          modelId: "synthetic-model",
+-          sessionId: session.runParams.sessionId,
+-          sessionFile: `${session.runParams.workspaceDir}/midturn-precheck.jsonl`,
+-          contextTokenBudget: 272_000,
+-        },
+-        request: {
+-          route: "truncate_tool_results_only",
+-          estimatedPromptTokens: 258_784,
+-          promptBudgetBeforeReserve: 252_000,
+-          overflowTokens: 6_784,
+-          toolResultReducibleChars: 91_432,
+-          effectiveReserveTokens: 20_000,
+-        },
+-        sessionAgentId: "main",
+-        sessionManager: manager,
+-        toolResultPromptProjectionState: createToolResultPromptProjectionState(),
+-        prePromptMessageCount: 1,
+-        replaceSessionMessages: vi.fn(),
+-      });
+-    } finally {
+-      truncate.mockImplementation(previousTruncate);
+-    }
+-    const messagesBeforeRetry: unknown[] = [];
++  it("continues once when persisted truncation is already a no-op", async () => {
+     mockedRunEmbeddedAttempt
+       .mockResolvedValueOnce(
+         session.makeAttemptResult({
+-          ...first,
+-          preflightRecovery: outcome.preflightRecovery,
+-          promptError: outcome.promptError,
+-          promptErrorSource: outcome.promptError ? "precheck" : undefined,
+-          terminal: normalizeAgentRunAttemptTerminal({
+-            promptError: outcome.promptError,
+-            promptErrorSource: outcome.promptError ? "precheck" : undefined,
+-          }),
++          preflightRecovery: {
++            route: "truncate_tool_results_only",
++            source: "mid-turn",
++            handled: true,
++            truncatedCount: 0,
++          },
++          toolMetas: [{ toolName: "read", meta: "step=1" }],
++          latestMcpAppChannelView: { viewId: "view-before-retry" },
+         }),
+       )
+-      .mockImplementationOnce(async () => {
+-        expect(mockedCompactDirect).toHaveBeenCalledOnce();
+-        messagesBeforeRetry.push(...manager.buildSessionContext().messages);
+-        return session.makeAttemptResult();
+-      });
++      .mockResolvedValueOnce(session.makeAttemptResult());
++
++    const result = await runEmbeddedAgent({
++      ...session.runParams,
++      runId: "run-midturn-precheck-noop",
++      promptCacheKey: "stable-cache-key",
++    });
++
++    expect(mockedCompactDirect).not.toHaveBeenCalled();
++    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
++    expectRetryContinuesFromTranscript();
++    const initial = requireAttemptCall(0);
++    const retry = requireAttemptCall(1);
++    expect(retry.sessionId).toBe(initial.sessionId);
++    expect(initial.promptCacheKey).toBe("stable-cache-key");
++    expect(retry.promptCacheKey).toBe(initial.promptCacheKey);
++    expect(result.latestMcpAppChannelView).toEqual({ viewId: "view-before-retry" });
++    expect(result.meta.error).toBeUndefined();
++  });
++
++  it("still compacts after a real provider overflow follows the no-op", async () => {
++    mockedRunEmbeddedAttempt
++      .mockResolvedValueOnce(
++        session.makeAttemptResult({
++          preflightRecovery: {
++            route: "truncate_tool_results_only",
++            source: "mid-turn",
++            handled: true,
++            truncatedCount: 0,
++          },
++        }),
++      )
++      .mockResolvedValueOnce(session.makeAttemptResult({ promptError: makeOverflowError() }))
++      .mockResolvedValueOnce(session.makeAttemptResult());
+     mockedCompactDirect.mockResolvedValueOnce(
+       makeCompactionSuccess({
+-        summary: "Both commands completed; also audit sample project data.",
+-        firstKeptEntryId: "entry-steered-current-batch",
+-        tokensBefore: 258_784,
++        summary: "Compacted after provider rejection",
++        firstKeptEntryId: "entry-provider-overflow",
++        tokensBefore: 155_000,
+       }),
+     );
+ 
+     const result = await runEmbeddedAgent({
+       ...session.runParams,
+-      runId: "run-midturn-unshrinkable-context",
++      runId: "run-midturn-precheck-provider-overflow",
+     });
+ 
+-    expect(mockedCompactDirect).toHaveBeenCalledOnce();
+-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
++    expect(mockedCompactDirect).toHaveBeenCalledTimes(1);
++    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
+     expectRetryContinuesFromTranscript();
+-    expect(messagesBeforeRetry).toEqual(original);
+-    expect(first.messagesSnapshot.at(-1)).toMatchObject({
+-      role: "user",
+-      content: "Also include unimportant sample project data.",
+-    });
+     expect(result.meta.error).toBeUndefined();
+   });
+ 
+diff --git a/src/agents/embedded-agent-runner/run/attempt-normalization.ts b/src/agents/embedded-agent-runner/run/attempt-normalization.ts
+index 218322ce6a85478f5a7b531637c794c648482f2e..b5600dfab54be697fbc858eca571c28a0b04eb91 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-normalization.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-normalization.ts
+@@ -26,6 +26,7 @@ import {
+   type IdleTimeoutBreakerState,
+ } from "./idle-timeout-breaker.js";
+ import { resolveReplayInvalidFlag } from "./incomplete-turn-resolution.js";
++import { resolveRunRetryKind } from "./retry-budget.js";
+ import { handleRetryLimitExhaustion } from "./retry-limit.js";
+ import type { prepareAndDispatchEmbeddedRunAttempt } from "./run-attempt-dispatch.js";
+ import {
+@@ -253,9 +254,14 @@ export async function normalizeEmbeddedRunAttempt(input: {
+       }
+       sessionPromptState.continueFromCurrentTranscript();
+     }
++    const retryKind = resolveRunRetryKind({
++      preflightRecovery,
++      retryingFromTranscript,
++      toolMetas: attempt.toolMetas,
++    });
+     return {
+       action: "retry" as const,
+-      retryKind: "recovery" as const,
++      retryKind,
+       bootstrapPromptWarningSignaturesSeen,
+       lastRunPromptUsage,
+       replayState,
+diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.test.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.test.ts
+index 4226c9e3c2376c7895dc397f25fc75257b8e300f..a8ff6745fa0f9cafe9fa33fcd12c25c27d2bdaf3 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.test.ts
+@@ -262,7 +262,7 @@ describe("attempt prompt preflight", () => {
+     });
+   });
+ 
+-  it("requires compaction when persisted truncation makes no progress", async () => {
++  it("admits a retry without changing history when persisted truncation cannot help", async () => {
+     const toolResult = makeToolResultMessage("already capped tool output");
+     const sessionManager = createSessionManagerWithMessage(toolResult);
+     const messagesBefore = sessionManager.buildSessionContext().messages;
+@@ -279,15 +279,13 @@ describe("attempt prompt preflight", () => {
+ 
+     expect(outcome.preflightRecovery).toEqual(
+       expect.objectContaining({
+-        route: "compact_only",
++        route: "truncate_tool_results_only",
+         source: "mid-turn",
+-        estimatedPromptTokens: request.estimatedPromptTokens,
+-        promptBudgetBeforeReserve: request.promptBudgetBeforeReserve,
+-        overflowTokens: request.overflowTokens,
++        handled: true,
++        truncatedCount: 0,
+       }),
+     );
+-    expect(outcome.promptError?.message).toBe(PREEMPTIVE_OVERFLOW_ERROR_TEXT);
+-    expect(outcome.preflightRecovery.handled).not.toBe(true);
++    expect(outcome.promptError).toBeUndefined();
+     expect(replaceSessionMessages).not.toHaveBeenCalled();
+     expect(sessionManager.buildSessionContext().messages).toEqual(messagesBefore);
+   });
+diff --git a/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.ts b/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.ts
+index b7962adb5b6618309b5695144f8465a0e680d59c..8762f4088c0a9ff9da6f6583257c0402ece8d9d9 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-preflight.ts
+@@ -103,18 +103,27 @@ export async function handleEmbeddedAttemptMidTurnPrecheck(input: {
+       sessionKey: attempt.sessionKey,
+       agentId: input.sessionAgentId,
+     });
+-    if (truncationResult.truncated) {
+-      input.replaceSessionMessages(
+-        sanitizeCompactionReplayMessages(input.sessionManager.buildSessionContext().messages),
++    if (
++      truncationResult.truncated ||
++      truncationResult.reason === "no oversized or aggregate tool results"
++    ) {
++      if (truncationResult.truncated) {
++        input.replaceSessionMessages(
++          sanitizeCompactionReplayMessages(input.sessionManager.buildSessionContext().messages),
++        );
++      }
++      // The mid-turn estimate sees the in-memory prompt view, while persisted
++      // recovery may already have capped the same tool results. Retry without
++      // manufacturing compaction when the persisted branch has nothing to trim.
++      const truncatedCount = truncationResult.truncated ? truncationResult.truncatedCount : 0;
++      logMidTurnPrecheck(
++        request.route,
++        `handled=true truncatedCount=${truncatedCount}` +
++          (truncationResult.truncated ? "" : ` truncateSkippedReason=${truncationResult.reason}`),
+       );
+-      const truncatedCount = truncationResult.truncatedCount;
+-      logMidTurnPrecheck(request.route, `handled=true truncatedCount=${truncatedCount}`);
+       return { preflightRecovery: { ...preflightRecovery, handled: true, truncatedCount } };
+     }
+ 
+-    // The model-visible history and bounded persisted branch can cover different
+-    // suffixes. Finding nothing to trim is not proof that another attempt fits;
+-    // let the existing compactor read the full transcript before continuing it.
+     preflightRecovery.route = "compact_only";
+     logMidTurnPrecheck(
+       preflightRecovery.route,
+diff --git a/src/agents/embedded-agent-runner/run/attempt-queue-message.ts b/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
+index d6e15326c2a0a7db12ed4c38c4d6fa7eb34e07e2..92b5161ad119192f8314dbb5f17421eadcef94c1 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-queue-message.ts
+@@ -9,7 +9,6 @@ import type { AgentSession } from "../../sessions/index.js";
+ import { retireQueuedUserMessage } from "../../sessions/queued-user-message-retirement.js";
+ import {
+   getSteeringMessageIdentity,
+-  QueuedSteeringWithdrawalError,
+   subscribeSteeringMessagePersistenceFailure,
+ } from "../../sessions/steering-message-identity.js";
+ import { log } from "../logger.js";
+@@ -193,10 +192,6 @@ async function steerWithTranscriptLifecycle(
+       if (!wasAccepted) {
+         reportAcceptance(false);
+       }
+-      const replayableError = (errorOptions?: ErrorOptions) =>
+-        wasAccepted
+-          ? new QueuedSteeringWithdrawalError(message, errorOptions)
+-          : new Error(message, errorOptions);
+       // Cancellation is best-effort but must finish before rejecting so callers
+       // do not return while a stale queued message can leak into the next turn.
+       cancellation ??= cancelQueuedSteeringMessage(activeSession, queueIdentity).then((removed) => {
+@@ -206,7 +201,7 @@ async function steerWithTranscriptLifecycle(
+         }
+       });
+       void cancellation.then(
+-        () => finish(replayableError()),
++        () => finish(new Error(message)),
+         (error: unknown) => {
+           if (!(error instanceof EmbeddedSteeringAcceptedUnconfirmedError)) {
+             log.warn(`failed to cancel queued steering message: ${String(error)}`);
+@@ -216,7 +211,7 @@ async function steerWithTranscriptLifecycle(
+               ? error
+               : wasAccepted && !allowReplay
+                 ? new EmbeddedSteeringAcceptedUnconfirmedError(message, { cause: error })
+-                : replayableError({ cause: error }),
++                : new Error(message, { cause: error }),
+           );
+         },
+       );
+diff --git a/src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts b/src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts
+index ce3d30a3a4f88152b8af6ed9b0a64b5618b6c021..b270f98a09012c89571c6800060beea1eed02eb0 100644
+--- a/src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt.queue-message.test.ts
+@@ -6,7 +6,6 @@ import type { AgentHarnessQuestionGatewayCall } from "../../harness/gateway-ques
+ import { runAgentHarnessGatewayQuestion } from "../../harness/gateway-question.js";
+ import { registerQueuedUserMessageRetirement } from "../../sessions/queued-user-message-retirement.js";
+ import {
+-  QueuedSteeringWithdrawalError,
+   reportSteeringMessagePersistenceFailure,
+   setSteeringMessageIdentity,
+ } from "../../sessions/steering-message-identity.js";
+@@ -299,22 +298,6 @@ describe("embedded OpenClaw queued steering cancellation", () => {
+     expect(f.queue).toEqual([]);
+   });
+ 
+-  it.each(["agent_settled", "agent_handoff"])(
+-    "reports withdrawal of accepted input on %s",
+-    async (type) => {
+-      const target = message("retained correction");
+-      const f = fixture(type === "agent_settled" ? [target] : []);
+-      const acceptance = deferred<boolean>();
+-      const wait = f.wait("retained correction", { onQueueAccepted: acceptance.resolve });
+-      const result = expect(wait).rejects.toBeInstanceOf(QueuedSteeringWithdrawalError);
+-      await expect(acceptance.promise).resolves.toBe(true);
+-      f.emit({ type });
+-      await result;
+-      expect(f.queue).toEqual([]);
+-      expect(f.listeners).toHaveLength(0);
+-    },
+-  );
+-
+   it("commits identical steering text only at the matching identity's message_end", async () => {
+     const first = message("same text", "steer-a");
+     const second = message("same text", "steer-b");
+diff --git a/src/agents/embedded-agent-runner/run/retry-budget.test.ts b/src/agents/embedded-agent-runner/run/retry-budget.test.ts
+index 9a820929eab51401bdcc4ed47140bc4c95856faa..c0be8d81d4e143060894ef236d451016188cd9a5 100644
+--- a/src/agents/embedded-agent-runner/run/retry-budget.test.ts
++++ b/src/agents/embedded-agent-runner/run/retry-budget.test.ts
+@@ -4,6 +4,7 @@ import {
+   createRunRetryBudget,
+   isRunRetryBudgetExhausted,
+   recordRunRetry,
++  resolveRunRetryKind,
+ } from "./retry-budget.js";
+ 
+ describe("run retry budget", () => {
+@@ -12,7 +13,17 @@ describe("run retry budget", () => {
+ 
+     for (let step = 0; step < 33; step += 1) {
+       beginRunAttempt(budget);
+-      recordRunRetry(budget, "progress_continuation");
++      recordRunRetry(
++        budget,
++        resolveRunRetryKind({
++          preflightRecovery: {
++            route: "truncate_tool_results_only",
++            truncatedCount: 0,
++          },
++          retryingFromTranscript: true,
++          toolMetas: [{ toolName: "read", meta: `step=${step}`, isError: false }],
++        }),
++      );
+     }
+ 
+     expect(budget).toEqual({ attemptsDispatched: 33, attemptsCounted: 0, maxAttempts: 32 });
+diff --git a/src/agents/embedded-agent-runner/run/retry-budget.ts b/src/agents/embedded-agent-runner/run/retry-budget.ts
+index 483226c56f5815463105bf355871aa977542e3e6..d7a4094a9210a6898aa2151f43caa1261d19563f 100644
+--- a/src/agents/embedded-agent-runner/run/retry-budget.ts
++++ b/src/agents/embedded-agent-runner/run/retry-budget.ts
+@@ -19,6 +19,19 @@ export function beginRunAttempt(budget: RunRetryBudget): void {
+   budget.attemptsCounted += 1;
+ }
+ 
++export function resolveRunRetryKind(params: {
++  preflightRecovery: { route: string; truncatedCount?: number };
++  retryingFromTranscript: boolean;
++  toolMetas: Array<{ isError?: boolean; meta?: string; toolName: string }>;
++}): RunRetryKind {
++  return params.retryingFromTranscript &&
++    params.preflightRecovery.route === "truncate_tool_results_only" &&
++    params.preflightRecovery.truncatedCount === 0 &&
++    params.toolMetas.some((tool) => tool.isError !== true)
++    ? "progress_continuation"
++    : "recovery";
++}
++
+ export function recordRunRetry(budget: RunRetryBudget, kind: RunRetryKind): void {
+   if (kind === "progress_continuation") {
+     budget.attemptsCounted = Math.max(0, budget.attemptsCounted - 1);
+diff --git a/src/agents/embedded-agent-runner/run/session-context-limits.ts b/src/agents/embedded-agent-runner/run/session-context-limits.ts
+index aaed653c0d098149f5a736f322495e8762ffb187..6a1c88bd5ff5634e97414d975773f4ffff73adc6 100644
+--- a/src/agents/embedded-agent-runner/run/session-context-limits.ts
++++ b/src/agents/embedded-agent-runner/run/session-context-limits.ts
+@@ -1,11 +1,7 @@
+ /** Attempts and recovery must hydrate the same bounded model-context view. */
+ export function resolveEmbeddedSessionContextLimits(contextTokenBudget?: number) {
+   return {
+-    maxBytes: 64 * 1024 * 1024,
+-    maxContextBytes: Math.min(
+-      64 * 1024 * 1024,
+-      Math.max(1024, (contextTokenBudget ?? 128_000) * 8),
+-    ),
++    maxBytes: Math.min(64 * 1024 * 1024, Math.max(1024, (contextTokenBudget ?? 128_000) * 8)),
+     maxEvents: 10_000,
+   };
+ }
+diff --git a/src/agents/embedded-agent-runner/runs.publication-wait.ts b/src/agents/embedded-agent-runner/runs.publication-wait.ts
+index fb6ee94451cd28b6c75d544011fd1cfb9cf23888..c5100b0c25c69201076067e3b92615cbb1cc3869 100644
+--- a/src/agents/embedded-agent-runner/runs.publication-wait.ts
++++ b/src/agents/embedded-agent-runner/runs.publication-wait.ts
+@@ -54,12 +54,9 @@ function ownsPublicationHandle(expected: Publication, handle: EmbeddedAgentQueue
+           owner.operationalRunInstance;
+ }
+ 
+-/** Keep waiting through a predecessor's retirement or an explicitly skipped backend. */
++/** A different predecessor's retirement cannot close this exact owner's rendezvous. */
+ export function retainPublication(expected: Publication, ended: EmbeddedAgentQueueHandle): boolean {
+-  return (
+-    isPublicationCurrent(expected) &&
+-    (expected.afterBackend === ended || !ownsPublicationHandle(expected, ended))
+-  );
++  return isPublicationCurrent(expected) && !ownsPublicationHandle(expected, ended);
+ }
+ 
+ export function notifyEmbeddedRunPublished(sessionId: string): void {
+@@ -74,11 +71,8 @@ export function notifyEmbeddedRunPublished(sessionId: string): void {
+       continue;
+     }
+     const current = isPublicationCurrent(expected);
+-    // Neither a predecessor nor the skipped backend can satisfy this publication.
+-    if (
+-      current &&
+-      (!handle || handle === expected.afterBackend || !ownsPublicationHandle(expected, handle))
+-    ) {
++    // A predecessor registration cannot wake or invalidate the queued owner's subscription.
++    if (current && (!handle || !ownsPublicationHandle(expected, handle))) {
+       continue;
+     }
+     const registration = handle && ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle);
+@@ -134,13 +128,11 @@ export async function waitForEmbeddedRunPublication(
+     | {
+         replyOperation: ReplyOperation;
+         directOwner?: never;
+-        afterBackend?: ReplyBackendHandle;
+         onRegistered?: (backend: ReplyBackendHandle) => void;
+       }
+     | {
+         replyOperation?: never;
+         directOwner: Extract<EmbeddedRunPublicationOwner, { kind: "direct" }>;
+-        afterBackend?: never;
+         onRegistered?: (target: ReplyMessageInjectionTarget) => void;
+       }
+   ),
+@@ -152,7 +144,6 @@ export async function waitForEmbeddedRunPublication(
+     sessionKey: params.sessionKey,
+     lifecycleGeneration,
+     owner: params.directOwner ?? { kind: "reply", operation: params.replyOperation },
+-    afterBackend: params.afterBackend,
+   };
+   const waiter: EmbeddedRunWaiter = {
+     publication: expected,
+diff --git a/src/agents/harness/prompt-context.ts b/src/agents/harness/prompt-context.ts
+index 2ad9c64d6851d1e600e1e835be5c729bf11e94b2..4635ea0bb0d94897842b7d05e48dfad5ccc56df3 100644
+--- a/src/agents/harness/prompt-context.ts
++++ b/src/agents/harness/prompt-context.ts
+@@ -4,13 +4,12 @@ import type { OpenClawConfig } from "../../config/types.js";
+ import { resolveAgentWorkspaceDir } from "../agent-scope-config.js";
+ import type { AgentHarnessAttemptParamsV2 } from "./types.js";
+ 
+-/** Bound model context separately from serialized inline-media materialization. */
++/** Bound transcript reads to the model budget while preserving complete messages. */
+ export function resolveAgentHarnessHistoryLimits(
+   contextTokenBudget?: number,
+ ): SessionModelContextLimits {
+   return {
+-    maxBytes: 64 * 1024 * 1024,
+-    maxContextBytes: Math.min(
++    maxBytes: Math.min(
+       64 * 1024 * 1024,
+       Math.max(1024, Math.floor((contextTokenBudget ?? 128_000) * 8)),
+     ),
+diff --git a/src/agents/sessions/session-manager-initial-context.test.ts b/src/agents/sessions/session-manager-initial-context.test.ts
+index 108100bdfd4803109f756285440877d4af840ddb..f6e7bec85c5db382bef6db9ff3bc91643b4a6169 100644
+--- a/src/agents/sessions/session-manager-initial-context.test.ts
++++ b/src/agents/sessions/session-manager-initial-context.test.ts
+@@ -3,16 +3,11 @@ import { expect, it, vi } from "vitest";
+ import type { Model } from "../../../packages/ai/src/types.js";
+ import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
+ import type { SessionTranscriptRuntimeTarget } from "../../config/sessions/session-accessor.types.js";
+-import { SessionModelContextLimitError } from "../../config/sessions/session-model-context-limit-error.js";
+ import * as modelContextReader from "../../config/sessions/session-transcript-read-worker-runtime.js";
+ import { withOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
+ import { recordGatewaySessionRunFailure } from "../../sessions/session-run-error.js";
+ import { AsyncWorkScope } from "../../shared/async-work-scope.js";
+-import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
+ import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+-import { resolveEmbeddedSessionContextLimits } from "../embedded-agent-runner/run/session-context-limits.js";
+-import { resolveAgentHarnessHistoryLimits } from "../harness/prompt-context.js";
+-import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
+ import { createResourceLoader } from "./agent-session-loop-resource-loader.test-support.js";
+ import { AuthStorage } from "./auth-storage.js";
+ import { ModelRegistry } from "./model-registry.js";
+@@ -34,180 +29,6 @@ const model: Model<"openai-responses"> = {
+   maxTokens: 8_192,
+ };
+ 
+-it.each(["identity", "legacy compressed"] as const)(
+-  "retains an image-bearing correction and completed effect in SDK context from %s storage",
+-  async (storage) => {
+-    await withOpenClawTestState({ label: "initial-context-images" }, async (state) => {
+-      const target = {
+-        agentId: "main",
+-        sessionId: "initial-images",
+-        sessionKey: "agent:main:initial-images",
+-        storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
+-      };
+-      await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
+-      const source = await SessionManager.openAsync(target, state.workspaceDir);
+-      const oldText = "Obsolete historical text. ".repeat(20_000);
+-      await source.appendMessageAsync({ role: "user", content: oldText, timestamp: 1 });
+-      const call = makeAgentAssistantMessage({
+-        content: [{ type: "toolCall", id: "completed-write", name: "write", arguments: {} }],
+-        stopReason: "toolUse",
+-      });
+-      await source.appendMessageAsync(call);
+-      const result = {
+-        role: "toolResult" as const,
+-        toolCallId: "completed-write",
+-        toolName: "write",
+-        content: [{ type: "text" as const, text: "Saved report; receipt synthetic-write-42." }],
+-        isError: false,
+-        timestamp: 2,
+-      };
+-      await source.appendMessageAsync(result);
+-      const images = [
+-        {
+-          type: "image" as const,
+-          mimeType: "image/png",
+-          data: "A".repeat(storage === "identity" ? 2_412_476 : 524_288),
+-        },
+-        {
+-          type: "image" as const,
+-          mimeType: "image/png",
+-          data: "B".repeat(storage === "identity" ? 1_867_592 : 524_288),
+-        },
+-      ];
+-      const correction = {
+-        role: "user" as const,
+-        content: [
+-          {
+-            type: "text" as const,
+-            text: "Use these two images in the summary. Keep the completed report; do not repeat its write.",
+-          },
+-          ...images,
+-        ],
+-        timestamp: 3,
+-      };
+-      await source.appendMessageAsync(correction);
+-      const database = openOpenClawAgentDatabase({ agentId: "main", path: target.storePath });
+-      if (storage === "legacy compressed") {
+-        // An already persisted compressed row has the original exact costs, but
+-        // predates image-aware context costs. Recovery must not require a rewrite.
+-        database.db
+-          .prepare(`UPDATE transcript_events SET navigation_json = json_remove(navigation_json,
+-            '$.modelContextBytes', '$.modelWithoutCheckpointContextBytes')
+-            WHERE session_id = ? AND navigation_json IS NOT NULL`)
+-          .run(target.sessionId);
+-      }
+-      const snapshot = () =>
+-        database.db
+-          .prepare(`SELECT seq, event_json, event_zstd, event_utf8_bytes, navigation_json
+-            FROM transcript_events WHERE session_id = ? ORDER BY seq`)
+-          .all(target.sessionId);
+-      const before = snapshot();
+-      expect(before.at(-1)?.event_zstd === null).toBe(storage === "identity");
+-      const limits =
+-        storage === "identity"
+-          ? resolveEmbeddedSessionContextLimits(model.contextWindow)
+-          : resolveAgentHarnessHistoryLimits(model.contextWindow);
+-      const manager = await SessionManager.openBoundedAsync(target, {
+-        cwd: state.workspaceDir,
+-        ...limits,
+-      });
+-      // The raw writer stays within the smaller original hydration budget.
+-      // Only the separate SDK model read may materialize the inline images.
+-      expect(manager.buildSessionContext().messages).toEqual([]);
+-      const authStorage = AuthStorage.inMemory();
+-      let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
+-      try {
+-        ({ session } = await createAgentSession({
+-          cwd: state.workspaceDir,
+-          agentDir: state.agentDir("main"),
+-          model: { ...model, input: ["text", "image"] },
+-          thinkingLevel: "off",
+-          noTools: "all",
+-          authStorage,
+-          modelRegistry: ModelRegistry.inMemory(authStorage),
+-          sessionManager: manager,
+-          settingsManager: SettingsManager.inMemory(),
+-          resourceLoader: createResourceLoader(),
+-        }));
+-        expect(session.messages).toEqual([call, result, correction]);
+-        const after = snapshot();
+-        // SDK initialization records the requested thinking setting on the sparse
+-        // writer view. It must not rewrite any existing conversation entry.
+-        expect(after.slice(0, before.length)).toEqual(before);
+-        expect(after).toHaveLength(before.length + 1);
+-        const appendedEvent = after[before.length]?.event_json;
+-        if (typeof appendedEvent !== "string") {
+-          throw new Error("Expected the appended thinking setting to contain JSON");
+-        }
+-        expect(JSON.parse(appendedEvent)).toMatchObject({
+-          type: "thinking_level_change",
+-          thinkingLevel: "off",
+-        });
+-      } finally {
+-        session?.dispose();
+-      }
+-    });
+-  },
+-);
+-
+-it.each([
+-  "strict bytes",
+-  "hard bytes",
+-  "text budget",
+-  "hard bytes after result omission",
+-  "text budget after result omission",
+-] as const)("keeps %s admission bounded when image-aware context is available", async (limit) => {
+-  await withOpenClawTestState({ label: "initial-context-image-limits" }, async (state) => {
+-    const target = {
+-      agentId: "main",
+-      sessionId: "image-limits",
+-      sessionKey: "agent:main:image-limits",
+-      storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
+-    };
+-    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
+-    const source = await SessionManager.openAsync(target);
+-    await source.appendMessageAsync({
+-      role: "user",
+-      content: limit.startsWith("text budget")
+-        ? "x".repeat(32_768)
+-        : [{ type: "image", mimeType: "image/png", data: "A".repeat(32_768) }],
+-      timestamp: 1,
+-    });
+-    if (limit.endsWith("after result omission")) {
+-      await source.appendMessageAsync(
+-        makeAgentAssistantMessage({
+-          content: [{ type: "toolCall", id: "large-result", name: "read", arguments: {} }],
+-          stopReason: "toolUse",
+-        }),
+-      );
+-      await source.appendMessageAsync({
+-        role: "toolResult",
+-        toolCallId: "large-result",
+-        toolName: "read",
+-        content: [{ type: "text", text: "r".repeat(32_768) }],
+-        isError: false,
+-        timestamp: 2,
+-      });
+-    }
+-    const limits =
+-      limit === "strict bytes"
+-        ? { maxBytes: 4096, maxEvents: 8 }
+-        : limit.startsWith("hard bytes")
+-          ? { maxBytes: 4096, maxContextBytes: 64_000, maxEvents: 8 }
+-          : { maxBytes: 64_000, maxContextBytes: 4096, maxEvents: 8 };
+-    await expect(
+-      SessionManager.openModelContextAsync(target, {
+-        limits: {
+-          ...limits,
+-          ...(limit.endsWith("after result omission")
+-            ? { toolResultOverflow: "omit" as const }
+-            : {}),
+-        },
+-      }),
+-    ).rejects.toBeInstanceOf(SessionModelContextLimitError);
+-  });
+-});
+-
+ it("refreshes SDK initial context after an accepted terminal receipt appends during its read", async () => {
+   await withOpenClawTestState({ label: "initial-context-refresh" }, async (state) => {
+     const target = {
+diff --git a/src/agents/sessions/session-manager-model-context-limits.test.ts b/src/agents/sessions/session-manager-model-context-limits.test.ts
+index f114f5c1467675fb69d7fd4d52edc7d7c28ac7d9..a10b7c4e4198d8b4c35d2c67f0eec2db455f8241 100644
+--- a/src/agents/sessions/session-manager-model-context-limits.test.ts
++++ b/src/agents/sessions/session-manager-model-context-limits.test.ts
+@@ -8,7 +8,6 @@ import {
+   upsertSessionEntryCore,
+   type SessionTranscriptRuntimeTarget,
+ } from "../../config/sessions/session-accessor.js";
+-import { SessionModelContextLimitError } from "../../config/sessions/session-model-context-limit-error.js";
+ import { transcriptEventJsonSql } from "../../config/sessions/transcript-payload.js";
+ import { getNodeSqliteKysely } from "../../infra/kysely-sync.js";
+ import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
+@@ -524,25 +523,25 @@ it.each(["latest message", "compaction boundary", "latest tool pair", "latest to
+           });
+           try {
+             expect(() => SessionManager.openModelContext(scope, options)).toThrow(
+-              SessionModelContextLimitError,
++              /context.*limit|limit.*context/iu,
+             );
+             expect(() =>
+               SessionManager.openModelContext(scope, {
+                 limits: { ...options.limits, toolResultOverflow: "omit" },
+               }),
+-            ).toThrow(SessionModelContextLimitError);
++            ).toThrow(/context.*limit|limit.*context/iu);
+           } finally {
+             spy.mockRestore();
+           }
+           expect(oversizedPayloadReads).toBe(0);
+           await expect(SessionManager.openModelContextAsync(scope, options)).rejects.toThrow(
+-            SessionModelContextLimitError,
++            /context.*limit|limit.*context/iu,
+           );
+           await expect(
+             SessionManager.openModelContextAsync(scope, {
+               limits: { ...options.limits, toolResultOverflow: "omit" },
+             }),
+-          ).rejects.toThrow(SessionModelContextLimitError);
++          ).rejects.toThrow(/context.*limit|limit.*context/iu);
+         });
+       },
+     );
+diff --git a/src/agents/sessions/session-manager-view-types.ts b/src/agents/sessions/session-manager-view-types.ts
+index 83810a8fa1e6a659d161c0a2cadb9717131bde8a..9bde8118f5859a362ade8875cb71d0514401f2a3 100644
+--- a/src/agents/sessions/session-manager-view-types.ts
++++ b/src/agents/sessions/session-manager-view-types.ts
+@@ -1,10 +1,9 @@
+ import type { SessionTranscriptBoundedActiveContext } from "../../config/sessions/session-accessor.sqlite-contract.js";
+-import type { SessionModelContextLimits } from "../../config/sessions/session-history-read.types.js";
+ import type { PreparedSessionTranscriptHydration } from "../../config/sessions/session-transcript-worker.types.js";
+ import type { SessionTranscriptTargetBinding } from "../../config/sessions/transcript-target-binding.js";
+ 
+ export type SessionManagerPersistenceTarget = SessionTranscriptTargetBinding;
+-export type SessionManagerBoundedContextLimits = SessionModelContextLimits;
++export type SessionManagerBoundedContextLimits = { maxBytes: number; maxEvents: number };
+ export type PreparedSessionTranscriptReload = PreparedSessionTranscriptHydration;
+ export type SessionManagerBoundedContext = Pick<
+   SessionTranscriptBoundedActiveContext,
+diff --git a/src/agents/sessions/steering-message-identity.ts b/src/agents/sessions/steering-message-identity.ts
+index de69d1f43be8742b839dbfb937dfcc35e1b98810..60b74f2a310d56cf56d174af6d2e5301c66401b4 100644
+--- a/src/agents/sessions/steering-message-identity.ts
++++ b/src/agents/sessions/steering-message-identity.ts
+@@ -1,13 +1,5 @@
+ import type { AgentMessage } from "../runtime/index.js";
+ 
+-/** The native queue owner withdrew an accepted input or released it at handoff. */
+-export class QueuedSteeringWithdrawalError extends Error {
+-  constructor(message: string, options?: ErrorOptions) {
+-    super(message, options);
+-    this.name = "QueuedSteeringWithdrawalError";
+-  }
+-}
+-
+ const STEERING_MESSAGE_IDENTITY = Symbol.for("openclaw.steeringMessageIdentity");
+ const steeringMessagePersistenceFailureListeners = new Map<string, Set<(error: unknown) => void>>();
+ 
+diff --git a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+index 54d5e3e94520c8e0acaff82a1d99b88a77fcb99e..8bb97d9dc9ce3aa2905c6530df09d3f05a413ca2 100644
+--- a/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-completion-delivery.ts
+@@ -31,7 +31,6 @@ import {
+ import { hasVisibleAgentPayload } from "../../embedded-agent-runner/message-visibility.js";
+ import { hasVisibleCompletionResult } from "../../internal-event-contract.js";
+ import { collectAgentInternalEventMedia, type AgentInternalEvent } from "../../internal-events.js";
+-import type { ReplyExpectation } from "../../reply-completion.js";
+ import { createAgentRunDirectAbortError } from "../../run-termination.js";
+ import {
+   hasAnnounceSendEvidence,
+@@ -55,7 +54,6 @@ export async function runAnnounceAgentCall(params: {
+   privateCompletion?: true;
+   typing?: Omit<GatewayRecoveryTypingParams, "isCurrent">;
+   settleWakeSourceSessionKeys?: readonly string[];
+-  settleWakeReplyExpectation?: ReplyExpectation;
+   delegatedToolPolicyHandoff?: SubagentCompletionToolHandoffRegistration;
+   expectFinal?: boolean;
+   onAccepted?: (payload: unknown) => void;
+@@ -98,7 +96,6 @@ export async function runAnnounceAgentCall(params: {
+       settleWakeReplay: params.settleWakeSourceSessionKeys
+         ? {
+             sourceSessionKeys: params.settleWakeSourceSessionKeys,
+-            replyExpectation: params.settleWakeReplyExpectation,
+             assertCurrent: () => {
+               if (!params.isExecutionAllowed()) {
+                 throw new SourceOwnerChangedError();
+diff --git a/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts b/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
+index 852dc74366dd433ad25bfc16ac9853312ef7bbc9..ab1b76dbebf0b465b6c80c9fb55cfaa97ba1fe9d 100644
+--- a/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
++++ b/src/agents/subagents/announce/subagent-announce-delivery.yielded-settle.test.ts
+@@ -170,11 +170,7 @@ describe("yielded private settle outcomes", () => {
+     const sessionKey = "agent:main:discord:dm:U123";
+     const origin = { channel: "discord", to: "dm:U123", accountId: "acct-1" };
+     const current = "replaced" in testCase ? "replacement-parent" : "requester-session-dm";
+-    const dispatch = vi.fn(async function <T>(
+-      _method: string,
+-      _params: Record<string, unknown>,
+-      _options?: { settleWakeReplay?: { replyExpectation?: string } },
+-    ) {
++    const dispatch = vi.fn(async function <T>(_method: string, _params: Record<string, unknown>) {
+       return testCase.response as T;
+     });
+     const send = vi.fn<typeof sendMessage>();
+@@ -197,9 +193,6 @@ describe("yielded private settle outcomes", () => {
+       requesterSessionOrigin: origin,
+       directOrigin: origin,
+       sourceTool: "subagent_settle",
+-      sourceSessionKey: "agent:main:subagent:settled-child",
+-      settleWakeSourceSessionKeys: ["agent:main:subagent:settled-child"],
+-      settleWakeReplyExpectation: "public" in testCase ? "required" : "optional",
+       requesterIsSubagent: false,
+       expectsCompletionMessage: false,
+       requireDirectDelivery: true,
+@@ -221,10 +214,6 @@ describe("yielded private settle outcomes", () => {
+       });
+       // The conversation's configured reply policy decides, not this handoff.
+       expect(agentParams).not.toHaveProperty("sourceReplyDeliveryMode");
+-      expect(agentParams).not.toHaveProperty("settleWakeReplyExpectation");
+-      expect(dispatch.mock.calls[0]?.[2]?.settleWakeReplay?.replyExpectation).toBe(
+-        "public" in testCase ? "required" : "optional",
+-      );
+     }
+     expect(send).not.toHaveBeenCalled();
+   });
+diff --git a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
+index a1480de9c282cd0e5b37bd4056a717f0c85bf993..508d44970f95f44ef1726e9a3e7a8191b997eb4d 100644
+--- a/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
++++ b/src/agents/subagents/announce/subagent-announce-direct-delivery.ts
+@@ -37,7 +37,6 @@ import {
+   projectRuntimeContextFragments,
+ } from "../../internal-runtime-context.js";
+ import type { McpRequesterScopeContext } from "../../mcp-requester-scope.js";
+-import type { ReplyExpectation } from "../../reply-completion.js";
+ import type { GatewayToolCallerReceiptAdmission } from "../../tools/gateway-caller-receipt.types.js";
+ import {
+   SOURCE_OWNER_CHANGED,
+@@ -101,7 +100,6 @@ export type SubagentAnnounceDirectParams = McpRequesterScopeContext & {
+   sourceSessionKey?: string;
+   sourceTool?: string;
+   settleWakeSourceSessionKeys?: readonly string[];
+-  settleWakeReplyExpectation?: ReplyExpectation;
+   isSourceSessionEffectsAllowed?: () => boolean;
+   deliverRequesterFinal?: import("../requester-final-attachment.js").RequesterFinalAttachmentDelivery;
+   sourceReceiptAdmission?: GatewayToolCallerReceiptAdmission;
+@@ -502,7 +500,6 @@ export async function sendSubagentAnnounceDirectly(
+                       }
+                     : undefined,
+                 settleWakeSourceSessionKeys: params.settleWakeSourceSessionKeys,
+-                settleWakeReplyExpectation: params.settleWakeReplyExpectation,
+                 ...(privateCompletion ? { privateCompletion: true as const } : {}),
+                 delegatedToolPolicyHandoff:
+                   ((isSubagentCompletion && trustedCompletionEvent) ||
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts
+index 215a61978bc8c609c04b3bfefd5c0429474fbaf0..f2693b1994cc51567bf3aa613040994a60a1aa3d 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.private.test.ts
+@@ -74,7 +74,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled private batches", () => {
+     // The conversation's reply policy decides whether a visible update is owed.
+     expect(call.requireVisibleReply).toBeUndefined();
+     expect(call.completionTarget).toBe(yielded ? undefined : "parent");
+-    expect(call.settleWakeReplyExpectation).toBe(yielded ? "optional" : "required");
+     const trigger = String(call.triggerMessage);
+     expect(trigger).toContain("private marker");
+     if (yielded) {
+@@ -97,28 +96,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled private batches", () => {
+     }
+   });
+ 
+-  it("keeps the first public yielded completion required", async () => {
+-    const child = makeSettledChild({
+-      runId: "public-yield",
+-      delivery: { status: "pending" },
+-      requesterSettleWake: {
+-        status: "pending",
+-        attemptCount: 0,
+-        afterRequesterYield: true,
+-        requesterYieldBatch: true,
+-        rearmGeneration: 1,
+-      },
+-    });
+-    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+-    expect(
+-      await maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: child })),
+-    ).toBe(true);
+-    expect(deliveredCallArg()).toMatchObject({
+-      requireVisibleReply: true,
+-      settleWakeReplyExpectation: "required",
+-    });
+-  });
+-
+   // The released yield writer stored private batches without the marker, including
+   // unattempted ones; after an upgrade they keep their admitted private policy.
+   it.each([
+@@ -145,7 +122,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled private batches", () => {
+       expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(true);
+       const call = deliveredCallArg();
+       expect(call.completionTarget).toBe(marked ? undefined : "parent");
+-      expect(call.settleWakeReplyExpectation).toBe(marked ? "optional" : "required");
+       // Deliverable retries rotate keys; private inputs retain their admitted identity.
+       expect(call.directIdempotencyKey).toBe(
+         requesterSettleKey(marked ? "run-b:yield-1:retry-1" : "run-b:yield-1"),
+diff --git a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
+index a70cca9a6d53a185141c79cb5640d1cfd54cf3f7..7ac3c7fb65c481672fb63f5b4a13a360cc3f5978 100644
+--- a/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
++++ b/src/agents/subagents/announce/subagent-announce.requester-settle-wake.ts
+@@ -586,11 +586,6 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
+                 directOrigin,
+                 sourceSessionKey: batchSessionKeys[0],
+                 settleWakeSourceSessionKeys: batchSessionKeys,
+-                // A yielded private batch lets the requester consume findings quietly.
+-                // Public completion and parent-only internal results remain required.
+-                settleWakeReplyExpectation: admissionMarker.yieldedFinalDeliverable
+-                  ? "optional"
+-                  : "required",
+                 sourceTool: "subagent_settle",
+                 targetRequesterSessionKey: requesterSessionKey,
+                 requesterIsSubagent: requesterDepth >= 1,
+diff --git a/src/auto-reply/reply/agent-runner-core.ts b/src/auto-reply/reply/agent-runner-core.ts
+index c83a3dcefd2a5f14ff5e54665ce808c8392048f6..3b8470c93f83b74ae2772f9c35b2e2233880f099 100644
+--- a/src/auto-reply/reply/agent-runner-core.ts
++++ b/src/auto-reply/reply/agent-runner-core.ts
+@@ -14,8 +14,6 @@ import {
+ import type { OpenClawConfig } from "../../config/config.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+ import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
+-import type { SessionTranscriptReadScope } from "../../config/sessions/session-accessor.sqlite-contract.js";
+-import type { DeliveredSourceReply } from "../../config/sessions/transcript-mirror.js";
+ import type { TypingMode } from "../../config/types.js";
+ import type { PendingAgentMessageInjectionTarget } from "../../gateway/agent-message-injection-target.js";
+ import { logVerbose } from "../../globals.js";
+@@ -223,12 +221,6 @@ export async function resolveTerminalReplyDelivery(params: {
+   minimumAssistantMessageIndex?: number;
+   resolveReplyDelivery?: ReplyDeliveryObserver;
+   sourceReplyDeliveryState?: ReplyDeliveryState;
+-  addressedSourceReply?: {
+-    scope: SessionTranscriptReadScope;
+-    source: Omit<DeliveredSourceReply, "platformMessageId">;
+-    inputUpdate?: Pick<TemplateContext, "ProviderUpdateKind" | "ProviderEditTimestamp">;
+-    isCurrent: () => boolean;
+-  };
+ }): Promise<ReplyDeliveryState> {
+   if (
+     params.sourceReplyDeliveryState === "delivered" ||
+@@ -241,30 +233,7 @@ export async function resolveTerminalReplyDelivery(params: {
+     await blockReplyPipeline?.flush({ force: true });
+   }
+   const sourceDelivery = await observeReplyDelivery(
+-    async (minimumIndex) => {
+-      const observed = (await params.resolveReplyDelivery?.(minimumIndex)) ?? "missing";
+-      const addressed = params.addressedSourceReply;
+-      if (
+-        observed !== "missing" ||
+-        !addressed ||
+-        addressed.inputUpdate?.ProviderEditTimestamp !== undefined ||
+-        addressed.inputUpdate?.ProviderUpdateKind?.startsWith("edited_")
+-      ) {
+-        return observed;
+-      }
+-      if (!addressed.isCurrent()) {
+-        return "pending";
+-      }
+-      // Native receipt metadata is outside model replay and survives compaction.
+-      // Its existing history worker visits navigation first, not unrelated tool bodies.
+-      const { findTranscriptEvent } =
+-        await import("../../config/sessions/session-transcript-match.js");
+-      const delivered = await findTranscriptEvent(addressed.scope, {
+-        kind: "delivered-source-reply",
+-        source: addressed.source,
+-      });
+-      return addressed.isCurrent() ? (delivered ? "delivered" : "missing") : "pending";
+-    },
++    params.resolveReplyDelivery,
+     minimumAssistantMessageIndex,
+     (error) => logVerbose(`reply delivery observation failed; retaining custody: ${String(error)}`),
+   );
+diff --git a/src/auto-reply/reply/agent-runner-embedded-candidate.ts b/src/auto-reply/reply/agent-runner-embedded-candidate.ts
+index d057cd27f4299f7b5f6f4530d11df952d5f63aa0..e8222ec2fb3424f881c2fada64cc96984ce4e4e0 100644
+--- a/src/auto-reply/reply/agent-runner-embedded-candidate.ts
++++ b/src/auto-reply/reply/agent-runner-embedded-candidate.ts
+@@ -8,7 +8,6 @@ import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
+ import { resolveOpenAIRuntimeProvider } from "../../agents/openai-routing.js";
+ import type { CompactionRequestBudget } from "../../agents/sessions/compaction/request-budget.js";
+ import { resolveGroupSessionKey } from "../../config/sessions.js";
+-import { conversationIdentityFromMsgContext } from "../../config/sessions/conversation-identity.js";
+ import { logVerbose } from "../../globals.js";
+ import { resolveSessionPinnedHarnessId } from "../../sessions/agent-harness-session-key.js";
+ import {
+@@ -27,10 +26,7 @@ import type { CompletedAgentAuthSelection } from "./agent-runner-execution.types
+ import type { AgentFallbackCandidateCommonParams } from "./agent-runner-fallback-cycle.types.js";
+ import { buildEmbeddedRunExecutionParams } from "./agent-runner-utils.js";
+ import type { DirectBlockDelivery } from "./reply-delivery.js";
+-import {
+-  isReplyOperationSuperseded,
+-  resolveReplyOperationTerminationFields,
+-} from "./reply-operation-abort.js";
++import { resolveReplyOperationTerminationFields } from "./reply-operation-abort.js";
+ import { markReplyOperationGlobalLaneWaitProgress } from "./reply-run-registry.js";
+ import {
+   bindSourceReplyDeliveryRuntime,
+@@ -57,43 +53,6 @@ export async function runEmbeddedFallbackCandidate(
+   compactionRequestBudget?: CompactionRequestBudget;
+ }> {
+   const turn = params.turn;
+-  const sourceConversation = conversationIdentityFromMsgContext({ ctx: { ...turn.sessionCtx } });
+-  const sourceMessageId = normalizeOptionalString(
+-    turn.sessionCtx.MessageSidFull ?? turn.sessionCtx.MessageSid,
+-  );
+-  const sourceLifecycleRevision = turn.getActiveSessionEntry()?.lifecycleRevision;
+-  const addressedSourceReply =
+-    sourceConversation && sourceMessageId && sourceLifecycleRevision && turn.sessionKey
+-      ? {
+-          scope: {
+-            agentId: turn.followupRun.run.agentId,
+-            sessionKey: turn.sessionKey,
+-            sessionId: params.effectiveRun.sessionId,
+-            storePath: turn.storePath,
+-          },
+-          source: {
+-            channel: sourceConversation.channel,
+-            accountId: sourceConversation.accountId,
+-            conversationRef: sourceConversation.conversationRef,
+-            messageId: sourceMessageId,
+-            lifecycleRevision: sourceLifecycleRevision,
+-          },
+-          inputUpdate: {
+-            ProviderUpdateKind: turn.sessionCtx.ProviderUpdateKind,
+-            ProviderEditTimestamp: turn.sessionCtx.ProviderEditTimestamp,
+-          },
+-          isCurrent: () => {
+-            const current = turn.getActiveSessionEntry();
+-            return (
+-              !turn.opts?.abortSignal?.aborted &&
+-              !turn.replyOperation?.abortSignal.aborted &&
+-              !isReplyOperationSuperseded(turn.replyOperation) &&
+-              current?.sessionId === params.effectiveRun.sessionId &&
+-              current.lifecycleRevision === sourceLifecycleRevision
+-            );
+-          },
+-        }
+-      : undefined;
+   let maintenanceAuthProfile: CompletedAgentAuthSelection | undefined;
+   let compactionRequestBudget: CompactionRequestBudget | undefined;
+   const sourceReplyDeliveryRuntime = readSourceReplyDeliveryRuntime(params.candidateRun);
+@@ -345,7 +304,6 @@ export async function runEmbeddedFallbackCandidate(
+             directBlockDeliveries: params.directBlockDeliveries,
+             minimumAssistantMessageIndex,
+             resolveReplyDelivery: turn.opts?.resolveReplyDelivery,
+-            addressedSourceReply,
+           }),
+         onBlockReplyFlush:
+           turn.blockStreamingEnabled && turn.blockReplyPipeline
+diff --git a/src/auto-reply/reply/agent-runner-failure-reply.test.ts b/src/auto-reply/reply/agent-runner-failure-reply.test.ts
+index a07bdcdba36194c7d0cb1ca6dc31d0daf5b756f6..6b8d8415f0cde844090c045e02c2f63f52daafd0 100644
+--- a/src/auto-reply/reply/agent-runner-failure-reply.test.ts
++++ b/src/auto-reply/reply/agent-runner-failure-reply.test.ts
+@@ -6,7 +6,6 @@ import {
+ } from "../../agents/failover/user-copy.js";
+ import { AgentHarnessPreflightError } from "../../agents/harness/errors.js";
+ import { resolveReplyCompletion } from "../../agents/reply-completion.js";
+-import { SessionModelContextLimitError } from "../../config/sessions/session-model-context-limit-error.js";
+ import { WorkerTaskError } from "../../infra/worker-task-pool.js";
+ import { SkillResourceDeliveryLimitError } from "../../skills/runtime/resource-delivery-error.js";
+ import { SkillLibraryError } from "../../skills/skill-library-error.js";
+@@ -51,41 +50,6 @@ describe("buildEmptyInteractiveReplyPayload", () => {
+ });
+ 
+ describe("buildExternalRunFailureReply", () => {
+-  it.each(["direct", "wrapped"])(
+-    "keeps %s local history-limit guidance visible without diagnostics",
+-    (kind) => {
+-      const limit = new SessionModelContextLimitError("private-history-diagnostic-canary");
+-      const error =
+-        kind === "direct" ? limit : new Error("private-wrapper-canary", { cause: limit });
+-      const reply = buildExternalRunFailureReply({ message: error.message, error });
+-      expect(reply).toEqual({
+-        text: "I couldn't load enough conversation history to continue. Some actions may have completed; check their results before continuing. Start a new session with /new and a brief summary.",
+-        isGenericRunnerFailure: false,
+-      });
+-      const payload = buildKnownAgentRunFailureReplyPayload({
+-        err: error,
+-        sessionCtx: { Provider: "discord", Surface: "discord", ChatType: "channel" },
+-        resolvedVerboseLevel: "off",
+-      });
+-      expect(payload).toMatchObject({ text: reply.text, isError: true });
+-      expect(getReplyPayloadMetadata(payload ?? {})?.deliverDespiteSourceReplySuppression).toBe(
+-        true,
+-      );
+-    },
+-  );
+-
+-  it.each([
+-    new RangeError("private-history-diagnostic-canary"),
+-    Object.assign(new Error("private-history-diagnostic-canary"), {
+-      name: "SessionModelContextLimitError",
+-    }),
+-  ])("does not disclose untyped or unrelated history failures: %s", (error) => {
+-    expect(buildExternalRunFailureReply({ message: error.message, error })).toEqual({
+-      text: GENERIC_EXTERNAL_RUN_FAILURE_TEXT,
+-      isGenericRunnerFailure: true,
+-    });
+-  });
+-
+   it.each(["direct", "wrapped"])(
+     "keeps %s skill delivery-limit guidance visible without diagnostics",
+     (kind) => {
+diff --git a/src/auto-reply/reply/agent-runner-failure-reply.ts b/src/auto-reply/reply/agent-runner-failure-reply.ts
+index d1a0ca8e97533c04667414aff118f524149195d3..9e91cce75ea163bae90d5bf44310205f7a5906dc 100644
+--- a/src/auto-reply/reply/agent-runner-failure-reply.ts
++++ b/src/auto-reply/reply/agent-runner-failure-reply.ts
+@@ -43,7 +43,6 @@ import { isAgentHarnessPreflightError } from "../../agents/harness/errors.js";
+ import { isProviderAuthError } from "../../agents/model-auth-runtime-shared.js";
+ import { buildProviderAuthRecoveryHint } from "../../agents/provider-auth-recovery-hint.js";
+ import type { ReplyCompletion, ReplyExpectation } from "../../agents/reply-completion.js";
+-import { SessionModelContextLimitError } from "../../config/sessions/session-model-context-limit-error.js";
+ import {
+   collectErrorGraphCandidates,
+   formatErrorMessage,
+@@ -249,14 +248,11 @@ export function buildExternalRunFailureReply(
+   if (approvalMessage) {
+     return { text: `⚠️ ${approvalMessage}`, isGenericRunnerFailure: false };
+   }
+-  const errorCandidates = collectErrorGraphCandidates(error, readErrorCauses);
+-  if (errorCandidates.some((candidate) => candidate instanceof SessionModelContextLimitError)) {
+-    return {
+-      text: "I couldn't load enough conversation history to continue. Some actions may have completed; check their results before continuing. Start a new session with /new and a brief summary.",
+-      isGenericRunnerFailure: false,
+-    };
+-  }
+-  if (errorCandidates.some((candidate) => candidate instanceof SkillResourceDeliveryLimitError)) {
++  if (
++    collectErrorGraphCandidates(error, readErrorCauses).some(
++      (candidate) => candidate instanceof SkillResourceDeliveryLimitError,
++    )
++  ) {
+     return {
+       text: "⚠️ Selected skill resources exceed the 8 MiB delivery limit. Select fewer skills, then try again.",
+       isGenericRunnerFailure: false,
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts b/src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts
+index 744491b8da87a7f5606091bf97c7b6ad8a354a79..182807cc70585eeee89d8a9518be84bdedfd933e 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.publication.test.ts
+@@ -415,60 +415,6 @@ describe("native retained source publication", () => {
+     },
+   );
+ 
+-  it.each([false, true])(
+-    "adopts definitively rejected input on a new backend (detach first=%s)",
+-    async (detachFirst) => {
+-      const key = `agent:main:discord:channel:publication-retry-same-operation-${detachFirst}`;
+-      keys.add(key);
+-      const base = originalRun();
+-      await withQuestionCreator(key, base, async (operation, fingerprint) => {
+-        operation.setPhase("running");
+-        const correction = params(key, base, "correction");
+-        correction.providedReplyOperation = operation;
+-        correction.toolAuthorityFingerprint = fingerprint;
+-        const rejected = vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>(async () => {
+-          throw new Error("Backend is temporarily unavailable");
+-        });
+-        const first = attachBackend(operation, fingerprint, rejected);
+-        setActiveEmbeddedRun(operation.sessionId, first, key, base.run.sessionFile, "main");
+-
+-        await expect(runActiveReplySteer(correction)).resolves.toBe("handled");
+-        await new Promise<void>((resolve) => {
+-          setImmediate(resolve);
+-        });
+-        expect(rejected).toHaveBeenCalled();
+-        expect(getExistingFollowupQueue(key)?.items).toEqual([correction.followupRun]);
+-        expect(correction.followupRun.turnAdoptionLifecycle?.onAdopted).not.toHaveBeenCalled();
+-        if (detachFirst) {
+-          operation.detachBackend(first);
+-        }
+-        clearActiveEmbeddedRun(operation.sessionId, first, key);
+-        operation.detachBackend(first);
+-
+-        const accepted = vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>(
+-          async (_text, _options, assertCurrent) => {
+-            assertCurrent();
+-          },
+-        );
+-        const successor = attachBackend(operation, fingerprint, accepted);
+-        setActiveEmbeddedRun(operation.sessionId, successor, key, base.run.sessionFile, "main");
+-        try {
+-          await new Promise<void>((resolve) => {
+-            setImmediate(resolve);
+-          });
+-          expect(accepted).toHaveBeenCalledOnce();
+-          expect(rejected).toHaveBeenCalledOnce();
+-          expect(correction.followupRun.turnAdoptionLifecycle?.onAdopted).toHaveBeenCalledOnce();
+-          expect(correction.followupRun.turnAdoptionLifecycle?.onSettled).toHaveBeenCalledOnce();
+-          expect(correction.runFollowup).not.toHaveBeenCalled();
+-          expect(getExistingFollowupQueue(key)?.items ?? []).toEqual([]);
+-        } finally {
+-          clearActiveEmbeddedRun(operation.sessionId, successor, key);
+-        }
+-      });
+-    },
+-  );
+-
+   it("retains an ordinary rejected source for exactly one after-clear fallback", async () => {
+     const key = "agent:main:discord:channel:publication-retryable-rejection";
+     keys.add(key);
+diff --git a/src/auto-reply/reply/agent-runner-steer-adoption.ts b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+index bbb8ffbbfd9959841981efa0c0ba99f84214395f..d5c80ee9dd95e93b25beef0946513886333e38ad 100644
+--- a/src/auto-reply/reply/agent-runner-steer-adoption.ts
++++ b/src/auto-reply/reply/agent-runner-steer-adoption.ts
+@@ -154,13 +154,10 @@ export async function runActiveReplySteer(
+   };
+   scheduleParkedFallback();
+   releaseAdmissionTicket();
+-  const fallback = async (
+-    reason?: string,
+-    afterBackend?: ReplyBackendHandle,
+-  ): Promise<"handled"> => {
++  const fallback = async (reason?: string): Promise<"handled"> => {
+     parked.fallback();
+     if (!params.retainedReservation) {
+-      wakeRetainedReplySteerSource(followupRun, activeReplyOperation, afterBackend);
++      wakeRetainedReplySteerSource(followupRun, activeReplyOperation);
+     }
+     if (
+       replyOperationRunState &&
+@@ -216,7 +213,7 @@ export async function runActiveReplySteer(
+       );
+     }
+     if (!injectionTarget) {
+-      return await fallback("no injectable reply operation", backend);
++      return await fallback("no injectable reply operation");
+     }
+     // A predecessor's admission may wait past this run's terminal delivery.
+     // Keep the parked input in the ordered queue if its target is no longer eligible.
+@@ -252,7 +249,6 @@ export async function runActiveReplySteer(
+     if (!isCurrentFallback()) {
+       return await fallback("automatic model fallback changed during steering admission");
+     }
+-    const attemptedBackend = activeReplyOperation && getAttachedBackend(activeReplyOperation);
+     const injectionAttempt = beginReplyMessageInjectionTarget(injectionTarget, followupRun.prompt, {
+       currentInboundContext: followupRun.currentInboundContext,
+       inboundAudio: followupRun.currentInboundAudio === true,
+@@ -337,15 +333,7 @@ export async function runActiveReplySteer(
+       shouldAbortOnAdoptionError: isIngressAdoptionLostError,
+     });
+     if (finalization.status === "rejected") {
+-      const { reason } = finalization.outcome;
+-      return await fallback(
+-        reason,
+-        reason === "runtime_rejected" ||
+-          reason === "injection_unavailable" ||
+-          reason === "input_withdrawn"
+-          ? attemptedBackend
+-          : undefined,
+-      );
++      return await fallback(finalization.outcome.reason);
+     }
+     // Accepted or indeterminate input cannot be abandoned for replay, even
+     // when the source's later adoption callback rejects.
+@@ -470,10 +458,7 @@ export async function retryRetainedFollowupSteers(
+   }
+ }
+ 
+-function retryRetainedFollowupSteersAfterPublication(
+-  operation: ReplyOperation,
+-  afterBackend?: ReplyBackendHandle,
+-): void {
++function retryRetainedFollowupSteersAfterPublication(operation: ReplyOperation): void {
+   if (!operation.ownerSettlement) {
+     return;
+   }
+@@ -482,7 +467,6 @@ function retryRetainedFollowupSteersAfterPublication(
+     sessionId: operation.sessionId,
+     sessionKey: operation.key,
+     replyOperation: operation,
+-    afterBackend,
+     ownerReleased: operation.ownerSettlement,
+     abortSignal: operation.abortSignal,
+     onRegistered: (published) => {
+@@ -587,9 +571,8 @@ export function bindRetainedReplySteerSource(params: ActiveReplySteerParams): vo
+ export function wakeRetainedReplySteerSource(
+   source: FollowupRun,
+   operation?: ReplyOperation,
+-  afterBackend?: ReplyBackendHandle,
+ ): void {
+   if (source.retrySteer && operation) {
+-    retryRetainedFollowupSteersAfterPublication(operation, afterBackend);
++    retryRetainedFollowupSteersAfterPublication(operation);
+   }
+ }
+diff --git a/src/auto-reply/reply/reply-run-registry.contracts.ts b/src/auto-reply/reply/reply-run-registry.contracts.ts
+index 2a05aa31e9d246cc753d7680468300351faa8b6c..3fa1bc05e1ce8dd0ac9f630ae508ae64decf97a1 100644
+--- a/src/auto-reply/reply/reply-run-registry.contracts.ts
++++ b/src/auto-reply/reply/reply-run-registry.contracts.ts
+@@ -264,7 +264,6 @@ export type ReplyMessageInjectionRejectionReason =
+   | "injection_unavailable"
+   | "audio_input_unsupported"
+   | ReplyBackendQueueMessageMismatch
+-  | "input_withdrawn"
+   | "runtime_rejected";
+ 
+ export type ReplyMessageInjectionOutcome =
+diff --git a/src/auto-reply/reply/reply-run-registry.message-injection.ts b/src/auto-reply/reply/reply-run-registry.message-injection.ts
+index 4617ad28b2b5b0ded111893e07c642070ca475ca..7f61248a83ffd6062595af1d9010a7ee88ca0e56 100644
+--- a/src/auto-reply/reply/reply-run-registry.message-injection.ts
++++ b/src/auto-reply/reply/reply-run-registry.message-injection.ts
+@@ -9,7 +9,6 @@ import {
+   QuestionDispatchRefusedError,
+   QuestionDispatchUnsupportedError,
+ } from "../../agents/harness/gateway-question-dispatch.js";
+-import { QueuedSteeringWithdrawalError } from "../../agents/sessions/steering-message-identity.js";
+ import { SessionPendingInputCustodyError } from "../../config/sessions/session-pending-input-custody-error.js";
+ import { getAgentRunContext } from "../../infra/agent-run-registry.js";
+ import { hasPromptImageInput } from "../../media/prompt-image-input.js";
+@@ -356,9 +355,6 @@ function resolveReplyMessageInjectionFailure(
+           : authorityError,
+     };
+   }
+-  if (candidates.some((candidate) => candidate instanceof QueuedSteeringWithdrawalError)) {
+-    return { status: "rejected", reason: "input_withdrawn" };
+-  }
+   return undefined;
+ }
+ 
+@@ -527,14 +523,7 @@ export async function finalizeReplyMessageInjectionAttempt(params: {
+   onAdopted?: () => void | Promise<void>;
+   shouldAbortOnAdoptionError?: (error: unknown) => boolean;
+ }) {
+-  const result = await params.attempt.outcome;
+-  // A later delivery error cannot return already accepted input to fallback dispatch.
+-  const outcome =
+-    result.status === "rejected" &&
+-    result.reason !== "input_withdrawn" &&
+-    (await params.attempt.acceptance)
+-      ? { status: "indeterminate" as const, errorMessage: "Input delivery could not be confirmed." }
+-      : result;
++  const outcome = await params.attempt.outcome;
+   if (outcome.status === "failed") {
+     throw outcome.error;
+   }
+diff --git a/src/auto-reply/reply/reply-run-registry.test.ts b/src/auto-reply/reply/reply-run-registry.test.ts
+index 78ca9166f702a4aa36aeda36ca34a9de679bcc74..83fa6c626dffd5801f1bb904622a2b7cc30265cf 100644
+--- a/src/auto-reply/reply/reply-run-registry.test.ts
++++ b/src/auto-reply/reply/reply-run-registry.test.ts
+@@ -3,7 +3,6 @@ import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coerci
+ import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { QuestionAnswerUnconfirmedError } from "../../agents/harness/gateway-question-dispatch.js";
+-import { QueuedSteeringWithdrawalError } from "../../agents/sessions/steering-message-identity.js";
+ import { SessionPendingInputCustodyError } from "../../config/sessions/session-pending-input-custody-error.js";
+ import {
+   getDiagnosticSessionActivitySnapshot,
+@@ -1684,47 +1683,32 @@ describe("reply run registry", () => {
+     await expect(rejected.acceptance).resolves.toBe(false);
+   });
+ 
+-  it.each([false, true])(
+-    "keeps callback acceptance authoritative over later queue rejection (withdrawn=%s)",
+-    async (withdrawn) => {
+-      const delivery = createDeferred();
+-      let queueOptions: ReplyBackendQueueMessageOptions | undefined;
+-      const operation = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
+-      operation.setPhase("running");
+-      operation.attachBackend({
+-        kind: "embedded",
+-        runId: "run-a",
+-        cancel: vi.fn(),
+-        messageInjection: {
+-          isAvailable: () => true,
+-          queueMessage: vi.fn((_text, options) => {
+-            queueOptions = options;
+-            return delivery.promise;
+-          }),
+-        },
+-      });
+-      const target = replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!;
+-      const attempt = beginReplyMessageInjectionTarget(target, "uncertain");
++  it("keeps callback acceptance authoritative over later queue rejection", async () => {
++    const delivery = createDeferred();
++    let queueOptions: ReplyBackendQueueMessageOptions | undefined;
++    const operation = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
++    operation.setPhase("running");
++    operation.attachBackend({
++      kind: "embedded",
++      runId: "run-a",
++      cancel: vi.fn(),
++      messageInjection: {
++        isAvailable: () => true,
++        queueMessage: vi.fn((_text, options) => {
++          queueOptions = options;
++          return delivery.promise;
++        }),
++      },
++    });
++    const target = replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!;
++    const attempt = beginReplyMessageInjectionTarget(target, "uncertain");
+ 
+-      queueOptions?.onQueueAccepted?.(true);
+-      delivery.reject(
+-        withdrawn
+-          ? new QueuedSteeringWithdrawalError("input withdrawn by native queue owner")
+-          : new Error("transcript unconfirmed"),
+-      );
++    queueOptions?.onQueueAccepted?.(true);
++    delivery.reject(new Error("transcript unconfirmed"));
+ 
+-      await expect(attempt.acceptance).resolves.toBe(true);
+-      await expect(attempt.outcome).resolves.toMatchObject({
+-        status: "rejected",
+-        reason: withdrawn ? "input_withdrawn" : "runtime_rejected",
+-      });
+-      const onAdopted = vi.fn();
+-      await expect(
+-        finalizeReplyMessageInjectionAttempt({ attempt, target, onAdopted }),
+-      ).resolves.toMatchObject({ status: withdrawn ? "rejected" : "indeterminate" });
+-      expect(onAdopted).toHaveBeenCalledTimes(withdrawn ? 0 : 1);
+-    },
+-  );
++    await expect(attempt.acceptance).resolves.toBe(true);
++    await expect(attempt.outcome).resolves.toMatchObject({ status: "rejected" });
++  });
+ 
+   it("rejects an ABA successor even when key and leaf are reused", async () => {
+     const first = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
+diff --git a/src/config/sessions/session-accessor.sqlite-active-context.ts b/src/config/sessions/session-accessor.sqlite-active-context.ts
+index 9b48d5584dc6a5f662bffbb4059253ec5ad4ee58..5ecca4521a06355cd1cf3a7a742731588ab0a7fe 100644
+--- a/src/config/sessions/session-accessor.sqlite-active-context.ts
++++ b/src/config/sessions/session-accessor.sqlite-active-context.ts
+@@ -176,7 +176,6 @@ export function readSessionTranscriptBoundedActiveContextCore(
+   scope: SessionTranscriptReadScope,
+   options: {
+     maxBytes: number;
+-    maxContextBytes?: number;
+     maxEvents: number;
+     ignoreReadFence?: boolean;
+     readOnly?: boolean;
+@@ -184,9 +183,7 @@ export function readSessionTranscriptBoundedActiveContextCore(
+   },
+ ): SessionTranscriptBoundedActiveContext {
+   const maxBytes = normalizeVisibleMessageLimit(
+-    // Raw writer hydration keeps its original small bound. The separate model
+-    // reader can admit inline media without expanding private-evidence hydration.
+-    Math.min(options.maxBytes, options.maxContextBytes ?? options.maxBytes),
++    options.maxBytes,
+     DEFAULT_VISIBLE_MESSAGE_MAX_BYTES,
+     MAX_VISIBLE_MESSAGE_MAX_BYTES,
+     "maxBytes",
+diff --git a/src/config/sessions/session-accessor.sqlite-model-context.ts b/src/config/sessions/session-accessor.sqlite-model-context.ts
+index a585a1a419b9ad0dcb092e0f07c5c1853da11187..fac5acd606450dcff1bfd711f46aa74552763def 100644
+--- a/src/config/sessions/session-accessor.sqlite-model-context.ts
++++ b/src/config/sessions/session-accessor.sqlite-model-context.ts
+@@ -38,11 +38,7 @@ import type {
+   SessionModelContextLimits,
+   SessionTranscriptModelContext,
+ } from "./session-history-read.types.js";
+-import { SessionModelContextLimitError } from "./session-model-context-limit-error.js";
+-import {
+-  projectModelContextBudgetBytesSql,
+-  projectModelContextEventSql,
+-} from "./session-model-context-projection.js";
++import { projectModelContextEventSql } from "./session-model-context-projection.js";
+ import {
+   resolveSqliteSessionTranscriptReadFence,
+   runWithSessionTranscriptReadFence,
+@@ -52,7 +48,6 @@ import type { TranscriptEntryAnchor } from "./transcript-entry-anchor.js";
+ import {
+   transcriptEventJsonSql,
+   transcriptEventModelBytesSql,
+-  transcriptEventModelContextBytesSql,
+   transcriptEventModelNavigationSql,
+   transcriptEventNavigationSql,
+ } from "./transcript-payload.js";
+@@ -68,16 +63,12 @@ type ModelContextRequest = {
+   omitCheckpoint: boolean;
+   toolResultOmission?: string;
+ };
+-type ModelContextCost = { bytes: number; contextBytes: number };
+ type TranscriptContextSnapshot = {
+   header: TranscriptEvent;
+   entries: ContextEntry[];
+   version: SessionTranscriptContextVersion;
+   readEntry: (entry: ContextEntry) => SessionTreeEntry;
+-  readModelEntrySizes: (
+-    requests: readonly ModelContextRequest[],
+-    imageAware: boolean,
+-  ) => Map<ContextEntry, ModelContextCost>;
++  readModelEntrySizes: (requests: readonly ModelContextRequest[]) => Map<ContextEntry, number>;
+   readModelEntries: (
+     requests: readonly ModelContextRequest[],
+   ) => Map<ContextEntry, SessionTreeEntry>;
+@@ -200,30 +191,19 @@ function selectBoundedModelRequests(
+   );
+   const candidates = requests.filter((request) => request !== boundary);
+   const sizingCandidates = candidates.slice(-limits.maxEvents);
+-  const imageAware = limits.maxContextBytes !== undefined;
+-  const costs = (entries: readonly ModelContextRequest[]) => readSizes(entries, imageAware);
+-  const sizes = costs(boundary ? [boundary, ...sizingCandidates] : sizingCandidates);
+-  const fits = (bytes: number, contextBytes: number) =>
+-    bytes <= limits.maxBytes && contextBytes <= (limits.maxContextBytes ?? Infinity);
+-  let bytes = boundary ? sizes.get(boundary.entry)!.bytes : 0;
+-  let contextBytes = boundary ? sizes.get(boundary.entry)!.contextBytes : 0;
++  const sizes = readSizes(boundary ? [boundary, ...sizingCandidates] : sizingCandidates);
++  let bytes = boundary ? sizes.get(boundary.entry)! : 0;
+   let events = boundary ? 1 : 0;
+-  if (!fits(bytes, contextBytes) || events > limits.maxEvents) {
+-    throw new SessionModelContextLimitError(
+-      "Required session context boundary exceeds the model-context limit",
+-    );
++  if (bytes > limits.maxBytes || events > limits.maxEvents) {
++    throw new RangeError("Required session context boundary exceeds the model-context limit");
+   }
+   let cut = candidates.length;
+   for (const request of sizingCandidates.toReversed()) {
+     const size = sizes.get(request.entry)!;
+-    if (
+-      !fits(bytes + size.bytes, contextBytes + size.contextBytes) ||
+-      events + 1 > limits.maxEvents
+-    ) {
++    if (bytes + size > limits.maxBytes || events + 1 > limits.maxEvents) {
+       break;
+     }
+-    bytes += size.bytes;
+-    contextBytes += size.contextBytes;
++    bytes += size;
+     events += 1;
+     cut -= 1;
+   }
+@@ -277,15 +257,8 @@ function selectBoundedModelRequests(
+     }
+     const required = candidates.slice(start);
+     if (required.length + (boundary ? 1 : 0) <= limits.maxEvents) {
+-      const requiredSizes = costs(boundary ? [boundary, ...required] : required);
+-      let requiredBytes = [...requiredSizes.values()].reduce(
+-        (total, size) => total + size.bytes,
+-        0,
+-      );
+-      let requiredContextBytes = [...requiredSizes.values()].reduce(
+-        (total, size) => total + size.contextBytes,
+-        0,
+-      );
++      const requiredSizes = readSizes(boundary ? [boundary, ...required] : required);
++      let requiredBytes = [...requiredSizes.values()].reduce((total, size) => total + size, 0);
+       const omissions = required.flatMap((request) => {
+         const { entry } = request;
+         if (entry.type !== "message" || entry.message.role !== "toolResult") {
+@@ -297,36 +270,32 @@ function selectBoundedModelRequests(
+             ...request,
+             toolResultOmission:
+               `Tool result body omitted from this bounded context: ${JSON.stringify(message.toolName)} ` +
+-              `(call ${JSON.stringify(message.toolCallId)}), original model-context event ${requiredSizes.get(entry)!.bytes} bytes. ` +
++              `(call ${JSON.stringify(message.toolCallId)}), original model-context event ${requiredSizes.get(entry)!} bytes. ` +
+               "The full result remains in the session transcript. Do not infer its outcome or repeat the operation from this notice.",
+           },
+         ];
+       });
+-      const omittedSizes = costs(omissions);
++      const omittedSizes = readSizes(omissions);
+       const savings = (request: ModelContextRequest) =>
+-        requiredSizes.get(request.entry)!.bytes - omittedSizes.get(request.entry)!.bytes;
++        requiredSizes.get(request.entry)! - omittedSizes.get(request.entry)!;
+       const replacements = new Map<ContextEntry, ModelContextRequest>();
+       for (const omission of omissions.toSorted((a, b) => savings(b) - savings(a))) {
+-        if (fits(requiredBytes, requiredContextBytes)) {
++        if (requiredBytes <= limits.maxBytes) {
+           break;
+         }
+         const saved = savings(omission);
+-        const contextSaved =
+-          requiredSizes.get(omission.entry)!.contextBytes -
+-          omittedSizes.get(omission.entry)!.contextBytes;
+-        if (saved > 0 || contextSaved > 0) {
++        if (saved > 0) {
+           replacements.set(omission.entry, omission);
+           requiredBytes -= saved;
+-          requiredContextBytes -= contextSaved;
+         }
+       }
+-      if (fits(requiredBytes, requiredContextBytes)) {
++      if (requiredBytes <= limits.maxBytes) {
+         selected = required.map((request) => replacements.get(request.entry) ?? request);
+       }
+     }
+   }
+   if (selected.length === 0) {
+-    throw new SessionModelContextLimitError(
++    throw new RangeError(
+       "The latest messages exceed this session's context limit. Start a new session with a brief summary to continue.",
+     );
+   }
+@@ -344,9 +313,7 @@ function selectBoundedModelRequests(
+   }
+   for (const message of selectedMessages) {
+     if (message.role === "toolResult" && owners.get(message) !== selectedOwners.get(message)) {
+-      throw new SessionModelContextLimitError(
+-        "Session context limit would change tool-result ownership",
+-      );
++      throw new RangeError("Session context limit would change tool-result ownership");
+     }
+   }
+   return boundary ? [boundary, ...selected] : selected;
+@@ -376,8 +343,6 @@ export function readSessionTranscriptModelContext(
+     limits &&
+     (!Number.isSafeInteger(limits.maxBytes) ||
+       limits.maxBytes <= 0 ||
+-      (limits.maxContextBytes !== undefined &&
+-        (!Number.isSafeInteger(limits.maxContextBytes) || limits.maxContextBytes <= 0)) ||
+       !Number.isSafeInteger(limits.maxEvents) ||
+       limits.maxEvents <= 0)
+   ) {
+@@ -569,8 +534,8 @@ function withTranscriptContextSnapshot<T>(
+               const row = readPayload(entry).rows[0];
+               return hydrateContextEntry(row!.event_json, entry);
+             },
+-            readModelEntrySizes: (requests, imageAware) => {
+-              const sizes = new Map<ContextEntry, ModelContextCost>();
++            readModelEntrySizes: (requests) => {
++              const sizes = new Map<ContextEntry, number>();
+               for (const batch of chunkItems(requests, MODEL_CONTEXT_PAYLOAD_BATCH_SIZE)) {
+                 const bySeq = new Map(batch.map(({ entry }) => [entry.seq, entry]));
+                 const omitted = batch
+@@ -600,30 +565,11 @@ function withTranscriptContextSnapshot<T>(
+                           .else(storedBytes)
+                           .end()
+                       : storedBytes;
+-                    const contextBytes: AliasableExpression<number> = imageAware
+-                      ? omission
+-                        ? eb
+-                            .case()
+-                            .when(omission, "is not", null)
+-                            .then(
+-                              projectModelContextBudgetBytesSql(
+-                                transcriptEventJsonSql(database.db),
+-                                omitCheckpoint,
+-                                omission,
+-                              ),
+-                            )
+-                            .else(transcriptEventModelContextBytesSql(database.db, omitCheckpoint))
+-                            .end()
+-                        : transcriptEventModelContextBytesSql(database.db, omitCheckpoint)
+-                      : eb.val(0);
+-                    return ["seq", bytes.as("bytes"), contextBytes.as("contextBytes")];
++                    return ["seq", bytes.as("bytes")];
+                   })
+                   .where("seq", "in", [...bySeq.keys()]);
+                 for (const row of iterateSqliteQuerySync(database.db, query)) {
+-                  sizes.set(bySeq.get(row.seq)!, {
+-                    bytes: row.bytes,
+-                    contextBytes: row.contextBytes,
+-                  });
++                  sizes.set(bySeq.get(row.seq)!, row.bytes);
+                 }
+               }
+               return sizes;
+diff --git a/src/config/sessions/session-accessor.sqlite-read.ts b/src/config/sessions/session-accessor.sqlite-read.ts
+index 0096539b4096ad38847dffe597e79f5cdc830031..5b6712bb89ec1da6bef425ec73162e1fd83b985a 100644
+--- a/src/config/sessions/session-accessor.sqlite-read.ts
++++ b/src/config/sessions/session-accessor.sqlite-read.ts
+@@ -565,7 +565,6 @@ export function findAssistantTranscriptEventInDatabase(
+   database: Pick<OpenClawAgentDatabase, "db">,
+   sessionId: string,
+   idempotencyKey?: string,
+-  match?: (event: TranscriptEvent) => boolean,
+ ): { event: TranscriptEvent } | undefined {
+   return readHotSessionTranscriptSnapshot(database, sessionId, "match", () => {
+     const db = getSessionKysely(database.db);
+@@ -573,8 +572,7 @@ export function findAssistantTranscriptEventInDatabase(
+       const message = readTranscriptEventMessage(event);
+       return (
+         message?.role === "assistant" &&
+-        (idempotencyKey === undefined || message.idempotencyKey === idempotencyKey) &&
+-        (!match || match(event))
++        (idempotencyKey === undefined || message.idempotencyKey === idempotencyKey)
+       );
+     };
+     for (const row of iterateSqliteQuerySync(
+diff --git a/src/config/sessions/session-history-read.types.ts b/src/config/sessions/session-history-read.types.ts
+index 05f727d2624ca9164d8c64edde7e3aedd4736942..758f1f01ec6d9bca19e4366d8a8e00088ea6959c 100644
+--- a/src/config/sessions/session-history-read.types.ts
++++ b/src/config/sessions/session-history-read.types.ts
+@@ -5,7 +5,6 @@ import type {
+   TranscriptEvent,
+ } from "./session-accessor.sqlite-contract.js";
+ import type { SessionBranchSummary } from "./session-accessor.types.js";
+-import type { DeliveredSourceReply } from "./transcript-mirror.js";
+ 
+ export type SessionTitleFields = {
+   firstUserMessage: string | null;
+@@ -27,10 +26,7 @@ export type SessionBranchSummaryReadResult =
+   | { status: "missing-session" | "failed" };
+ 
+ export type SessionModelContextLimits = {
+-  /** Exact serialized materialization ceiling, including all inline media. */
+   maxBytes: number;
+-  /** Optional model budget: direct inline image payloads use a fixed token estimate. */
+-  maxContextBytes?: number;
+   maxEvents: number;
+   /** Detached model views may omit result bodies; evidence and fork readers remain strict. */
+   toolResultOverflow?: "omit";
+@@ -70,5 +66,4 @@ export type SessionTranscriptEventMatch =
+       runId?: string;
+       deliveryMirror?: boolean;
+     }
+-  | { kind: "active-assistant"; runId: string }
+-  | { kind: "delivered-source-reply"; source: Omit<DeliveredSourceReply, "platformMessageId"> };
++  | { kind: "active-assistant"; runId: string };
+diff --git a/src/config/sessions/session-model-context-limit-error.ts b/src/config/sessions/session-model-context-limit-error.ts
+deleted file mode 100644
+index d526a0b86566c584670a31888d82f4ad93fdda01..0000000000000000000000000000000000000000
+--- a/src/config/sessions/session-model-context-limit-error.ts
++++ /dev/null
+@@ -1,7 +0,0 @@
+-/** A local history byte/event bound cannot preserve the required conversation entries. */
+-export class SessionModelContextLimitError extends RangeError {
+-  constructor(message: string) {
+-    super(message);
+-    this.name = "SessionModelContextLimitError";
+-  }
+-}
+diff --git a/src/config/sessions/session-model-context-projection.ts b/src/config/sessions/session-model-context-projection.ts
+index ea7218baf16f19d0ea00c16ea3e619fc4db6631f..720d3b63a661326dc57b8ac73791c0c293939525 100644
+--- a/src/config/sessions/session-model-context-projection.ts
++++ b/src/config/sessions/session-model-context-projection.ts
+@@ -1,5 +1,4 @@
+ import { sql, type Expression, type RawBuilder } from "kysely";
+-import { IMAGE_BLOCK_TOKENS } from "../../../packages/agent-core/src/harness/compaction/token-estimates.js";
+ import {
+   LEGACY_MISSING_TOOL_RESULT_TEXT,
+   SYNTHETIC_MISSING_TOOL_RESULT_DETAIL_KEY,
+@@ -27,28 +26,6 @@ export function projectModelContextEventSql(
+     THEN json_remove(${boundedEvent}, '$.message.providerReplay') ELSE ${boundedEvent} END`;
+ }
+ 
+-/** Model-budget cost; the separate serialized-byte ceiling still charges every media byte. */
+-export function projectModelContextBudgetBytesSql(
+-  event: Expression<string | Uint8Array>,
+-  omitCheckpoint: Expression<number>,
+-  toolResultOmission?: Expression<string | null>,
+-): RawBuilder<number> {
+-  const projected = projectModelContextEventSql(event, omitCheckpoint, toolResultOmission);
+-  // Match the harness's conservative eight-byte-per-token budget. Only direct
+-  // native image blocks qualify; nested arguments, text and other data stay exact.
+-  const imageBytes = IMAGE_BLOCK_TOKENS * 8;
+-  return /* kysely-allow-raw: price inline image data natively without hydrating or changing it; JSON quoting preserves escaped and UTF-16 byte costs. */ sql<number>`(
+-    SELECT octet_length(model_context_event.event) - COALESCE((
+-      SELECT sum(octet_length(json_quote(json_extract(value, '$.data'))) - octet_length('""') - ${imageBytes})
+-      FROM json_each(model_context_event.event, '$.message.content')
+-      WHERE json_type(model_context_event.event, '$.message.content') = 'array'
+-        AND type = 'object' AND json_extract(value, '$.type') = 'image'
+-        AND json_type(value, '$.data') = 'text'
+-    ), 0)
+-    FROM (SELECT ${projected} AS event) AS model_context_event
+-  )`;
+-}
+-
+ function pickJsonObject(value: Expression<unknown>, keys: readonly string[]): RawBuilder<string> {
+   // json_each distinguishes absent properties from explicit nulls. Preserve JSON
+   // subtypes so booleans and nested navigation facts do not become strings/numbers.
+@@ -123,32 +100,11 @@ export function projectTranscriptPayloadNavigationSql(
+       "message_member.value",
+     );
+   const internal = pickJsonObject(memberValue, ["runId", "steerTargetRunId", "contextFreeCommand"]);
+-  const deliveredSource = pickJsonObject(
+-    sql`json_extract(${memberValue}, '$.deliveredSourceReply')`,
+-    [
+-      "channel",
+-      "accountId",
+-      "conversationRef",
+-      "messageId",
+-      "lifecycleRevision",
+-      "platformMessageId",
+-    ],
+-  );
+-  const deliveryMirror = sql`json_set(${pickJsonObject(memberValue, ["kind", "sourceMessageId"])},
+-    '$.deliveredSourceReply', json(${deliveredSource}))`;
+   const message = /* kysely-allow-raw: preserve duplicate message/internal envelopes in native member order. */ sql<string>`(SELECT json_group_object(message_member.key,
+     CASE WHEN message_member.key = '__openclaw' AND message_member.type = 'object'
+-      THEN json(${internal})
+-      WHEN message_member.key = 'openclawDeliveryMirror' THEN json(${deliveryMirror})
+-      ELSE ${jsonMemberValue("message_member")} END)
++      THEN json(${internal}) ELSE ${jsonMemberValue("message_member")} END)
+     FROM json_each(root_member.value) AS message_member
+-    WHERE message_member.key IN ('role', 'idempotencyKey', 'provenance', 'excludeFromContext', '__openclaw')
+-      OR (message_member.key IN ('api', 'provider', 'model') AND message_member.type = 'text'
+-        AND length(message_member.value) <= 128)
+-      OR (message_member.key = 'openclawDeliveryMirror' AND message_member.type = 'object'
+-        AND length(message_member.value) <= 8192
+-        AND json_extract(message_member.value, '$.kind') = 'channel-final'
+-        AND json_type(message_member.value, '$.deliveredSourceReply') = 'object'))`;
++    WHERE message_member.key IN ('role', 'idempotencyKey', 'provenance', 'excludeFromContext', '__openclaw'))`;
+   return /* kysely-allow-raw: preserve duplicate root keys and nested SQL types while selecting bounded navigation. */ sql<string>`(SELECT json_group_object(root_member.key,
+     CASE WHEN root_member.key = 'message' AND root_member.type = 'object'
+       THEN json(${message}) ELSE ${jsonMemberValue("root_member")} END)
+diff --git a/src/config/sessions/session-transcript-hydration.ts b/src/config/sessions/session-transcript-hydration.ts
+index 33d7841ad74d226613c2979bbfd2beda896e2af8..37605a8c5a85f485d03b37186cf3cdeb5bf23c00 100644
+--- a/src/config/sessions/session-transcript-hydration.ts
++++ b/src/config/sessions/session-transcript-hydration.ts
+@@ -17,7 +17,6 @@ import {
+   type ResolvedTranscriptReadScope,
+ } from "./session-accessor.sqlite-scope.js";
+ import type { SessionTranscriptRuntimeTarget } from "./session-accessor.types.js";
+-import type { SessionModelContextLimits } from "./session-history-read.types.js";
+ import type { SessionTranscriptMaintenanceRead } from "./session-transcript-hydration.types.js";
+ import { readSessionTranscriptMaintenance } from "./session-transcript-maintenance-read.js";
+ import {
+@@ -36,18 +35,12 @@ import { captureSessionTranscriptTargetBinding } from "./transcript-target-bindi
+ /** Capture identity before queueing; a missing file remains the creation owner's responsibility. */
+ export function prepareSessionTranscriptHydration(
+   source: SessionTranscriptRuntimeTarget & { env?: NodeJS.ProcessEnv },
+-  limits?: SessionModelContextLimits,
++  limits?: { maxBytes: number; maxEvents: number },
+   signal?: AbortSignal,
+ ) {
+   const target = captureSessionTranscriptTargetBinding(source);
+   const contextLimits = limits
+-    ? {
+-        maxBytes: limits.maxBytes,
+-        maxEvents: limits.maxEvents,
+-        ...(limits.maxContextBytes !== undefined
+-          ? { maxContextBytes: limits.maxContextBytes }
+-          : {}),
+-      }
++    ? { maxBytes: limits.maxBytes, maxEvents: limits.maxEvents }
+     : undefined;
+   const receipt = resolveSessionTranscriptReadFence(target);
+   const admission = receipt ? { ...receipt } : undefined;
+diff --git a/src/config/sessions/session-transcript-hydration.types.ts b/src/config/sessions/session-transcript-hydration.types.ts
+index 23455b0cc2248a6bb8c825486f789e6538e3ad02..9057f85f59530a0a04328a8f67838fc584d31b74 100644
+--- a/src/config/sessions/session-transcript-hydration.types.ts
++++ b/src/config/sessions/session-transcript-hydration.types.ts
+@@ -10,7 +10,6 @@ import type { ResolvedTranscriptReadScope } from "./session-accessor.sqlite-scop
+ import type { SessionTranscriptRuntimeTarget } from "./session-accessor.types.js";
+ import type {
+   PreparedSessionTranscriptHydration,
+-  SessionModelContextLimits,
+   SessionTranscriptReadSnapshot,
+ } from "./session-history-read.types.js";
+ import type { TranscriptEntryAnchor } from "./transcript-entry-anchor.js";
+@@ -78,7 +77,7 @@ export type SessionTranscriptHydrationWorkerInput = {
+   target: SessionTranscriptReadScope;
+   resolvedScope: ResolvedTranscriptReadScope;
+   expectedIdentity?: DatabaseFileIdentity;
+-  limits?: SessionModelContextLimits;
++  limits?: { maxBytes: number; maxEvents: number };
+   admission?: UserTurnTranscriptAdmissionReceipt;
+ };
+ 
+diff --git a/src/config/sessions/session-transcript-match.ts b/src/config/sessions/session-transcript-match.ts
+index 5c65644b112b4d7c59b0ff3224aa1a48ddb36ff6..7330200465c8c96fd654313951d2f8e9f0faa3d8 100644
+--- a/src/config/sessions/session-transcript-match.ts
++++ b/src/config/sessions/session-transcript-match.ts
+@@ -14,7 +14,6 @@ import type {
+ } from "./session-accessor.sqlite-contract.js";
+ import {
+   findTranscriptEventInDatabase,
+-  findAssistantTranscriptEventInDatabase,
+   readTranscriptEventId,
+ } from "./session-accessor.sqlite-read.js";
+ import {
+@@ -39,11 +38,6 @@ export function findTranscriptEventMatchingInDatabase(
+   request: SessionTranscriptEventMatchRequest,
+ ): { event: TranscriptEvent } | undefined {
+   const { target, match } = request;
+-  if (match.kind === "delivered-source-reply") {
+-    return findAssistantTranscriptEventInDatabase(database, target.sessionId, undefined, (event) =>
+-      matchesTranscriptEvent(event, match),
+-    );
+-  }
+   return findTranscriptEventInDatabase(database, target.sessionId, (event) => {
+     if (!matchesTranscriptEvent(event, match)) {
+       return false;
+@@ -74,7 +68,7 @@ export async function findTranscriptEvent(
+     ...(scope.storePath ? { storePath: path.resolve(scope.storePath) } : {}),
+     env: captureSessionTranscriptStorageEnvironment(scope.env ?? process.env),
+   };
+-  const selection = structuredClone(match);
++  const selection = { ...match };
+   if (isIncognitoSessionKey(captured.sessionKey)) {
+     // A process-owned in-memory store cannot be reopened in another worker.
+     const target = resolveSqliteTranscriptReadScope(captured);
+diff --git a/src/config/sessions/transcript-mirror.ts b/src/config/sessions/transcript-mirror.ts
+index 221a9bcdff72c99950e33e043dc97135254496a2..9fa7324ca76ddfddeb45eb40ce0650285394d320 100644
+--- a/src/config/sessions/transcript-mirror.ts
++++ b/src/config/sessions/transcript-mirror.ts
+@@ -1,21 +1,10 @@
+ // Transcript mirroring turns outbound text/media notifications into compact transcript text.
+ import path from "node:path";
+ 
+-/** Host-confirmed final delivery to one input, independent of the sending run. */
+-export type DeliveredSourceReply = {
+-  channel: string;
+-  accountId: string;
+-  conversationRef: string;
+-  messageId: string;
+-  lifecycleRevision: string;
+-  platformMessageId: string;
+-};
+-
+ export type SessionTranscriptDeliveryMirror =
+   | {
+       kind: "channel-final";
+       sourceMessageId?: string;
+-      deliveredSourceReply?: DeliveredSourceReply;
+     }
+   | {
+       kind: "channel-final-suppressed";
+diff --git a/src/config/sessions/transcript-payload.ts b/src/config/sessions/transcript-payload.ts
+index 639a2810fd02d6b1ae997c583298a411262ad949..91e73a74a24dc205ea205de5146f442850fb445e 100644
+--- a/src/config/sessions/transcript-payload.ts
++++ b/src/config/sessions/transcript-payload.ts
+@@ -12,7 +12,6 @@ import { resolveZstdCodec } from "../../infra/zstd-codec.js";
+ import type { DB } from "../../state/openclaw-agent-db.generated.js";
+ import { findSessionTranscriptHeader } from "./session-entry-codec.js";
+ import {
+-  projectModelContextBudgetBytesSql,
+   projectModelContextEventSql,
+   projectModelContextNavigationSql,
+   projectResetBoundaryNavigationSql,
+@@ -142,8 +141,6 @@ function navigationProjection(
+       'model', json(${projectModelContextNavigationSql(event)}),
+       'modelBytes', octet_length(${projectModelContextEventSql(event, sql.lit(0))}),
+       'modelWithoutCheckpointBytes', octet_length(${projectModelContextEventSql(event, sql.lit(1))}),
+-      'modelContextBytes', ${projectModelContextBudgetBytesSql(event, sql.lit(0))},
+-      'modelWithoutCheckpointContextBytes', ${projectModelContextBudgetBytesSql(event, sql.lit(1))},
+       'withoutCustomDataBytes', octet_length(json_remove(${event}, '$.data')))
+     END ELSE NULL END`;
+ }
+@@ -399,23 +396,6 @@ export function transcriptEventModelBytesSql(
+       THEN '$.modelWithoutCheckpointBytes' ELSE '$.modelBytes' END) END`;
+ }
+ 
+-/** Older compressed rows lack this optional cache; decode only within the existing payload bound. */
+-export function transcriptEventModelContextBytesSql(
+-  database: DatabaseSync,
+-  omitCheckpoint: Expression<number>,
+-  alias: TranscriptPayloadAlias = "transcript_events",
+-): RawBuilder<number> {
+-  const metadata =
+-    /* kysely-allow-raw: closed transcript aliases select native projection accounting. */ sql.ref(
+-      `${alias}.navigation_json`,
+-    );
+-  return /* kysely-allow-raw: missing optional cache keys use the canonical identity or bounded decoder without rewriting historical rows. */ sql<number>`coalesce(
+-    json_extract(${metadata}, CASE WHEN ${omitCheckpoint} = 1
+-      THEN '$.modelWithoutCheckpointContextBytes' ELSE '$.modelContextBytes' END),
+-    ${projectModelContextBudgetBytesSql(transcriptEventJsonSql(database, alias), omitCheckpoint)}
+-  )`;
+-}
+-
+ /** Suffix admission can retain opaque custom data without charging or decoding its body. */
+ export function transcriptEventWithoutCustomDataBytesSql(
+   alias: TranscriptPayloadAlias = "transcript_events",
+diff --git a/src/cron/isolated-agent/run-delivery-trace.ts b/src/cron/isolated-agent/run-delivery-trace.ts
+index bd9f2e48fc769353218b407ed405d1c412d28675..cee6017a540feee92ab2f74ce94649eb6b5c5610 100644
+--- a/src/cron/isolated-agent/run-delivery-trace.ts
++++ b/src/cron/isolated-agent/run-delivery-trace.ts
+@@ -318,7 +318,6 @@ export function finalizeCronPromptForResolvedTools(params: {
+   prompt: string;
+   messageToolAvailable: boolean;
+   deliveryRequested: boolean;
+-  hasBoundTaskTools?: boolean;
+   resolvedDelivery: SourceDeliveryPlan["target"] & { ok: boolean };
+   sourceDelivery: SourceDeliveryPlan;
+   messageToolFormatPrompt?: string;
+@@ -340,11 +339,8 @@ export function finalizeCronPromptForResolvedTools(params: {
+       promptWithDeliveryGuidance =
+         `${params.prompt}\n\nUse the message tool if you need to notify the user directly ${targetHint}. If you do not send directly, your final plain-text reply will be delivered automatically. When relying on automatic delivery, write only the exact user-facing message to send. Do not narrate the automatic delivery itself or say things like "Sent the user...", "I sent...", or "I asked them...".`.trim();
+     } else {
+-      const outboundGuidance = params.hasBoundTaskTools
+-        ? "A separate outbound message may be sent only when this job's trusted instructions explicitly authorize it and an available tool permits it."
+-        : "If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.";
+       promptWithDeliveryGuidance =
+-        `${params.prompt}\n\nYour response will be delivered automatically. Write only the exact user-facing message to send; do not narrate the automatic delivery itself or say things like "Sent the user...", "I sent...", or "I asked them...". ${outboundGuidance}`.trim();
++        `${params.prompt}\n\nYour response will be delivered automatically. Write only the exact user-facing message to send; do not narrate the automatic delivery itself or say things like "Sent the user...", "I sent...", or "I asked them...". If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.`.trim();
+     }
+   }
+   // The message-tool contract waits for the final tool surface: a runtime without
+diff --git a/src/cron/isolated-agent/run-executor.ts b/src/cron/isolated-agent/run-executor.ts
+index 07ad3b3fc3a7c7b0546ace7795dce10f8c5f855c..d05ccc7a7a6fbe10fc9faf704e3f64b5361a85df 100644
+--- a/src/cron/isolated-agent/run-executor.ts
++++ b/src/cron/isolated-agent/run-executor.ts
+@@ -145,10 +145,6 @@ function createCronPromptExecutor(params: CronPromptExecutorParams) {
+       prompt,
+       messageToolAvailable,
+       deliveryRequested: params.deliveryRequested,
+-      hasBoundTaskTools:
+-        scheduledToolPolicy !== undefined &&
+-        params.inputProvenance?.kind === "internal_system" &&
+-        params.inputProvenance.sourceTool === "cron",
+       resolvedDelivery: params.resolvedDelivery,
+       sourceDelivery,
+       messageToolFormatPrompt: params.messageToolFormatPrompt,
+diff --git a/src/cron/isolated-agent/run.message-tool-policy.test.ts b/src/cron/isolated-agent/run.message-tool-policy.test.ts
+index 85c16efe0b7ccce9991503cd182b938c9cc206d6..fb3435769aef319bec649ff1c310172f955eba8c 100644
+--- a/src/cron/isolated-agent/run.message-tool-policy.test.ts
++++ b/src/cron/isolated-agent/run.message-tool-policy.test.ts
+@@ -688,42 +688,6 @@ describe("runCronIsolatedAgentTurn delivery policy", () => {
+       expect(prompt).not.toMatch(/\bsummary\b/i);
+     });
+ 
+-    it.each([false, true])(
+-      "keeps automatic report delivery separate from authorized task effects (external hook=%s)",
+-      async (externalHook) => {
+-        mockAnnounce();
+-        const ownerSessionKey = "agent:main:discord:channel:reporting";
+-        const job = makeJob(
+-          announce,
+-          { toolsAllow: ["exec"], ...(externalHook ? { externalContentSource: "webhook" } : {}) },
+-          {
+-            owner: { agentId: "main", sessionKey: ownerSessionKey, accountId: "default" },
+-            scheduledToolPolicy: {
+-              version: 1,
+-              mode: "account",
+-              ownerSessionKey,
+-              ownerAccountId: "default",
+-            },
+-            toolsAllowProvenance: {
+-              version: 1,
+-              source: "final-executable-surface",
+-              callerOrigin: { kind: "external", channel: "discord" },
+-            },
+-          },
+-        );
+-        const result = await runCronIsolatedAgentTurn(makeParams(job));
+-        expect(result).toMatchObject({ status: "ok" });
+-        const prompt = runPrompt(embedded());
+-        expect(prompt).toContain("Your response will be delivered automatically");
+-        if (externalHook) {
+-          expect(prompt).toContain("note who/where");
+-        } else {
+-          expect(prompt).toContain("separate outbound message");
+-          expect(prompt).not.toContain("instead of sending it yourself");
+-        }
+-      },
+-    );
+-
+     it("composes unattended guidance after the safe external-hook wrapper", async () => {
+       resolveCronDeliveryPlanMock.mockReturnValue({ requested: false, mode: "none" });
+       buildSafeExternalPromptMock.mockReturnValue("<safe-external>wrapped hook</safe-external>");
+diff --git a/src/gateway/agent-turn/agent-run-execution-phase.ts b/src/gateway/agent-turn/agent-run-execution-phase.ts
+index bd8d88dc5934726afeb0220dbb4eab03444088c3..2e439a172b518d232458db3e188bb3e59eb6cc2c 100644
+--- a/src/gateway/agent-turn/agent-run-execution-phase.ts
++++ b/src/gateway/agent-turn/agent-run-execution-phase.ts
+@@ -102,7 +102,8 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+     let workspaceOverride = prepared.workspaceOverride;
+     let leaseActive = true;
+     const abortRegistration = prepared.activeRunAbort;
+-    const { entry: abortEntry, controller: abortController } = abortRegistration;
++    const abortEntry = abortRegistration.entry;
++    const abortController = abortRegistration.controller;
+     const operationalRunInstance = prepared.operationalRunInstance;
+     const sessionKey = abortEntry?.sessionKey;
+     const admittedRunIdentity = abortEntry
+@@ -553,7 +554,6 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
+                 runtimeContextFragments: params.client?.internal?.runtimeContextFragments,
+                 inputProvenance: params.inputProvenance,
+                 privateCompletion: prepared.userTurn.privateCompletion,
+-                settleWakeReplyExpectation: prepared.userTurn.settleWakeReplyExpectation,
+                 senderIsOwner,
+                 sessionEffects: params.sessionEffects,
+                 skipInitialSessionTouch: params.skipAgentInitialSessionTouch,
+diff --git a/src/gateway/agent-turn/agent-run-user-turn.test.ts b/src/gateway/agent-turn/agent-run-user-turn.test.ts
+index 1361cb533f032b7dbb147bb903ff0e93f3da11a2..e1098b74b00dd88be89cbe247a1a3799524b7bf0 100644
+--- a/src/gateway/agent-turn/agent-run-user-turn.test.ts
++++ b/src/gateway/agent-turn/agent-run-user-turn.test.ts
+@@ -97,51 +97,6 @@ describe("prepareAgentRunUserTurn", () => {
+     });
+   });
+ 
+-  it.each(["optional", "required"] as const)(
+-    "carries the trusted frozen settle owner's %s expectation into execution",
+-    async (replyExpectation) => {
+-      const sessionKey = "agent:main:discord:channel:settle-owner";
+-      const sessionEntry: SessionEntry = { sessionId: "settle-session", updatedAt: 1 };
+-      const sourceSessionKey = "agent:main:subagent:settled-child";
+-      const assertCurrent = vi.fn();
+-      mocks.loadSessionEntry.mockReturnValue({
+-        cfg: {},
+-        storePath: "/tmp/sessions.json",
+-        canonicalKey: sessionKey,
+-        entry: sessionEntry,
+-        store: { [sessionKey]: sessionEntry },
+-      });
+-      const prepared = await prepareAgentRunUserTurn({
+-        assertCurrent: () => {},
+-        request: { message: "reviewed findings", idempotencyKey: "announce:settle-owner" },
+-        cfg: {},
+-        sessionEntry,
+-        resolvedSessionKey: sessionKey,
+-        admittedSessionId: sessionEntry.sessionId,
+-        activeSessionAgentId: "main",
+-        suppressVisibleSessionEffects: false,
+-        requestedPromptPersistenceSuppression: false,
+-        canUseInternalRuntimeHandoff: false,
+-        message: "reviewed findings",
+-        effectiveTranscriptInputText: "reviewed findings",
+-        images: [],
+-        offloadedRefs: [],
+-        runId: "announce:settle-owner",
+-        client: null,
+-        context: { logGateway: { warn: vi.fn() } } as unknown as AgentTurnContext,
+-        inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle", sourceSessionKey },
+-        settleWakeReplay: {
+-          sourceSessionKeys: [sourceSessionKey],
+-          assertCurrent,
+-          replyExpectation,
+-        },
+-      });
+-      expect(prepared.settleWakeReplyExpectation).toBe(replyExpectation);
+-      expect(assertCurrent).toHaveBeenCalled();
+-      expect(mocks.persistedMessages).toHaveLength(1);
+-    },
+-  );
+-
+   it("fails closed when the admitted session entry disappeared before transcript persistence", async () => {
+     const sessionKey = "agent:main:main";
+     const admittedSessionId = "admitted-session";
+diff --git a/src/gateway/agent-turn/agent-run-user-turn.ts b/src/gateway/agent-turn/agent-run-user-turn.ts
+index b78eff7be692c8e3cc0000fd868ee204eb8c01b7..c7111e6583ddc29d4f9247454f233d8023766078 100644
+--- a/src/gateway/agent-turn/agent-run-user-turn.ts
++++ b/src/gateway/agent-turn/agent-run-user-turn.ts
+@@ -12,7 +12,6 @@ import {
+ } from "../../agents/bash-tools.exec-approval-output.js";
+ import type { ExecElevatedDefaults } from "../../agents/bash-tools.exec-types.js";
+ import { runAgentHarnessBeforeMessageWriteHook } from "../../agents/harness/hook-helpers.js";
+-import type { ReplyExpectation } from "../../agents/reply-completion.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import { deleteMediaBuffer } from "../../media/store.js";
+@@ -55,7 +54,6 @@ import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.
+ 
+ export type PreparedAgentRunUserTurn = {
+   privateCompletion?: true;
+-  settleWakeReplyExpectation?: ReplyExpectation;
+   bashElevated?: ExecElevatedDefaults;
+   claimedExecApprovalFollowupHandoffId?: string;
+   execApprovalFollowupHandoffClaimId: string;
+@@ -383,9 +381,6 @@ export async function prepareAgentRunUserTurn(params: {
+     }
+     return {
+       ...(params.privateCompletion ? { privateCompletion: true as const } : {}),
+-      ...(settleWakeReplay?.replyExpectation
+-        ? { settleWakeReplyExpectation: settleWakeReplay.replyExpectation }
+-        : {}),
+       ...(releaseProcessingAbortObserver ? { releaseProcessingAbortObserver } : {}),
+       ...(execApprovalFollowupRuntimeHandoff?.bashElevated
+         ? { bashElevated: execApprovalFollowupRuntimeHandoff.bashElevated }
+diff --git a/src/gateway/agent-turn/internal-facade.types.ts b/src/gateway/agent-turn/internal-facade.types.ts
+index c343757db091ffe26d60bbd6520235d55fd15e34..b466005687e8923a3de1838f13c90aba1413f884 100644
+--- a/src/gateway/agent-turn/internal-facade.types.ts
++++ b/src/gateway/agent-turn/internal-facade.types.ts
+@@ -1,6 +1,5 @@
+ import type { AgentWaitParams } from "../../../packages/gateway-protocol/src/index.js";
+ import type { ConnectParams } from "../../../packages/gateway-protocol/src/schema/frames.js";
+-import type { ReplyExpectation } from "../../agents/reply-completion.js";
+ import type { GatewayMethodDispatchResponse } from "../server-in-process-dispatch.types.js";
+ import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
+ import type { GatewayClient } from "../server-methods/client-types.js";
+@@ -21,8 +20,6 @@ export type AgentTurnStartOwner = {
+ export type RequesterSettleWakeReplay = {
+   sourceSessionKeys: readonly string[];
+   assertCurrent: () => void;
+-  /** Frozen completion owner policy, never accepted from the agent request or model output. */
+-  replyExpectation?: ReplyExpectation;
+ };
+ 
+ export type InternalAgentTurnDispatchOptions = {
+diff --git a/src/gateway/server-plugin-in-process-authority.ts b/src/gateway/server-plugin-in-process-authority.ts
+index 11dd301446478d48d10b70b819fced70c7829f76..b086fe6c7ee2c96dc7c6af6c2365582a072e2fdd 100644
+--- a/src/gateway/server-plugin-in-process-authority.ts
++++ b/src/gateway/server-plugin-in-process-authority.ts
+@@ -480,7 +480,7 @@ export function resolveInProcessGatewayDispatch(
+   }
+   const useScopedClient =
+     options?.forceSyntheticClient !== true && scopedClient && matchesOperatorSource;
+-  let client = useScopedClient
++  const client = useScopedClient
+     ? operatorRunAuthority
+       ? mergePluginRuntimeClientInternal(
+           scopedClient,
+@@ -489,11 +489,6 @@ export function resolveInProcessGatewayDispatch(
+         )
+       : scopedClient
+     : syntheticClient;
+-  if (assertSettleWakeCurrent) {
+-    // The settle owner classifies and retries failed attempts. Publish authored
+-    // replies while keeping each attempt's runtime error on the owner side.
+-    client = mergePluginRuntimeClientInternal(client, { internalDeliverySuppressErrors: true });
+-  }
+   const resume = readInProcessSubagentResume(options);
+   if (resume) {
+     if (method !== "agent" || options?.forceSyntheticClient !== true || !client.internal) {
+diff --git a/src/gateway/server-plugin-in-process-dispatch.authority-transfer.test-support.ts b/src/gateway/server-plugin-in-process-dispatch.authority-transfer.test-support.ts
+index 4210bffce114b892b89201493f47ce62ebfef77f..3904ce5a3bba305a2c62d6d47dcc12317b6b78ba 100644
+--- a/src/gateway/server-plugin-in-process-dispatch.authority-transfer.test-support.ts
++++ b/src/gateway/server-plugin-in-process-dispatch.authority-transfer.test-support.ts
+@@ -22,74 +22,6 @@ export function registerInProcessGatewayAuthorityTransferTests({
+ }: {
+   startTurn: Mock;
+ }): void {
+-  it.each([
+-    [false, "optional"],
+-    [true, "optional"],
+-    [false, "required"],
+-    [true, "required"],
+-  ] as const)(
+-    "keeps requester-settle owner policy internal with synthetic client=%s, reply=%s",
+-    async (forceSyntheticClient, replyExpectation) => {
+-      const client = createOperatorClient({
+-        profileName: "settle-owner",
+-        scopes: ["operator.write"],
+-      });
+-      const context = createContext();
+-      const createFacade = vi.fn(context.createAgentTurnFacade!);
+-      context.createAgentTurnFacade = createFacade;
+-      const sourceSessionKey = "agent:main:subagent:settled-child";
+-      const request = {
+-        message: "Summarize the completed child result.",
+-        deliver: true,
+-        inputProvenance: {
+-          kind: "inter_session",
+-          sourceSessionKey,
+-          sourceChannel: "internal",
+-          sourceTool: "subagent_settle",
+-        },
+-      };
+-      const assertCurrent = vi.fn();
+-      const result = { runId: "settle-wake", status: "accepted" };
+-      startTurn.mockImplementation(async ({ io }) => io.emitAcceptance([true, result, undefined]));
+-      await withPluginRuntimeGatewayRequestScope(
+-        { client, context, isWebchatConnect: () => false },
+-        async () => {
+-          await expect(
+-            dispatchGatewayMethodInProcess(
+-              "agent",
+-              { ...request, idempotencyKey: "announce:settle-wake" },
+-              {
+-                forceSyntheticClient,
+-                settleWakeReplay: {
+-                  sourceSessionKeys: [sourceSessionKey],
+-                  assertCurrent,
+-                  replyExpectation,
+-                },
+-              },
+-            ),
+-          ).resolves.toEqual(result);
+-          await expect(
+-            dispatchGatewayMethodInProcess(
+-              "agent",
+-              { ...request, idempotencyKey: "ordinary-request" },
+-              { forceSyntheticClient },
+-            ),
+-          ).resolves.toEqual(result);
+-        },
+-      );
+-      expect(assertCurrent).toHaveBeenCalled();
+-      expect(
+-        createFacade.mock.calls.map(
+-          ([input]) => input.client?.internal?.internalDeliverySuppressErrors,
+-        ),
+-      ).toEqual([true, undefined]);
+-      expect(
+-        startTurn.mock.calls.map(([input]) => input.settleWakeReplay?.replyExpectation),
+-      ).toEqual([replyExpectation, undefined]);
+-      expect(client.internal?.internalDeliverySuppressErrors).toBeUndefined();
+-    },
+-  );
+-
+   it.each(["current", "revoked source", "missing permission", "replaced target"] as const)(
+     "transfers queued credential facts through native dispatch without replacing permission (%s)",
+     async (mode) => {
+diff --git a/src/infra/outbound/addressed-source-reply.integration.test.ts b/src/infra/outbound/addressed-source-reply.integration.test.ts
+deleted file mode 100644
+index ebb324ff8a4992ddcb707ea451264743546706b8..0000000000000000000000000000000000000000
+--- a/src/infra/outbound/addressed-source-reply.integration.test.ts
++++ /dev/null
+@@ -1,406 +0,0 @@
+-import { performance } from "node:perf_hooks";
+-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+-import { resolveEmbeddedRunTerminal } from "../../agents/embedded-agent-runner/run/terminal-resolution.js";
+-import {
+-  emptyAssistant,
+-  makeTerminalInput,
+-} from "../../agents/embedded-agent-runner/run/terminal-resolution.test-support.js";
+-import { resolveTerminalReplyDelivery } from "../../auto-reply/reply/agent-runner-core.js";
+-import { createSessionEntryWithTranscript } from "../../config/sessions/session-accessor.js";
+-import {
+-  resolveSqliteTranscriptReadScope,
+-  toDatabaseOptions,
+-} from "../../config/sessions/session-accessor.sqlite-scope.js";
+-import { replaceTranscriptEvents } from "../../config/sessions/session-accessor.sqlite-transcript-write.js";
+-import { findTranscriptEvent } from "../../config/sessions/session-transcript-match.js";
+-import type { SessionTranscriptDeliveryMirror } from "../../config/sessions/transcript-mirror.js";
+-import { withOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
+-import { setActivePluginRegistry } from "../../plugins/runtime.js";
+-import { buildConversationRef } from "../../routing/conversation-ref.js";
+-import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
+-import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
+-import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
+-import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+-import { mirrorDeliveredPayloads } from "./deliver-transcript.js";
+-import type { OutboundDeliveryResult } from "./deliver-types.js";
+-import { runMessageAction } from "./message-action-runner.js";
+-import type { OutboundMirror } from "./mirror.js";
+-
+-const append = vi.hoisted(() =>
+-  vi.fn(async (_params: { deliveryMirror?: SessionTranscriptDeliveryMirror }) => ({ ok: true })),
+-);
+-vi.mock("../../config/sessions/transcript.runtime.js", () => ({
+-  appendAssistantMessageToSessionTranscript: append,
+-}));
+-vi.mock("../../agents/embedded-agent-runner/run/auth-profile-success.js", () => ({
+-  markEmbeddedRunAuthProfileSuccess: vi.fn(),
+-  reportEmbeddedRunSuccessfulAuthBinding: vi.fn(),
+-}));
+-
+-const source = {
+-  channel: "discord",
+-  accountId: "default",
+-  conversationRef: buildConversationRef({
+-    channel: "discord",
+-    accountId: "default",
+-    kind: "channel",
+-    peerId: "synthetic-room",
+-  }),
+-  messageId: "pending-input",
+-  lifecycleRevision: "epoch-one",
+-};
+-const sessionKey = "agent:main:discord:channel:synthetic-room";
+-const cfg = { channels: { discord: { enabled: true } } };
+-const sendText = vi.fn(async () => delivered());
+-
+-function delivered(): OutboundDeliveryResult {
+-  return {
+-    channel: "discord",
+-    messageId: "first-platform-answer",
+-    target: { kind: "channel", id: "synthetic-room" },
+-    receipt: {
+-      primaryPlatformMessageId: "first-platform-answer",
+-      platformMessageIds: ["first-platform-answer"],
+-      replyToId: source.messageId,
+-      sentAt: 100,
+-      parts: [
+-        {
+-          platformMessageId: "first-platform-answer",
+-          index: 0,
+-          kind: "text",
+-          replyToId: source.messageId,
+-          raw: {
+-            channel: "discord",
+-            messageId: "first-platform-answer",
+-            channelId: "synthetic-room",
+-          },
+-        },
+-      ],
+-    },
+-  };
+-}
+-
+-async function produce(
+-  overrides: {
+-    result?: OutboundDeliveryResult;
+-    final?: boolean;
+-    allPayloadsDelivered?: boolean;
+-    accountId?: string;
+-    revision?: string;
+-  } = {},
+-) {
+-  append.mockClear();
+-  const mirror: OutboundMirror = {
+-    sessionKey,
+-    text: "The pending request is already answered.",
+-    ...(overrides.final === false
+-      ? {}
+-      : {
+-          addressedSourceReply: {
+-            channel: source.channel,
+-            accountId: source.accountId,
+-            conversationRef: source.conversationRef,
+-            messageId: source.messageId,
+-            target: "channel:synthetic-room",
+-          },
+-        }),
+-  };
+-  const payloads = [{ text: mirror.text!, mediaUrls: [] }];
+-  await withOwnedSessionTranscriptWrites(
+-    {
+-      sessionKey,
+-      sessionTarget: {
+-        sessionKey,
+-        expectedWriterRunId: "preceding-webchat-run",
+-        expectedLifecycleRevision: overrides.revision ?? source.lifecycleRevision,
+-      },
+-      withTranscriptWrite: async (run) => await run(),
+-    },
+-    async () =>
+-      await mirrorDeliveredPayloads({
+-        delivery: {
+-          cfg,
+-          channel: "discord",
+-          to: "synthetic-room",
+-          accountId: overrides.accountId ?? "default",
+-          mirror,
+-          payloads,
+-        },
+-        payloads,
+-        channel: "discord",
+-        to: "synthetic-room",
+-        results: [overrides.result ?? delivered()],
+-        allPayloadsDelivered: overrides.allPayloadsDelivered ?? true,
+-      }),
+-  );
+-  return append.mock.calls.at(-1)?.[0].deliveryMirror;
+-}
+-
+-function mirrorEvent(deliveryMirror: SessionTranscriptDeliveryMirror | undefined) {
+-  return {
+-    type: "message",
+-    id: "predecessor-delivery",
+-    message: {
+-      role: "assistant",
+-      content: "Already answered. " + "x".repeat(8192),
+-      api: "openclaw-transcript",
+-      provider: "openclaw",
+-      model: "delivery-mirror",
+-      ...(deliveryMirror ? { openclawDeliveryMirror: deliveryMirror } : {}),
+-    },
+-  };
+-}
+-
+-async function finish(replyDeliveryState: "delivered" | "pending" | "missing") {
+-  const assistant = emptyAssistant();
+-  assistant.content = [{ type: "text", text: "NO_REPLY" }];
+-  const input = makeTerminalInput({
+-    attemptAssistant: assistant,
+-    replyDeliveryState,
+-    runParams: { trigger: "user", terminalReplyExpectation: "required" },
+-  });
+-  const result = await resolveEmbeddedRunTerminal(input);
+-  return { result, input };
+-}
+-
+-beforeEach(() => {
+-  setActivePluginRegistry(
+-    createTestRegistry([
+-      {
+-        pluginId: "discord",
+-        source: "test",
+-        plugin: {
+-          ...createOutboundTestPlugin({
+-            id: "discord",
+-            messaging: {
+-              normalizeTarget: (target) => target.replace(/^channel:/, ""),
+-              inferTargetChatType: () => "channel",
+-            },
+-            outbound: { deliveryMode: "direct", sendText },
+-          }),
+-          config: {
+-            listAccountIds: () => ["default"],
+-            resolveAccount: () => ({ enabled: true }),
+-            isConfigured: () => true,
+-          },
+-          threading: { threadAddressing: "message" },
+-        },
+-      },
+-    ]),
+-  );
+-});
+-afterEach(() => setActivePluginRegistry(createTestRegistry([])));
+-
+-it("does not regenerate an exact queued input already answered by another run", async () => {
+-  await withOpenClawTestState({ label: "addressed-source-reply" }, async (state) => {
+-    const scope = {
+-      agentId: "main",
+-      env: state.env,
+-      sessionKey,
+-      sessionId: "synthetic-session",
+-      storePath: state.statePath("transcript.sqlite"),
+-    };
+-    await createSessionEntryWithTranscript(scope, () => ({
+-      ok: true,
+-      entry: { sessionId: scope.sessionId, updatedAt: 1 },
+-    }));
+-    // The producer sees a successful provider receipt before the queued input commits.
+-    append.mockClear();
+-    sendText.mockClear();
+-    await withOwnedSessionTranscriptWrites(
+-      {
+-        sessionKey,
+-        sessionTarget: {
+-          sessionKey,
+-          expectedWriterRunId: "preceding-webchat-run",
+-          expectedLifecycleRevision: source.lifecycleRevision,
+-        },
+-        withTranscriptWrite: async (run) => await run(),
+-      },
+-      async () => {
+-        await runMessageAction({
+-          cfg,
+-          action: "send",
+-          agentId: "main",
+-          sourceReplyFinal: true,
+-          sessionKey,
+-          defaultAccountId: "default",
+-          toolContext: { currentChannelProvider: "webchat", currentMessageId: "maintenance-input" },
+-          params: {
+-            channel: "discord",
+-            target: "channel:synthetic-room",
+-            replyTo: source.messageId,
+-            message: "The pending request is already answered.",
+-          },
+-          dryRun: false,
+-        });
+-      },
+-    );
+-    expect(sendText).toHaveBeenCalledTimes(1);
+-    const marker = append.mock.calls.at(-1)?.[0].deliveryMirror;
+-    expect(marker).toMatchObject({
+-      kind: "channel-final",
+-      sourceMessageId: source.messageId,
+-      deliveredSourceReply: { ...source, platformMessageId: "first-platform-answer" },
+-    });
+-    const multipart = delivered();
+-    multipart.receipt!.parts.push({
+-      platformMessageId: "continuation",
+-      index: 1,
+-      kind: "text",
+-      raw: { channel: "discord", channelId: "synthetic-room" },
+-    });
+-    multipart.receipt!.platformMessageIds.push("continuation");
+-    expect(await produce({ result: multipart })).toEqual(marker);
+-    const queued = {
+-      type: "message",
+-      id: "queued-input",
+-      parentId: "predecessor-delivery",
+-      message: { role: "user", content: "Please finish the request." },
+-    };
+-    await replaceTranscriptEvents(scope, [mirrorEvent(marker), queued]);
+-    const stored = withOpenClawAgentDatabaseReadOnly(
+-      (database) =>
+-        database.db
+-          .prepare(
+-            "SELECT event_zstd IS NOT NULL AS compressed, json_extract(navigation_json, '$.navigation.message.openclawDeliveryMirror.deliveredSourceReply.messageId') AS source FROM transcript_events WHERE session_id = ? AND event_zstd IS NOT NULL LIMIT 1",
+-          )
+-          .get(scope.sessionId),
+-      toDatabaseOptions(resolveSqliteTranscriptReadScope(scope)),
+-    );
+-    expect(stored.found && stored.value).toMatchObject({ compressed: 1, source: source.messageId });
+-    const observation = { scope, source, isCurrent: () => true };
+-    const status = await resolveTerminalReplyDelivery({ addressedSourceReply: observation });
+-    expect(status).toBe("delivered");
+-    const completed = await finish(status);
+-    expect(completed.result.action).toBe("complete");
+-    expect(completed.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
+-    // The original behavior retained text but lost its typed delivery fact.
+-    await replaceTranscriptEvents(scope, [mirrorEvent(undefined), queued]);
+-    const missing = await resolveTerminalReplyDelivery({ addressedSourceReply: observation });
+-    expect(missing).toBe("missing");
+-    expect((await finish(missing)).result.action).toBe("retry");
+-    await closeOpenClawAgentDatabasesAsync(state.root);
+-  });
+-});
+-
+-it("retains required-reply recovery for progress, partial or wrong provider receipts", async () => {
+-  const wrongReply = delivered();
+-  wrongReply.receipt!.replyToId = "different-input";
+-  const wrongPart = delivered();
+-  wrongPart.receipt!.parts[0]!.replyToId = "different-input";
+-  const wrongPartChannel = delivered();
+-  wrongPartChannel.receipt!.parts[0]!.raw!.channel = "telegram";
+-  const wrongPartAccount = delivered();
+-  Object.assign(wrongPartAccount.receipt!.parts[0]!.raw!, { accountId: "other-account" });
+-  const wrongResultAccount = delivered();
+-  Object.assign(wrongResultAccount, { accountId: "other-account" });
+-  const wrongTarget = delivered();
+-  wrongTarget.target = { kind: "channel", id: "other-room" };
+-  const wrongChannel = delivered();
+-  wrongChannel.channel = "telegram";
+-  for (const variant of [
+-    { final: false },
+-    { allPayloadsDelivered: false },
+-    { accountId: "other-account" },
+-    { result: wrongReply },
+-    { result: wrongPart },
+-    { result: wrongPartChannel },
+-    { result: wrongPartAccount },
+-    { result: wrongResultAccount },
+-    { result: wrongTarget },
+-    { result: wrongChannel },
+-  ]) {
+-    expect(await produce(variant)).toBeUndefined();
+-  }
+-});
+-
+-it("keeps the receipt across compaction and rejects every source or lifecycle mismatch", async () => {
+-  await withOpenClawTestState({ label: "addressed-source-history" }, async (state) => {
+-    const scope = {
+-      agentId: "main",
+-      env: state.env,
+-      sessionKey,
+-      sessionId: "synthetic-history",
+-      storePath: state.statePath("transcript.sqlite"),
+-    };
+-    await createSessionEntryWithTranscript(scope, () => ({
+-      ok: true,
+-      entry: { sessionId: scope.sessionId, updatedAt: 1 },
+-    }));
+-    const marker = await produce();
+-    const noise = Array.from({ length: 64 }, (_, index) => ({
+-      type: "message",
+-      id: `tool-${index}`,
+-      message: { role: "toolResult", content: "x".repeat(1024) },
+-    }));
+-    await replaceTranscriptEvents(scope, [
+-      mirrorEvent(marker),
+-      ...noise,
+-      { type: "message", id: "kept-input", message: { role: "user", content: "Kept input" } },
+-      {
+-        type: "compaction",
+-        id: "compaction",
+-        parentId: "kept-input",
+-        summary: "Preserved objective.",
+-        firstKeptEntryId: "kept-input",
+-        tokensBefore: 1,
+-      },
+-      {
+-        type: "message",
+-        id: "queued-after-compaction",
+-        parentId: "compaction",
+-        message: { role: "user", content: "Finish." },
+-      },
+-    ]);
+-    const started = performance.now();
+-    expect(
+-      await resolveTerminalReplyDelivery({
+-        addressedSourceReply: { scope, source, isCurrent: () => true },
+-      }),
+-    ).toBe("delivered");
+-    console.info(
+-      JSON.stringify({
+-        contract: "navigation-first-compressed-receipt",
+-        durationMs: performance.now() - started,
+-        rssBytes: process.memoryUsage().rss,
+-      }),
+-    );
+-    for (const key of [
+-      "channel",
+-      "accountId",
+-      "conversationRef",
+-      "messageId",
+-      "lifecycleRevision",
+-    ] as const) {
+-      expect(
+-        await findTranscriptEvent(scope, {
+-          kind: "delivered-source-reply",
+-          source: { ...source, [key]: "different" },
+-        }),
+-      ).toBeUndefined();
+-    }
+-    for (const inputUpdate of [
+-      { ProviderUpdateKind: "edited_message" },
+-      { ProviderEditTimestamp: 200 },
+-    ]) {
+-      const edited = await resolveTerminalReplyDelivery({
+-        addressedSourceReply: { scope, source, inputUpdate, isCurrent: () => true },
+-      });
+-      expect(edited).toBe("missing");
+-      expect((await finish(edited)).result.action).toBe("retry");
+-    }
+-    let current = true;
+-    const changedDuringLookup = () => {
+-      const previous = current;
+-      current = false;
+-      return previous;
+-    };
+-    expect(
+-      await resolveTerminalReplyDelivery({
+-        addressedSourceReply: { scope, source, isCurrent: changedDuringLookup },
+-      }),
+-    ).toBe("pending");
+-    await closeOpenClawAgentDatabasesAsync(state.root);
+-  });
+-});
+diff --git a/src/infra/outbound/deliver-core.ts b/src/infra/outbound/deliver-core.ts
+index 10c3cdcdb3fb251260f26eb357a80ae618f7863d..4a8f224612a45e8fe64e1cc039d4705cd0a57b3a 100644
+--- a/src/infra/outbound/deliver-core.ts
++++ b/src/infra/outbound/deliver-core.ts
+@@ -536,9 +536,6 @@ export async function deliverOutboundPayloadsCore(
+     payloads: deliveredMirrorPayloads,
+     channel,
+     to,
+-    results,
+-    allPayloadsDelivered:
+-      payloadOutcomes.length > 0 && payloadOutcomes.every((outcome) => outcome.status === "sent"),
+   });
+ 
+   return results;
+diff --git a/src/infra/outbound/deliver-transcript.ts b/src/infra/outbound/deliver-transcript.ts
+index 3a8a81a9342cdfd352d1049666cacc1557c846b3..d22939207889702b10eefc6e979c51f143a8489d 100644
+--- a/src/infra/outbound/deliver-transcript.ts
++++ b/src/infra/outbound/deliver-transcript.ts
+@@ -1,4 +1,3 @@
+-import { createMessageReceiptFromOutboundResults } from "../../channels/message/receipt.js";
+ // Mirrors successful outbound payloads into the configured session transcript.
+ import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
+ import { getOwnedSessionTranscriptWriterFence } from "../../config/sessions/transcript-write-context.js";
+@@ -6,13 +5,9 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
+ import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
+ import { formatErrorMessage } from "../errors.js";
+ import type { DeliverOutboundPayloadsCoreParams } from "./deliver-contracts.js";
+-import type { OutboundDeliveryResult } from "./deliver-types.js";
+ import { resolveOutboundPayloadMirrorText, type NormalizedOutboundPayload } from "./payloads.js";
+ 
+ const log = createSubsystemLogger("outbound/deliver");
+-const loadAddressedSourceReplyRuntime = createLazyRuntimeModule(
+-  () => import("./source-reply-addressed.js"),
+-);
+ const loadTranscriptRuntime = createLazyRuntimeModule(
+   () => import("../../config/sessions/transcript.runtime.js"),
+ );
+@@ -22,8 +17,6 @@ export async function mirrorDeliveredPayloads(params: {
+   payloads: readonly NormalizedOutboundPayload[];
+   channel: string;
+   to: string;
+-  results?: readonly OutboundDeliveryResult[];
+-  allPayloadsDelivered?: boolean;
+ }): Promise<void> {
+   const mirror = params.delivery.mirror;
+   if (!mirror || params.payloads.length === 0) {
+@@ -60,26 +53,7 @@ export async function mirrorDeliveredPayloads(params: {
+       ...(writerFence ? { expectedWriterRunId: writerFence.expectedWriterRunId } : {}),
+       text: mirrorText,
+       idempotencyKey: mirror.idempotencyKey,
+-      deliveryMirror:
+-        mirror.addressedSourceReply &&
+-        params.allPayloadsDelivered === true &&
+-        params.results?.length
+-          ? await (
+-              await loadAddressedSourceReplyRuntime()
+-            ).resolveAddressedSourceReplyMirror({
+-              mirror,
+-              cfg: params.delivery.cfg,
+-              channel: params.channel,
+-              accountId: params.delivery.accountId,
+-              lifecycleRevision: writerFence?.expectedLifecycleRevision,
+-              deliveredPayload: {
+-                channel: params.channel,
+-                results: params.results,
+-                receipt: createMessageReceiptFromOutboundResults({ results: params.results }),
+-                deliveryStatus: "sent",
+-              },
+-            })
+-          : mirror.deliveryMirror,
++      deliveryMirror: mirror.deliveryMirror,
+       config: params.delivery.cfg,
+     });
+     if (!mirrorResult.ok) {
+diff --git a/src/infra/outbound/message-action-send.ts b/src/infra/outbound/message-action-send.ts
+index 0ce8fb10da174da3c76750c9f96e9ed9be8618fc..857e1e54ae3734469459bb3e4935a44750a164ee 100644
+--- a/src/infra/outbound/message-action-send.ts
++++ b/src/infra/outbound/message-action-send.ts
+@@ -25,8 +25,6 @@ import {
+ import type { AssistantDeliveryTtsFacts } from "../../llm/types.js";
+ import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
+ import { readBooleanParam } from "../../plugin-sdk/boolean-param.js";
+-import { buildConversationRef } from "../../routing/conversation-ref.js";
+-import { normalizeAccountId } from "../../routing/session-key.js";
+ import { withChannelReadAuthority } from "../../shared/channel-read-authority.js";
+ import { dedupeByKey } from "../../shared/dedupe-by-key.js";
+ import { stripUnsupportedCitationControlMarkers } from "../../shared/text/citation-control-markers.js";
+@@ -568,23 +566,6 @@ export async function executeMessageSend(ctx: ResolvedActionContext): Promise<Me
+     applySendPayloadPartsToActionParams(params, sendPayload);
+   }
+ 
+-  const addressedSourceReply =
+-    input.sourceReplyFinal === true && reply?.source === "explicit" && outboundRoute
+-      ? {
+-          channel,
+-          accountId: normalizeAccountId(accountId),
+-          conversationRef: buildConversationRef({
+-            channel,
+-            accountId: normalizeAccountId(accountId),
+-            kind: outboundRoute.chatType,
+-            peerId: outboundRoute.peer.id,
+-            threadId: resolvedThreadId ?? undefined,
+-          }),
+-          messageId: reply.replyToId,
+-          target: to,
+-          ...(resolvedThreadId ? { threadId: resolvedThreadId } : {}),
+-        }
+-      : undefined;
+   const send = await executeSendAction({
+     ctx: {
+       ...ctx,
+@@ -615,7 +596,6 @@ export async function executeMessageSend(ctx: ResolvedActionContext): Promise<Me
+               ...input.transcriptMirror,
+               text: sendPayload.message,
+               mediaUrls: sendPayload.mediaUrls,
+-              ...(addressedSourceReply ? { addressedSourceReply } : {}),
+             }
+           : outboundRoute && !dryRun && input.suppressTranscriptMirror !== true
+             ? {
+@@ -624,7 +604,6 @@ export async function executeMessageSend(ctx: ResolvedActionContext): Promise<Me
+                 text: sendPayload.message,
+                 mediaUrls: sendPayload.mediaUrls,
+                 idempotencyKey: normalizeOptionalString(params.idempotencyKey) ?? undefined,
+-                ...(addressedSourceReply ? { addressedSourceReply } : {}),
+               }
+             : undefined,
+       silent: sendPayload.silent ?? undefined,
+diff --git a/src/infra/outbound/mirror.ts b/src/infra/outbound/mirror.ts
+index 5e6ab0c6af27f89423e1478083b661f7a4b75702..7c2ca0bbd30977a3d320638b656aa647862fcfc5 100644
+--- a/src/infra/outbound/mirror.ts
++++ b/src/infra/outbound/mirror.ts
+@@ -1,7 +1,4 @@
+-import type {
+-  DeliveredSourceReply,
+-  SessionTranscriptDeliveryMirror,
+-} from "../../config/sessions/transcript-mirror.js";
++import type { SessionTranscriptDeliveryMirror } from "../../config/sessions/transcript-mirror.js";
+ 
+ /**
+  * Transcript append data emitted after an outbound send completes.
+@@ -14,11 +11,6 @@ export type OutboundMirror = {
+   idempotencyKey?: string;
+   expectedSessionId?: string;
+   deliveryMirror?: SessionTranscriptDeliveryMirror;
+-  /** Unconfirmed intent; only the delivery owner may promote a settled provider receipt. */
+-  addressedSourceReply?: Omit<DeliveredSourceReply, "lifecycleRevision" | "platformMessageId"> & {
+-    target: string;
+-    threadId?: string;
+-  };
+ };
+ 
+ /**
+diff --git a/src/infra/outbound/outbound-send-service.ts b/src/infra/outbound/outbound-send-service.ts
+index 95c0e6dc20ed9d6ac8263465e5355a76a8f0627a..5d8230d57ca402cb38f30f4709cc4844f83cabee 100644
+--- a/src/infra/outbound/outbound-send-service.ts
++++ b/src/infra/outbound/outbound-send-service.ts
+@@ -176,7 +176,7 @@ async function tryHandleWithPluginAction(params: {
+   ctx: OutboundSendContext;
+   action: "send" | "poll";
+   reply?: OutboundReplyFacts;
+-  onHandled?: (outcome: { partialDelivery: boolean; payload: unknown }) => Promise<void> | void;
++  onHandled?: (outcome: { partialDelivery: boolean }) => Promise<void> | void;
+ }): Promise<PluginHandledResult | null> {
+   if (params.ctx.dryRun) {
+     return null;
+@@ -214,10 +214,7 @@ async function tryHandleWithPluginAction(params: {
+   }
+   const deliveryFact = projectPluginMessageDeliveryFact(handled);
+   if (!deliveryFact || deliveryFact.status === "settled") {
+-    await params.onHandled?.({
+-      partialDelivery: deliveryFact?.partialDelivery === true,
+-      payload: extractToolPayload(handled),
+-    });
++    await params.onHandled?.({ partialDelivery: deliveryFact?.partialDelivery === true });
+   }
+   return {
+     handledBy: "plugin",
+@@ -292,7 +289,7 @@ export async function executeSendAction(params: SendActionParams): Promise<{
+         ctx: pluginCtx,
+         action: "send",
+         reply: params.reply,
+-        onHandled: async ({ partialDelivery, payload }) => {
++        onHandled: async ({ partialDelivery }) => {
+           // The accepted-send commit must precede the transcript mirror below:
+           // first-contact outbound routes create their session row in it.
+           await params.ctx.onSendAccepted?.();
+@@ -322,18 +319,7 @@ export async function executeSendAction(params: SendActionParams): Promise<{
+               text: mirrorText,
+               mediaUrls: mirrorMediaUrls,
+               idempotencyKey: params.ctx.mirror.idempotencyKey,
+-              deliveryMirror: params.ctx.mirror.addressedSourceReply
+-                ? await (
+-                    await import("./source-reply-addressed.js")
+-                  ).resolveAddressedSourceReplyMirror({
+-                    mirror: params.ctx.mirror,
+-                    cfg: params.ctx.cfg,
+-                    channel: params.ctx.channel,
+-                    accountId: params.ctx.accountId ?? undefined,
+-                    lifecycleRevision: writerFence?.expectedLifecycleRevision,
+-                    deliveredPayload: payload,
+-                  })
+-                : params.ctx.mirror.deliveryMirror,
++              deliveryMirror: params.ctx.mirror.deliveryMirror,
+               config: params.ctx.cfg,
+             });
+             if (!mirrorResult.ok) {
+diff --git a/src/infra/outbound/source-reply-addressed.ts b/src/infra/outbound/source-reply-addressed.ts
+deleted file mode 100644
+index cdd898805ae0ff7c748093215a53d3aefaac3f26..0000000000000000000000000000000000000000
+--- a/src/infra/outbound/source-reply-addressed.ts
++++ /dev/null
+@@ -1,100 +0,0 @@
+-import { asOptionalRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
+-import { projectPluginMessageDeliveryFact } from "../../agents/embedded-agent-message-delivery.js";
+-import type { SessionTranscriptDeliveryMirror } from "../../config/sessions/transcript-mirror.js";
+-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import { normalizeAccountId } from "../../routing/session-key.js";
+-import type { OutboundMirror } from "./mirror.js";
+-import { isDeliveredCurrentSourceReplyAsync } from "./source-reply-mirror.js";
+-
+-/** A preceding run may answer an input still waiting in the same conversation. */
+-export async function resolveAddressedSourceReplyMirror(params: {
+-  mirror: OutboundMirror;
+-  cfg: OpenClawConfig;
+-  channel: string;
+-  accountId?: string;
+-  deliveredPayload: unknown;
+-  lifecycleRevision?: string;
+-}): Promise<SessionTranscriptDeliveryMirror | undefined> {
+-  if (params.mirror.deliveryMirror) {
+-    return params.mirror.deliveryMirror;
+-  }
+-  const source = params.mirror.addressedSourceReply;
+-  const delivery = projectPluginMessageDeliveryFact(params.deliveredPayload);
+-  const payload = asRecord(params.deliveredPayload);
+-  const result = asRecord(payload?.result);
+-  const receipt = asRecord(result?.receipt) ?? asRecord(payload?.receipt);
+-  if (
+-    !source ||
+-    !params.lifecycleRevision ||
+-    source.channel !== params.channel ||
+-    source.accountId !== normalizeAccountId(params.accountId) ||
+-    delivery?.status !== "settled" ||
+-    delivery.partialDelivery ||
+-    !delivery.primaryPlatformMessageId ||
+-    ["unknown", "skipped", "suppressed"].includes(
+-      delivery.primaryPlatformMessageId.toLowerCase(),
+-    ) ||
+-    receipt?.replyToId !== source.messageId ||
+-    (Array.isArray(receipt.parts) &&
+-      receipt.parts.some((part) => {
+-        const value = asRecord(part);
+-        const raw = asRecord(value?.raw);
+-        return (
+-          (value?.replyToId !== undefined && value.replyToId !== source.messageId) ||
+-          (raw?.channel !== undefined && raw.channel !== source.channel) ||
+-          (raw?.accountId !== undefined &&
+-            (typeof raw.accountId !== "string" ||
+-              normalizeAccountId(raw.accountId) !== source.accountId))
+-        );
+-      })) ||
+-    (Array.isArray(payload?.results) &&
+-      payload.results.some((item) => {
+-        const value = asRecord(item);
+-        return (
+-          value?.channel !== source.channel ||
+-          (value?.accountId !== undefined &&
+-            (typeof value.accountId !== "string" ||
+-              normalizeAccountId(value.accountId) !== source.accountId))
+-        );
+-      })) ||
+-    [payload, result].some(
+-      (value) =>
+-        (value?.channel !== undefined && value.channel !== source.channel) ||
+-        (value?.accountId !== undefined &&
+-          (typeof value.accountId !== "string" ||
+-            normalizeAccountId(value.accountId) !== source.accountId)),
+-    ) ||
+-    !(await isDeliveredCurrentSourceReplyAsync({
+-      action: "send",
+-      cfg: params.cfg,
+-      channel: params.channel,
+-      accountId: source.accountId,
+-      currentAccountId: source.accountId,
+-      sessionKey: params.mirror.sessionKey,
+-      actionParams: { target: source.target, replyTo: source.messageId },
+-      toolContext: {
+-        currentChannelProvider: source.channel,
+-        currentMessagingTarget: source.target,
+-        currentMessageId: source.messageId,
+-        currentThreadTs: source.threadId,
+-      },
+-      deliveredPayload: params.deliveredPayload,
+-      sourceReplyFinal: true,
+-      replyToIsExplicit: true,
+-    }))
+-  ) {
+-    return undefined;
+-  }
+-  return {
+-    kind: "channel-final",
+-    sourceMessageId: source.messageId,
+-    deliveredSourceReply: {
+-      channel: source.channel,
+-      accountId: source.accountId,
+-      conversationRef: source.conversationRef,
+-      messageId: source.messageId,
+-      lifecycleRevision: params.lifecycleRevision,
+-      platformMessageId: delivery.primaryPlatformMessageId,
+-    },
+-  };
+-}
+diff --git a/src/sessions/transcript-visible-record.ts b/src/sessions/transcript-visible-record.ts
+index 1e1b4efd27839a63a7be3c5a13b81495dce86c1f..29b04e4b4cb199acff93cbf973cc8210590da689 100644
+--- a/src/sessions/transcript-visible-record.ts
++++ b/src/sessions/transcript-visible-record.ts
+@@ -3,12 +3,7 @@ import { OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE } from "../agents/internal-runtime
+ import { extractStoredAssistantText } from "../agents/tools/chat-history-text.js";
+ import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+ import type { SessionTranscriptEventMatch } from "../config/sessions/session-history-read.types.js";
+-import {
+-  isOpenClawDeliveryMirrorAssistantMessage,
+-  OPENCLAW_TRANSCRIPT_ARTIFACT_API,
+-  OPENCLAW_TRANSCRIPT_ARTIFACT_PROVIDER,
+-  OPENCLAW_DELIVERY_MIRROR_MODEL,
+-} from "../shared/transcript-only-openclaw-assistant.js";
++import { isOpenClawDeliveryMirrorAssistantMessage } from "../shared/transcript-only-openclaw-assistant.js";
+ import {
+   readSessionTranscriptRunId,
+   resolveTerminalAssistantTranscriptRunId,
+@@ -60,28 +55,6 @@ export function matchesTranscriptEvent(
+     return isVisibleAssistantResultEventForRun(event, match.runId);
+   }
+   const message = asOptionalRecord(asOptionalRecord(event)?.message);
+-  if (match.kind === "delivered-source-reply") {
+-    const mirror = asOptionalRecord(message?.openclawDeliveryMirror);
+-    const source = asOptionalRecord(mirror?.deliveredSourceReply);
+-    return Boolean(
+-      message?.role === "assistant" &&
+-      message.api === OPENCLAW_TRANSCRIPT_ARTIFACT_API &&
+-      message.provider === OPENCLAW_TRANSCRIPT_ARTIFACT_PROVIDER &&
+-      message.model === OPENCLAW_DELIVERY_MIRROR_MODEL &&
+-      mirror?.kind === "channel-final" &&
+-      mirror.sourceMessageId === match.source.messageId &&
+-      typeof source?.platformMessageId === "string" &&
+-      source.platformMessageId.trim() &&
+-      (
+-        ["channel", "accountId", "conversationRef", "messageId", "lifecycleRevision"] as const
+-      ).every(
+-        (key) =>
+-          typeof match.source[key] === "string" &&
+-          match.source[key].trim() &&
+-          source?.[key] === match.source[key],
+-      ),
+-    );
+-  }
+   if (match.kind === "idempotency") {
+     return (
+       message?.idempotencyKey === match.key &&
+diff --git a/src/state/openclaw-state-worker-error-identity.ts b/src/state/openclaw-state-worker-error-identity.ts
+index 793fef08e74ad1d7ba654187008ca2ce7c810076..639d0d2ddecc8cca17f744cc553817fd1fceb650 100644
+--- a/src/state/openclaw-state-worker-error-identity.ts
++++ b/src/state/openclaw-state-worker-error-identity.ts
+@@ -7,7 +7,6 @@ import {
+   SessionGoalOperationError,
+   type SessionGoalOperationErrorCode,
+ } from "../config/sessions/goals-operations.types.js";
+-import { SessionModelContextLimitError } from "../config/sessions/session-model-context-limit-error.js";
+ import { SqliteSessionMutationConflictError } from "../config/sessions/session-mutation-conflict-error.js";
+ import { SessionPendingInputCustodyError } from "../config/sessions/session-pending-input-custody-error.js";
+ import { WorkerSessionAlreadyAttachedError } from "../gateway/worker-environments/session-attachment.js";
+@@ -49,7 +48,6 @@ const MESSAGE_ONLY_ERRORS = {
+   "duplicate-agent": DuplicateAgentError,
+   "session-pending-input-custody": SessionPendingInputCustodyError,
+   "skill-upload-request": SkillUploadRequestError,
+-  "session-model-context-limit": SessionModelContextLimitError,
+   coordinator: SqliteCoordinatorError,
+   ownership: OpenClawStateOwnershipError,
+   "newer-schema": SqliteSchemaVersionError,
+diff --git a/src/state/openclaw-state-worker-error.test.ts b/src/state/openclaw-state-worker-error.test.ts
+index bdf3b93ba2312e50782c38b22345992b32fed456..b55f5dc42bce9749ec9f64af0142d81847f6eaee 100644
+--- a/src/state/openclaw-state-worker-error.test.ts
++++ b/src/state/openclaw-state-worker-error.test.ts
+@@ -1,7 +1,6 @@
+ import assert from "node:assert/strict";
+ import { describe, expect, it, vi } from "vitest";
+ import { McpOAuthStoreCorruptionError } from "../agents/mcp-oauth-store-error.js";
+-import { SessionModelContextLimitError } from "../config/sessions/session-model-context-limit-error.js";
+ import { WorkerSessionAlreadyAttachedError } from "../gateway/worker-environments/session-attachment.js";
+ import { GatewayStateOwnerContentionError } from "../infra/gateway-state-owner.js";
+ import {
+@@ -126,13 +125,7 @@ describe("shared-state worker error transport", () => {
+   });
+ 
+   it.each(
+-    [
+-      RangeError,
+-      SyntaxError,
+-      TypeError,
+-      SkillUploadRequestError,
+-      SessionModelContextLimitError,
+-    ].map((ErrorType) => ({
++    [RangeError, SyntaxError, TypeError, SkillUploadRequestError].map((ErrorType) => ({
+       ErrorType,
+       name: ErrorType.name,
+     })),
+@@ -464,9 +457,6 @@ describe("shared-state worker error transport", () => {
+       Object.assign(new Error("syntax imitation"), { name: "SyntaxError" }),
+       Object.assign(new Error("type imitation"), { name: "TypeError" }),
+       Object.assign(new Error("upload imitation"), { name: "SkillUploadRequestError" }),
+-      Object.assign(new Error("history limit imitation"), {
+-        name: "SessionModelContextLimitError",
+-      }),
+       Object.assign(new Error("native open imitation"), { nativeOpen: true, code: "SQLITE_IOERR" }),
+       Object.assign(new Error("terminal admission imitation"), {
+         name: "SqliteIntegrityError",
