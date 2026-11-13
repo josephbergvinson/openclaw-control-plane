@@ -17,6 +17,7 @@ Start with [the introduction](00-start-here.md), then follow the
 | [Policy and authority](05-policy-and-authority.md) | How do requests, standing policy and fetched information interact? |
 | [Worked example](07-worked-example.md) | How does a calendar task work end to end? |
 | [Design decisions](18-architecture-evolution.md) | Why keep these boundaries? |
+| [Evaluation and future work](22-evaluation-and-future-work.md) | What improved, what did the comparison show, and what should change next? |
 
 ## Configure behavior and integrations
 

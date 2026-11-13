@@ -2,7 +2,7 @@
 
 This reference is built around a practical objective: let one operator delegate useful work across their projects and personal administration without constantly specifying tools, repeating context or diagnosing the agent's internal state.
 
-The current build is a particular implementation of that objective. The direction described here is not a claim that every desired property has already been achieved.
+The [evaluation and future-work chapter](22-evaluation-and-future-work.md) connects these design decisions to measured results and proposed improvements.
 
 ## Keep judgment flexible and effects verifiable
 
@@ -18,7 +18,7 @@ Older arrangements accumulated parallel status files, wrapper processes and over
 
 The current direction favors the native runtime for sessions, goals, scheduler state, worker continuation and delivery coordination. The workspace retains the instructions, integrations and operational procedures that belong outside the model loop. A derived report stays a report; it does not become a second scheduler.
 
-Retiring a wrapper is useful only after its real responsibility has a supported owner. Deleting a confusing file while leaving its job unowned would reduce visible complexity at the expense of correctness.
+When retiring a wrapper, transfer its responsibility to the surviving owner and update its callers together.
 
 ## Treat instructions as maintained interfaces
 
@@ -28,11 +28,11 @@ This reduces contradictory instructions and avoids paying for every operational 
 
 The public templates preserve these behavioral decisions. They substitute neutral identities and examples while retaining useful instructions. Their purpose is to help another operator build similar behavior, rather than merely admire the architecture.
 
-## Preserve context without pretending it is infallible
+## Preserve objectives and completed work
 
 A large context window is useful, but it is temporary and finite. Durable objectives, source pointers and progress checkpoints allow work to continue after context reduction. Structured personal or company data can supply facts that conversation summaries omit.
 
-Compaction introduces uncertainty when it loses a constraint or the interface leaves its status unclear. The correct response is to preserve critical instructions and expose supported lifecycle information. A warning threshold is not evidence that compaction finished, and a successful compaction does not prove that every relevant fact survived.
+Compaction must preserve the objective, corrections, completed effects and pending work. Verify those facts after context reduction and resume from the retained state. The current compactor summarizes a split-turn prefix once; the evaluation chapter reports the measured savings.
 
 ## Make operational cost visible
 

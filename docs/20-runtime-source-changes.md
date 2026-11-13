@@ -6,6 +6,17 @@ source areas in the reconstructed checkout; it is not an exhaustive changed-file
 inventory or a deployment diary. Use Git to inspect the exact patch and regression
 tests. [Reconstruction](../runtime/README.md) checks the resulting tree and modes.
 
+## On this page
+
+- [Follow one request](#follow-one-request)
+- [Requests, tools and durable work](#requests-tools-and-durable-work)
+- [Context, memory and model requests](#context-memory-and-model-requests)
+- [Text, voice and meeting records](#text-voice-and-meeting-records)
+- [Native application and browser interaction](#native-application-and-browser-interaction)
+- [Scheduling, releases and host helpers](#scheduling-releases-and-host-helpers)
+- [Reproduction and qualification](#reproduction-and-qualification)
+- [Attribution](#attribution)
+
 ## Follow one request
 
 ```mermaid

@@ -4,6 +4,22 @@ A request can involve several sources and one destination. “Add the Company Al
 
 The reference uses structured routes and a supported resolver for that work. A route identifies an account, workspace, principal and mechanism; it is not authorization. The authenticated request supplies authority, and the provider's current response establishes whether the operation actually worked.
 
+## On this page
+
+- [A concrete multi-account example](#a-concrete-multi-account-example)
+- [Registry and resolver](#registry-and-resolver)
+- [Readiness is useful evidence, not an execution veto](#readiness-is-useful-evidence-not-an-execution-veto)
+- [Supported fallback order](#supported-fallback-order)
+- [Actual roles, credential coverage and acceptance destinations](#actual-roles-credential-coverage-and-acceptance-destinations)
+- [Exact objects and current content](#exact-objects-and-current-content)
+- [Documentation MCP read contracts](#documentation-mcp-read-contracts)
+- [Subject-scoped personal data](#subject-scoped-personal-data)
+- [Calendar: different source and destination](#calendar-different-source-and-destination)
+- [External writes and delivery](#external-writes-and-delivery)
+- [OAuth state and configuration](#oauth-state-and-configuration)
+- [Recovering an existing account](#recovering-an-existing-account)
+- [Verifying an adopted route](#verifying-an-adopted-route)
+
 ## A concrete multi-account example
 
 The example operator has personal accounts, Company Alpha accounts and Company Beta accounts. Company Alpha has two distinct mail identities: `operator@company-alpha.example` and `coordinator@company-alpha.example`. The first may be the intended sender while the second holds the current invitation. Reading both relevant mailboxes is useful; using whichever one answered first to send a message is a routing error.

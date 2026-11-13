@@ -16,6 +16,15 @@ installation's recovery inventory. Native store initialization remains with its
 existing owner. Updates use the same sealed-release activation procedure;
 a competing package updater must not replace components alongside it.
 
+## On this page
+
+- [From source to candidate](#from-source-to-candidate)
+- [What must agree before activation](#what-must-agree-before-activation)
+- [One start and an inspectable outcome](#one-start-and-an-inspectable-outcome)
+- [Running identity and state](#running-identity-and-state)
+- [Recovery and retention](#recovery-and-retention)
+- [What activation proves](#what-activation-proves)
+
 ## From source to candidate
 
 Reconstruct the pinned source using [the runtime package](../runtime/README.md). Record

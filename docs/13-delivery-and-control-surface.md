@@ -4,6 +4,19 @@ Discord and Telegram are interfaces for directing work, receiving progress and
 reviewing results. The answer should satisfy the request in ordinary language;
 the runtime records establish what executed and whether delivery succeeded.
 
+## On this page
+
+- [Separate three events](#separate-three-events)
+- [One clear result](#one-clear-result)
+- [Discord goal commands](#discord-goal-commands)
+- [Progress should reduce uncertainty](#progress-should-reduce-uncertainty)
+- [Company reply surfaces](#company-reply-surfaces)
+- [Realtime voice and task handoff](#realtime-voice-and-task-handoff)
+- [Meeting capture and minutes](#meeting-capture-and-minutes)
+- [Context notices and interrupted requests](#context-notices-and-interrupted-requests)
+- [Ambiguous delivery](#ambiguous-delivery)
+- [Acceptance through the real interface](#acceptance-through-the-real-interface)
+
 ## Separate three events
 
 | Event | What it proves | What it does not prove |

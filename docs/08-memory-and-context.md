@@ -4,6 +4,19 @@ A useful assistant needs continuity without treating its entire history as curre
 
 The runtime controls which files enter a model turn. Workspace manifests describe intended roles and aid review, but they do not load files, change a model or grant access. This chapter describes the actual filename and session filtering in the pinned source and the policy built around it.
 
+## On this page
+
+- [Three different kinds of continuity](#three-different-kinds-of-continuity)
+- [What the runtime recognizes](#what-the-runtime-recognizes)
+- [Company agents and shared conversations](#company-agents-and-shared-conversations)
+- [Realtime voice context](#realtime-voice-context)
+- [Loading and retrieval expose different things](#loading-and-retrieval-expose-different-things)
+- [Recall starts with the claim](#recall-starts-with-the-claim)
+- [Writing durable memory](#writing-durable-memory)
+- [Session age and active work](#session-age-and-active-work)
+- [Compaction, warnings and resumption](#compaction-warnings-and-resumption)
+- [How to verify this design](#how-to-verify-this-design)
+
 ## Three different kinds of continuity
 
 | Layer | What it preserves | What it cannot establish |

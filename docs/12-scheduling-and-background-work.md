@@ -4,6 +4,19 @@ Scheduled work needs an owner, a defined effect and a delivery contract. A succe
 
 The reference combines the native OpenClaw scheduler with macOS launchd. Each remains authoritative for its own definitions and execution state.
 
+## On this page
+
+- [Two scheduling layers](#two-scheduling-layers)
+- [A job definition is an executable contract](#a-job-definition-is-an-executable-contract)
+- [Model and reasoning ownership](#model-and-reasoning-ownership)
+- [Inventory and ownership](#inventory-and-ownership)
+- [Pin the complete launch environment](#pin-the-complete-launch-environment)
+- [Execution, effect and delivery](#execution-effect-and-delivery)
+- [Source-change announcements](#source-change-announcements)
+- [Independent safety nets](#independent-safety-nets)
+- [Interruptions and concurrent work](#interruptions-and-concurrent-work)
+- [Acceptance sequence](#acceptance-sequence)
+
 ## Two scheduling layers
 
 | Layer | Owns | Current authority | Availability boundary |

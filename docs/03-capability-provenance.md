@@ -43,8 +43,9 @@ The [runtime source package](20-runtime-source-changes.md) supplies the complete
 
 The public policy is intentionally substantive. It preserves reusable operating behavior while using fictitious identities and routes. It cannot supply an adopter's credentials, account relationships, device permissions or external project data.
 
-## What the reference's validation establishes
+## Validate an installation
 
-Source reconstruction can prove that the supplied patch produces the advertised tree. Tests can prove the behavior covered by their inputs and assertions. A successful build can prove that the source produces a runnable distribution under the tested toolchain. A live test can prove the observed user path.
-
-Keep those records separate. Do not turn a check count into a claim of universal reliability, or cite a successful normal worker completion as proof that cancellation at its deadline works. The [verification chapter](15-evidence-audit-and-verification.md) gives the acceptance procedure.
+Reconstruct and test the pinned source, build under its declared toolchain, then
+verify the installed behavior through a real task. The [verification guide](15-evidence-audit-and-verification.md)
+provides the checks for each stage. [Evaluation and future work](22-evaluation-and-future-work.md)
+records the measured performance results and the next proposed improvements.
