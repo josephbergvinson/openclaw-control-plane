@@ -457,6 +457,20 @@ class RuntimeReconstructionTests(unittest.TestCase):
                            normalization_paths=frozenset(paths)))
         self.assertEqual(expected, RUNTIME.load_package(directory, native_distribution=True,
                                                        native_companion=True))
+        # A retained companion can predate a source-only test fixture. Its exact
+        # delta and replay tree still bind what the companion contains.
+        source_extra = json.loads(json.dumps(normalized))
+        source_extra["source"]["normalization"]["paths"] = [
+            "src/example.test.ts", "src/trajectory/runtime-store.sqlite.test.ts"]
+        path.write_text(json.dumps(source_extra))
+        self.assertEqual(expected, RUNTIME.load_package(directory, native_distribution=True,
+                                                       native_companion=True))
+        for extra in (["src/new.test.ts"], ["src/../private"], ["src/example.test.ts"], [True]):
+            broken = json.loads(json.dumps(normalized))
+            broken["source"]["normalization"]["paths"] += extra
+            path.write_text(json.dumps(broken))
+            with self.assertRaises(RUNTIME.ReconstructionError):
+                RUNTIME.load_package(directory, native_distribution=True, native_companion=True)
         for field in ("normalization", "normalizedTree"):
             broken = json.loads(json.dumps(normalized))
             del broken["nativeCompanion"][field]
@@ -615,6 +629,9 @@ class RuntimeReconstructionTests(unittest.TestCase):
             invalid.append(broken)
         broken = json.loads(json.dumps(manifest))
         broken["nativeCompanion"]["normalization"]["paths"] = ["src/other.test.ts"]
+        invalid.append(broken)
+        broken = json.loads(json.dumps(manifest))
+        broken["source"]["normalization"]["paths"].append("src/new.test.ts")
         invalid.append(broken)
         broken = json.loads(json.dumps(manifest))
         for section in ("source", "nativeCompanion"):

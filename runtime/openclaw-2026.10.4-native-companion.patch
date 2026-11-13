@@ -3077,10 +3077,10 @@ index 4210bffce114b892b89201493f47ce62ebfef77f..3904ce5a3bba305a2c62d6d47dcc1231
      async (mode) => {
 diff --git a/src/infra/outbound/addressed-source-reply.integration.test.ts b/src/infra/outbound/addressed-source-reply.integration.test.ts
 deleted file mode 100644
-index bab51839e7895c7516707c07eb0bcf55a16a23d8..0000000000000000000000000000000000000000
+index ebb324ff8a4992ddcb707ea451264743546706b8..0000000000000000000000000000000000000000
 --- a/src/infra/outbound/addressed-source-reply.integration.test.ts
 +++ /dev/null
-@@ -1,398 +0,0 @@
+@@ -1,406 +0,0 @@
 -import { performance } from "node:perf_hooks";
 -import { afterEach, beforeEach, expect, it, vi } from "vitest";
 -import { resolveEmbeddedRunTerminal } from "../../agents/embedded-agent-runner/run/terminal-resolution.js";
@@ -3188,6 +3188,7 @@ index bab51839e7895c7516707c07eb0bcf55a16a23d8..00000000000000000000000000000000
 -          },
 -        }),
 -  };
+-  const payloads = [{ text: mirror.text!, mediaUrls: [] }];
 -  await withOwnedSessionTranscriptWrites(
 -    {
 -      sessionKey,
@@ -3200,8 +3201,15 @@ index bab51839e7895c7516707c07eb0bcf55a16a23d8..00000000000000000000000000000000
 -    },
 -    async () =>
 -      await mirrorDeliveredPayloads({
--        delivery: { cfg, accountId: overrides.accountId ?? "default", mirror },
--        payloads: [{ text: mirror.text!, mediaUrls: [] }],
+-        delivery: {
+-          cfg,
+-          channel: "discord",
+-          to: "synthetic-room",
+-          accountId: overrides.accountId ?? "default",
+-          mirror,
+-          payloads,
+-        },
+-        payloads,
 -        channel: "discord",
 -        to: "synthetic-room",
 -        results: [overrides.result ?? delivered()],

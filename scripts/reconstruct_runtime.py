@@ -390,6 +390,7 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
     source_commit = require_digest(companion.get("sourceCommit"), 40, "companion source commit SHA-1")
     source_tree = require_digest(companion.get("sourceTree"), 40, "companion source tree SHA-1")
     normalized_tree, normalization_paths = None, frozenset()
+    source_only_normalization_paths: frozenset[str] = frozenset()
     if "normalizedTree" in companion or "normalization" in companion:
         normalized_tree = require_digest(companion.get("normalizedTree"), 40,
                                          "normalized companion tree SHA-1")
@@ -402,10 +403,17 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
         source_normalization = source.get("normalization") if isinstance(source, dict) else None
         source_paths = source_normalization.get("paths") if isinstance(source_normalization, dict) else None
         if (not isinstance(declared, list) or not declared or not all(isinstance(name, str) for name in declared)
-                or declared != sorted(set(declared)) or declared != source_paths):
-            raise ReconstructionError("Companion fixture paths must exactly match the declared source normalization")
+                or declared != sorted(set(declared))
+                or not isinstance(source_paths, list) or not source_paths
+                or not all(isinstance(name, str) for name in source_paths)
+                or source_paths != sorted(set(source_paths))
+                or not set(declared).issubset(source_paths)
+                or ("delta" not in companion and declared != source_paths)):
+            raise ReconstructionError("Companion normalization must be declared in the source; differing path sets require an explicit delta")
         normalization_paths = frozenset(declared)
         validate_companion_paths(normalization_paths)
+        validate_companion_paths(frozenset(source_paths))
+        source_only_normalization_paths = frozenset(source_paths) - normalization_paths
     if "delta" not in companion:
         if (source_commit != native.reference_commit or source_tree != native.reference_tree
                 or (normalized_tree or source_tree) != native.normalized_tree):
@@ -426,6 +434,8 @@ def load_native_companion(directory: Path, manifest: dict, native: NativeDistrib
             raise ReconstructionError("Companion delta paths must be a sorted unique nonempty list")
         paths = frozenset(declared)
     validate_companion_paths(paths, allow_native_dependencies=True)
+    if not source_only_normalization_paths.issubset(paths):
+        raise ReconstructionError("Source-only normalization paths must be covered by the companion delta")
     base = require_digest(delta["distributionTree"], 40, "companion distribution tree SHA-1")
     if base != native.normalized_tree:
         raise ReconstructionError("Companion base must match the normalized native distribution")
